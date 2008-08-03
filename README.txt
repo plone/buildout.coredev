@@ -1,12 +1,10 @@
-========
-ploneout
-========
+=============
+plone-coredev
+=============
 
-Due to the unclear naming, we have moved this buildout configuration to a new
-place in our Subversion repository. You can find the buildout configuration
-to develop Plone itself at
-https://svn.plone.org/svn/plone/buildouts/plone-coredev now.
+This is the buildout configuration used to develop the Plone CMS itself.
 
-To switch your checkout to the new location do:
+Do not use it for your own private projects. You can learn more about
+buildout in the tutorial at:
 
-svn switch https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/3.1 .
+http://plone.org/documentation/tutorial/buildout
