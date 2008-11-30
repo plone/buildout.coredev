@@ -39,7 +39,7 @@ def main(args=[]):
     arg = ' '.join(args)
 
     errors = []
-    for p in packages:
+    for p in sorted(packages):
         print '#### Running tests for %s ####' % p
         value = os.system('%s -1 --auto-progress --auto-color --udiff %s -s %s' % (test, arg, p))
         if value > 0:
