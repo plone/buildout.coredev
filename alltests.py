@@ -8,13 +8,7 @@ import sys
 
 disabled = [
     '.svn',
-    'chameleon.core',
-    'chameleon.zpt',
-    'cmf.pt',
-    'five.pt',
     'repoze.zope2',
-    'sourcecodegen',
-    'z3c.pt',
     'Products.ZopeVersionControl',
     'Zope2',
 ]
@@ -45,6 +39,7 @@ def main(args=[]):
         if value > 0:
             errors.append(p)
         print '#### Finished tests for %s ####' % p
+        print
 
     print
     print '#### Begin test results ####'
