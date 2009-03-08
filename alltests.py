@@ -28,7 +28,12 @@ def main(args=[]):
             setup = os.path.join(src, directory, 'setup.py')
             if os.path.exists(setup):
                 name = package_map.get(directory, directory)
-                packages.append(name)
+                try:
+                    __import__(name)
+                except ImportError:
+                    pass
+                else:
+                    packages.append(name)
 
     arg = ' '.join(args)
 
