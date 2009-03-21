@@ -20,10 +20,6 @@ Starting a Plone instance (`./bin/instance fg`):
 
   ./bin/instance
 
-  or
-
-  ./bin/paster serve etc/plone.ini
-
 Adding a new user (`./bin/instance adduser user password`):
 
   ./bin/addzope2user user password
