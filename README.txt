@@ -18,16 +18,16 @@ variant is included in brackets.
 
 Starting a Plone instance (`./bin/instance fg`):
 
-  ./bin/instance
+  ./bin/instance-fg
 
 Adding a new user (`./bin/instance adduser user password`):
 
-  ./bin/addzope2user user password
+  ./bin/instance-adduser user password
 
 A debug prompt (`./bin/instance debug`):
 
-  ./bin/debugzope2
+  ./bin/instance-debug
 
-Running tests (`./bin/instance test -v -s plone.i18n`):
+Running tests (`./bin/instance test -s plone.i18n`):
 
-  ./bin/test -v -s plone.i18n
+  ./bin/test -s plone.i18n
