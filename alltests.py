@@ -10,7 +10,6 @@ disabled = [
     '.svn',
     'repoze.zope2',
     'Products.ZopeVersionControl',
-    'Zope2',
 ]
 
 package_map = {
