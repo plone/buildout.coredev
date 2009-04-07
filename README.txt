@@ -9,6 +9,8 @@ buildout in the tutorial at:
 
 http://plone.org/documentation/tutorial/buildout
 
+This buildout requires Python 2.6. Older versions of Python do no longer work.
+
 --------
 Commands
 --------
