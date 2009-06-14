@@ -8,7 +8,13 @@ import sys
 
 disabled = [
     '.svn',
+    'borg.localrole',
     'repoze.zope2',
+    'Products.ExtendedPathIndex',
+    'Products.PasswordResetTool',
+    'Products.PloneLanguageTool',
+    'Products.PluggableAuthService',
+    'Products.ResourceRegistries',
     'Products.ZopeVersionControl',
 ]
 
