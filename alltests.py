@@ -9,13 +9,6 @@ import sys
 disabled = [
     '.svn',
     'borg.localrole',
-    'plone.app.contentrules',
-    'plone.app.iterate',
-    'plone.app.openid',
-    'plone.app.portlets',
-    'plone.app.upgrade',
-    'plone.portlet.collection',
-    'plone.portlet.static',
     'repoze.zope2',
     'Products.CMFDiffTool',
     'Products.CMFEditions',
