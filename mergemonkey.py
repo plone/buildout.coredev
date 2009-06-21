@@ -7,6 +7,7 @@ TODO:
 - Better argument handling, based on optparse or so.
 - A more convinient merge command, that knows about the correct branch to
   take the revisions from.
+- Better help messages for the various commands. Look at mr.developer.
 - Turn this into a buildout recipe, so the previous and current source files
   can be tracked properly.
 """
