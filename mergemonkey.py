@@ -7,7 +7,6 @@ TODO:
 - Better argument handling, based on optparse or so.
 - A more convinient merge command, that knows about the correct branch to
   take the revisions from.
-- A "merge all missing" command to batch process all missing revisions
 - Turn this into a buildout recipe, so the previous and current source files
   can be tracked properly.
 """
@@ -24,6 +23,7 @@ SAME_BRANCH = 'Previous version uses the same branch'
 
 ELIGIBLE_COMMAND = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
 LOG_COMMAND = 'svn log --incremental -%(rev)s %(branch)s'
+MERGE_COMMAND = 'svn merge -%(rev)s %(branch)s %(trunk)s'
 
 
 def extract_sources(location):
@@ -129,6 +129,17 @@ def missing(name, trunk, branch, quiet=False):
         print('-' * 72)
 
 
+def mergeall(name, trunk, branch):
+    print("Merging all missing revisions for %s, based on %s" % (name, branch))
+    out = determine_missing(trunk, branch)
+    print('Revisions to be merged: %s' ', '.join(out))
+    for rev in out:
+        cs = rev.replace('r', 'c')
+        command = MERGE_COMMAND % dict(rev=cs, branch=branch, trunk=trunk)
+        print('Executing: %s' % command)
+        os.system(command)
+
+
 def status(sources, repos=None):
     names = sorted(sources.keys())
     for name in names:
@@ -168,6 +179,12 @@ def main(args,
             if info is not None:
                 trunk, branch = info
                 missing(name, trunk, branch, quiet=quiet)
+        elif 'mergeall' in args or 'ma' in args:
+            name = args[1]
+            info = get_locations(name, sources)
+            if info is not None:
+                trunk, branch = info
+                mergeall(name, trunk, branch)
     elif 'status' in args or 'st' in args:
         status(sources, repos=repos)
     else:
