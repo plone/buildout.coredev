@@ -8,9 +8,6 @@ TODO:
 - A more convinient merge command, that knows about the correct branch to
   take the revisions from.
 - A "merge all missing" command to batch process all missing revisions
-- Some form of status command that can tell if there's any missing merges,
-  most useful in a similar form of "svn status" detailing the status for
-  all tracked packages, even though this is properly slow.
 - Turn this into a buildout recipe, so the previous and current source files
   can be tracked properly.
 """
@@ -83,15 +80,11 @@ def match_name(keys, name):
     return matches
 
 
-def get_locations(name, sources, src_dir=None):
+def get_locations(name, sources, quiet=False, src_dir=None):
     names = match_name(sources.keys(), name)
     if not names:
-        print("No distribution with the name %s could be found." % name)
-        return None
-    elif len(names) > 1:
-        print("More than one matching distribution found, please be more "
-              "specific:\n\n %s" % ', '.join(names)
-        )
+        if not quiet:
+            print("No distribution with the name %s could be found." % name)
         return None
     else:
         name = names[0]
@@ -104,9 +97,11 @@ def get_locations(name, sources, src_dir=None):
             if isinstance(branchinfo, dict):
                 return trunk, branchinfo.get('previous')
             else:
-                print("Couldn't compute merge info: %s" % branchinfo)
+                if not quiet:
+                    print("Couldn't compute merge info: %s" % branchinfo)
     else:
-        print("Missing source directory: %s not found." % trunk)
+        if not quiet:
+            print("Missing source directory: %s not found." % trunk)
     return None
 
 
@@ -134,9 +129,32 @@ def missing(name, trunk, branch, quiet=False):
         print('-' * 72)
 
 
+def status(sources, repos=None):
+    names = sorted(sources.keys())
+    for name in names:
+        info = get_locations(name, sources, quiet=True)
+        if info is not None:
+            trunk, branch = info
+        else:
+            continue
+        if repos is not None:
+            found = False
+            for r in repos:
+                if r in branch:
+                    found = True
+            if not found:
+                continue
+        result = determine_missing(trunk, branch)
+        if len(result) > 0:
+            print('M ' +  name + ' - missing revisions: %s' % len(result))
+        else:
+            print('  ' + name)
+
+
 def main(args,
     previous_sources='http://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.0/sources.cfg',
-    current_sources=os.path.join(os.path.abspath(os.curdir), 'sources.cfg')
+    current_sources=os.path.join(os.path.abspath(os.curdir), 'sources.cfg'),
+    repos=['svn.plone.org'],
     ):
     sources = prepare_sources(previous_sources, current_sources)
 
@@ -150,6 +168,8 @@ def main(args,
             if info is not None:
                 trunk, branch = info
                 missing(name, trunk, branch, quiet=quiet)
+    elif 'status' in args or 'st' in args:
+        status(sources, repos=repos)
     else:
         print("Not enough arguments.")
 
