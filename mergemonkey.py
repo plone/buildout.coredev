@@ -110,8 +110,7 @@ def get_locations(name, sources, src_dir=None):
     return None
 
 
-def missing(name, trunk, branch, quiet=False):
-    print("Determining missing merges for %s, based on %s" % (name, branch))
+def determine_missing(trunk, branch):
     p = subprocess.Popen(
         ELIGIBLE_COMMAND % dict(branch=branch, trunk=trunk),
         shell=True, stdout=subprocess.PIPE,
@@ -119,11 +118,17 @@ def missing(name, trunk, branch, quiet=False):
     p.wait()
     out = p.stdout.read()
     del p
+    out = out.split('\n')
+    out = [o.strip() for o in out if o]
+    return out
+
+
+def missing(name, trunk, branch, quiet=False):
+    print("Determining missing merges for %s, based on %s" % (name, branch))
+    out = determine_missing(trunk, branch)
     if quiet:
-        print(out)
+        print('\n'.join(out))
     else:
-        out = out.split('\n')
-        out = [o.strip() for o in out if o]
         rev_string = ' -'.join(out)
         os.system(LOG_COMMAND % dict(rev=rev_string, branch=branch))
         print('-' * 72)
@@ -136,7 +141,7 @@ def main(args,
     sources = prepare_sources(previous_sources, current_sources)
 
     if len(args) > 1:
-        if '--missing' in args:
+        if 'missing' in args or 'mi' in args:
             quiet = False
             if '-q' in args or '--quiet' in args:
                 quiet = True
@@ -150,7 +155,7 @@ def main(args,
 
 
 def help():
-    print("Use this script via python mergemonkey.py --missing "
+    print("Use this script via python mergemonkey.py missing "
           "<distribution name> where <distribution name> is the name or a "
           "unique substring of the name of a distribution checked out in src."
          )
