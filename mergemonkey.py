@@ -112,11 +112,11 @@ def missing(args, sources):
                 if '-v' in args or '--verbose' in args:
                     out = out.split('\n')
                     out = [o.strip() for o in out if o]
-                    for rev in out:
-                        os.system(log_command % dict(
-                            rev=rev,
-                            branch=branch,
-                        ))
+                    rev_string = ' -'.join(out)
+                    os.system(log_command % dict(
+                        rev=rev_string,
+                        branch=branch,
+                    ))
                     print('-' * 72)
                 else:
                     print(out)
