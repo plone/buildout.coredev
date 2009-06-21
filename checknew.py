@@ -46,7 +46,7 @@ def main():
 
 
 def help():
-    print("Use this script via ./bin/zopepy inst/checknew.py.")
+    print("Use this script via ./bin/base-py checknew.py")
 
 
 if __name__ == '__main__':
