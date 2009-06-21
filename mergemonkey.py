@@ -15,17 +15,18 @@ TODO:
   most useful in a similar form of "svn status" detailing the status for
   all tracked packages, even though this is properly slow.
 - Turn this into a buildout recipe, so the previous and current source files
-  can be tracked properly and the previous one can come from an URL.
+  can be tracked properly.
 """
 
 import os
 import sys
+import urllib
 import ConfigParser
 
 
 HERE = os.path.abspath(os.curdir)
 SRC = os.path.join(HERE, 'src')
-PREVIOUS_SOURCES = os.path.join(HERE, os.pardir, '40', 'sources.cfg')
+PREVIOUS_SOURCES = 'http://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.0/sources.cfg'
 CURRENT_SOURCES = os.path.join(HERE, 'sources.cfg')
 
 NEW_PACKAGE = 'Newly added package'
@@ -36,7 +37,17 @@ def extract_sources(sourcefile):
     config = ConfigParser.RawConfigParser()
     # We want to preserve case sensitivity
     config.optionxform = lambda s: s
-    config.read(sourcefile)
+
+    if sourcefile.startswith('http'):
+        fd = None
+        try:
+            fd = urllib.urlopen(sourcefile)
+            config.readfp(fd)
+        finally:
+            if fd is not None:
+                fd.close()
+    else:
+        config.read(sourcefile)
 
     raw_sources = dict(config.items('sources'))
     sources = {}
@@ -112,9 +123,6 @@ def main(args):
 
 
 def help():
-    print("This script currently only works on Hanno's laptop. "
-          "It will be made more general soon (tm). ")
-    print("---")
     print("Use this script via python mergemonkey.py --missing "
           "<distribution name> where <distribution name> is the name or a "
           "unique substring of the name of a distribution checked out in src."
