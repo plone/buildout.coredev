@@ -8,11 +8,8 @@ import sys
 
 disabled = [
     '.svn',
-    'borg.localrole',
     'repoze.zope2',
-    'Products.CMFDiffTool',
     'Products.CMFEditions',
-    'Products.CMFPlacefulWorkflow',
     'Products.ExtendedPathIndex',
     'Products.Marshall',
     'Products.PasswordResetTool',
