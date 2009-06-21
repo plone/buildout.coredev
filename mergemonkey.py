@@ -25,6 +25,9 @@ import ConfigParser
 NEW_PACKAGE = 'Newly added package'
 SAME_BRANCH = 'Previous version uses the same branch'
 
+ELIGIBLE_COMMAND = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
+LOG_COMMAND = 'svn log --incremental -%(rev)s %(branch)s'
+
 
 def extract_sources(location):
     config = ConfigParser.RawConfigParser()
@@ -80,14 +83,18 @@ def match_name(keys, name):
     return matches
 
 
-def missing(name, sources, quiet=False, src_dir=None):
-    eligible_command = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
-    log_command = 'svn log --incremental -%(rev)s %(branch)s'
+def get_locations(name, sources, src_dir=None):
     names = match_name(sources.keys(), name)
     if not names:
         print("No distribution with the name %s could be found." % name)
-        return
-    name = names[0]
+        return None
+    elif len(names) > 1:
+        print("More than one matching distribution found, please be more "
+              "specific:\n\n %s" % ', '.join(names)
+        )
+        return None
+    else:
+        name = names[0]
     if src_dir is None:
         src_dir = os.path.join(os.path.abspath(os.curdir), 'src')
     trunk = os.path.join(src_dir, name)
@@ -95,31 +102,31 @@ def missing(name, sources, quiet=False, src_dir=None):
         branchinfo = sources.get(name)
         if branchinfo is not None:
             if isinstance(branchinfo, dict):
-                branch = branchinfo.get('previous')
-                print("Determining missing merges for %s, based on %s" %
-                      (name, branch))
-                p = subprocess.Popen(eligible_command % dict(
-                    branch=branch, trunk=trunk),
-                    shell=True, stdout=subprocess.PIPE,
-                )
-                p.wait()
-                out = p.stdout.read()
-                del p
-                if quiet:
-                    print(out)
-                else:
-                    out = out.split('\n')
-                    out = [o.strip() for o in out if o]
-                    rev_string = ' -'.join(out)
-                    os.system(log_command % dict(
-                        rev=rev_string,
-                        branch=branch,
-                    ))
-                    print('-' * 72)
+                return trunk, branchinfo.get('previous')
             else:
                 print("Couldn't compute merge info: %s" % branchinfo)
     else:
         print("Missing source directory: %s not found." % trunk)
+    return None
+
+
+def missing(name, trunk, branch, quiet=False):
+    print("Determining missing merges for %s, based on %s" % (name, branch))
+    p = subprocess.Popen(
+        ELIGIBLE_COMMAND % dict(branch=branch, trunk=trunk),
+        shell=True, stdout=subprocess.PIPE,
+    )
+    p.wait()
+    out = p.stdout.read()
+    del p
+    if quiet:
+        print(out)
+    else:
+        out = out.split('\n')
+        out = [o.strip() for o in out if o]
+        rev_string = ' -'.join(out)
+        os.system(LOG_COMMAND % dict(rev=rev_string, branch=branch))
+        print('-' * 72)
 
 
 def main(args,
@@ -134,7 +141,10 @@ def main(args,
             if '-q' in args or '--quiet' in args:
                 quiet = True
             name = args[1]
-            missing(name, sources, quiet=quiet)
+            info = get_locations(name, sources)
+            if info is not None:
+                trunk, branch = info
+                missing(name, trunk, branch, quiet=quiet)
     else:
         print("Not enough arguments.")
 
