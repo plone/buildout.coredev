@@ -4,9 +4,6 @@ of branches to track.
 
 TODO:
 
-- Add a verbose option to --missing, so one can get a direct list of the
-  svn log of all revisions that still should be merged. The revision number
-  alone isn't very helpful.
 - Better argument handling, based on optparse or so.
 - A more convinient merge command, that knows about the correct branch to
   take the revisions from.
@@ -19,6 +16,7 @@ TODO:
 """
 
 import os
+import subprocess
 import sys
 import urllib
 import ConfigParser
@@ -88,7 +86,8 @@ def match_name(keys, name):
 
 
 def missing(args, sources):
-    command = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
+    eligible_command = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
+    log_command = 'svn log --incremental -%(rev)s %(branch)s'
     name = args[1]
     names = match_name(sources.keys(), name)
     if not names:
@@ -103,9 +102,24 @@ def missing(args, sources):
                 branch = branchinfo.get('previous')
                 print("Determining missing merges for %s, based on %s" %
                       (name, branch))
-                os.system(command % dict(
-                    branch=branchinfo['previous'], trunk=trunk)
+                p = subprocess.Popen(eligible_command % dict(
+                    branch=branch, trunk=trunk),
+                    cwd=HERE, shell=True, stdout=subprocess.PIPE,
                 )
+                p.wait()
+                out = p.stdout.read()
+                del p
+                if '-v' in args or '--verbose' in args:
+                    out = out.split('\n')
+                    out = [o.strip() for o in out if o]
+                    for rev in out:
+                        os.system(log_command % dict(
+                            rev=rev,
+                            branch=branch,
+                        ))
+                    print('-' * 72)
+                else:
+                    print(out)
             else:
                 print("Couldn't compute merge info: %s" % branchinfo)
     else:
