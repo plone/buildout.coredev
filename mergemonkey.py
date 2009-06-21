@@ -22,30 +22,25 @@ import urllib
 import ConfigParser
 
 
-HERE = os.path.abspath(os.curdir)
-SRC = os.path.join(HERE, 'src')
-PREVIOUS_SOURCES = 'http://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.0/sources.cfg'
-CURRENT_SOURCES = os.path.join(HERE, 'sources.cfg')
-
 NEW_PACKAGE = 'Newly added package'
 SAME_BRANCH = 'Previous version uses the same branch'
 
 
-def extract_sources(sourcefile):
+def extract_sources(location):
     config = ConfigParser.RawConfigParser()
     # We want to preserve case sensitivity
     config.optionxform = lambda s: s
 
-    if sourcefile.startswith('http'):
+    if location.startswith('http'):
         fd = None
         try:
-            fd = urllib.urlopen(sourcefile)
+            fd = urllib.urlopen(location)
             config.readfp(fd)
         finally:
             if fd is not None:
                 fd.close()
     else:
-        config.read(sourcefile)
+        config.read(location)
 
     raw_sources = dict(config.items('sources'))
     sources = {}
@@ -55,9 +50,9 @@ def extract_sources(sourcefile):
     return sources
 
 
-def prepare_sources():
-    previous_sources = extract_sources(PREVIOUS_SOURCES)
-    current_sources = extract_sources(CURRENT_SOURCES)
+def prepare_sources(previous_location, current_location):
+    previous_sources = extract_sources(previous_location)
+    current_sources = extract_sources(current_location)
 
     sources = {}
     for k,v in current_sources.items():
@@ -85,16 +80,17 @@ def match_name(keys, name):
     return matches
 
 
-def missing(args, sources):
+def missing(name, sources, quiet=False, src_dir=None):
     eligible_command = 'svn mergeinfo --show-revs eligible %(branch)s %(trunk)s'
     log_command = 'svn log --incremental -%(rev)s %(branch)s'
-    name = args[1]
     names = match_name(sources.keys(), name)
     if not names:
         print("No distribution with the name %s could be found." % name)
         return
     name = names[0]
-    trunk = os.path.join(SRC, name)
+    if src_dir is None:
+        src_dir = os.path.join(os.path.abspath(os.curdir), 'src')
+    trunk = os.path.join(src_dir, name)
     if os.path.exists(trunk):
         branchinfo = sources.get(name)
         if branchinfo is not None:
@@ -104,12 +100,14 @@ def missing(args, sources):
                       (name, branch))
                 p = subprocess.Popen(eligible_command % dict(
                     branch=branch, trunk=trunk),
-                    cwd=HERE, shell=True, stdout=subprocess.PIPE,
+                    shell=True, stdout=subprocess.PIPE,
                 )
                 p.wait()
                 out = p.stdout.read()
                 del p
-                if '-v' in args or '--verbose' in args:
+                if quiet:
+                    print(out)
+                else:
                     out = out.split('\n')
                     out = [o.strip() for o in out if o]
                     rev_string = ' -'.join(out)
@@ -118,20 +116,25 @@ def missing(args, sources):
                         branch=branch,
                     ))
                     print('-' * 72)
-                else:
-                    print(out)
             else:
                 print("Couldn't compute merge info: %s" % branchinfo)
     else:
         print("Missing source directory: %s not found." % trunk)
 
 
-def main(args):
-    sources = prepare_sources()
+def main(args,
+    previous_sources='http://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.0/sources.cfg',
+    current_sources=os.path.join(os.path.abspath(os.curdir), 'sources.cfg')
+    ):
+    sources = prepare_sources(previous_sources, current_sources)
 
     if len(args) > 1:
         if '--missing' in args:
-            missing(args, sources)
+            quiet = False
+            if '-q' in args or '--quiet' in args:
+                quiet = True
+            name = args[1]
+            missing(name, sources, quiet=quiet)
     else:
         print("Not enough arguments.")
 
