@@ -133,7 +133,7 @@ def missing(name, trunk, branch, quiet=False):
 def mergeall(name, trunk, branch):
     print("Merging all missing revisions for %s, based on %s" % (name, branch))
     out = determine_missing(trunk, branch)
-    print('Revisions to be merged: %s' ', '.join(out))
+    print('Revisions to be merged: %s' % ', '.join(out))
     for rev in out:
         cs = rev.replace('r', 'c')
         command = MERGE_COMMAND % dict(rev=cs, branch=branch, trunk=trunk)
