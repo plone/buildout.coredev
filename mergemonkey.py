@@ -5,8 +5,6 @@ of branches to track.
 TODO:
 
 - Better argument handling, based on optparse or so.
-- A more convinient merge command, that knows about the correct branch to
-  take the revisions from.
 - Better help messages for the various commands. Look at mr.developer.
 - Turn this into a buildout recipe, so the previous and current source files
   can be tracked properly.
@@ -140,6 +138,14 @@ def mergeall(name, trunk, branch):
         os.system(LOG_COMMAND % dict(rev=cs, branch=branch))
         os.system(command)
 
+def merge(name, trunk, branch, rev):
+    print("Merging revisions %s for %s, based on %s" % (rev, name, branch))
+    cs = rev
+    if ':' not in rev:
+        cs = rev.replace('r', 'c')
+    command = MERGE_COMMAND % dict(rev=cs, branch=branch, trunk=trunk)
+    os.system(LOG_COMMAND % dict(rev=cs, branch=branch))
+    os.system(command)
 
 def status(sources, repos=None):
     names = sorted(sources.keys())
@@ -171,21 +177,21 @@ def main(args,
     sources = prepare_sources(previous_sources, current_sources)
 
     if len(args) > 1:
-        if 'missing' in args or 'mi' in args:
-            quiet = False
-            if '-q' in args or '--quiet' in args:
-                quiet = True
-            name = args[1]
-            info = get_locations(name, sources)
-            if info is not None:
-                trunk, branch = info
+        name = args[1]
+        info = get_locations(name, sources)
+        if info is not None:
+            trunk, branch = info
+            if 'missing' in args or 'mi' in args:
+                quiet = False
+                if '-q' in args or '--quiet' in args:
+                    quiet = True
                 missing(name, trunk, branch, quiet=quiet)
-        elif 'mergeall' in args or 'ma' in args:
-            name = args[1]
-            info = get_locations(name, sources)
-            if info is not None:
-                trunk, branch = info
+            elif 'mergeall' in args or 'ma' in args:
                 mergeall(name, trunk, branch)
+            elif 'merge' in args or 'me' in args:
+                if len(args) > 2:
+                    rev = args[2]
+                    merge(name, trunk, branch, rev)
     elif 'status' in args or 'st' in args:
         status(sources, repos=repos)
     else:
