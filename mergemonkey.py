@@ -203,6 +203,9 @@ def help():
           "<distribution name> where <distribution name> is the name or a "
           "unique substring of the name of a distribution checked out in src."
          )
+    print("Examples:")
+    print("To merge r88746 and r88747 from Products.CMFEditions branch 1.2 to trunk:")
+    print("python mergemonkey.py merge Products.CMFEditions r88745:88747")
     print("---" + __doc__)
 
 
