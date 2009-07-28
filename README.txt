@@ -49,7 +49,13 @@ should always be branching packages when working on PLIPs.
 = Common Issues =
 =================
  
+Issue:
+-----
+
 "ERROR: Can't update package '[Some package]', because it's dirty."
+
+Fix:
+---
 
  mr.developer is complaining because a file has been changed/added, but not
  committed.
@@ -58,7 +64,27 @@ should always be branching packages when working on PLIPs.
  .installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg" to your subversion
  config's global-ignores has been suggested as a more permanent solution.
 
+Issue:
+-----
+
 "ImportError: No module named Zope2" when building using a PLIP cfg file.
+
+Fix:
+---
  
  Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
  rerun buildout to correct this if you're finding it irksome.
+
+Issue:
+-----
+
+can't open file '/Startup/run.py'
+
+Fix:
+---
+
+Two possible fixes, you are using Python 2.4 by mistake, so use Python 2.5 or 2.6 instead.
+Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'.
+Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run
+buildout, develop, buildout.
+
