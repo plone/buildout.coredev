@@ -1,7 +1,7 @@
 This is the development buildout for Plone 4.0.
 
-Plone 4 now runs Zope 2.12, which uses Python 2.5 or 2.6, so make sure that
-you're using one of those versions of Python to run the 'python bootstrap.py'
+Plone 4 now runs Zope 2.12, and uses Python 2.6, so make sure that
+you're using the correct version of Python to run the 'python bootstrap.py'
 command.
 
 ================
@@ -88,3 +88,14 @@ Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'
 Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run
 buildout, develop, buildout.
 
+Issue:
+-----
+
+Missing PIL.
+
+Fix:
+---
+ 
+PIL.cfg is include within this buildout to aid in PIL installation. 
+Run bin/buildout -c PIL.cfg to install. This method does not work on Windows, so
+we're unable to run it by default.
