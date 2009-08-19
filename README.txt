@@ -99,3 +99,17 @@ Fix:
 PIL.cfg is include within this buildout to aid in PIL installation. 
 Run bin/buildout -c PIL.cfg to install. This method does not work on Windows, so
 we're unable to run it by default.
+
+
+Issue:
+-----
+
+bin/develop status is showing that the Products.CMFActionIcons egg has been
+modified, but I haven't touched it.  And this is preventing bin/develop up
+from updating all the eggs.
+
+Fix:
+----
+
+Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
+
