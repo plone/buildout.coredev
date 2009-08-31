@@ -1,0 +1,118 @@
+Summary
+=============
+
+This PLIP provides optimizations for Archetypes schema lookup intended
+to mitigate the expense of schema lookup/generation by caching
+pre-compiled schemas globally in a RAMCache.  According to benchmarks
+performed by the kind folks at PSU, these changes provide significant
+performance improvements (up to a factor of 5), especially during bulk
+content import/upload/edit and presumably also in usecases with
+multiple simultaneous add/edit operations.
+
+The patch is straightforward, it adds a use_cache flag to the Schema
+method of Archetypes BaseObject.  This flag defaults to True, and when
+enabled a global RAMCache manager is used to store the schema lookup
+results.
+
+The cache key is fairly complex in order to cover a number of standard
+usecases.  It includes the class name, the portal_type, all interfaces
+directly provided by the content instance, any skin layers required by
+any browser layer aware schema extender adapters available on the
+content instance (this is only used if archetypes.schemaextender is
+installed), and the python id of the object class.  This fairly
+complex key will need to be generated on every call to the Schema
+method; however, judging by the benchmarks, the calculation is
+insignificant when compared to the normal schema lookup.
+
+All passing tests continue to pass, though some of the Archetypes
+tests needed to be modified to explicitly invalidate the schema cache
+after modifying schema attributes at runtime.  No additional tests
+were added for the new functionality.
+
+Issues and Concerns
+=====================
+
+Judging by the PLIP discussion, the PLIP authors don't seem to have a
+clear understanding of the source of the performance problems that
+these changes aim to fix.  When schemaextender is not installed, the
+Schema method performs a single adapter lookup that simply returns an
+instance attribute (the 'schema' attribute which is generally a Schema
+instance built during Zope startup).  If schemaextender is installed,
+the lookup becomes significantly more complex, involving lookups of
+multiple adapters and possible on-the-fly schema instantiation.
+However, in this case the cache key method would be performing the
+same set adapter lookups, though it wouldn't be generating the
+schemas.  Given these facts, it's quite surprising that the Schema
+cache would provide such a significant speedup (the adapter registry
+is already cached after all and normal schema objects should already
+be built and in memory).
+
+I'm very wary of adding such a brute-force optimization for a not
+well-understood performance issue.  This is especially true since the
+patch includes no obvious way to disable the schema caching either
+globally or on a per-type basis.  Considering that these changes are
+certain to break a few sites and products which do unexpected things
+with schema attributes, some configurability should be considered an
+absolute necessity for inclusion in Plone.  Archetypes has never
+guaranteed that the schema attribute was defined per class, though
+this implementation assumes that to be true and makes few allowances
+for other behaviors.
+
+These changes also alter Archetypes functionality without providing
+any new tests, e.g. for the cache key generation or cache
+invalidation.  The authors have provided no performance benchmarks,
+and no optional tests to demonstrate the performance improvements.  It
+appears that no testing/benchmarking was performed to determine the
+optimal caching mechanism.  If the issues are due to poor performance
+during multiple calls to Schema() during a single request, then a
+request cache should provide most of the benefit with fewer drawbacks
+including no need for explicit cache invalidation.  At the very least
+we should have some benchmarks to see if the benefits of using a
+global RAMCache are worth the tradeoffs.
+
+The cache invalidation appears to be poorly implemented.  Any schema
+change that requires invalidation will invalidate all cached schema
+entries in the global RAMCache.  The authors do not appear to be able
+to invalidate a single schema entry from the cache on-demand, which
+implies that their cache key generator is not well understood.  I for
+one am curious why both the class name and the python id of the class
+are required in the cache key.  Is the id there to ensure that
+plone.reload type reloads will cause implicit invalidation?  If so,
+why use the class name at all?  Is it to ensure that such reloads
+don't cause cache collisions (assigning an id that had belonged to one
+AT class to another)?  The code could would benefit from some comments
+and/or tests to explain the necessity of the various cache elements.
+
+Finally, I performed a rather trivial benchmark to test the claims of
+this product in the default case that schemaextender is not installed.
+I did the following::
+
+    >>> from timeit import Timer
+    >>> setup = (
+    ... 'from zope.component import provideAdapter, provideUtility;'
+    ... 'from Products.Archetypes.Schema.factory import instanceSchemaFactory;'
+    ... 'from plone.memoize.ram import global_cache, choose_cache;'
+    ... 'from plone.memoize.interfaces import ICacheChooser;'
+    ... 'from zope.ramcache.interfaces.ram import IRAMCache;'
+    ... 'from Products.ATContentTypes.content.document import ATDocument;'
+    ... 'provideAdapter(instanceSchemaFactory);'
+    ... 'provideUtility(global_cache, provides=IRAMCache);'
+    ... 'provideUtility(choose_cache, provides=ICacheChooser);'
+    ... 'd=ATDocument("myid")'
+    ... )
+   
+    >>> t = Timer(stmt='d.Schema()',setup=setup)
+    >>> t2 = Timer(stmt='d.Schema(use_cache=False)',setup=setup)
+    >>> t.timeit(100000)
+    7.4870579242706299
+    >>> t2.timeit(100000)
+    1.5962069034576416
+
+The caching behavior appears to cause significant reduction in
+performance for normal Archetypes schema lookup.
+
+My general feeling is that unless these optimizations can be
+significantly improved, they should continue to live in an add-on
+product.  If they only have a significant effect when schemaextender
+is installed, then optimizations (hopefully better thought-out) should
+be applied directly to schemaextender and not in Archetypes.
