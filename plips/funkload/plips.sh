@@ -26,4 +26,4 @@ do
 done &&
 
 cd /opt/collective.loadtesting &&
-bin/fl-build-label-reports -x-label=plone-4\.0 -y-label=!plone-4\.0
+bin/fl-build-label-reports --x-label=plone-4\.0 --y-label=!plone-4\.0
