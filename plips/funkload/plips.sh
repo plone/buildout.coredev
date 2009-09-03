@@ -14,6 +14,7 @@ for i in *.cfg
 do
     if [[ ! -d /opt/plone-coredev-4.0/plips/funkload/*-$i ]]
     then
+
 	cd /opt/plone-coredev-4.0 &&
 	bin/instance stop
 	bin/buildout -vN -c plips/$i &&
@@ -22,6 +23,7 @@ do
 	
 	cd /opt/collective.loadtesting &&
 	bin/fl-run-bench -s collective.coreloadtests --label=$i
+
     fi &&
 done &&
 
