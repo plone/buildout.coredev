@@ -3,7 +3,7 @@ set -x
 
 for i in python2.6 python2.5 python2.4
 do
-    if [[ ! -d "/opt/collective.coreloadtests/var/funkload/*-$i" ]]
+    if [[ -z $(ls -d /opt/collective.loadtesting/var/funkload/*-$i) ]]
     then
 	echo "Begin with $i"
 
@@ -21,16 +21,23 @@ do
     fi
 done &&
 
-cd /opt/plone-coredev-4.0 &&
-bin/instance stop
-rm -rf .installed.cfg .mr.developer.cfg parts/ develop-eggs/ Data.fs
-python2.4 bootstrap.py &&
-bin/buildout -vN -c plips/funkload/released.cfg &&
-bin/instance start &&
-sleep 30 &&
+i=3.3-python2.4
+if [[ -z $(ls -d /opt/collective.loadtesting/var/funkload/*-$i) ]]
+then
+    echo "Begin with $i"
 
-cd /opt/collective.loadtesting &&
-bin/fl-run-bench -s collective.coreloadtests --label=released
+    cd /opt/plone-coredev-4.0 &&
+    bin/instance stop
+    rm -rf .installed.cfg .mr.developer.cfg parts/ develop-eggs/ Data.fs
+    python2.4 bootstrap.py &&
+    bin/buildout -vN -c plips/funkload/released.cfg &&
+    bin/instance start &&
+    sleep 30 &&
+
+    cd /opt/collective.loadtesting &&
+    bin/fl-run-bench -s collective.coreloadtests --label=$i
+
+fi
 
 cd /opt/collective.loadtesting &&
 bin/fl-build-label-reports
