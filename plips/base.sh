@@ -30,7 +30,7 @@ then
     bin/instance stop
     rm -rf .installed.cfg .mr.developer.cfg parts/ develop-eggs/ Data.fs
     python2.4 bootstrap.py &&
-    bin/buildout -vN -c plips/funkload/released.cfg &&
+    bin/buildout -vN -c plips/released.cfg &&
     bin/instance start &&
     sleep 30 &&
 
