@@ -13,12 +13,12 @@ then
     sleep 30 &&
 
     cd /opt/collective.loadtesting &&
-    bin/fl-run-bench -s collective.coreloadtests --label=$i &&
+    bin/fl-run-bench -s collective.coreloadtests --label=$i
 
-fi
+fi &&
 
 cd /opt/plone-coredev-4.0/plips &&
-for i in *.cfg
+for i in plip*.cfg
 do
     if [[ -z $(ls -d /opt/collective.loadtesting/var/funkload/*-$i) ]]
     then
