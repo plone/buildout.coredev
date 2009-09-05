@@ -24,5 +24,5 @@ do
 done
 
 cd /opt/collective.loadtesting
-bin/fl-build-label-reports --x-label='plone4\.0-python2\.6\.cfg' --y-label='plip-.*\.cfg'
-mv var/funkload/index.html plips.html
+bin/fl-build-label-reports --x-label='^plone4\.0-python2\.6$' --y-label='^plip-.*'
+mv var/funkload/index.html var/funkload/plips.html
