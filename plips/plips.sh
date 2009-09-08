@@ -6,7 +6,7 @@ cd /opt/plone-coredev-4.0/plips &&
 for plip in plip[0-9]*-*.cfg
 do
     label=${plip:0:${#plip}-4}
-    if [[ -z $(ls -d /opt/collective.loadtesting/var/funkload/diff_*-$label) ]]
+    if [[ -z $(ls -d /opt/collective.loadtesting/var/funkload/diff_*$label*) ]]
     then
 
 	cd /opt/plone-coredev-4.0 &&
@@ -24,5 +24,5 @@ do
 done
 
 cd /opt/collective.loadtesting
-bin/fl-build-label-reports --x-label='^plone4\.0-python2\.6$' --y-label='^plip-.*'
+bin/fl-build-label-reports --x-label='^plone4\.0-python2\.6$' --y-label='^plip[0-9]*-.*'
 mv var/funkload/index.html var/funkload/plips.html
