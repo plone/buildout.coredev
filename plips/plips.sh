@@ -12,7 +12,8 @@ do
 	cd /opt/plone-coredev-4.0 &&
 	bin/instance stop
 	rm -rf .installed.cfg parts/ develop-eggs/ fake-eggs .mr.developer var/filestorage/Data.fs
-	python2.6 bootstrap.py &>/opt/collective.loadtesting/var/funkload/$label.log &&
+	svn status -v &>/opt/collective.loadtesting/var/funkload/$label.log &&
+	python2.6 bootstrap.py >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 &&
 	bin/buildout -vN -c plips/$plip >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 &&
 	bin/develop status -v >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 && 
 	bin/instance start &&
