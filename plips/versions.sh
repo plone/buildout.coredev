@@ -11,7 +11,7 @@ do
 
 	cd /opt/plone-coredev-4.0 &&
 	bin/instance stop
-	rm -rf .installed.cfg parts/ develop-eggs/ fake-eggs .mr.developer plips/.installed.cfg plips/fake-eggs/ plips/.mr.developer var/filestorage/Data.fs
+	rm -rf .installed.cfg parts/ develop-eggs/ fake-eggs .mr.developer var/filestorage/Data.fs
 	python2.4 bootstrap.py &>/opt/collective.loadtesting/var/funkload/$label.log &&
 	bin/buildout -vN -c plips/$version >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 &&
 	bin/instance start &&
@@ -24,5 +24,5 @@ do
 done
 
 cd /opt/collective.loadtesting &&
-bin/fl-build-label-reports --x-label='^plone4\.0-python2\.6$' --y-label='^plone4\.0-python2\.6$' --y-label='^plone[^4].[0-9]$' --reverse
+bin/fl-build-label-reports --x-label='^plipbase' --y-label='^plipbase' --y-label='^plone[^4].[0-9]$' --reverse
 mv var/funkload/index.html var/funkload/versions.html
