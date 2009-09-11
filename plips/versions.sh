@@ -14,6 +14,7 @@ do
 	rm -rf .installed.cfg parts/ develop-eggs/ fake-eggs .mr.developer var/filestorage/Data.fs
 	python2.4 bootstrap.py &>/opt/collective.loadtesting/var/funkload/$label.log &&
 	bin/buildout -vN -c plips/$version >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 &&
+	bin/develop status -v >>/opt/collective.loadtesting/var/funkload/$label.log 2>&1 && 
 	bin/instance start &&
 	sleep 30 &&
 
