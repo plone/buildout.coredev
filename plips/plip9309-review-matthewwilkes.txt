@@ -1,0 +1,161 @@
+PLIP 9309: Better search for East Asian (multi-byte) languages.
+===============================================================
+
+Steps taken:
+
+1) Read source code of implementation
+2) Through-the-web testing of Japanese script
+3) Run tests
+
+Source code
+-----------
+
+There are a few things here that I have concerns about, mostly the style of the
+code implemented. Firstly, this has been implemented as a 3rd party product that
+patches its way into Plone, rather than directly in the products concerned.
+
+Function naming
+~~~~~~~~~~~~~~~
+
+Secondly, the structure of the code is very difficult to understand, for example
+the core.py file contains the following methods (signatures and docstrings
+included)::
+
+    def bigrams(xs, isglob):
+        ...
+    def findallg(rx, s):
+        ...
+    def bigrams_(s, isglob):
+        ...
+    def bisplitx(xss, isglob):
+        ...
+    def bisplit(xs, isglob):
+        ...
+    def kananormalize(xs):
+        ...
+
+i.e. none of the methods are documented, and they all take unclear arguments.
+``isglob`` is used to determine if a "*" character should be appended to the
+result, but is only directly used in ``bisplit``, the rest only pass it through
+a chain of functions.
+
+The same problem occurs in ``main.py``, with functions such as::
+    
+    def process_post_glob_core(lst, enc):
+        ...
+    
+    def getulst_glob(ulst):
+        ...
+
+Here there are also some seemingly useless functions that only exist as they
+were needed before a refactoring, such as::
+
+    def getenc(self):
+        return getSiteEncoding(self)
+    
+    def processGlob_o(self, lst):
+        return processGlob_u(self,lst)
+
+
+
+Character normalisation
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``kananormalize`` is more readily understandable to people with a passing
+knowledge of Japanese, but it is not clear from reading the code that there are
+two (mostly) equivalent japanese syllabaries which are being normalised into a
+canonical form.
+
+This method is implemented with a list comprehension, rather than a translation
+table, leading to more difficult to read code.
+
+Compare::
+
+    KANA_MIN = ord(u"ア")
+    KANA_MAX = ord(u"ア") + 85
+    KANA_DIF = ord(u"あ") - ord(u"ア")
+
+    def kananormalize(xs):
+        assert isinstance(xs, unicode)
+        return u"".join(
+            ## unichr(ord(x) + KANA_DIF) if KANA_MIN <= ord(x) <= KANA_MAX else x
+            (KANA_MIN <= ord(x) <= KANA_MAX) and unichr(ord(x) + KANA_DIF) or x
+            for x in xs)
+
+with a quickly implemented (and without serious testing) version using
+translation tables::
+
+    # The syllabaries are 85 characters wide, from a to ke
+    KATAKANA_CODESPACE = range(ord(u"ア"), ord(u"ヶ")+1)
+    HIRAGANA_CODESPACE = range(ord(u"あ"), ord(u"ゖ")+1)
+    
+    # Create a mapping of codepoints in katakana to those in hiragana for use
+    # as a table in unicode.translate
+    KATAKANA_TO_HIRANAGA = dict(zip(KATAKANA_CODESPACE, HIRAGANA_CODESPACE))
+    
+    
+    def kananormalize(kana):
+        """Transform katakana symbols to their hiragana equivalents"""
+        return kana.translate(KATAKANA_TO_HIRANAGA)
+
+Regular Expressions
+~~~~~~~~~~~~~~~~~~~
+
+In ``config.py`` there are a series of regular expressions to implement the
+bigram split, which are constructed with string interpolation and list
+comprehensions. This section is also difficult to parse for human eyes, it's not
+obvious where the values in the `rangetable` dictionary come from.
+
+For example, the japanese syllabaries are commented out, as there is a superset,
+``cj`` preset below. I would be more comfortable if this ``cj`` section was
+composed of ranges above, rather than hard-coded.
+
+However, the sheer number of uncommented regular expressions here is what really
+makes me uncomfortable. There are regular expressions for ``glob_true`` and
+``glob_false`` that are in no way clear as to why they should be different.
+Three regexen start with ``rx_`` but there is no indication that this means
+anything but "Regular eXpression".  
+
+This entire file needs some tidying and, above all, commenting.
+
+TTW testing
+-----------
+
+The user experience here is very nice, creating a page and testing search works
+as expected for all input I tried. However, as Vincent Frettin has noted, the
+livesearch functionality is not working (i.e. returns no results).
+
+Using the full-width and half-width romaji characters does not affect searching,
+they are completely interchangable, and livesearch does function on these
+characters.
+
+Mixing CJK and Roman characters seems to work reliably, including searching
+within the same document. Bigram splitting only occurs on CJK languages, not on
+roman text.
+
+Unit tests
+----------
+
+There is an (understandable) focus of CJK languages in the tests, but there is
+some verification of English working correctly. For me, the tests aren't
+extensive enough, they don't seem to test anything but the expected case, i.e.
+no edge cases.
+
+Finally, the coverage isn't sufficiently high::
+
+lines cov% module (path) 39 69% Products.UnicodeSplitterPatch.core 73 61%
+Products.UnicodeSplitterPatch.main 12 66% Products.UnicodeSplitterPatch.monkey
+19 94% Products.UnicodeSplitterPatch.tests.base
+
+I'd like to see main and core have 100% coverage a few times over, given how
+obtuse the functions are.
+
+Evaluation
+----------
+
+The implementation submitted here is not acceptable for Plone core, as it uses
+monkey patching rather than modifying our codebase directly.
+
+That notwithstanding, the code is difficult to read and maintain, which forces
+me to vote -1 on this. The user experience is very good, I would love to see
+some better commenting and source layout so we can get this in.
