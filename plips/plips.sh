@@ -13,6 +13,8 @@ do
         cd $base &&
 	bin/instance stop
 	rm -rf .installed.cfg parts/ develop-eggs/ fake-eggs .mr.developer plips/.installed.cfg plips/.mr.developer var/filestorage/Data.fs
+        svn up &&
+        bin/develop up -v &&
 	svn status -v &>$base/../collective.loadtesting/var/funkload/$label.log &&
 	python2.6 bootstrap.py >>$base/../collective.loadtesting/var/funkload/$label.log 2>&1 &&
 	bin/buildout -vN -c plips/$plip >>$base/../collective.loadtesting/var/funkload/$label.log 2>&1 &&
