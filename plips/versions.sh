@@ -21,10 +21,8 @@ do
 
 	cd ../collective.loadtesting &&
 	bin/fl-run-bench -s collective.coreloadtests --label=$label
+        bin/fl-build-label-reports --x-label='^plipbase' --y-label='^plipbase' --y-label='^plone[^4].[0-9]$' --reverse
+        mv var/funkload/index.html var/funkload/versions.html
 
     fi
 done
-
-cd ../collective.loadtesting &&
-bin/fl-build-label-reports --x-label='^plipbase' --y-label='^plipbase' --y-label='^plone[^4].[0-9]$' --reverse
-mv var/funkload/index.html var/funkload/versions.html

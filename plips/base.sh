@@ -24,10 +24,8 @@ do
 	
 	cd ../collective.loadtesting &&
 	bin/fl-run-bench -s collective.coreloadtests --label=$label
+        bin/fl-build-label-reports --x-label='^plipbase$' --x-label='^plipbase-python2..$' --y-label='^plipbase$' --y-label='^plipbase-python2..$'
+        mv var/funkload/index.html var/funkload/base.html
 
     fi
 done &&
-
-cd ../collective.loadtesting &&
-bin/fl-build-label-reports --x-label='^plipbase$' --x-label='^plipbase-python2..$' --y-label='^plipbase$' --y-label='^plipbase-python2..$'
-mv var/funkload/index.html var/funkload/base.html
