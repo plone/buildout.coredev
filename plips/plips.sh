@@ -3,7 +3,7 @@ set -x
 export PYTHON_EGG_CACHE=eggs
 
 cd plips &&
-for plip in plip*.cfg
+for plip in plipbase.cfg plip[0-9]*-*.cfg
 do
     label=${plip:0:${#plip}-4}
     if [[ -z $(ls -d ../collective.loadtesting/var/funkload/diff_*$label*) ]]
