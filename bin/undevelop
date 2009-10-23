@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+
+import logging
+import os.path
+import shutil
+import subprocess
+import sys
+from optparse import OptionParser
+
+mypath=os.path.dirname(os.path.abspath(sys.argv[0]))
+sys.path[0:0] = [mypath]
+
+from common import HandledException
+from common import GetFullPackageName
+from common import UpdatePins
+from common import UpdateBuildout
+
+buildout=os.path.dirname(mypath)
+
+def RemovePackageSource(pkg):
+    global sources
+
+    logging.info("Removing %s source tree" % pkg)
+    target=os.path.join(buildout, "src", pkg)
+    if not os.path.isdir(target):
+        logging.warning("No source tree for %s found" % pkg)
+        return
+
+    command=subprocess.Popen(["svn", "status", "--quiet", "--xml", target],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+    (stdout,stderr)=command.communicate()
+    if command.returncode!=0:
+        logging.error("Subversion checkout for %s failed" % pkg)
+        logging.error(stderr)
+        raise HandledException()
+
+    if 'item="unversioned"' in stdout or \
+        'item="conflicted"' in stdout or \
+        'item="added"' in stdout:
+        logging.error("Unversioned, conflicted or newly added files found, refusing to remove %s" % pkg)
+        raise HandledException()
+
+    try:
+        shutil.rmtree(target)
+    except OSError, e:
+        logging.error("Error removing source for %s: %s" % (pkg, e.strerror))
+        raise HandledException(e)
+
+
+
+def main():
+    parser=OptionParser(
+            usage="bin/undevelop [options] <package> [<package>]",
+            description="Remove any checkouts of the given packages in the "
+                        "src/ subdirectory and update the buildout to use "
+                        "the standard versions.")
+
+    (options, args)=parser.parse_args()
+    if not args:
+        parser.print_help()
+        return 0
+
+    for pkg in args:
+        try:
+            pkg=GetFullPackageName(pkg)
+        except KeyError, e:
+            logging.error("Unknown package: %s" % pkg)
+            raise HandledException(e)
+
+        RemovePackageSource(pkg)
+
+    UpdatePins()
+    UpdateBuildout()
+
+
+if __name__=="__main__":
+    try:
+        sys.exit(main())
+    except HandledException:
+        sys.exit(1)
+

@@ -1,0 +1,87 @@
+#!/usr/bin/env python
+
+import logging
+import os.path
+import re
+import subprocess
+import sys
+from optparse import OptionParser
+
+mypath=os.path.dirname(os.path.abspath(sys.argv[0]))
+sys.path[0:0] = [mypath]
+
+from common import HandledException
+from common import GetFullPackageName
+from common import UpdatePins
+from common import UpdateBuildout
+from common import sources
+
+buildout=os.path.dirname(mypath)
+
+
+def GetPackageSource(pkg, branch=None):
+    global sources
+
+    uri=sources[pkg]
+    if branch is not None:
+        if branch!="trunk":
+            branch="branches/%s" % branch
+
+        newuri=re.sub(r"(/trunk\b|/branches/([^/]+))", "/"+branch, uri)
+        if uri==newuri:
+            logging.error("Unable to determine root URL for %s" % uri)
+            raise HandledException()
+        uri=newuri
+
+    logging.info("Checking out %s" % pkg)
+    target=os.path.join(buildout, "src", pkg)
+    command=subprocess.Popen(["svn", "checkout", "--quiet", uri, target],
+                             stderr=subprocess.PIPE)
+    (_,stderr)=command.communicate()
+    if command.returncode!=0:
+        logging.error("Subversion checkout for %s failed" % pkg)
+        logging.error(stderr)
+        raise HandledException()
+
+
+def main():
+    parser=OptionParser(
+            usage="bin/develop [options] <package> [<package>]",
+            description="Make a (subversion) checkout of the given packages "
+                        "in the src/ subdirectory and update the buildout to "
+                        "use them.")
+
+    parser.add_option("-b", "--branch", dest="branch", default=None,
+                      help="branch to checkout, or 'trunk' if you want trunk")
+    parser.add_option("-t", "--trunk", dest="branch",
+                      action="store_const", const="trunk",
+                      help="always checkout trunk")
+    (options, args)=parser.parse_args()
+    if not args:
+        parser.print_help()
+        return 0
+
+    if options.branch=="trunk":
+        logging.info("Will checkout the trunk of all packages") 
+    elif options.branch is not None:
+        logging.info("Will checkout branch %s of all packages", options.branch) 
+
+    for pkg in args:
+        try:
+            pkg=GetFullPackageName(pkg)
+        except KeyError, e:
+            logging.error("Unknown package: %s" % pkg)
+            raise HandledException(e)
+
+        GetPackageSource(pkg, branch=options.branch)
+
+    UpdatePins()
+    UpdateBuildout()
+
+
+if __name__=="__main__":
+    try:
+        sys.exit(main())
+    except HandledException:
+        sys.exit(1)
+
