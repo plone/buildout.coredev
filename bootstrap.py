@@ -16,8 +16,6 @@
 Simply run this script in a directory containing a buildout.cfg.
 The script accepts buildout command-line options, so you can
 use the -c option to specify an alternate configuration file.
-
-$Id$
 """
 
 import os, shutil, sys, tempfile, urllib2
@@ -50,7 +48,9 @@ if options.version is not None:
 else:
     VERSION = ''
 
-USE_DISTRIBUTE = options.distribute
+# We decided to always use distribute, make sure this is the default for us
+# USE_DISTRIBUTE = options.distribute
+USE_DISTRIBUTE = True
 args = args + ['bootstrap']
 
 to_reload = False
