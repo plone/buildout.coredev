@@ -1,7 +1,7 @@
 This is the development buildout for Plone 4.0.
 
 Plone 4 now runs Zope 2.12, and uses Python 2.6, so make sure that
-you're using the correct version of Python to run the 'python bootstrap.py'
+you're using the correct version of Python to run the 'python2.6 bootstrap.py'
 command.
 
 mr.developer
@@ -10,6 +10,25 @@ mr.developer
 This buildout uses mr.developer to manage package development. See
 http://pypi.python.org/pypi/mr.developer for more information or run
 'bin/develop help' for a list of available commands.
+
+The most common workflow to get all the latest updates is:
+
+  $ svn up
+  $ bin/develop rb
+
+This will get you the latest coredev configuration, checkout and update all
+packages via Subversion in src and run buildout to configure the whole thing.
+
+From time to time you can check if some old cruft has accumulated:
+
+  $ bin/develop st
+
+If this prints any lines with a question mark in front, you can cleanup by:
+
+  $ bin/develop purge
+
+This will remove packages from src/ which are no longer needed, as they have
+been replaced by proper egg releases of these packages.
 
 PLIP Implementation
 ===================
@@ -55,7 +74,7 @@ Fix
 ---
 
 mr.developer is complaining because a file has been changed/added, but not
- committed.
+committed.
 
 Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
 .installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` to your subversion
@@ -80,21 +99,20 @@ can't open file '/Startup/run.py'
 Fix
 ----
 
-Two possible fixes, you are using Python 2.4 by mistake, so use Python 2.5 or 2.6 instead.
-Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'.
-Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run
-buildout, develop, buildout.
+Two possible fixes, you are using Python 2.4 by mistake, so use Python 2.5 or
+2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after
+'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap
+and re-run buildout, develop, buildout.
 
 Issue
 -----
 
 Missing PIL.
 
-Fix
----
- 
-PIL.cfg is include within this buildout to aid in PIL installation. 
-Run bin/buildout -c PIL.cfg to install. This method does not work on Windows, so
+Fix ---
+
+PIL.cfg is include within this buildout to aid in PIL installation. Run
+bin/buildout -c PIL.cfg to install. This method does not work on Windows, so
 we're unable to run it by default.
 
 
