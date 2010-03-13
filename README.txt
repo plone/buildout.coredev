@@ -111,8 +111,8 @@ Missing PIL.
 
 Fix ---
 
-PIL.cfg is include within this buildout to aid in PIL installation. Run
-bin/buildout -c PIL.cfg to install. This method does not work on Windows, so
+pil.cfg is include within this buildout to aid in PIL installation. Run
+bin/buildout -c pil.cfg to install. This method does not work on Windows, so
 we're unable to run it by default.
 
 
