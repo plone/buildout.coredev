@@ -81,6 +81,18 @@ Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
 config's global-ignores has been suggested as a more permanent solution.
 
 Issue
+-----
+
+``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
+
+When running any ``./bin/develop`` command.
+
+Fix
+---
+
+``ln -s plips/.mr.developer.cfg``
+
+Issue
 ------
 
 "ImportError: No module named Zope2" when building using a PLIP cfg file.
