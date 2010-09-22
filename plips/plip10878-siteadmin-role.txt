@@ -1,0 +1,94 @@
+PLIP #10878 implementation notes (Add SiteAdmin role)
+=====================================================
+
+Implementer: David Glick
+PLIP text: https://dev.plone.org/plone/ticket/10878
+
+Reference buildout is at
+https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1; run with
+-c plips/plip10878-siteadmin-role.cfg. This buildout is based on the PLIP 10776
+buildout because the implementation depends on the role ZCML subdirective
+introduced in Zope 2.13.  The failing tests when running bin/alltests are known
+issues documented in Hanno's notes.
+
+First I looked through the list of permissions that are included with Plone out
+of the box, and determined which should be assigned to the SiteAdmin role in a
+fresh Plone site. The list I determined is documented (and tested) in
+CMFPlone/tests/testSiteAdminRole.py. My overall aim was to include permissions
+related to managing content and exclude permissions related to management via
+the ZMI. This involved some judgment calls, so I would anticipate a need for
+slight adjustments to the set of SiteAdmin permissions.
+
+I used two approaches to make this set of permissions a reality. For permissions
+defined in "upstream" packages in the Zope repository, I updated the Plone
+rolemap.xml to add the SiteAdmin role for these permissions when the Plone
+profile is imported. (For existing sites, an upgrade step adds the SiteAdmin
+role to all rolemap.xml permissions that have the Manager role, minus Manage
+portal, plus some additional permissions that get the Manager role as a
+Zope-wide default role.) For permissions defined in packages in the Plone,
+archetypes, and collective repositories, I updated their Zope-wide default roles
+to add SiteAdmin where appropriate (either using
+Products.CMFCore.permissions.setDefaultRoles, or the new-in-Zope-2.13 role
+subdirective of the permission ZCML directive).
+
+I updated Plone's built-in workflows to assign the SiteAdmin role wherever the
+Manager role is assigned. An upgrade step for existing sites updates ALL
+workflows, doing the same. It also calls the workflow tool's recursive method to
+update role mappings and reindex the allowedRolesAndUsers index.
+
+I grepped through the codebase to find things protected by the 'Manage portal'
+permission (which SiteAdmins cannot have) that should be accessible to
+SiteAdmins. I then updated the following to use more specific permissions:
+
+ - most Plone control panels (a unique permission for each one, so that the
+   access given to SiteAdmins can easily be focused)
+
+The following are still only accessible with the 'Manage portal' permission. In
+some cases this is because they are still skin layer items (thus harder to
+secure all at once like browser views) and not worth rewriting into browser
+views:
+ 
+ - the error log control panel
+ - the kupu control panel (not worth updating; kupu is going away)
+ - the collections control panel (not worth rewriting if we're switching to
+   plone.app.collection)
+ - removal of CMFDefault discussion items (not worth changing if we're updating
+   to use plone.app.discussion)
+ - setting local workflow policy
+ - lots of ZMI stuff
+
+In order to protect the control panel overview page, I converted it into a
+browser view (well, I used the existing one that Hanno had started).
+plone_control_panel is kept as a skin layer template that pulls in the browser
+view, for backwards-compatibility. The group details form got a similar
+treatment.
+
+One particular concern was to make sure that SiteAdmins can have access to mange
+users and groups without risk of them escalating themselves to have Manager
+privileges. To achieve this, I made sure that SiteAdmins do not get the general
+"Manage users" permission which protects a number of methods of
+user-management-related tools. SiteAdmins *do* get access to the Plone users and
+groups control panel and related forms, which I updated and tested to make sure
+that:
+
+ - non-Managers cannot add or remove the Manager role to users or groups
+ - non-Managers cannot add or remove users or groups with the Manager role (or
+   trigger a password reset for them)
+ - non-Managers cannot add users to or remove them from groups with the Manager
+   role
+
+I did not tackle the problem of how to provide for role delegation in a more
+general manner within the Users & Groups control panels. This is because I could
+think of several ways to approach the problem and was unclear how to proceed,
+and also because it would have distracted from the main goal of adding the
+SiteAdmin role. Someone should submit a PLIP for this in the future, but for now
+I decided it would be most expedient to focus on preventing escalation to
+Manager.
+
+I added a SiteAdmins group that is created OOTB (and an upgrade step to add it
+for existing sites).
+
+I plan to add developer documentation of how to register permissions with
+SiteAdmin as a default role, at both
+http://plone.org/documentation/manual/plone-community-developer-documentation
+and http://plone.org/documentation/manual/upgrade-guide
