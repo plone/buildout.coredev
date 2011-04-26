@@ -1,4 +1,4 @@
-This is the development buildout for Plone 4.0.
+This is the development buildout for Plone 4.1.
 
 Plone 4 now runs Zope 2.12, and uses Python 2.6, so make sure that
 you're using the correct version of Python to run the 'python2.6 bootstrap.py'
@@ -41,18 +41,18 @@ like this:
 
 In file plips/plip-1234-widget-frobbing.cfg...::
 
- [buildout] 
+ [buildout]
  extends = plipbase.cfg
  auto-checkout +=
   plone.somepackage
   plone.app.someotherpackage
 
- [sources] 
+ [sources]
   plone.somepackage = svn https://svn.plone.org/.../branches/plip-1234-widget-frobbing
   plone.app.someotherpackage = svn https://svn.plone.org/.../branches/plip-1234-widget-frobbing
 
- [instance] 
- eggs += 
+ [instance]
+ eggs +=
     plone.somepackage
     plone.app.someotherpackage
  zcml +=
@@ -64,7 +64,7 @@ should always be branching packages when working on PLIPs.
 
 Common Issues
 =============
- 
+
 Issue
 -----
 
@@ -99,7 +99,7 @@ Issue
 
 Fix
 ----
- 
+
 Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
 rerun buildout to correct this if you're finding it irksome.
 
@@ -139,4 +139,3 @@ Fix
 ---
 
 Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
-
