@@ -1,6 +1,6 @@
 This is the development buildout for Plone 4.1.
 
-Plone 4 now runs Zope 2.12, and uses Python 2.6, so make sure that
+Plone 4 now runs Zope 2.13, and uses Python 2.6, so make sure that
 you're using the correct version of Python to run the 'python2.6 bootstrap.py'
 command.
 
