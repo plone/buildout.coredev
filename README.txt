@@ -13,7 +13,7 @@ http://pypi.python.org/pypi/mr.developer for more information or run
 
 The most common workflow to get all the latest updates is:
 
-  $ svn up
+  $ git pull
   $ bin/develop rb
 
 This will get you the latest coredev configuration, checkout and update all
@@ -48,8 +48,8 @@ In file plips/plip-1234-widget-frobbing.cfg...::
   plone.app.someotherpackage
 
  [sources]
-  plone.somepackage = svn https://svn.plone.org/.../branches/plip-1234-widget-frobbing
-  plone.app.someotherpackage = svn https://svn.plone.org/.../branches/plip-1234-widget-frobbing
+  plone.somepackage = git git://github.com/plone/plone.somepackage.git branch=plip-1234-widget-frobbing
+  plone.app.someotherpackage = git git://github.com/plone/plone.app.somepackage.git branch=plip-1234-widget-frobbing
 
  [instance]
  eggs +=
