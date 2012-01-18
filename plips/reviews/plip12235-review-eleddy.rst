@@ -32,9 +32,15 @@ Must Have Changes
    and the doctest is not good reading. An updated page in collective docs on how to actually use 
    the batching interface would make me feel great about integrating this plip.
  - There is one XXX in the code which should be addressed or moved 
+ - On a default install in plone, the error log has lots of deprecation warnings. These should be 
+   handled by default with this plip. For example when searching the following line occurs 
+   at least 20 times in my log::
+   
+   string>:1: DeprecationWarning: Using len() for getting the actual pagesize is deprecated. Use the `pagesize` attribute instead.
 
 
 Conclusion
 ----------
 I'm +1 after human readable developer documentation is added to collective docs and some html
-markup for the batch template.
+markup for the batch template. Last but not least, a default plone install shouldn't be 
+throwing deprecation errors. 
