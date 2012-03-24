@@ -6,7 +6,7 @@ if "%SPHINXBUILD%" == "" (
 	set SPHINXBUILD=sphinx-build
 )
 set BUILDDIR=/Users/eleddy/buildouts/plone42devel/docs/build
-set ALLSPHINXOPTS=-d %BUILDDIR%/doctrees %SPHINXOPTS% /Users/eleddy/buildouts/plone42devel/docs/source
+set ALLSPHINXOPTS=-d %BUILDDIR%/doctrees %SPHINXOPTS% /Users/eleddy/buildouts/plone42devel/docs
 if NOT "%PAPER%" == "" (
 	set ALLSPHINXOPTS=-D latex_paper_size=%PAPER% %ALLSPHINXOPTS%
 )

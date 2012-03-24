@@ -2,201 +2,152 @@ Introduction
 ============
 This is the development buildout for Plone 4.2. If this is your first time here, please read ALL if the instructions below before getting started. It will save you time in the end, we promise!
 
+This document assumes you want to fix a bug and will detail the full process. For more information on writing PLIPS, please :doc:`go here <plips>`.
+
 STOP!
 =====
-Legally, you can NOT contribute code unless you have signed the contributor agreement. This means that we can NOT accept pull requests from you unless this is done so please don't put the code reviewers at risk and do it anyways. Subimtting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc` and ask on of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
-
-
-Contents:
+Legally, you can NOT contribute code unless you have signed the :doc:`contributor agreement <agreement>`. This means that we can NOT accept pull requests from you unless this is done so please don't put the code reviewers at risk and do it anyways. Subimtting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc <culture>` and ask on of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
 
 .. toctree::
    :maxdepth: 2
 
-Indices and tables
-==================
-* :ref:`genindex`
-* :ref:`search`
+Version Support Policy
+----------------------
+If you are doing bug triaging or fixing, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.  
 
+Dependencies
+------------
+* `Git <http://help.github.com/mac-set-up-git/>`_
+* `Python <http://python.org/>`_ 2.6 
+* If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start but have faith, you'll come back to it later. They always do...
+* `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
 
-Bug Fixing
-==========
-
-Setting up your development environment
+Setting up Your Development Environment
 ---------------------------------------
+The first step in fixing a bug is getting this buildout running. We recommend fixing the bug on the latest branch and then backporting as necessary. `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch. More information on switching release branches is below.
 
-Checking out packages
----------------------
+To set up a plone 4.2 development environment::
+
+  > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
+  > cd ./plone42devel
+  > python bootstrap.py # (where "python" is your python 2.6 binary). 
+  > bin/buildout -v
+
+This will run for a long time if it is your first pull (~20 mins). Once that is done pulling down eggs, You can start your new instance with::
+
+  > ./bin/instance fg
+
+Switching Branches
+^^^^^^^^^^^^^^^^^^
+If your bug is specific to one branch or you think it should be backported, you can easily switch branches. The first time you get a branch, you must do::
+
+  > git checkout -t origin/4.1
+
+This should automatically track to the remote repository. From then on you can just do::
+
+  > git checkout 4.1
+
+To see what branch you are currently on, just do::
+
+  > git branch
+
+The line with a * by it will indicate which branch you are currently working on.
+
+Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior! 
+
+For more information on buildout, please see the `collective developer manual documentation on buildout <http://collective-docs.plone.org/en/latest/tutorials/buildout/index.html>`_.
+
+
+Checking out Packages for Fixing
+--------------------------------
+If you are checking out a buildout, you obviously want to fix a package. Most packages are not in src/ by default so we can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question but just on irc if you need some help. Once you [think you] know which package(s) you want, we can use mr.developer to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
+
+  > ./bin/develop co plone.app.caching
+  > ./bin/develop co plone.caching
+  > ./bin/buildout
+
+Don't forget to rerun buildout! mr.developer will download the source from github (or otherwise) and put the package in the src directory. You can repeat this process with as many or as few packages as you need. For some more tips on working with mr.developer, please :doc:`read more here <mrdeveloper>`.
 
 Testing Locally
 ---------------
+In an ideal world, you would write a test case for your issue before actually trying to fix it. In reality this rarely happens. No matter how you approach it, you should ALWAYS run test cases for both the module and plone.org before commiting any changes. 
+
+First and formost, you need to make sure the egg is set up for testing. Open up buildout.cfg and make sure that the test section has the eggs you have modified. Using the same packages above, this would be::
+
+  [test]
+  eggs += 
+    plone.app.caching [test]
+    plone.caching [test]
+    ...
+
+To run test for the specific module you are modifying::
+
+  > ./bin/test -m plone.app.caching
+  > ./bin/test -m plone.caching
+
+These should all run without error. Please don't check in anything that doesn't! If you haven't written it already, this is a good time to write a test case for the bug you are fixing and make sure everything is running as it should.
+
+After the module level tests run with your change, please make sure other modules aren't affected by the change by running the full suite::
+
+  > ./bin/test
 
 Updating CHANGES.rst and checkouts.cfg
 --------------------------------------
+Once all the tests are running locally on your machine, you are ALMOST ready to commit the changes. A couple housekeeping things before moving on. 
+
+First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will bo collated for the next Plone release and is important for integrators and developers.
+
+*Most importantly*, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This let's the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
+
+Note that there is a section seperator called "# Test Fixes Only". Make sure your egg is above that line or your egg probably won't get made very quickly. This just tells the release manager that any eggs below this line have tests that are updated, but no code changes.
+
+Modifying checkouts.cfg also triggers the buildbot, jenkins, to pull in the egg and run all the tests against the changes you just made. Not that you would ever skip running all tests of course... More on that below.
+
+If your bug is in more than one release (e.g. 4.1 and 4.2), please checkout both branches and add to the checkouts.cfg.
 
 Commiting and Pull Requests
 ---------------------------
+Phew! We are in the home stretch. How about a last minute checklist:
+
+ * Did you fix the original bug?
+ * Did you write a test case for that bug?
+ * Are all test cases for the modules(s) and for Plone passing?
+ * Did you update CHANGES.rst in each packages you touched?
+ * Did you add your changed packages to checkouts.cfg?
+
+If you answered YES to all of these questions, you are ready to push your changes! 
+
+Branches and Forks and Direct Commits - Oh My!
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Plone used to be in an svn repository, so everyone is familiar and accustomed to commiting directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be mster).
+
+HOWEVER, if you are just getting started or you are not sure about your changes or just want general feedback, you may create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
+
+  > cd src/plone.app.caching
+  > git branch my_descriptive_branch_name
+
+*Note*: Branching or forking is your choice. I prefer forking, and I'm writing the docs so this uses the branch method. If you branch, it helps us because we *know* that you have committer rights. Either way it's your call.
+
+Proceed as normal. When you are ready to push your fix, push to a remote branch with::
+
+  > git push origin/my_descriptive_branch_name
+
+This will make a remote branch in github. Navigate to this branch in the github UI and on the top right there will be a button that says "Pull Request". This will turn your request into a pull request on the main branch. There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary. The reviewers are informal and very nice so don't worry - they are there to help! If you want immediate feedback, jump into irc with the pull request link and ask for a review.
+
+*Note*: you still need to update checkouts.cfg in the correct branches of buildout.coredev!
 
 Jenkins
 -------
+You STILL aren't done! Please check jenkins to make sure your changes haven't borked things. It runs every half an hour and takes a while to run so checking back in an hour is a safe bet. Have a beer and head over to the `Jenkins control panel <https://jenkins.plone.org/>`_.
 
 Finalizing Tickets
 ------------------
+If you are working from a ticket, please don't forget to go back to the ticket and add a link to the changeset. We don't have integration with github yet so it's a nice way to trac changes. It also let's the reporter know that you care. If the bug is really bad, consider pinging the release manager and asking him to make a release pronto.
 
 FAQ
 ---
-When is my package ready?
 
-Writing PLIPS
-=============
+ * *How do I know when my package got made?* 
+You can follow the project on github and watch its timeline. You can also check the CHANGES.txt of every plone release for a comprehensive list of all changes and validate that yours is present.
 
-Documentation
-=============
-
-
-Plone 4 now runs Zope 2.13, and uses Python 2.6, so make sure that
-you're using the correct version of Python to run the 'python2.6 bootstrap.py'
-command.
-
-
-
-mr.developer
-============
-
-This buildout uses mr.developer to manage package development. See
-http://pypi.python.org/pypi/mr.developer for more information or run
-'bin/develop help' for a list of available commands.
-
-The most common workflow to get all the latest updates is:
-
-  $ git pull
-  $ bin/develop rb
-
-This will get you the latest coredev configuration, checkout and update all
-packages via Subversion in src and run buildout to configure the whole thing.
-
-From time to time you can check if some old cruft has accumulated:
-
-  $ bin/develop st
-
-If this prints any lines with a question mark in front, you can cleanup by:
-
-  $ bin/develop purge
-
-This will remove packages from src/ which are no longer needed, as they have
-been replaced by proper egg releases of these packages.
-
-PLIP Implementation
-===================
-
-Create a buildout configuration file for your plip in the 'plips' folder.
-Give it a descriptive name, starting with the plip number;
-'plip-1234-widget-frobbing.cfg' for example. This file will define the
-branches/trunks you're working with in your PLIP. It should look something
-like this:
-
-In file plips/plip-1234-widget-frobbing.cfg...::
-
- [buildout]
- extends = plipbase.cfg
- auto-checkout +=
-  plone.somepackage
-  plone.app.someotherpackage
-
- [sources]
-  plone.somepackage = git git://github.com/plone/plone.somepackage.git branch=plip-1234-widget-frobbing
-  plone.app.someotherpackage = git git://github.com/plone/plone.app.somepackage.git branch=plip-1234-widget-frobbing
-
- [instance]
- eggs +=
-    plone.somepackage
-    plone.app.someotherpackage
- zcml +=
-    plone.somepackage
-    plone.app.someotherpackage
-
-Use the same naming convention when branching existing packages, and you
-should always be branching packages when working on PLIPs.
-
-Common Issues
-=============
-
-Issue
------
-
-"ERROR: Can't update package '[Some package]', because it's dirty."
-
-Fix
----
-
-mr.developer is complaining because a file has been changed/added, but not
-committed.
-
-Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
-.installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` to your subversion
-config's global-ignores has been suggested as a more permanent solution.
-
-Issue
------
-
-``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
-
-When running any ``./bin/develop`` command.
-
-Fix
----
-
-``ln -s plips/.mr.developer.cfg``
-
-Issue
-------
-
-"ImportError: No module named Zope2" when building using a PLIP cfg file.
-
-Fix
-----
-
-Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
-rerun buildout to correct this if you're finding it irksome.
-
-Issue
-------
-
-can't open file '/Startup/run.py'
-
-Fix
-----
-
-Two possible fixes, you are using Python 2.4 by mistake, so use Python 2.5 or
-2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after
-'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap
-and re-run buildout, develop, buildout.
-
-Issue
------
-
-Missing PIL.
-
-Fix ---
-
-pil.cfg is include within this buildout to aid in PIL installation. Run
-bin/buildout -c pil.cfg to install. This method does not work on Windows, so
-we're unable to run it by default.
-
-
-Issue
------
-
-bin/develop status is showing that the Products.CMFActionIcons egg has been
-modified, but I haven't touched it.  And this is preventing bin/develop up
-from updating all the eggs.
-
-Fix
----
-
-Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
-=======
-.. buildout.coredev documentation master file, created by
-   sphinx-quickstart on Fri Mar 23 23:17:15 2012.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
 
