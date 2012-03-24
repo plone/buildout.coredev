@@ -1,4 +1,3 @@
-============
 Introduction
 ============
 This is the development buildout for Plone 4.2. If this is your first time here, please read ALL if the instructions below before getting started. It will save you time in the end, we promise!
@@ -6,6 +5,17 @@ This is the development buildout for Plone 4.2. If this is your first time here,
 STOP!
 =====
 Legally, you can NOT contribute code unless you have signed the contributor agreement. This means that we can NOT accept pull requests from you unless this is done so please don't put the code reviewers at risk and do it anyways. Subimtting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc` and ask on of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
+
+
+Contents:
+
+.. toctree::
+   :maxdepth: 2
+
+Indices and tables
+==================
+* :ref:`genindex`
+* :ref:`search`
 
 
 Bug Fixing
@@ -184,3 +194,9 @@ Fix
 ---
 
 Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
+=======
+.. buildout.coredev documentation master file, created by
+   sphinx-quickstart on Fri Mar 23 23:17:15 2012.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
