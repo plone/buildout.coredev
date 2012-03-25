@@ -3,13 +3,15 @@ Contributing to Plone Core
 
 There are many people and companies who rely on Plone on a day-to-day basis so we have to introduce some level of code quality control. Plone's source code is hosted in a git repository at  https://github.com/plone, but only members of the developer team have commit-rights. 
 
-Just sending in a contributors agreement does not guarantee you access to the repository. Before requesting core access please familiarize yourself a little with the community:
+Just sending in a contributors agreement does not guarantee you access to the repository, but once you send it in we will always have it on file for when you are ready to contribute. We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
 * Ask and (especially) answer questions on stack overflow and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. See the section on "Helping Others" for more info.
 
 * Attend a conference/symposium or participate in a sprint/tuneup. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
-* Get your feet wet by contributing to the collective and/or submitting patches. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. Adding patches to the collector is one of the best ways of showing off your skills and proving that you should be given commit-access to the Plone repository. If you think you know how to fix a bug then this is your chance to shine.
+* Get your feet wet by contributing to the collective. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. 
+
+* **Patches** Historically we encouraged people to submit patches to the ticket collector. These tickets often rotted in place and technically, in order for us to accept your patch you must sign the contributors agreement. If you want to contribute fixes, please just sign the agreement and go through the standard github pull request  process described until you feel comfortable to bypass review.
 
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
