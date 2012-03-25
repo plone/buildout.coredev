@@ -96,24 +96,17 @@ In an ideal world, you would write a test case for your issue before actually tr
 
 If you don't start with a test case, save yourself potential problems and validate the bug before getting too deep into the issue!
 
-First and formost, you need to make sure the egg is set up for testing. Open up buildout.cfg and make sure that the test section has the eggs you have modified. Using the same packages above, this would be::
-
-  [test]
-  eggs += 
-    plone.app.caching [test]
-    plone.caching [test]
-    ...
-
-To run test for the specific module you are modifying::
+To run a test for the specific module you are modifying::
 
   > ./bin/test -m plone.app.caching
-  > ./bin/test -m plone.caching
 
 These should all run without error. Please don't check in anything that doesn't! If you haven't written it already, this is a good time to write a test case for the bug you are fixing and make sure everything is running as it should.
 
 After the module level tests run with your change, please make sure other modules aren't affected by the change by running the full suite::
 
   > ./bin/alltests
+
+*Note*: Tests take a long time to run. Once you become a master of bugfixes, you may just let jenkins do this part for you. More on that below.
 
 Updating CHANGES.rst and checkouts.cfg
 --------------------------------------
@@ -150,11 +143,11 @@ HOWEVER, if you are just getting started or you are not sure about your changes 
   > cd src/plone.app.caching
   > git checkout -b my_descriptive_branch_name
 
-*Note*: Branching or forking is your choice. I prefer forking, and I'm writing the docs so this uses the branch method. If you branch, it helps us because we *know* that you have committer rights. Either way it's your call.
+*Note*: Branching or forking is your choice. I prefer branching, and I'm writing the docs so this uses the branch method. If you branch, it helps us because we *know* that you have committer rights. Either way it's your call.
 
 Proceed as normal. When you are ready to push your fix, push to a remote branch with::
 
-  > git push origin/my_descriptive_branch_name
+  > git push origin my_descriptive_branch_name
 
 This will make a remote branch in github. Navigate to this branch in the github UI and on the top right there will be a button that says "Pull Request". This will turn your request into a pull request on the main branch. There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary. The reviewers are informal and very nice so don't worry - they are there to help! If you want immediate feedback, jump into irc with the pull request link and ask for a review.
 
