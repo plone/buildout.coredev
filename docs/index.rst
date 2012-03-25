@@ -36,6 +36,8 @@ To set up a plone 4.2 development environment::
   > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 binary). 
   > bin/buildout -v
 
+If you run into issues in this process, please see the doc :doc:`issues`.
+
 This will run for a long time if it is your first pull (~20 mins). Once that is done pulling down eggs, You can start your new instance with::
 
   > ./bin/instance fg
