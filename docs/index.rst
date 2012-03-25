@@ -8,9 +8,6 @@ STOP!
 =====
 Legally, you can NOT contribute code unless you have signed the :doc:`contributor agreement <agreement>`. This means that we can NOT accept pull requests from you unless this is done, so please don't put the code reviewers at risk and do it anyways. Submitting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc <culture>` and ask one of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
 
-.. toctree::
-   :maxdepth: 2
-
 Version Support Policy
 ----------------------
 If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
@@ -126,7 +123,7 @@ Modifying checkouts.cfg also triggers the buildbot, jenkins, to pull in the egg 
 If your bug is in more than one release (e.g. 4.1 and 4.2), please checkout both branches and add to the checkouts.cfg.
 
 Committing and Pull Requests
----------------------------
+----------------------------
 Phew! We are in the home stretch. How about a last minute checklist:
 
  * Did you fix the original bug?
@@ -171,3 +168,14 @@ FAQ
 You can follow the project on github and watch its timeline. You can also check the CHANGES.txt of every plone release for a comprehensive list of all changes and validate that yours is present.
 
 
+More Fun Reading
+----------------
+.. toctree::
+   :maxdepth: 2
+ 
+   agreement
+   culture
+   documentation
+   plips
+   issues
+   updateme

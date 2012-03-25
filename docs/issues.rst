@@ -1,8 +1,9 @@
-Buildout Issues
+Troubleshooting
 ===============
 
-Potential Buildout Anger
-------------------------
+Buildout Issues
+---------------
+
 Buildout can be frustrating for those unfamiliar with parsing through autistic robot language. Fear not! These errors are almost always a quick fix and a little bit of understanding goes a long ways. 
 
 Errors Running bootstrap.py
@@ -34,9 +35,6 @@ Do one of those, say two hail marys, and re-run bootstrap. Tada!
 One other thing of note is that running bootstrap effectively ties that python executable and all of its libraries to your buildout. If you have several python installs and want to switch which python is tied to your buildout, simply rerun bootstrap.py with the new python (and then rerun buildout). You may get the same error above again but now that you know how to fix it, you can spend that time drinking beer instead of smashing your keyboard. 
 
 Hooray!
-
-Errors Running Buildout
------------------------
 
 When Mr. Developer is Unhappy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -73,19 +71,30 @@ Again, this is only necessary if the package wasn't found in the end.
 
 Hooray!
 
+mr.developer Path Errors
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-General Issues
-==============
+``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
+
+When running any ``./bin/develop`` command.
+
+To fix, simply do::
+
+  ``ln -s plips/.mr.developer.cfg``
+
+
+
+Other Random Issues
+-------------------
 .. TODO: These need to be revalidated
 
-Issue
------
+Dirty Packages
+^^^^^^^^^^^^^^
 
 "ERROR: Can't update package '[Some package]', because it's dirty."
 
 Fix
-^^^
-
+~~~
 mr.developer is complaining because a file has been changed/added, but not
 committed.
 
@@ -93,64 +102,33 @@ Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
 .installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` to your subversion
 config's global-ignores has been suggested as a more permanent solution.
 
-Issue
------
 
-``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
-
-When running any ``./bin/develop`` command.
-
-Fix
-^^^
-
-``ln -s plips/.mr.developer.cfg``
-
-Issue
-------
-
-"ImportError: No module named Zope2" when building using a PLIP cfg file.
-
-Fix
-^^^
+No module named zope 2
+^^^^^^^^^^^^^^^^^^^^^^
+``ImportError: No module named Zope2" when building using a PLIP cfg file.``
 
 Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
 rerun buildout to correct this if you're finding it irksome.
 
-Issue
------
+Can't open file '/Startup/run.py'
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Two possible fixes, you are using Python 2.4 by mistake, so use 2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run buildout, develop, buildout.
 
-can't open file '/Startup/run.py'
-
-Fix
-^^^
-
-Two possible fixes, you are using Python 2.4 by mistake, so use
-2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after
-'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap
-and re-run buildout, develop, buildout.
-
-Issue
------
-
-Missing PIL.
-
-Fix
-^^^
-
+Missing PIL
+^^^^^^^^^^^
 pil.cfg is include within this buildout to aid in PIL installation. Run
 bin/buildout -c pil.cfg to install. This method does not work on Windows, so
 we're unable to run it by default.
 
 
-Issue
------
-
+Modified Egg Issues
+^^^^^^^^^^^^^^^^^^^
 bin/develop status is showing that the Products.CMFActionIcons egg has been
 modified, but I haven't touched it.  And this is preventing bin/develop up
 from updating all the eggs.
 
 Fix
-^^^
+~~~
 
 Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
 
