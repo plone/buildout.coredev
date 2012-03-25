@@ -5,7 +5,7 @@ There are many people and companies who rely on Plone on a day-to-day basis so w
 
 Just sending in a contributors agreement does not guarantee you access to the repository. Before requesting core access please familiarize yourself a little with the community:
 
-* Ask and (especially) answer questions on stack overflow and :doc:`irc <culture>` with a focus on getting to know the active developers a bit. See the section on "Helping Others" for more info.
+* Ask and (especially) answer questions on stack overflow and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. See the section on "Helping Others" for more info.
 
 * Attend a conference/symposium or participate in a sprint/tuneup. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
@@ -17,6 +17,6 @@ Once you have familiarized yourself with the community and you are excited to co
 
 * After your form has been signed and received, fill out a trac ticket for core access at https://dev.plone.org/newticket. Please specify "core" not collective on the trac ticket, your github username, and select the CoreAccess component. If you are at a sprint, you will likely just hand this paper to the sprint
 
-If you aren't sure where to start or just want more direction, feel free to get on irc, mailing lists, twitter, etc... and ask for help. While there is no official mentoring process, there are plenty of people willing to act in that role and guide you through the steps of getting involved in the community. A common way to start contributing is to participate in a Plone tune-up day. Tune-ups are filled with a good mix of newbies and experienced devs alike. For more information, please see  http://plone.org/tuneup.
+If you aren't sure where to start or just want more direction, feel free to get on IRC, mailing lists, Twitter, etc... and ask for help. While there is no official mentoring process, there are plenty of people willing to act in that role and guide you through the steps of getting involved in the community. A common way to start contributing is to participate in a Plone tune-up day. Tune-ups are filled with a good mix of newbies and experienced devs alike. For more information, please see  http://plone.org/tuneup.
 
 Welcome to the Plone community!
