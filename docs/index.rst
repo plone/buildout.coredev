@@ -40,6 +40,8 @@ This will run for a long time if it is your first pull (~20 mins). Once that is 
 
   > ./bin/instance fg
 
+The default username/password for a dev instance is admin/admin.
+
 Switching Branches
 ^^^^^^^^^^^^^^^^^^
 If your bug is specific to one branch or you think it should be backported, you can easily switch branches. The first time you get a branch, you must do::
@@ -63,17 +65,36 @@ For more information on buildout, please see the `collective developer manual do
 
 Checking out Packages for Fixing
 --------------------------------
-If you are checking out a buildout, you obviously want to fix a package. Most packages are not in src/ by default so we can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question but just on irc if you need some help. Once you [think you] know which package(s) you want, we can use mr.developer to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
+Most packages are not in src/ by default so we can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question but just on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
+
+You can get the source of the package with mr.developer and the checkout command, or you can go directly to editing checkouts.cfg. We recommend the latter but will describe both. In the end, checkouts.cfg must be configured either way so you might as well start there.
+
+At the base of your buildout, open checkouts.cfg andadd your package if it's not already there::
+
+  auto-checkout =
+          # my modified packages 
+          plone.app.caching
+          plone.caching
+          # others
+          ...
+
+Then rerun buildout to get the source packages::
+
+  > ./bin/buildout
+
+Altternatively, we can manage checkouts from the command line,  we can use mr.developer to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
 
   > ./bin/develop co plone.app.caching
   > ./bin/develop co plone.caching
   > ./bin/buildout
 
-Don't forget to rerun buildout! mr.developer will download the source from github (or otherwise) and put the package in the src directory. You can repeat this process with as many or as few packages as you need. For some more tips on working with mr.developer, please :doc:`read more here <mrdeveloper>`.
+Don't forget to rerun buildout! In both methods, mr.developer will download the source from github (or otherwise) and put the package in the src directory. You can repeat this process with as many or as few packages as you need. For some more tips on working with mr.developer, please :doc:`read more here <mrdeveloper>`.
 
 Testing Locally
 ---------------
 In an ideal world, you would write a test case for your issue before actually trying to fix it. In reality this rarely happens. No matter how you approach it, you should ALWAYS run test cases for both the module and plone.org before commiting any changes. 
+
+If you don't start with a test case, save yourself potential problems and validate the bug before getting too deep into the issue!
 
 First and formost, you need to make sure the egg is set up for testing. Open up buildout.cfg and make sure that the test section has the eggs you have modified. Using the same packages above, this would be::
 
@@ -92,7 +113,7 @@ These should all run without error. Please don't check in anything that doesn't!
 
 After the module level tests run with your change, please make sure other modules aren't affected by the change by running the full suite::
 
-  > ./bin/test
+  > ./bin/alltests
 
 Updating CHANGES.rst and checkouts.cfg
 --------------------------------------
@@ -100,7 +121,7 @@ Once all the tests are running locally on your machine, you are ALMOST ready to 
 
 First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will bo collated for the next Plone release and is important for integrators and developers.
 
-*Most importantly*, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This let's the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
+*Most importantly*, if you didn't do it earlier, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This let's the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
 
 Note that there is a section seperator called "# Test Fixes Only". Make sure your egg is above that line or your egg probably won't get made very quickly. This just tells the release manager that any eggs below this line have tests that are updated, but no code changes.
 
@@ -127,7 +148,7 @@ Plone used to be in an svn repository, so everyone is familiar and accustomed to
 HOWEVER, if you are just getting started or you are not sure about your changes or just want general feedback, you may create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
 
   > cd src/plone.app.caching
-  > git branch my_descriptive_branch_name
+  > git checkout -b my_descriptive_branch_name
 
 *Note*: Branching or forking is your choice. I prefer forking, and I'm writing the docs so this uses the branch method. If you branch, it helps us because we *know* that you have committer rights. Either way it's your call.
 
