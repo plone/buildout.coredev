@@ -6,20 +6,20 @@ This document assumes you want to fix a bug and will detail the full process. Fo
 
 STOP!
 =====
-Legally, you can NOT contribute code unless you have signed the :doc:`contributor agreement <agreement>`. This means that we can NOT accept pull requests from you unless this is done so please don't put the code reviewers at risk and do it anyways. Subimtting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc <culture>` and ask on of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
+Legally, you can NOT contribute code unless you have signed the :doc:`contributor agreement <agreement>`. This means that we can NOT accept pull requests from you unless this is done, so please don't put the code reviewers at risk and do it anyways. Submitting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc <culture>` and ask one of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
 
 .. toctree::
    :maxdepth: 2
 
 Version Support Policy
 ----------------------
-If you are doing bug triaging or fixing, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.  
+If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
 
 Dependencies
 ------------
 * `Git <http://help.github.com/mac-set-up-git/>`_
-* `Python <http://python.org/>`_ 2.6 
-* If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start but have faith, you'll come back to it later. They always do...
+* `Python <http://python.org/>`_ 2.6 or 2.7
+* If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul-selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start, but have faith, you'll come back to it later. They always do...
 * `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
 * `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment
 
@@ -31,7 +31,7 @@ To set up a plone 4.2 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
   > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
-  > virtualenv plone42devpy --no-site-packages
+  > virtualenv --no-site-packages plone42devpy
   > cd plone42devel
   > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 binary). 
   > bin/buildout -v
@@ -48,7 +48,7 @@ If your bug is specific to one branch or you think it should be backported, you 
 
   > git checkout -t origin/4.1
 
-This should automatically track to the remote repository. From then on you can just do::
+This should set up a local 4.1 branch tracking the one on github. From then on you can just do::
 
   > git checkout 4.1
 
@@ -58,18 +58,19 @@ To see what branch you are currently on, just do::
 
 The line with a * by it will indicate which branch you are currently working on.
 
-Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior! 
+.. important::
+   Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior! 
 
 For more information on buildout, please see the `collective developer manual documentation on buildout <http://collective-docs.plone.org/en/latest/tutorials/buildout/index.html>`_.
 
 
 Checking out Packages for Fixing
 --------------------------------
-Most packages are not in src/ by default so we can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question but just on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
+Most packages are not in src/ by default, so you can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question, but just ask on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
 
 You can get the source of the package with mr.developer and the checkout command, or you can go directly to editing checkouts.cfg. We recommend the latter but will describe both. In the end, checkouts.cfg must be configured either way so you might as well start there.
 
-At the base of your buildout, open checkouts.cfg andadd your package if it's not already there::
+At the base of your buildout, open checkouts.cfg and add your package if it's not already there::
 
   auto-checkout =
           # my modified packages 
@@ -82,7 +83,7 @@ Then rerun buildout to get the source packages::
 
   > ./bin/buildout
 
-Altternatively, we can manage checkouts from the command line,  we can use mr.developer to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
+Altternatively, we can manage checkouts from the command line, by using mr.developer's ``bin/develop`` command to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
 
   > ./bin/develop co plone.app.caching
   > ./bin/develop co plone.caching
@@ -112,9 +113,9 @@ Updating CHANGES.rst and checkouts.cfg
 --------------------------------------
 Once all the tests are running locally on your machine, you are ALMOST ready to commit the changes. A couple housekeeping things before moving on. 
 
-First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will bo collated for the next Plone release and is important for integrators and developers.
+First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will be collated for the next Plone release and is important for integrators and developers.
 
-*Most importantly*, if you didn't do it earlier, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This let's the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
+*Most importantly*, if you didn't do it earlier, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This lets the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and Plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
 
 Note that there is a section seperator called "# Test Fixes Only". Make sure your egg is above that line or your egg probably won't get made very quickly. This just tells the release manager that any eggs below this line have tests that are updated, but no code changes.
 
@@ -122,7 +123,7 @@ Modifying checkouts.cfg also triggers the buildbot, jenkins, to pull in the egg 
 
 If your bug is in more than one release (e.g. 4.1 and 4.2), please checkout both branches and add to the checkouts.cfg.
 
-Commiting and Pull Requests
+Committing and Pull Requests
 ---------------------------
 Phew! We are in the home stretch. How about a last minute checklist:
 
@@ -136,7 +137,7 @@ If you answered YES to all of these questions, you are ready to push your change
 
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Plone used to be in an svn repository, so everyone is familiar and accustomed to commiting directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be mster).
+Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be master).
 
 HOWEVER, if you are just getting started or you are not sure about your changes or just want general feedback, you may create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
 
@@ -149,7 +150,7 @@ Proceed as normal. When you are ready to push your fix, push to a remote branch 
 
   > git push origin my_descriptive_branch_name
 
-This will make a remote branch in github. Navigate to this branch in the github UI and on the top right there will be a button that says "Pull Request". This will turn your request into a pull request on the main branch. There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary. The reviewers are informal and very nice so don't worry - they are there to help! If you want immediate feedback, jump into irc with the pull request link and ask for a review.
+This will make a remote branch in github. Navigate to this branch in the github UI and on the top right there will be a button that says "Pull Request". This will turn your request into a pull request on the main branch. There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary. The reviewers are informal and very nice so don't worry - they are there to help! If you want immediate feedback, jump into IRC with the pull request link and ask for a review.
 
 *Note*: you still need to update checkouts.cfg in the correct branches of buildout.coredev!
 
@@ -159,7 +160,7 @@ You STILL aren't done! Please check jenkins to make sure your changes haven't bo
 
 Finalizing Tickets
 ------------------
-If you are working from a ticket, please don't forget to go back to the ticket and add a link to the changeset. We don't have integration with github yet so it's a nice way to trac changes. It also let's the reporter know that you care. If the bug is really bad, consider pinging the release manager and asking him to make a release pronto.
+If you are working from a ticket, please don't forget to go back to the ticket and add a link to the changeset. We don't have integration with github yet so it's a nice way to track changes. It also lets the reporter know that you care. If the bug is really bad, consider pinging the release manager and asking him to make a release pronto.
 
 FAQ
 ---
