@@ -21,6 +21,7 @@ Dependencies
 * `Python <http://python.org/>`_ 2.6 
 * If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start but have faith, you'll come back to it later. They always do...
 * `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
+* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment
 
 Setting up Your Development Environment
 ---------------------------------------
@@ -28,9 +29,11 @@ The first step in fixing a bug is getting this buildout running. We recommend fi
 
 To set up a plone 4.2 development environment::
 
+  > cd ~/buildouts # or wherever you want to put things
   > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
-  > cd ./plone42devel
-  > python bootstrap.py # (where "python" is your python 2.6 binary). 
+  > virtualenv plone42devpy --no-site-packages
+  > cd plone42devel
+  > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 binary). 
   > bin/buildout -v
 
 This will run for a long time if it is your first pull (~20 mins). Once that is done pulling down eggs, You can start your new instance with::
