@@ -5,7 +5,7 @@ There are many people and companies who rely on Plone on a day-to-day basis so w
 
 Just sending in a contributors agreement does not guarantee you access to the repository, but once you send it in we will always have it on file for when you are ready to contribute. We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
-* Ask and (especially) answer questions on stack overflow and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. See the section on "Helping Others" for more info.
+* Ask and (especially) answer questions on stack overflow and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
 
 * Attend a conference/symposium or participate in a sprint/tuneup. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
