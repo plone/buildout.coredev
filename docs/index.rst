@@ -1,8 +1,6 @@
 Introduction
 ============
-This is the development buildout for Plone 4.2. If this is your first time here, please read ALL if the instructions below before getting started. It will save you time in the end, we promise!
-
-This document assumes you want to fix a bug and will detail the full process. For more information on writing PLIPS, please :doc:`go here <plips>`.
+This documentation describes the process for developing Plone. It is primarily a technical resource for setting up your core developer buildout, fixing bugs, and writing plips. 
 
 STOP!
 =====

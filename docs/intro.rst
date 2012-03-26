@@ -138,7 +138,13 @@ Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be master).
 
-HOWEVER, if you are just getting started or you are not sure about your changes or just want general feedback, you may create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
+HOWEVER, there are a few situations where a branch is appropriate. If you:
+ * are just getting started, 
+ * are not sure about your changes
+ * want feedback/code review
+ * are implementing a non-trivial change
+
+then you likely want to create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
 
   > cd src/plone.app.caching
   > git checkout -b my_descriptive_branch_name
