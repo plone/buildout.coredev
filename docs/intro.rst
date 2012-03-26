@@ -122,12 +122,17 @@ Phew! We are in the home stretch. How about a last minute checklist:
 
  * Did you fix the original bug?
  * Is your code consistent with our :doc:`style`?
+ * Did you remove any extra code and lingering pdbs?
  * Did you write a test case for that bug?
  * Are all test cases for the modules(s) and for Plone passing?
  * Did you update CHANGES.rst in each packages you touched?
  * Did you add your changed packages to checkouts.cfg?
 
-If you answered YES to all of these questions, you are ready to push your changes! 
+If you answered YES to all of these questions, you are ready to push your changes! A couple quick reminders:
+
+ * Only commit directly to the development branch if you're confident your code won't break anything badly and the changes are small and fairly trivial. Otherwise, please create a pull request (more on that below).
+ * Please try to make one change per commit. If you are fixing three bugs, make three commits. That way, it is easier to see what was done when, and easier to roll back any changes if necessary. If you want to make large changes cleaning up whitespace or renaming variables, it is especially important to do so in a separate commit for this reason.
+* We have a few angels that follow the changes and each commit to see what happens to their favourite CMS! If you commit something REALLY sketchy, they will politely contact you, most likely after immediately reverting changes. There is no official people assigned to this so if you are especially nervous, jump into #plone and ask for a quick eyeball on your changes.
 
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
