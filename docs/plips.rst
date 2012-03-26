@@ -39,8 +39,8 @@ When is the PLIP due?
 You don’t like my PLIP :( What now?
     Just because a PLIP isn’t accepted in core doesn’t mean it’s a bad idea. It is often the case that there are competing implementations and we want to see it vetted as an add on before “blessing” a preferred implementation. 
 
-PLIP Process Overview
----------------------
+Process Overview
+----------------
 #. Submit a PLIP (at any time)
 #. PLIP is approved for inclusion into core for a given release
 #. Developer implements PLIP (code, tests, documentation)
@@ -69,8 +69,8 @@ The seconder field is REQUIRED. We will send the PLIP back to you if it is not f
 
 Everything else should be self explanatory. That or I got lazy when writing these docs. I'm betting on the latter.
 
-PLIP Review Process
--------------------
+Evaluating PLIPs
+^^^^^^^^^^^^^^^^
 After you submit your PLIP, the Framework Team will meet within a couple weeks and let you know if the PLIP is accepted. If the PLIP is not accepted, please don't be sad! We encourage most PLIPs to go through the add on process at first if at all possible to make sure the majority of the comunity uses it.
 
 All communication with you occurs on the PLIP ticket itself so please keep your eyes and inbox open for changes.
@@ -82,8 +82,8 @@ These are the criterias by which the framework team will review your review bund
  * Is this PLIP more appropriate as a qualified add-on?
  * Is this PLIP too risky?
 
-Getting Started on Your PLIP
-----------------------------
+Implementing Your PLIP
+----------------------
 You can start the development at any time - but if you are going to modify Plone itself, you might want to wait to see if your idea is approved first to save yourself some work if it isn't. 
 
 General Rules
