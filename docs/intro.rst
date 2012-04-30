@@ -134,6 +134,34 @@ If you answered YES to all of these questions, you are ready to push your change
  * Please try to make one change per commit. If you are fixing three bugs, make three commits. That way, it is easier to see what was done when, and easier to roll back any changes if necessary. If you want to make large changes cleaning up whitespace or renaming variables, it is especially important to do so in a separate commit for this reason.
 * We have a few angels that follow the changes and each commit to see what happens to their favourite CMS! If you commit something REALLY sketchy, they will politely contact you, most likely after immediately reverting changes. There is no official people assigned to this so if you are especially nervous, jump into #plone and ask for a quick eyeball on your changes.
 
+Committing to Products.CMFPlone
+-------------------------------
+If you are working a bug fix on Products.CMFPlone, there are a couple other things to take notice of. First and foremost, 
+you'll see that there are several branches. At the time of writing this document, there are branches for 4.1, 4.2, and 
+master, which is the implied 4.3. Still with me? So you have a bug fix for 4.x. If the fix is only for one version, make
+sure to get that branch and party on. However, chances are the bug is in multiple branches. 
+
+XXX: if anyone has a better way of doing this, please update this.
+
+Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there with tests. If you have more than one commit, 
+BEFORE merging, you are going to want to squash those so that later you can cherry-pick into other branches with just one
+SHA. To do that, you can rebase (a la https://makandracards.com/makandra/527-squash-several-git-commits-into-a-single-commit).
+While you are STILL in the 4.1 branch::
+
+  > git rebase -i master
+
+You are going to want to pick the first commit, and squash everything else into that commit. When you are done, you will
+end up with one commit SHA. Push that to master. So 4.1 and master (aka 4.3) at this point would have the change. Last, 
+let's put that commit in 4.2::
+
+  > git checkout 4.2
+
+Then cherry pick the commit from master into the new branch::
+
+  > git cherry-pick b6ff4309
+
+You will need to handle the conflicts and commit from there.
+
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be master).
