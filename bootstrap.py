@@ -37,7 +37,7 @@ parser.add_option("-v", "--version", dest="version", default='1.5.2',
                           'bootstrap script defaults to '
                           '1.5.2, unlike usual buildout bootstrap scripts.*')
 parser.add_option("-d", "--distribute",
-                   action="store_true", dest="distribute", default=True,
+                   action="store_true", dest="distribute", default=False,
                    help="Use Disribute rather than Setuptools.")
 
 parser.add_option("-c", None, action="store", dest="config_file",
