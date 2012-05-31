@@ -140,31 +140,59 @@ If you answered YES to all of these questions, you are ready to push your change
 
 Committing to Products.CMFPlone
 -------------------------------
-If you are working a bug fix on Products.CMFPlone, there are a couple other things to take notice of. First and foremost, 
-you'll see that there are several branches. At the time of writing this document, there are branches for 4.1, 4.2, and 
-master, which is the implied 4.3. Still with me? So you have a bug fix for 4.x. If the fix is only for one version, make
-sure to get that branch and party on. However, chances are the bug is in multiple branches. 
+If you are working a bug fix on Products.CMFPlone,
+there are a couple other things to take notice of.
+First and foremost, 
+you'll see that there are several branches.
+At the time of writing this document,
+there are branches for 4.1, 4.2, and master, which is the implied 4.3.
 
-XXX: if anyone has a better way of doing this, please update this.
+Still with me? So you have a bug fix for 4.x.
+If the fix is only for one version,
+make sure to get that branch and party on.
+However, chances are the bug is in multiple branches. 
 
-Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there with tests. If you have more than one commit, 
-BEFORE merging, you are going to want to squash those so that later you can cherry-pick into other branches with just one
-SHA. To do that, you can rebase (a la https://makandracards.com/makandra/527-squash-several-git-commits-into-a-single-commit).
-While you are STILL in the 4.1 branch::
+Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there with tests.
 
-  > git rebase -i master
+If your fix only involved a single commit,
+you can use git's ``cherry-pick`` command to apply the same commit
+to a different branch.
 
-You are going to want to pick the first commit, and squash everything else into that commit. When you are done, you will
-end up with one commit SHA. Push that to master. So 4.1 and master (aka 4.3) at this point would have the change. Last, 
-let's put that commit in 4.2::
+First check out the branch::
 
   > git checkout 4.2
 
-Then cherry pick the commit from master into the new branch::
+And then cherry-pick the commit (you can get the SHA hash from git log).
 
   > git cherry-pick b6ff4309
 
-You will need to handle the conflicts and commit from there.
+There may be conflicts; if so, resolve them and then follow the directions
+git gives you to complete the cherry-pick.
+
+If your fix involved multiple commits, cherry-picking them one by one can get tedious.
+In this case things are easiest if you did your fix in a separate feature branch.
+
+In that scenario, you first merge the feature branch to the 4.1 branch::
+
+  > git checkout 4.1
+  > git merge my-awesome-feature
+
+Then you return to the feature branch and make a branch for `rebasing` it onto the 4.2 branch::
+
+  > git checkout my-awesome-feature
+  > git checkout -b my-awesome-feature-4.2
+  > git rebase ef978a --onto 4.2
+
+(ef978a happens to be the last commit in the feature branch's history before
+it was branched off of 4.1. You can look at git log to find this.)
+
+At this point, the feature branch's history has been updated, but it hasn't actually
+been merged to 4.2 yet. This lets you deal with resolving conflicts before you
+actually merge it to the 4.2 release branch. Let's do that now::
+
+  > git checkout 4.2
+  > git merge my-awesome-feature-4.2
+
 
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
