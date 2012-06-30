@@ -34,7 +34,7 @@ def getSourceLocation(packageName):
 
     if config.has_option('sources', packageName):
         sourceLine = config.get('sources', packageName)
-
+        branch = "master"
         _template_split = re.compile('([$]{[^}]*})').split
         # _simple = re.compile('[-a-zA-Z0-9 ._]+$').match
 
@@ -49,9 +49,12 @@ def getSourceLocation(packageName):
             url = ''.join(value[1:])
             url = url.split(' pushurl')[0]
 
+            branch_check = sourceLine.split('branch=')
+            if len(branch_check) == 2:
+                branch = branch_check[-1]
         url = url.replace('git:', 'https:')
         url = url.replace('.git', '')
-        return url
+        return url, branch
     # sources = {}
     # for line in sourcesFile:
     #     line = line.strip().replace(" ","")
@@ -64,7 +67,7 @@ def getSourceLocation(packageName):
     #             sources[package] = location
     #         except ValueError:
     #             print line
-    return ""
+    return "", ""
 
 
 def main(argv):
@@ -87,16 +90,15 @@ def main(argv):
             if version > priorVersion:
                 packageChange = u"%s: %s %s %s" % (package, priorVersion, u"\u2192", version)
                 outputStr += u"\n" + packageChange + u"\n" + u"-" * len(packageChange) + "\n"
-            
-                source = getSourceLocation(package)
+                source, branch = getSourceLocation(package)
                 if source:
                     if 'github' in source:
-                        source = source.replace(' branch=', '/raw/')
+                        # source = source.replace(' branch=', '/raw/')
                         # https://github.com/plone/Plone/raw/4.1/README.txt
-                        paths_to_try = ["raw/master/CHANGES.txt",
-                                        "raw/master/CHANGES.rst",
-                                        "raw/master/docs/HISTORY.txt",
-                                        "raw/master/docs/CHANGES.txt"]
+                        paths_to_try = ["raw/%s/CHANGES.txt" % branch,
+                                        "raw/%s/CHANGES.rst" % branch,
+                                        "raw/%s/docs/HISTORY.txt" % branch,
+                                        "raw/%s/docs/CHANGES.txt" % branch]
                     else:
                         paths_to_try = ["/CHANGES.txt",
                                         "/docs/CHANGES.txt",
@@ -106,8 +108,6 @@ def main(argv):
                             paths_to_try.append('/%s/CHANGES.txt' % '/'.join(package.split('.')))
                         except:
                             pass
-                    # if 'theming' in package or 'imaging' in package:
-                    #     import pdb; pdb.set_trace( )
 
                     for structure in paths_to_try:
                         url = "%s/%s" % (source, structure)
