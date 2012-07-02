@@ -5,14 +5,18 @@ from distutils.version import StrictVersion
 from docutils.core import publish_doctree
 import sys
 
+dist_url = "http://dist.plone.org/release/%s/versions.cfg"
 
-def pullVersions(versionsFile):
+
+def pullVersions(versionNumber):
     try:
         from ordereddict import OrderedDict
         packageVersions = OrderedDict()
     except ImportError:
         print "Unable to find OrderedDict"
         packageVersions = {}
+    url = dist_url % versionNumber
+    versionsFile = urllib.urlopen(url)
     for line in versionsFile:
         line = line.strip().replace(" ", "")
         if line and not (line.startswith('#') or line.startswith('[')):
@@ -23,6 +27,7 @@ def pullVersions(versionsFile):
                 pass
             else:
                 packageVersions[package] = version
+    print "Parsed %s" % url
     return packageVersions
 
 
@@ -43,7 +48,7 @@ def getSourceLocation(packageName):
             url = value[0].split()[1]
         else:
             variable = value[1][2:-1].split()[0].split(':')
-            
+
             section, option = variable
             value[1] = config.get(section, option)
             url = ''.join(value[1:])
@@ -55,18 +60,6 @@ def getSourceLocation(packageName):
         url = url.replace('git:', 'https:')
         url = url.replace('.git', '')
         return url, branch
-    # sources = {}
-    # for line in sourcesFile:
-    #     line = line.strip().replace(" ","")
-    #     for t in ['svn','git']:
-    #         line = line.replace("=%s" % t,";;")
-
-    #     if line and not (line.startswith('#') or line.startswith('[')):
-    #         try:
-    #             package, location = line.split(";;")
-    #             sources[package] = location
-    #         except ValueError:
-    #             print line
     return "", ""
 
 
@@ -74,20 +67,15 @@ def main(argv):
     priorVersionNumber = sys.argv[1]
     currentVersionNumber = sys.argv[2]
 
-    dist_url = "http://dist.plone.org/release/%s/versions.cfg"
-    priorVersionsFile = urllib.urlopen(dist_url % priorVersionNumber)
-    priorVersions = pullVersions(priorVersionsFile)
+    priorVersions = pullVersions(priorVersionNumber)
+    currentVersions = pullVersions(currentVersionNumber)
 
-    currentVersionsFile = urllib.urlopen(dist_url % currentVersionNumber)
-    currentVersions = pullVersions(currentVersionsFile)
-
-    # sourcesFile = open("sources.cfg", "r")
-    # sources = pullSources #pullSources(sourcesFile)
     outputStr = ""
     for package, version in currentVersions.iteritems():
         if package in priorVersions:
             priorVersion = priorVersions[package]
             if version > priorVersion:
+                print "%s has a newer version" % package
                 packageChange = u"%s: %s %s %s" % (package, priorVersion, u"\u2192", version)
                 outputStr += u"\n" + packageChange + u"\n" + u"-" * len(packageChange) + "\n"
                 source, branch = getSourceLocation(package)
