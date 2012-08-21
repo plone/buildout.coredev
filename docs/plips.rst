@@ -129,21 +129,6 @@ In file plips/plip-1234-widget-frobbing.cfg...::
 Use the same naming convention when branching existing packages, and you
 should always be branching packages when working on PLIPs.
 
-Best way to run the buildout with your configuration file
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Create a file local.cfg in the buildout directory edit::
-
- [buildout]
- extends =
-     plips/plip-1234-widget-frobbing.cfg
-
-And run it like so:
-  
-  $ ./bin/buildout -c local.cfg
-
-This way, the buildout directory is set up correctly and no other files are created in the plips directory.
-
 Finishing Up
 ^^^^^^^^^^^^
 Before marking your PLIP as ready for review, please add a file to give a set of instructions to the PLIP reviewer.
