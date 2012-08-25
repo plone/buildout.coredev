@@ -1,25 +1,23 @@
 Mr. Developer
 =============
 
-This buildout uses mr.developer to manage package development. See
-http://pypi.python.org/pypi/mr.developer for more information or run
-'bin/develop help' for a list of available commands.
+Esse buildout usa o mr.developer para gerenciar o desenvolvimento do pacote. Veja
+http://pypi.python.org/pypi/mr.developer para maiores informações ou execute
+'bin/develop help' para obter uma lista de comandos disponíveis.
 
-The most common workflow to get all the latest updates is:
+A forma mais comum de obter as últimas atualizações é:
 
   $ git pull
   $ bin/develop rb
 
-This will get you the latest coredev configuration, checkout and update all
-packages via Subversion in src and run buildout to configure the whole thing.
+Isto lhe trará a versão mais recente da configuração do coredev, faça o checkout, atualize todos os pacotes do Subversion na pasta src e execute buildout para configurar tudo.
 
-From time to time you can check if some old cruft has accumulated:
+De vez em quando você pode verificar se existem modificações não comitadas nos repositórios baixados pelo mr.developer:
 
   $ bin/develop st
 
-If this prints any lines with a question mark in front, you can cleanup by:
+Se alguma linha for impressa com um ponto de interrogação na frente, você pode limpar a lista com o seguinte comando:
 
   $ bin/develop purge
 
-This will remove packages from src/ which are no longer needed, as they have
-been replaced by proper egg releases of these packages.
+Isso irá remover os pacotes desnecessários de src/, já que foram substituídos por versões de eggs mais adequadas.
