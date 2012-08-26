@@ -1,9 +1,9 @@
-How to Update these Docs
-========================
+Cómo actualizar estas documentaciones
+=====================================
 
-These documents are currently stored with the coredev buildout in github in /docs. To update them, please checkout the coredev buildout and update there. To check your changes locally, rerun buildout and then::
+Estos documentos actualmente son almacenados con el directorio /docs del buildout de coredev en github. Para actualizarles, por favor, hacer un checkout desde el buildout coredev y actualizar allá. Para generar sus cambios localmente, inicie de nuevo el buildout y entonces::
 
   > cd docs/build
   > make html
 
-Sphinx will poop out a file directory that you can put in your browser url to validate. Please make sure to validate all warnings and errors before committing to make sure the documents remain valid.
+Sphinx colocara en un directorio que tu puedes consultar en tu navegador web para validar la documentacion generada. Por favor asegurese en validar todos los avisos y los errores antes de generar una revision para estar seguro que los documentos queden válido.
