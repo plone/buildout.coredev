@@ -1,13 +1,14 @@
-Introduction
-============
-This documentation describes the process for developing Plone. It is primarily a technical resource for setting up your core developer buildout, fixing bugs, and writing plips. 
+Introdução
+==========
+Esta documentação descreve o processo para desenvolvimento usando o Plone e é um recurso técnico para configurar seu core developer buildout, corrigir erros e escrever PLIP's (PLone Improvement Proposal - Propostas de Melhoria do Plone).
 
-STOP!
-=====
-Legally, you can NOT contribute code unless you have signed the :doc:`contributor agreement <agreement>`. This means that we can NOT accept pull requests from you unless this is done, so please don't put the code reviewers at risk and do it anyways. Submitting the agreement is easy (and will soon be easier) and if you want quick access and are familiar with the community, go into :doc:`irc <culture>` and ask one of the repo admins to give you access with a scanned copy of the agreement. They will get you going as fast as possible!
+ATENÇÃO!
+========
+Legalmente, você NÃO pode contribuir com código sem que tenha assinado o :doc:`acordo de contribuição <agreement>`; sem ele, não podemos aceitar seus pull requests. Enviar o acordo é fácil e será mais fácil em breve. Por isto, não coloque os revisores do código em risco, de forma alguma. Se você quiser acesso rápido e estiver familiarizado com a comunidade, acesse :doc:`irc <culture>` e peça para algum administrador do repositório lhe dar acesso, enviando uma cópia escaneada do acordo. Eles permitirão que você comece a contribuir o mais rápido possível.
 
-Table of Awesome
-----------------
+
+Sumário
+-------
 .. toctree::
    :maxdepth: 2
 

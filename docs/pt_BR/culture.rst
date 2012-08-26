@@ -1,11 +1,15 @@
-=======================
-Plone Developer Culture
-=======================
+==============================
+Cultura do desenvolvedor Plone
+==============================
 
-If you are going to be contributing back to Plone, we ask a couple things. First, please join the `plone-developers <https://lists.sourceforge.net/lists/listinfo/Plone-developers>`_ list and at minimum lurk around. You will quickly see how people work and what kind of things are best suited for group discussion. Second, please ask for help setting up your environment in IRC. Most of our developers work there and you will get the best advice there.
+Se você deseja contribuir com o desenvolvimento do Plone, siga algumas instruções:
 
-Download an IRC client and jump on to #plone-framework (and/or #plone - both on freenode).  The people in #plone-framework have been using plone for a very long time and are happy to help you get going and make the right decisions. More info on IRC can be found at http://plone.org/support/chat.
+1) Cadastre-se na lista `plone-developers <https://lists.sourceforge.net/lists/listinfo/Plone-developers>`_ e veja como as pessoas trabalham e como costumam abordar as discussões no grupo.
 
-If you are in a timezone when things are not very active, please post to the plone-developers mailing list or grab a beer and wait for people to wake up.
+2) Peça ajuda sobre configuração do ambiente no IRC. A maioria dos desenvolvedores está lá.
 
-When in doubt, please ask. The code base is very complicated and everyone is vested in the right thing happening. Despite the occasional grouch here and there, most plone devs will go out of their way to get you on the right path.
+Baixe um cliente de IRC e acesse o canal #plone-framework ou #plone, ambos no freenode. As pessoas no #plone-framework usam Plone há muito tempo e ficam felizes em poder ajudar. Mais informações podem ser obtidas no endereço http://plone.org/support/chat.
+
+Se você está em um fuso horário em que o canal não esteja muito ativo, envie um e-mail para a lista plone-developers ou pegue uma cerveja e espere o pessoal acordar.
+
+Quando tiver dúvidas, pode perguntar. O código do Plone é muito complicado e todos estão empenhados em fazer a coisa certa acontecer. Apesar de uma ou outra grosseria, a maioria dos desenvolvedores Plone irá deixar o que está fazendo para lhe ajudar a achar o caminho certo.
