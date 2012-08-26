@@ -15,7 +15,7 @@ Just sending in a contributors agreement does not guarantee you access to the re
 
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
-* Sign and snail mail the contributor agreement at  http://plone.org/foundation/contributors-agreement/agreement.pdf/at_download/file. This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase, ensuring it is not appropriated for someone's unethical purposes. For questions about why the agreement is required, please see  http://plone.org/foundation/contributors-agreement. 
+* Sign and snail mail the contributor agreement at  http://plone.org/foundation/contributors-agreement/agreement.pdf/at_download/file. This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase, ensuring it is not appropriated for someone's unethical purposes. For questions about why the agreement is required, please see  :doc:`Contributor’s Agreement for Plone Explained <contributors_agreement_explained>`. 
 
 * After your form has been signed and received, fill out a trac ticket for core access at https://dev.plone.org/newticket. Make sure you are logged in and please specify "core" not collective on the trac ticket, your github username, and select the CoreAccess component. If you are not logged in, you will not be able to select a component so make sure you are logged in. If you are at a sprint, you will likely just hand this paper to the sprint
 
