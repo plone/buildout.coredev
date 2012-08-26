@@ -66,8 +66,8 @@ ME/TAL
  * Existem linhas de código obsoletas ou no estilo antigo, como DateTime?
  * O HTML renderizado é compatível com as normas? Os ids e classes são usadas apropriadamente?
 
-Exemplo de revisões de PLIP
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Exemplos de revisões de PLIP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-davisagli.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip10886-review-cah190.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-rossp.txt
