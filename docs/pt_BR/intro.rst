@@ -1,21 +1,21 @@
-How To Commit Fixes to Plone Core
-=================================
-This document assumes you want to fix a bug and will detail the full process. For more information on writing PLIPS, please :doc:`go here <plips>`.
+Como enviar correções para o Core do Plone
+==========================================
+Este documento assume que você deseja corrigir um bug e irá detalhar o processo completo. Para mais informações sobre PLIPS, :doc:`go here <plips>`.
 
-Version Support Policy
-----------------------
-If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
+Política de Versões Suportadas
+------------------------------
+Se você estiver fazendo uma triagem ou corrigindo bugs, tenha em mente que o Plone possui uma `Política de versões suportadas <http://plone.org/support/version-support-policy>`_.
 
-Dependencies
+Dependências
 ------------
 * `Git <http://help.github.com/mac-set-up-git/>`_
 * `Subversion <http://subversion.apache.org/>`_
-* `Python <http://python.org/>`_ 2.6 or 2.7 including development headers.
+* `Python <http://python.org/>`_ 2.6 or 2.7 incluindo as bibliotecas de desenvolvimento.
 * If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul-selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start, but have faith, you'll come back to it later. They always do...
-* `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
-* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment.
-* `GCC <http://gcc.gnu.org/>`_ in order to compile ZODB, Zope and lxml.
-* `libxml2 and libxslt <http://xmlsoft.org/XSLT/downloads.html>`_, including development headers.
+* `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Certifique-se de instalar no ambiente Python adequado.
+* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ No ambiente Python adequado.
+* `GCC <http://gcc.gnu.org/>`_ A fim de compilar ZODB, Zope e lxml.
+* `libxml2 and libxslt <http://xmlsoft.org/XSLT/downloads.html>`_, Incluíndo as bibliotecas de desenvolvimento.
 
 
 Setting up Your Development Environment
