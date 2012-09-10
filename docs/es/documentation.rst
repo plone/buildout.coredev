@@ -1,76 +1,75 @@
-Writing documentation
-=====================
+Escribiendo documentación
 
-Documentation of Plone
+Documentación de Plone
 ----------------------
 
-As a community, Plone maintains several types of documentation:
+Como una comunidad, Plone mantienen muchos tipos de documentación:
 
-* *Curated* documents. This is a limited set of documentation that is intended to be carefully managed and regularly updated.
+* Documentos *mantenidos*. Esto es un conjunto limitado de documentación que está pretendido para ser cuidadosamente dirigido y regularmente actualizado.
 
-  * `User Manual <http://plone.org/documentation/manual/plone-4-user-manual>`_
-  * `Installing Plone <http://plone.org/documentation/manual/installing-plone>`_
-  * `Theme Reference <http://plone.org/documentation/manual/theme-reference>`_
-  * `Developer Manual <http://plone.org/documentation/manual/developer-manual>`_
+  * `Manual de Usuario <http://plone.org/documentation/manual/plone-4-user-manual>`_
+  * `Instalando Plone <http://plone.org/documentation/manual/installing-plone>`_
+  * `Referencia de Temas <http://plone.org/documentation/manual/theme-reference>`_
+  * `Manual de Desarrollo <http://plone.org/documentation/manual/developer-manual>`_
 
-  Improvements to the curated documents can be discussed on the `plone-docs mailing list <https://lists.sourceforge.net/lists/listinfo/plone-docs>`_.
+  Las mejoras a los documentos mantenidos pueden ser discutidos en la lista de correo `plone-docs <https://lists.sourceforge.net/lists/listinfo/plone-docs>`_.
 
-* *Community-edited* documents. These are open for contributions by anyone. This leads to a wealth of information that is of more widely ranging quality.
+* Documentos *editado colectivamente en comunidad*. Estos son abiertos para contribuciones por cualquier que lo deseo hacer. Esto dirige a una riqueza de información que es de más ampliamente variando calidad.
 
-  * `Knowledgebase on plone.org <http://plone.org/documentation/kb>`_. Anyone with a plone.org account is free to edit.
-  * `Collective Plone developer documentation <http://collective-docs.readthedocs.org/en/latest/index.html>`_. Anyone may `contribute <http://collective-docs.readthedocs.org/en/latest/introduction/developermanual.html>`_.
+  * `Base de conocimiento en plone.org <http://plone.org/documentation/kb>`_. Cualquiera con una cuenta en plone.org es libre de editarlo.
+  * `Documentación para el programador en Plone Collective <http://collective-docs.readthedocs.org/en/latest/index.html>`_. Cualquiera tal ves puede `contribuir <http://collective-docs.readthedocs.org/en/latest/introduction/developermanual.html>`_.
 
-Documenting a package
----------------------
+Documentando un paquete
+-----------------------
 
-The basics
-~~~~~~~~~~
+Lo básico
+~~~~~~~~~
 
-At the very least, your package should include the following forms of documentation:
+Al menos, su paquete tendría que incluir las siguientes formas de documentación
 
   ``README.rst``
-    The readme is the first entry point for most people to your package. It will be included on the PyPI page for your egg, and on the front page of its github repository. It should be formatted using `reStructuredText (reST) <http://docutils.sourceforge.net/rst.html>`_ in order to get formatted properly by those systems.
+    El archivo README es el primer punto de partida para la mayoría de personas a su paquete. Este será incluido en la página PyPI en su paquete Egg, y en la página de su repositorio github. Este tendrá que ser formateado utilizando `reStructuredText (reST) <http://docutils.sourceforge.net/rst.html>`_ para conseguir el formato apropiado por aquellos sistemas.
 
-    ``README.rst`` should include:
+    ``README.rst`` tendría que incluir:
 
-    * A brief description of the package's purpose
-    * Installation information (How do I get it working?)
-    * Compatibility information (what versions of Plone does it work with?)
-    * Links to other sources of documentation
-    * Links to issue trackers, mailing lists, and other ways to get help.
+    * Una breve descripción del propósito del paquete
+    * Información de instalación (Cómo consigo que funcione?)
+    * Información de compatibilidad (qué versiones de Plone trabaja con que?)
+    * Enlaces a otras fuentes de documentación
+    * Enlaces para reportar errores, listas de correo, y otras maneras de conseguir ayuda.
 
-  The manual (a.k.a. narrative documentation)
+  El manual (a.k.a. documentación narrativa)
 
-    The manual goes into further depth for people who want to know all about how to use the package.
+    El manual va a una profundidad más lejana para personas que quieren saber todo acerca de cómo para utilizar el paquete.
 
-    It includes topics like:
+    Este incluye temas como los siguientes:
 
-    * What the features are
-    * How to use them (in English—not doctests!)
-    * Information about architecture
-    * Common gotchas
+    * ¿Qué características poseen?
+    * Documentos ¿Cómo usar? (en no-inglés doctests!)
+    * Información aproximadamente de la arquitectura
+    * Común gotchas
 
-    The manual should consider various audiences who may need different types of information:
+    El manual debería considerar varias audiencias quiénes pueden necesitar tipos diferentes de información
 
-    * End users who use Plone for content editing but don't manage the site.
-    * Site administrators who install and configure the package.
-    * Integrators who need to extend the functionality of the package in code.
-    * Sysadmins who need to maintain the server running the software.
+    * Los usuarios finales quiénes utilizan Plone para editar contenido pero no administran el sitio.
+    * Los administradores del sitio quiénes instalan y configurar el paquete.
+    * Los integradores quiénes necesitan extender la funcionalidad del paquete desde el código fuente.
+    * Los administradores de sistemas quiénes necesitan mantener que el servidor ejecute el software.
 
-    Simple packages with limited functionality can get by with a single page of narrative documentation. In this case it's simplest to include it in an extended ``README.rst``. Some excellent examples of a single-page readme are http://pypi.python.org/pypi/plone.outputfilters and https://github.com/plone/plone.app.caching
+    Los paquetes sencillos con funcionalidad limitada pueden ser una página sola de narrativa documentación. En este caso es más sencillo de incluir él un extendido ``README.rst`` Algunos ejemplos excelentes de una página sencilla de archivo readme son http://pypi.python.org/pypi/plone.outputfilters y https://github.com/plone/plone.app.caching
 
-    If your project is moderately complex, you may want to set up your documentation with multiple pages. The best way to do this is to add Sphinx to your project and host your docs on readthedocs.org so that it rebuilds the documentation whenever you push to github. If you do this, your ``README.rst`` must link off site to the documentation.
+    Si su proyecto es moderadamente complejo, puedes querer instalar su documentación con páginas múltiples. La manera mejor de hacer este es para añadir Sphinx a su proyecto y hospedar su documentos en readthedocs.org de modo que reconstruye la documentación siempre que aplica un cambio en github.com Si tú hace esto, su ``README.rst`` debe que enlazar fuera sitio a la documentación.
 
-  Reference (a.k.a. API documentation)
+  Referencia (a.k.a.  documentación de API)
 
-    An API reference provides information about the package's public API (that is, the code that the package exposes for use from external code.) It is meant for random access to remind the reader of how a particular class or method works, rather than for reading in its entirety.
+    Una referencia de API proporciona información sobre la API pública del paquete (eso es, el código que el paquete expone para uso de código externo.)  Eso significa para el acceso aleatorio a recordar el lector de cómo una clase particular o un método trabajo, más que para leer enteramente.
 
-    If the codebase is written with docstrings, API documentation can be automatically generated using Sphinx.
+    Si el código base está escrito con docstrings, la documentación de la API puede ser automáticamente generada utilizando Sphinx.
 
   ``CHANGES.txt``
-    The changelog is a record of all the changes made to the package and who made them, with the most recent changes at the top. This is maintained separately from the git commit history to give a chance for more user-friendly messages and to and record when releases were made.
+    El changelog o registro de cambios es un registro de todos los cambios que hizo al paquete y quién les hicieron, con los cambios más recientes en la parte superior. Esto está mantenido por separado del historial de revisión del git para dar una posibilidad de mensajes mas amigables al usuario al registrar cuándo las liberaciones estuvieran listas.
 
-    A changelog looks something like::
+    Un changelog se parece a algo así::
 
       Changelog
       =========
@@ -81,21 +80,21 @@ At the very least, your package should include the following forms of documentat
       * Documented changelogs.
         [davisagli]
 
-    See https://raw.github.com/plone/plone.app.caching/master/CHANGES.rst for a full example.
+    Ver https://raw.github.com/plone/plone.app.caching/master/CHANGES.rst para un ejemplo completo.
 
-    If a change was related to a bug in the issue tracker, the changelog entry should include a link to that issue.
+    Si un cambio sucedió relacionado a un error en el sistema de ticket, en la entrada changelog tendría que incluir un enlace a aquel asunto.
 
-  Licenses
-    Information about the open source license used for the package should be placed within the ``docs`` directory.
+  Licencias
+    Información sobre la licencia del código abierto utilizada para el paquete tendría que ser colocado dentro del directorio ``docs``.
 
-    For Plone core packages, this includes ``LICENSE.txt`` and ``LICENSE.GPL``.
+    Para paquetes del núcleo Plone, esto incluye ``LICENSE.txt`` Y ``LICENSE.GPL`.
 
 
-Using Sphinx
-~~~~~~~~~~~~
+Utilizando Sphinx
+~~~~~~~~~~~~~~~~~
 
-reST References:
- * `Plone Oriented Shpinx Documentation <http://collective-docs.plone.org/en/latest/introduction/writing.html>`_
- * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_ 
+Referencias reST:
+ * `Documentación Shpinx orientada a Plone <http://collective-docs.plone.org/en/latest/introduction/writing.html>`_
+ * `Manual básico Sphinx reST <http://sphinx.pocoo.org/rest.html>`_ 
 
-To add Sphinx to your package...
+Para añadir Sphinx a su paquete...
