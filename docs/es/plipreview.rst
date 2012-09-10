@@ -1,73 +1,73 @@
-Reviewing PLIPs
+Revisando PLIPs
 ===============
 
-Expectations
+Expectativas
 ------------
-A good PLIP review takes about 4 hours so please plan accordingly. When you are done, if you have access to core please commit the review to the plips folder and reference the PLIP in your commit message. If you do not have access, please attach your review to the PLIP ticket itself.
+Una buena revisión del PLIP toma aproximadamente 4 horas así que por favor haga planes en consecuencia. Cuando haya terminado, si usted tiene acceso al núcleo por favor comprometerse con la revisión de los plips y hacer referencia a la PLIP en el mensaje de confirmación. Si no tienes acceso, por favor adjuntar su revisión al ticket PLIP en si mismo.
 
-Setting up the environment
---------------------------
-Follow the instructions on [wiki:DevelopmentEnvironment setting up a development environment] for "Getting the Code". You will need to checkout the branch to which the PLIP is assigned. Instead of running the buildout with the default buildout file, you will run the config specific to that plip::
+Instalando el entorno
+---------------------
+Seguir las instrucciones en [wiki:DevelopmentEnvironment setting up a development environment] para "Conseguir el Código". Usted necesitará a tener una copia al branch del repositorio del cual el PLIP fue asignado. En vez de correr el buildout con el archivo predeterminado buildout, usted lo ejecutara el archivo especifico de configuración del plip::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
-Functionality Review
---------------------
-There are several things that could be addressed in a PLIP review depending on the nature of the PLIP itself. This is by no means an exhaustive list, but a place to start. Things to think about when reviewing:
+Revisión de funcionalidad
+-------------------------
+Hay varias cosas que podría ser dirigido en una revisión PLIP que depende de la naturaleza del PLIP. Esto es de ninguna manera una lista exhaustiva, pero un sitio para empezar. Las cosas para pensar aproximadamente cuándo este revisando:
 
 General
 -------
- * Does the PLIP actually do what the implementors proposed? Are there incomplete variations? 
- * Were there any errors running buildout? Did the migration(s) work?
- * Do error and status messages make sense? Are they properly internationalized?
- * Are there any performance considerations? Has the implementor addressed them if so?
+ * ¿Este PLIP realmente hace lo que los implementadores propusieron? ¿Hay variaciones incompletas? 
+ * ¿Hubo allí algunos errores al ejecutar el buildout? ¿Hizo el trabajo de migración?
+ * ¿No mensajes de error y los mensajes de estado tiene sentido? ¿Son correctas las internacionalizaciones?
+ * ¿Hay alguna consideraciones de rendimiento? ¿El implementador de este PLIP se dirigió a ellos si es así?
 
-Bugs
-----
- * Are there any bugs? Nothing is too big nor small.
- * Do fields handle whacky data? How about strings in date fields or nulls in required?
- * Is validation up to snuff and sensical? Is it too restrictive or not restrictive enough?
+Errores
+-------
+ * ¿Hay algún error? Nada es demasiado grande ni pequeño.
+ * ¿Los campos a manejar data estrafalarias? ¿Como son las cadenas en los campos de fecha o los campos nulos son requeridos?
+ * Es validación y cuestión de puro sentido? ¿Es demasiado restrictiva o no es lo suficiente restrictivo?
 
-Usability Issues
-----------------
- * Is the implementation usable? 
- * How will novice end users respond to the change? 
- * Does this PLIP need a usability review? If you think this PLIP needs a usability review, please change the state to "please review" and add a note in the comments. 
- * Is the PLIP consistent with the rest of Plone? For example, if there is control panel configuration, does the new form fit in with the rest of the panels? 
- * Does everything flow nicely for novice and advanced users? Is there any workflow that feels odd?
- * Are there any new permissions and do they work properly? Does their role assignment make sense?
+Incidentes de usabilidad
+------------------------
+ * ¿Es usable la implementación? 
+ * ¿Cómo los usuarios finales novatos responden al cambio? 
+ * ¿Hace este PLIP necesidad una revisión de usabilidad? Si usted piensa que este PLIP necesita una revisión de usabilidad, por favor, cambiar el estado a "please review" y agregue una nota a estos comentarios. 
+ * ¿El PLIP es compatible con el resto de Plone? Por ejemplo, si hay configuración de panel del control, hacer esta forma nueva funciona en con el resto de los panel de control. 
+ * ¿Todo se comporta bien para principiantes y usuarios avanzados? ¿Hay algún flujo de trabajo que se ofrece una experiencia extraña?
+ * ¿Hay permisos nuevos y ellos trabajan correctamente? ¿Esas asignaciones de roles hacen con sentido?
 
-Documentation Issues
---------------------
- * Is the corresponding documentation for the end user, be it developer or plone user, sufficient?
- * Is the change itself properly documented?
+Incidencias de la documentación
+-------------------------------
+ * ¿Hay suficiente documentación disponible correspondiente para el usuario final, ya sea programador o usuario plone?
+ * ¿Este cambio en si mismo esta correctamente documentado?
 
-Please report bugs/issues in Trac as you would for any Plone bug. Reference the PLIP in the bug, assign to its implementor, and add a tag for the PLIP in the form of plip-xxx. This way the implementor can find help if he needs it. Please also prioritize the ticket. The PLIP will not be merged until all blockers and critical bugs are fixed.
+Por favor, reporte fallos/incidencias en el sistema de ticket Trac como si se tratara de cualquier fallo Plone. Haga referencia al PLIP en el fallo, asigne a su implementador, y añadir una etiqueta para el PLIP en forma de plip-xxx. De este modo el implementor puede encontrar ayuda si lo necesita. Por favor, también priorizar el ticket. El PLIP no será fusionado hasta que todo los fallos bloqueadores y críticos están corregido.
 
-Code Review
------------
+Revisión de Código
+------------------
 
 Python
 ^^^^^^
- * Is this code maintainable?
- * Is the code properly documented?
- * Does the code adhere to PEP8 standards (more or less)?
- * Are they importing deprecated modules?
+ * ¿Es este código fuente mantenible?
+ * ¿Esta el código fuente adecuadamente documentado?
+ * ¿El código fuente se adhiere al estándar PEP8 (más o menos)?
+ * ¿Están importando módulos obsoletos?
 
 Javascript
 ^^^^^^^^^^
- * Does the javascript meet our set of javascript standards? See http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
- * Does the Javascript work in all currently supported browsers? Is it performant? 
+ * ¿El javascript conocer a nuestro conjunto de normas javascript? Ver http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
+ * ¿El Javascript funciona en todos los navegadores soportados actualmente? ¿Es eficaz? 
 
 ME/TAL
 ^^^^^^
- * Does the PLIP use views appropriately and avoiding too much logic?
- * Is there any code in a loop that could potentially be a performance issue?
- * Are there any deprecated or old style ME/TAL lines of code such as using DateTime?
- * Is the rendered html standards compliant? Are ids and classes used appropriately?
+ * ¿La vista de usuario del PLIP adecuadamente y evitando demasiada lógica?
+ * ¿Hay algún código fuente en un bucle que podría ser un problema de rendimiento?
+ * ¿Hay alguna líneas de código con estilo obsoleto o viejo ME/TAL como el uso de DateTime?
+ * ¿Es compatible con lo que dicta el estándar html? ¿Los ids y class CSS utilizado son apropiados?
 
-Example PLIP Reviews
-^^^^^^^^^^^^^^^^^^^^
+Ejemplos de revisiones de PLIP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-davisagli.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip10886-review-cah190.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-rossp.txt
