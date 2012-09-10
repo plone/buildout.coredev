@@ -6,4 +6,4 @@ Estos documentos actualmente son almacenados con el directorio /docs del buildou
   > cd docs/build
   > make html
 
-Sphinx colocara en un directorio que tu puedes consultar en tu navegador web para validar la documentacion generada. Por favor asegurese en validar todos los avisos y los errores antes de generar una revision para estar seguro que los documentos queden válido.
+Sphinx colocara en un directorio que tu puedes consultar en tu navegador web para validar la documentación generada. Por favor asegúrese en validar todos los avisos y los errores antes de generar una revisión para estar seguro que los documentos queden válido.
