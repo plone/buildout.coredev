@@ -1,6 +1,6 @@
 Introducción
 ============
-Esta documentación describes el proceso para el desarrollo en Plone. Esto es principalmente un recurso técnico para instalar su buildout del core developer, corregir errores, y escribir plips. 
+Esta documentación describes el proceso para el desarrollo en Plone. Esto es principalmente un recurso técnico para instalar su buildout del core developer, corregir fallos, y escribir plips. 
 
 DETENTE!
 ========
