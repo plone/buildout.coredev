@@ -25,8 +25,8 @@ What is a PLIP champion?
     Keep in mind that champions are in passive mode by default. If you need help or guidance, please reach out to them as soon as possible to activate help mode.
  
 I’m still nervous. Can I get involved other ways at first?
-    If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at XXX:Link. Make sure to let us know you intend to review the PLIP by joining the Framework Team mailing list (XXX:link) and sending a quick email.
-    Then, follow the simple instructions for reviewing a PLIP (XXX:link). Thank you in advance!
+    If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `following link <https://dev.plone.org/report/24>`_. Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_ and sending a quick email.
+    Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`. Thank you in advance!
 
 When can I submit a PLIP?
     Today, tomorrow, any time! After the PLIP is accepted, the Framework Team will try to judge complexity and time to completion and assign it to a milestone. You can begin working immediately, and we encourage submitting fast and furious.
@@ -50,10 +50,11 @@ Process Overview
 #. PLIP is approved for merge. In rare circumstances, a PLIP will be rejected. This is usually the result of the developer not responding to feedback or dropping out of the process.  Hang in there!
 #. After all other PLIPS are merged, a release is cut. Standy for bugs!
 
+.. _how_submit_plip:
 
 How to Submit a PLIP
 --------------------
-Whether you want to update the default theme or rip out a piece of architecture, everyone should go through the PLIP process. If you need help at any point in this process, please contact a member of the framework team personally or ask for help on the FWT mailing list XXX: link here.
+Whether you want to update the default theme or rip out a piece of architecture, everyone should go through the PLIP process. If you need help at any point in this process, please contact a member of the framework team personally or ask for help on the `FWT mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_.
 
 A PLIP is just a ticket with a special template. To get started, `open a new ticket <https://dev.plone.org/newticket>`_ and select "PLIP" as the ticket type. A new ticket template will reload and you should plan to fill in all of the fields.
 
@@ -63,7 +64,7 @@ If your change is minor then a ticket in the tracker will be sufficient, added a
 
 After your plip is written, solicit feedback on your idea on the plone-developers mailing list. In this vetting process, you want to make sure that the change won’t adversely affect other people on accident. Others may be able to point out risks or even offer up better or existing solutions. 
 
-When you are happy with the feedback, submit a PLIP. XXX: Link here. Please use the template provided (XXX: put the template here? Can we just have a custom ticket type?). Please note a few things. It is very rare that the “Risks” section will be empty or none. If you find this is the case and your PLIP is anything more than trivial, maybe some more vetting should be done. 
+When you are happy with the feedback, :ref:`submit a PLIP <how_submit_plip>`. Please use the template provided (XXX: put the template here? Can we just have a custom ticket type?). Please note a few things. It is very rare that the “Risks” section will be empty or none. If you find this is the case and your PLIP is anything more than trivial, maybe some more vetting should be done. 
 
 The seconder field is REQUIRED. We will send the PLIP back to you if it is not filled in. Currently, this is just someone else who thinks your PLIP is a good idea, a +1. In the near future, we will start asking that the seconder is either a coding partner, or someone who is willing and able to finish the PLIP should something happen to the implementor.
 
@@ -94,7 +95,7 @@ General Rules
     * Be :doc:`Properly Documented <documentation>`
     * Have clear code
     * User the current idioms of development
-    * Be tested (XXX: link here?)
+    * `Be tested <http://collective-docs.plone.org/en/latest/testing_and_debugging/index.html>`_
 
 Creating a New PLIP Branch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
