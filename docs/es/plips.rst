@@ -1,112 +1,113 @@
-Implementing PLIPS
-==================
+Implementando PLIPS
+===================
 
-All about PLIPS
----------------
-What is a PLIP? 
-    A PLIP is a PLone Improvement Proposal. It is a change to a Plone package that would affect everyone. PLIPs go through a different process than bug fixes because of their broad reaching effect. The Plone 4.x Framework Team reviews all PLIPs to be sure that it’s in the best interest of the broader community to be implemented and that it is of high quality.
-
-Is it a PLIP or a bugfix?
-    In general, anything that changes the API of Plone in the backend or UI on the front end should be filed as a PLIP. When in doubt, submit it as a PLIP. The framework team is eager to reduce it’s own workload and will re-classify it for you.
-
-Who can submit PLIPs?
-    Anyone who has signed a Plone core contributor agreement can work on a PLIP. Don’t let the wording freak you out: signing the agreement is easy and you will get access almost immediately.
-    You do not have to be the most amazing coder in the entire world to submit a PLIP. The Framework Team is happy to help you at any point in the process. Submitting a PLIP can be a great learning process and we encourage people of all backgrounds to submit.  When the PLIP is accepted, a Framework Team member will “champion” your PLIP and be dedicated to seeing it completed.
-    PLIPs are not just for code monkeys. If you have ideas on new interactions or UI your ideas are more than welcome. We will even help you pair up with implementors if needed.
-
-What is a PLIP champion?
-   When you submit your PLIP and it is approved, 1 Framework Team member who is especially excited about seeing the PLIP completed will be assigned to your PLIP as a champion. They are there to push you through completion as well as answer any questions and provide guidance. 
-    A champion should:
-      * Answer any questions the PLIP implementor has, technically and otherwise
-      * Encourage the PLIP author by constantly giving feedback and encouragement
-      * Keep the implementor aware of timelines and push to get things done on time
-      * Assist with finding additional help when needed to complete the implementation in a timely matter
-
-    Keep in mind that champions are in passive mode by default. If you need help or guidance, please reach out to them as soon as possible to activate help mode.
- 
-I’m still nervous. Can I get involved other ways at first?
-    If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at XXX:Link. Make sure to let us know you intend to review the PLIP by joining the Framework Team mailing list (XXX:link) and sending a quick email.
-    Then, follow the simple instructions for reviewing a PLIP (XXX:link). Thank you in advance!
-
-When can I submit a PLIP?
-    Today, tomorrow, any time! After the PLIP is accepted, the Framework Team will try to judge complexity and time to completion and assign it to a milestone. You can begin working immediately, and we encourage submitting fast and furious.
-
-When is the PLIP due?
-    Summary: As soon as you get it done.
-    &tldr; Technically, we want to see it completed for the release to which it’s assigned. We know that things get busy and new problems make PLIPs more complicated and we will push it to the next release. 
-    In general, we don’t want to track a PLIP for more than a year. If your PLIP is accepted and we haven’t seen activity in over a year, we will probably ask you to restart the whole process.
-
-You don’t like my PLIP :( What now?
-    Just because a PLIP isn’t accepted in core doesn’t mean it’s a bad idea. It is often the case that there are competing implementations and we want to see it vetted as an add on before “blessing” a preferred implementation. 
-
-Process Overview
-----------------
-#. Submit a PLIP (at any time)
-#. PLIP is approved for inclusion into core for a given release
-#. Developer implements PLIP (code, tests, documentation)
-#. PLIP is submitted for review by developer
-#. Framework Team reviews plip and givea feedback
-#. Developer addresses concerns in feedback and resubmits if necessary. This may go back and forth a few times until both the FWT and developer are happy with the result. 
-#. PLIP is approved for merge. In rare circumstances, a PLIP will be rejected. This is usually the result of the developer not responding to feedback or dropping out of the process.  Hang in there!
-#. After all other PLIPS are merged, a release is cut. Standy for bugs!
-
-
-How to Submit a PLIP
+Todo sobre los PLIPS
 --------------------
-Whether you want to update the default theme or rip out a piece of architecture, everyone should go through the PLIP process. If you need help at any point in this process, please contact a member of the framework team personally or ask for help on the FWT mailing list XXX: link here.
+¿Qué es un PLIP? 
+    Del ingles, PLIP significa PLone Improvement Proposal, el cual es una propuesta de mejora a Plone. Eso es cuando un cambio a un paquete Plone que afectaría todo el mundo Las PLIPs van por un proceso diferente que la corrección de fallos debido a su ancho logrando efecto. El equipo del framework Plone 4.x revisa todas las PLIPs para ser seguro que es en el mejor interés de la comunidad para ser implementada y que es de calidad alta.
 
-A PLIP is just a ticket with a special template. To get started, `open a new ticket <https://dev.plone.org/newticket>`_ and select "PLIP" as the ticket type. A new ticket template will reload and you should plan to fill in all of the fields.
+¿Es un PLIP o una corrección de fallo?
+    En general, cualquier cosa que cambia el API de Plone en el backend o la UI en la portada tendría que ser archivado como PLIP. En caso de duda, se presentará como una PLIP. El equipo del framework es ansioso al reducir es propia carga de trabajo y clasificarla de nuevo por usted.
 
-When writing a PLIP, be as specific and to-the-point as you can. Remember your audience - to get support for your proposal, people will have to be able to read it! A good PLIP is sufficiently clear for a knowlegable Plone user to be able to understand the proposed changes, and sufficiently detailed for the release manager and other developers to understand the full impact the proposal would have on the codebase. You don't have to list every line of code that needs to be changed, but you should also give an indication that you have some idea that how the change can be feasibly implemented.
+¿Quiénes pueden presentar PLIPs?
+    Cualquiera quién ha firmado el Plone core contributor agreement puede trabajar en un PLIP. No deje que la redacción le asuste: la firma del acuerdo es fácil y usted tendrá acceso casi inmediato.
+    Usted no tiene que ser el más increíble programador en el mundo entero para poder presentar una PLIP. El equipo del Framework estará encantado de ayudarle en cualquier momento del proceso. La presentación de un PLIP puede ser un gran proceso de aprendizaje y animamos a la gente de todos los orígenes a presentar.  Cuando el PLIP es aceptado, un miembro del equipo del Framework "defenderá" su PLIP y a ser encargado de llevar a cabo esta mejorar hasta que este completada.
+    Las PLIPs no solamente son código fuente monkeys. Si usted tiene ideas sobre nuevas formas de interactuar o de la interfaz de usuario sus ideas son mas que bienvenidas. Incluso te ayudaremos a la par con los implementores si necesario.
 
-If your change is minor then a ticket in the tracker will be sufficient, added as an enhancement. The key point here is that each change needs documentation so other users can see what it is. This can be in the form of an issue tracker entry, or a PLIP in the case of a bigger change. A bug or minor change does normally not need to go through a review process - a PLIP does.
+¿Qué es un defensor PLIP?
+   Cuando usted presenta su PLIP y esta es aprobada, Un miembro del equipo de Framework que este especialmente animado a ver hecho realidad el PLIP sera asignado a su PLIP como un defensor. Ellos están ahí para animar hasta su culminación, así que responde a cualquier pregunta y proporcionar orientación necesaria. 
+    Un defensor debería:
+      * Responda a las preguntas formuladas por el implementador tiene sobre el PLIP, técnica y de cualquier otra
+      * Fomentar el autor PLIP por su constantemente retroalimentación y estímulo
+      * Cuidar que el implementador logre la lineas de tiempo y coloque las cosas listas a tiempo
+      * Asistir en la búsqueda de ayuda adicional cuando sea necesario para completar la implementación en un tiempo oportuno
 
-After your plip is written, solicit feedback on your idea on the plone-developers mailing list. In this vetting process, you want to make sure that the change won’t adversely affect other people on accident. Others may be able to point out risks or even offer up better or existing solutions. 
+    Ten en mente que los defensores están en modo pasivo por defecto. Si usted necesitas ayuda o asesoría, por favor, contacte a ellos lo mas pronto sea posible para activar el modo ayuda.
+ 
+Yo aun estoy nervioso. ¿Puedo yo involucrarme de otras formas primero?
+    Si quieres sentir el proceso y cómo funciona, nos ayudan a revisar los PLIPs terminar las implementaciones. Si usted quiere sentir el proceso y cómo funciona, ayúdenos a revisar los PLIPs para terminar las implementaciones. Simplemente pregunte a los miembros del equipo de Framework cual PLIPs esta disponible para revisar o verificar el estatus del PLIPs en el `siguiente enlace <https://dev.plone.org/report/24>`_. Asegúrese de decirnos como usted intenta revisar el PLIP uniéndose a la `lista de correo del equipo de Framework <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_ y enviar un correo rápidamente.
+    Entonces, siga las simples instrucciones para :doc:`revisar un PLIP <plipreview>`. ¡Gracias de antemano!
 
-When you are happy with the feedback, submit a PLIP. XXX: Link here. Please use the template provided (XXX: put the template here? Can we just have a custom ticket type?). Please note a few things. It is very rare that the “Risks” section will be empty or none. If you find this is the case and your PLIP is anything more than trivial, maybe some more vetting should be done. 
+¿Cuándo yo puedo presentar un PLIP?
+    ¡Hoy, mañana, en cualquier momento! Después que la PLIP es aceptada, el equipo del Framework tratara de juzgar la complejidad y el tiempo para completar y asignar este en un hito. Usted puede iniciar rápidamente su trabajo, y nosotros animamos a presentarlo 'rápido y furioso'.
 
-The seconder field is REQUIRED. We will send the PLIP back to you if it is not filled in. Currently, this is just someone else who thinks your PLIP is a good idea, a +1. In the near future, we will start asking that the seconder is either a coding partner, or someone who is willing and able to finish the PLIP should something happen to the implementor.
+¿Cuándo el PLIP es debido?
+    Resumen: Tan pronto usted lo finalice.
+    &tldr; Técnicamente, nosotros queremos ver eso completado para la publicación a la cual fue asignada. Nosotros sabemos que todos tenemos ocupaciones que nos ponen muy ocupados y además de nuevos problemas hacen a los PLIPs más complicado si es así entonces los vamos a mover hacia la siguiente versión. 
+    En general, nosotros no queremos seguir un PLIP por mas de un año. Si su PLIP es aceptada y nosotros no vemos actividad en mas de un año, nosotros probablemente le preguntaremos para iniciar de nuevo el proceso.
 
-Everything else should be self explanatory. That or I got lazy when writing these docs. I'm betting on the latter.
+No le gusta mi PLIP :( Y ahora que?
+    Solo por que un PLIP no ha sido aceptado en núcleo no significa que sea una mala idea. A menudo, es el caso que hay implementaciones compitiendo y nosotros queremos ver eso evaluado como un añadido antes de recibir la "bendición" la implementación preferida. 
 
-Evaluating PLIPs
-^^^^^^^^^^^^^^^^
-After you submit your PLIP, the Framework Team will meet within a couple weeks and let you know if the PLIP is accepted. If the PLIP is not accepted, please don't be sad! We encourage most PLIPs to go through the add on process at first if at all possible to make sure the majority of the comunity uses it.
+Información general del proceso
+-------------------------------
+#. Presentar un PLIP (en cualquier tiempo)
+#. PLIP es aprobada para incluirse dentro de núcleo para ser dado en una publicación
+#. El desarrollador implementa el PLIP (código, tests, documentación)
+#. PLIP es presentado para ser revisado por un desarrollador
+#. El equipo del Framework revisa el plip y ofrece un comentario
+#. El desarrollador direcciona lo concerniente en al comentario y presenta de nuevo si es necesario. Esto puede ir y venir varias veces hasta que tanto el FWT y el desarrollador está satisfecho con el resultado. 
+#. El PLIP es aprobada para fusionarse. En raras circunstancias, un PLIP sera rechazado. Esto es usualmente a que el resultado del trabajo hecho por el desarrollador no responde al comentario o abandono del proceso.  ¡Aguante ahí!
+#. Después de que todos los otros PLIPS son fusionado, una publicación se corta. Esperar por los nuevos fallos!
 
-All communication with you occurs on the PLIP ticket itself so please keep your eyes and inbox open for changes.
+.. _how_submit_plip:
 
-These are the criterias by which the framework team will review your review bundle:
- * What is size and status of the work needed to be done? Is it already an add-on and well established?
- * Is this idea well baked and expressed clearly?
- * Does the work proposed belong in Plone now, in the future?
- * Is this PLIP more appropriate as a qualified add-on?
- * Is this PLIP too risky?
+Como presentar a PLIP
+--------------------
+ Si usted necesita ayuda en algun punto de este proceso, por favor, contacte a un miembro del equipo del framework personalmente o pida ayuda en la `lista de correo FWT <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_.
 
-Implementing Your PLIP
+Un PLIP es un ticket con una plantilla especial. Para iniciar, `abra un nuevo ticket <https://dev.plone.org/newticket>`_ y seleccione "PLIP" como el tipo de ticket. Un nueva plantilla de ticket se cargara y usted debería planear llenarla en todas sus secciones y campos.
+
+Cuando escribe una PLIP, de se lo mas especifico que pueda al punto a tratar. Recuerde su audiencia - que le puede dar apoyo a su propuesta, las personas tendrán que ser capaces de leerla! Un buen PLIP es suficientemente claro para un usuario conocedor de Plone disponible a entender la propuesta de cambios, y suficientemente detallada para el release manager y otros desarrolladores entender el completo impacto de la propuesta puede tener el código base. Usted no tiene que listar cada línea de código que necesidades de ser cambiadas, pero usted también debe dar una indicación que usted tenga sobre alguna idea de como el cambio puede ser viablemente implementado.
+
+Si el cambio es menor entonces un ticket en el sistema de seguimiento debe ser suficiente, añadido como una mejora. El punto clave acá es que cada cambio necesita documentación para que otros usuarios puedan ver que cambios hay de nuevo. Esto puede ser en el formulario de un registro de en el sistema de incidencia, o un PLIP en el caso de que es un cambio mayor. Un fallo o cambio menor normalmente no necesita ir a través del proceso de revisión - que hace un PLIP.
+
+Después que su plip es escrita, solicite un comentario de sus ideas en la lista de correo plone-developers. En este proceso de evaluación, usted quiere asegurarse de que el cambio no afectará negativamente a otras personas en un accidente. Otros pueden ser capaces de señalar puntos de riegos o incluso ofrecer una mejor o soluciones existentes. 
+
+Cuándo este feliz con el comentario, :ref:`presente un PLIP <how_submit_plip>`. Por favor, use la plantilla proveída (XXX: put the template here? Can we just have a custom ticket type?). Por favor, note un par de cosas. Es muy rara ves que la sección de “Risks” estará vacío o nula. Si usted busca esto es el caso y su PLIP no tiene más nada que un cambio trivial, quizás con algo más investigación debería estar listo. 
+
+El campo seconder es REQUERIDO. Nosotros enviaremos el PLIP de regreso a usted si ese campo no es llenado. En la actualidad, sólo alguien más que piensa que su PLIP es una buena idea, un +1. En el futuro cercano, vamos a empezar a preguntar al secunde que es un socio de la codificación, o alguien que esté dispuesto y sea capaz de terminar el PLIP si algo le ocurriera al implementador.
+
+Todo lo demás debe explicarse por sí mismo en el ticket de su PLIP. Si le dio pereza escribir estas PLIP tan documentado. Estoy apostando a este último.
+
+Evaluando PLIPs
+^^^^^^^^^^^^^^^
+Después de presentar su PLIP, el equipo Framework tendrá un par de semanas para conocer y le harán de conocimiento si el PLIP es aceptado. Si el PLIP no es aceptado, por favor, se sienta mal! Animamos a que la mayoría de los PLIPs pasen que se coloquen al principio del proceso si es posible para asegurarse de que la mayoría de la comunidad lo use.
+
+Toda la comunicación con usted ocurrirá en ticket PLIP ticket en si mismo por favor, este pendiente a su bandeja de entrada de su correo electrónico por cada cambios aplicado al ticket.
+
+Estos son los criterios por del equipo framework que va a revisar en su revisión del paquete:
+ * ¿Cual es el tamaño y estatus del trabajo necesitado para culminarlo? ¿Esta listo un add-on y esta bien establecido?
+ * ¿Esta idea esta bien cocinada y se expresa con claridad?
+ * ¿El trabajo propuesto en Plone deber estar ahora, en el futuro?
+ * ¿Es esta PLIP más apropiado a ser calificado como un add-on?
+ * ¿Es esta PLIP demasiado arriesgada?
+
+Implementando su PLIP
 ----------------------
-You can start the development at any time - but if you are going to modify Plone itself, you might want to wait to see if your idea is approved first to save yourself some work if it isn't. 
+Usted puede iniciar el desarrollo en cualquier momento - pero si usted yendo a modificar el Plone en si mismo, usted podría querer esperar para ver si sus ideas son aprobadas primero para salvarse algún trabajo que no sea necesario. 
 
-General Rules
-^^^^^^^^^^^^^
- * Any new packages must be in a branch in the plone namespace in github. You don't have to develop there, but it must be there when submitted. We recommend using branches off of the github.com/plone repo and will detail that below. 
- * Most importantly, the PLIP reviewers must be able run buildout and everything should "just work" (tm).
- * Any new code must:
-    * Be :doc:`Properly Documented <documentation>`
-    * Have clear code
-    * User the current idioms of development
-    * Be tested (XXX: link here?)
+Reglas Generales
+^^^^^^^^^^^^^^^^
+ * Cualquiera de los nuevos paquetes debe estar en una branch bajo el namespace plone en github. Así usted no tenga el desarrollo allí, pero ese debe estar allí cuando este presentado. Nosotros recomendamos usar branches en el repositorio github.com/plone y se detallará abajo. 
+ * Lo mas importante, los revisores PLIP debe estar disponible a ejecutarse con buildout y cada cosa debería "solo trabajar" (tm).
+ * Cualquier nuevo código fuente debería:
+    * Estar :doc:`documentado apropiadamente <documentation>`
+    * Tener el código fuente limpio
+    * Usa los idiomas actuales de desarrollo
+    * `Estar probado <http://collective-docs.plone.org/en/latest/testing_and_debugging/index.html>`_
 
-Creating a New PLIP Branch
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+Creando una nueva Creating Branch PLIP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. TODO: This needs to be updated for branches
 
-Create a buildout configuration file for your plip in the 'plips' folder.
-Give it a descriptive name, starting with the plip number;
-'plip-1234-widget-frobbing.cfg' for example. This file will define the
-branches/trunks you're working with in your PLIP. It should look something
-like this:
+Cree una archivo configuración buildout para su plip en la carpeta llamada 'plips'.
+Dar un nombre descriptivo, iniciando con el numero de plip; 
+por ejemplo 'plip-1234-widget-frobbing.cfg'. Es archivo sera definido en el 
+branches/trunks que usted esta trabajando con su PLIP. Esto debería lucir algo 
+así como lo siguiente:
 
-In file plips/plip-1234-widget-frobbing.cfg...::
+En el archivo plips/plip-1234-widget-frobbing.cfg...::
 
  [buildout]
  extends = plipbase.cfg
@@ -126,21 +127,21 @@ In file plips/plip-1234-widget-frobbing.cfg...::
     plone.somepackage
     plone.app.someotherpackage
 
-Use the same naming convention when branching existing packages, and you
-should always be branching packages when working on PLIPs.
+Utilice la misma convención de nombre cuando haga un branch existente a paquetes existentes, y siempre usted 
+debería siempre hacer branch paquetes cuando esta trabajando en las PLIPs.
 
-Finishing Up
-^^^^^^^^^^^^
-Before marking your PLIP as ready for review, please add a file to give a set of instructions to the PLIP reviewer.
+Finalizando
+^^^^^^^^^^^
+Antes de hacer que su PLIP este listo para revisar, por favor añada un archivo dando un conjunto de instrucciones al revisor PLIP.
 
-This file should be called plip_<number>_notes.txt. This should include (but is not limited to):
- * URLs pointing to all documentation created/updated
- * Any concerns, issues still remaining
- * Any weird buildout things
- * XXX: What else?
+Este debería ser llamado plip_<number>_notes.txt. Este debe incluir (pero no es limitado a solo eso):
+ * Las direcciones URLs que apuntan a toda la documentación creada/actualizada
+ * Cualquier inquietud, las incidencias aún permanecen
+ * Cualquier cosas buildout extrañas
+ * XXX: ¿Algo mas?
 
-Once you have finished, please update your PLIP ticket to indicate that it is ready for review. The Framework Team will assign 2-3 people to review your PLIP. They will follow the guildelines listed at :doc:`plipreview`.
+Una ves que allá finalizado, por favor, actualice su ticket indicar que esta listo para ser revisado. El equipo del Framework asignara 2 a 3 personas para revisar su PLIP. Ellos seguirá las lineas guías definidas en :doc:`plipreview`.
 
-After the PLIP has been accepted by the framework team and the release manager, you will be asked to merge your work into the main development line. Merging the PLIP in is not the hardest part, but you must think about it when you develop. You'll have to interact with a large number of people to get it all set up. The merge may cause problems with other PLIP's coming in. During the merge phase you must be prepared to help out with all the features and bugs that arise.
+Después de que el PLIP ha sido aceptado por el equipo de framework y el release manager, se le pedirá que fusionar su trabajo dentro de la línea de desarrollo principal. La fusión de la PLIP no es la parte más difícil, pero hay que pensar en ello cuando se desarrolla. Usted tendrá que interactuar con un gran número de personas para conseguir que todo quede preparado. La fusión puede causar problemas con otros PLIPs que vienen en camino. Durante la fase de fusión debe estar preparado para ayudar con todas las características y fallos que puedan surgir.
 
-If all went as planned the next Plone release will carry on with your PLIP in it. You'll be expected to help out with that feature after it's been released (within reason).
+Si todo ha ido según lo previsto en el próximo lanzamiento de Plone contendrá su PLIP en ella. Se espera contar con su ayuda para dar soporte a esa característica después de haber sido lanzado en Plone (dentro de lo razonable).
