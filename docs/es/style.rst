@@ -1,48 +1,48 @@
-Style Guide
-===========
+Guía de estilos
+===============
 
-Python, like any programming language, can be written in a number of styles. We're the first to admit that Zope and Plone are not the finest examples of stylistic integrity, but that doesn't stop us from trying!
+Python, como cualquier lenguaje de programación, puede ser escrito en un número de estilos. ¡Somos los primeros en admitir que Zope y Plone no son los mejores ejemplos de la integridad estilística, pero eso no nos impide intentarlo!
 
-If you are not familiar with `PEP 8 <http://www.python.org/dev/peps/pep-0008>`_ - the python style guide, please take a moment to read and get up to date. We don't require it but we as a community really, really appreciate it. 
+Si no estas familiarizado con `PEP 8 <http://www.python.org/dev/peps/pep-0008>`_ - la guía de estilo de la python, por favor, tome un momento para leer y ponerse al día. Nosotros no requerimos, pero nosotros, como comunidad realmente, realmente lo apreciamos. 
 
-Naming Conventions
-------------------
-Above all else, be consistent with any code your are modifying! Historically the code is all camel case, but many new libraries are in the PEP8 convention. The mailing list is exploding with debate over what is better so we'll leave the excersize of deciding what to do with the user.
+Convenciones de nombre
+----------------------
+¡Por encima de todo, ser coherente con cualquier código que usted está modificando! Históricamente, el código es todo camel case, pero muchas nuevas bibliotecas se encuentran en la convención PEP8. La lista de correo es la explosión de debates sobre que es lo mejor, así que nosotros vamos a dejar el ejercicio de decidir qué hacer con el usuario de esta lista.
 
-File Conventions
-----------------
-In Zope 2, file names used to be MixedCase. In Python, and thus in Plone going forward, we prefer all-lowercase filenames. This has the advantage that you can instantly see if you refer to a module / file or a class::
+Convenciones de Archivo
+-----------------------
+En Zope 2, los nombres de archivos que solía ser así MixedCase. En Python, y así en Plone yendo de frente, preferimos todos los nombres de archivos en minúsculas. Esto tiene la ventaja de que usted puede ver inmediatamente si se refiere a un módulo / archivo o una clase::
 
   from zope.pagetemplate.pagetemplate import PageTemplate
 
-compare that to::
+comparar eso a::
 
   from Products.PageTemplates.PageTemplate import PageTemplatePageTemplate
 
-Filenames should be short and descriptive. Think about how an import would read::
+Los nombres de archivos debe ser ordenados y descriptivos. Piensa acerca de como un import podría leerse::
 
   from Products.CMFPlone.utils import safe_hasattr
 
-compare that to::
+comparar eso a::
 
   from Products.CMFPlone.PloneUtilities import safe_hasattr
 
-The former is obviously much easier to read, less redundant and generally more aesthetically pleasing.
+A la primera es, obviamente, mucho más fácil de leer, menos redundante y por lo general estéticamente más agradable.
 
-**Note** This example is just about as terrible as they come. We need a better one.
+**Nota** Este ejemplo es casi tan terrible como el que viene. Necesitamos una mejor.
 
-Concrete Rules
---------------
- * Do not use tabs in Python code! Use spaces as indenting, 4 spaces for each level. We don't "require" `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, but most people use it and it's good for you.
- * Indent properly, even in HTML. 
- * Never use a bare except. Anything like 'except: pass' will likely be reverted instantly
- * Avoid tal:on-error, since this swallows exceptions
- * Don't use hasattr() - this swallows exceptions, use getattr(foo, 'bar', None) instead. The problem with swallowed exceptions is not just poor error reporting. This can also mask ConflictErrors, which indicate that something has gone wrong at the ZODB level!
- * Never, ever put any HTML in Python code and return it as a string
- * Do not acquire anything unless absolutely necessary, especially tools. For example, instead of using 'context.plone_utils', use::
+Reglas específicas
+------------------
+ * ¡No utiliza tabuladores en código de Python! Use espacios como indentado, a 4 espacios para cada nivel. Nosotros no "requerimos" `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, pero mucha gente lo usa y eso es bueno para usted.
+ * Indentar apropiadamente, incluso en HTML. 
+ * Nunca usar una excepción bare. Cualquier cosa como 'except: pass' es probable que sea revertido instantáneamente
+ * Evitar tal:on-error, desde estas excepciones swallows
+ * No use hasattr() - esto son swallows exceptions, por favor, en este caso use getattr(foo, 'bar', None). El problema con las swallowed exceptions,no es sólo el informe de errores pobre. Sino que esto también puede ocultar errores de conflicto (ConflictErrors), que indican que algo ha ido mal en el nivel de la ZODB!
+ * Nunca, coloque ningún código HTML dentro del código Python y lo retorne como una cadena
+ * No adquirir nada menos que sea absolutamente necesario, especialmente herramientas. Por ejemplo, en vez de utilizar g 'context.plone_utils', use::
   
     from Products.CMFCore.utils import getToolByName
     plone_utils = getToolByName(context, 'plone_utils')
 
- * Do not put too much logic in ZPT (use Views instead!)
- * Remember to add i18n tags in ZPTs and Python code
+ * No coloque mucho de la lógica en las Plantillas de pagina Zope - ZPT (use Views en este caso!)
+ * Recuerde agregar etiquetas i18n en ZPTs y código Python
