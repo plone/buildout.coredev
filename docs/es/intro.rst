@@ -1,234 +1,234 @@
-How To Commit Fixes to Plone Core
-=================================
-This document assumes you want to fix a bug and will detail the full process. For more information on writing PLIPS, please :doc:`go here <plips>`.
+Como presentar corrección de fallos al núcleo de Plone
+======================================================
+Este documento supone que usted quiere corregir un fallo y detallará el proceso completo para hacerlo. Para más información en la escritura de PLIPS, por favor :doc:`valla aqui <plips>`.
 
-Version Support Policy
-----------------------
-If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
+Política sobre soporte a la Versión
+-----------------------------------
+Si usted está tratando de corregir fallos, tenga en cuenta que Plone tiene una `política sobre soporte a la versión <http://plone.org/support/version-support-policy>`_.
 
-Dependencies
+Dependencias
 ------------
 * `Git <http://help.github.com/mac-set-up-git/>`_
 * `Subversion <http://subversion.apache.org/>`_
-* `Python <http://python.org/>`_ 2.6 or 2.7 including development headers.
-* If you are on Mac OSX, you will need to install XCode. You can do this through the app store or several other soul-selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start, but have faith, you'll come back to it later. They always do...
-* `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
-* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment.
-* `GCC <http://gcc.gnu.org/>`_ in order to compile ZODB, Zope and lxml.
-* `libxml2 and libxslt <http://xmlsoft.org/XSLT/downloads.html>`_, including development headers.
+* `Python <http://python.org/>`_ 2.6 or 2.7  incluyendo encabezados de desarrollo.
+* Si usted esta usando un Mac OSX, necesitara instalar XCode. Usted puede hacer este a través de la app store o muchos otros métodos que venden. Usted probablemente querrá instalar su propio python 2.6 entonces necesita fuera todos los archivos encabezados cuál hace compilar algunas extensiones. Usted puede ignorar este consejo para empezar, pero tenga fe, volverás a él más tarde. Ellos siempre hacen...
+* `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Debe asegurarse instalar esto dentro de su apropiado entorno python.
+* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_  en el apropiado entorno python.
+* `GCC <http://gcc.gnu.org/>`_ para compilar ZODB, Zope y lxml.
+* `libxml2 y libxslt <http://xmlsoft.org/XSLT/downloads.html>`_, incluyendo los encabezados de desarrollo.
 
 
-Setting up Your Development Environment
----------------------------------------
-The first step in fixing a bug is getting this buildout running. We recommend fixing the bug on the latest branch and then backporting as necessary. `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch. More information on switching release branches is below.
+Instalando su Entorno de Desarrollo
+-----------------------------------
+El primer paso en corregir un fallo está consiguiendo ejecutar este buildout correctamente. Le recomendamos corregir un fallo en la branch más reciente y entonces backporting tan como sea necesario. `Github <https://github.com/plone/buildout.coredev/>`_ por defecto siempre apunta a la rama actualmente activa. Más información en el cambio de ramas de liberación a continuación.
 
-To set up a plone 4.2 development environment::
+Para instalar un entorno de desarrollo plone 4.2::
 
-  > cd ~/buildouts # or wherever you want to put things
+  > cd ~/buildouts # o donde tu quieras colocar sus cosas
   > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
   > virtualenv --no-site-packages plone42devpy
   > cd plone42devel
-  > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 binary). 
+  > ../plone42devpy/bin/python bootstrap.py # (donde "python" es su binario python 2.6). 
   > bin/buildout -v
 
-If you run into issues in this process, please see the doc :doc:`issues`.
+Si se encuentra con problemas en este proceso, consulte la documentación :doc:`issues`.
 
-This will run for a long time if it is your first pull (~20 mins). Once that is done pulling down eggs, You can start your new instance with::
+Esto se ejecutará durante mucho tiempo, si es su primera ejecución de buildout (~ 20 minutos). Una vez que se hace ejecutado el buildout, usted puede comenzar su nueva instancia Zope con el siguiente comando::
 
   > ./bin/instance fg
 
-The default username/password for a dev instance is admin/admin.
+El usuario y contraseña por defecto para una instancia Zope de desarrollo es admin/admin.
 
-Switching Branches
-^^^^^^^^^^^^^^^^^^
-If your bug is specific to one branch or you think it should be backported, you can easily switch branches. The first time you get a branch, you must do::
+Cambiar Branches
+^^^^^^^^^^^^^^^^
+Si su fallo es especifico en una branch o usted piensa que debería hacer backport, usted puede cambiar fácilmente las branches. La primera ves usted tiene que obtener una branch, usted debe hacer::
 
   > git checkout -t origin/4.1
 
-This should set up a local 4.1 branch tracking the one on github. From then on you can just do::
+Esto debería crear una branch local de 4,1 rastrear el uno en github. A partir de entonces sólo se puede hacer::
 
   > git checkout 4.1
 
-To see what branch you are currently on, just do::
+Para ver qué branch que se encuentra actualmente, acaba de hacer::
 
   > git branch
 
-The line with a * by it will indicate which branch you are currently working on.
+La línea con un * por él indicará qué rama actualmente estás trabajando.
 
 .. important::
-   Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior! 
+   Asegúrese de volver a ejecutar buildout si estuviera en una rama diferente antes para obtener las versiones correctas de los paquetes, de lo contrario obtendrá un comportamiento extraño! 
 
-For more information on buildout, please see the `collective developer manual documentation on buildout <http://collective-docs.plone.org/en/latest/tutorials/buildout/index.html>`_.
+Para mas información sobre buildout, por favor ver la `documentación sobre buildout en el manual de desarrollador collective <http://collective-docs.plone.org/en/latest/tutorials/buildout/index.html>`_.
 
 
-Checking out Packages for Fixing
---------------------------------
-Most packages are not in src/ by default, so you can user mr.developer to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question, but just ask on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
+Comprobando Paquetes para corregir
+----------------------------------
+La mayoría de paquetes no están en el directorio src/ por defecto, así usted que puedes usar mr.developer para conseguir la versión mas reciente y asegurarse que usted siempre tiene la versión mas actualizada. Puede ser un poco intimidante al principio para averiguar qué paquetes están causando el fallo en cuestión, pero sólo pregunte en el IRC si necesitas algo de ayuda. Una vez que [cree] saben cuál es el paquete(s) que desea, tenemos que obtener de la fuente del mismo.
 
-You can get the source of the package with mr.developer and the checkout command, or you can go directly to editing checkouts.cfg. We recommend the latter but will describe both. In the end, checkouts.cfg must be configured either way so you might as well start there.
+Usted puede conseguir la fuente del paquete con mr.developer y la orden checkout, o puedes ir directamente a editar checkouts.cfg. Nosotros recomendamos el último pero describirá ambos. Al final, checkouts.cfg tiene que ser configurado cualquier manera así que también podrías empezar allí.
 
-At the base of your buildout, open checkouts.cfg and add your package if it's not already there::
+En la base de su buildout, abra el archivo checkouts.cfg y añada su paquete si no es ya allí::
 
   auto-checkout =
-          # my modified packages 
+          # mi paquetes modificados 
           plone.app.caching
           plone.caching
-          # others
+          # otros
           ...
 
-Then rerun buildout to get the source packages::
+Entonces ejecutar de nuevo buildout para conseguir los paquetes de sus repositorios fuente::
 
   > ./bin/buildout
 
-Altternatively, we can manage checkouts from the command line, by using mr.developer's ``bin/develop`` command to get the latest source. For example, if the issue is in plone.app.caching and plone.caching::
+Alternativamente, nosotros podemos administrar los checkouts desde la línea de comando, usando el comando de mr.developer ``bin/develop`` para conseguir la fuente de paquetes más reciente. Por ejemplo, si la incidencia es en los paquetes plone.app.caching y plone.caching::
 
   > ./bin/develop co plone.app.caching
   > ./bin/develop co plone.caching
   > ./bin/buildout
 
-Don't forget to rerun buildout! In both methods, mr.developer will download the source from github (or otherwise) and put the package in the src directory. You can repeat this process with as many or as few packages as you need. For some more tips on working with mr.developer, please :doc:`read more here <mrdeveloper>`.
+No olvide volver a ejecutar buildout! En ambos métodos, mr.developer descargará la fuente de github (o de donde se definió) y poner el paquete en el directorio src. Usted puede repetir este proceso con tan muchos o cuando pocos paquetes cuando necesite. Para algunos más consejos en la forma de trabajo con mr.developer, por favor :doc:`lea mas aquí <mrdeveloper>`.
 
-Testing Locally
----------------
-In an ideal world, you would write a test case for your issue before actually trying to fix it. In reality this rarely happens. No matter how you approach it, you should ALWAYS run test cases for both the module and plone.org before commiting any changes. 
+Probando localmente
+-------------------
+En un mundo ideal, usted debería escribir un caso de prueba para su incidencia antes de tratar de corregirlo. En realidad esto rara ves sucede. Ningún asunto cómo  te lo acercas, usted tiene que SIEMPRE probar la ejecución de los test cases para ambos el módulo y plone.org antes de que generar una revisión con cualquiera de cambios. 
 
-If you don't start with a test case, save yourself potential problems and validate the bug before getting too deep into the issue!
+Si usted no comienza con un caso de prueba, se ahorrará problemas potenciales y validar el fallo antes de llegar demasiado profundo en la incidencia!
 
-To run a test for the specific module you are modifying::
+Para correr una prueba para el módulo específico ejecute el siguiente comando::
 
   > ./bin/test -m plone.app.caching
 
-These should all run without error. Please don't check in anything that doesn't! If you haven't written it already, this is a good time to write a test case for the bug you are fixing and make sure everything is running as it should.
+Estos deberían ejecutarse todo sin fallos. Por favor, no verifique ninguna cosa adicional! Si usted no lo ha escrito ya, este es un buen momento para escribir un caso de prueba para la falla que usted está reparando y asegúrese de que todo está funcionando como debería.
 
-After the module level tests run with your change, please make sure other modules aren't affected by the change by running the full suite::
+Después de las pruebas de nivel de módulo se ejecutan con su cambio realizado, por favor asegúrese de que los otros módulos no se ven afectados por su cambio realizado, para esto ejecute todas as pruebas con el siguiente comando::
 
   > ./bin/alltests
 
-*Note*: Tests take a long time to run. Once you become a master of bugfixes, you may just let jenkins do this part for you. More on that below.
+*Nota*: Las pruebas toman un tiempo en ejecutarse. Una ves se allá convertido en el maestro de corrección de fallas, usted tal ves le deje al servicio de jenkins hacer esta tarea por usted. Más sobre esto a continuación.
 
-Updating CHANGES.rst and checkouts.cfg
---------------------------------------
-Once all the tests are running locally on your machine, you are ALMOST ready to commit the changes. A couple housekeeping things before moving on. 
+Actualizar el archivo CHANGES.rst y checkouts.cfg
+-------------------------------------------------
+Una ves todo las pruebas se ejecuten localmente en si maquina, usted debe estar CASI listo para generar una revisión de sus cambios. Un par de cosas hay que hacer antes de continuar. 
 
-First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will be collated for the next Plone release and is important for integrators and developers.
+Primero, por favor edite el archivo CHANGES.rst (o CHANGES.txt) en cada archivo que usted modifico y agregue un resumen de sus cambios en base al formato que usa este archivo. Esta nota de cambio será cotejada para la próxima versión de Plone y es importante para los integradores y desarrolladores.
 
-*Most importantly*, if you didn't do it earlier, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This lets the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and Plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
+*Lo más importante*, si no lo hizo antes, edite el checkouts.cfg en el directorio de buildout y agregar el paquete al cual le hizo sus cambios a la lista de auto-checkout. Esto le permite al administrador de la versión saber que paquete ha sido actualizado para que cuando sea la próxima versión de Plone tendrá que fijar a la próxima versión del paquete al momento de generar un nuevo paquete Egg. LEER: esto es como su corrección viene en un paquete egg! 
 
-Note that there is a section seperator called "# Test Fixes Only". Make sure your egg is above that line or your egg probably won't get made very quickly. This just tells the release manager that any eggs below this line have tests that are updated, but no code changes.
+Tenga en cuenta que hay una separador de sección llamada "# Test Fixes Only". Asegúrese que su paquete egg este por encima de esa línea o su paquete egg probablemente no se hizo muy rápidamente. Este dice al administrador de la versión que los paquetes Egg por debajo de esta línea tienen pruebas que están actualizadas, pero no hay cambios en el código.
 
-Modifying checkouts.cfg also triggers the buildbot, jenkins, to pull in the egg and run all the tests against the changes you just made. Not that you would ever skip running all tests of course... More on that below.
+Modifique el archivo checkouts.cfg también ejecute el buildbot, entonces el servicio jenkins, actualizara el paquete egg y ejecutara todas las pruebas contra las pruebas que usted realizo. No sea que alguna vez volvería a sáltate ejecutar todas las pruebas, por supuesto... Más sobre esto a continuación.
 
-If your bug is in more than one release (e.g. 4.1 and 4.2), please checkout both branches and add to the checkouts.cfg.
+Si su fallo esta en mas de una publicación (ej. 4.1 y 4.2), por favor, aplicar sus cambios en ambas branches y añadir al archivo checkouts.cfg.
 
-Committing and Pull Requests
-----------------------------
-Phew! We are in the home stretch. How about a last minute checklist:
+Generando una revisión y haciendo Pull Requests
+-----------------------------------------------
+¡Uf! Estamos en la recta final. Verifique su lista de actividades hechas en los últimos minutos:
 
- * Did you fix the original bug?
- * Is your code consistent with our :doc:`style`?
- * Did you remove any extra code and lingering pdbs?
- * Did you write a test case for that bug?
- * Are all test cases for the modules(s) and for Plone passing?
- * Did you update CHANGES.rst in each packages you touched?
- * Did you add your changed packages to checkouts.cfg?
+ * ¿Usted corrigió el fallo original?
+ * ¿Su código consiste con nuestro :doc:`style`?
+ * ¿Usted removió lineas extras de código y PDB persistentes?
+ * ¿Usted escribió un caso de prueba para su fallo?
+ * ¿Todos sus casos de prueba para los módulos y para Plone se ejecutan sin ningún problema?
+ * ¿Usted actualizo el archivo CHANGES.rst en cada paquete que usted modifico?
+ * ¿Usted añadió sus paquetes cambiados al archivo checkouts.cfg?
 
-If you answered YES to all of these questions, you are ready to push your changes! A couple quick reminders:
+Si usted respondió SI a todas estas preguntas, usted esta listo para presentar sus cambios! Un par de recordatorios rápidos:
 
- * Only commit directly to the development branch if you're confident your code won't break anything badly and the changes are small and fairly trivial. Otherwise, please create a pull request (more on that below).
- * Please try to make one change per commit. If you are fixing three bugs, make three commits. That way, it is easier to see what was done when, and easier to roll back any changes if necessary. If you want to make large changes cleaning up whitespace or renaming variables, it is especially important to do so in a separate commit for this reason.
-* We have a few angels that follow the changes and each commit to see what happens to their favourite CMS! If you commit something REALLY sketchy, they will politely contact you, most likely after immediately reverting changes. There is no official people assigned to this so if you are especially nervous, jump into #plone and ask for a quick eyeball on your changes.
+ * Solamente generar una revisión directamente a la branch de desarrollo si usted esta seguro que su código no causa ninguna falla y los cambios son pequeños y triviales. De lo contrario, por favor, haga un fork del repositorio aplicando sus revisiones allí y luego haga un pull request (mas abajo se explica como).
+ * Por favor, trate de hacer un cambio por cada revisión. Si usted esta corrigiendo tres fallas, haga tres revisiones. De esta forma, es fácil ver que fue cambiado y donde se realizo el cambio, además es mas fácil hacer un roll back de cualquier cambio si es necesario. Si usted quiere hacer muchos cambios sobre limpiar espacios en blanco o renombrar variables, es especialmente importante hacer una revisión separada por esta razón.
+* Nosotros tenemos un grupo de ángeles que siguen los cambios y cada revisión aplicada para ver que ha sucedido de nuevo en el código fuente de nuestro favorito CMS! Si su revisión tiene algo REALMENTE sketchy, ellos le contactaran políticamente a usted, lo mas común que suceda es que inmediatamente revierten los cambios aplicados con sus revisiones. Hay personas no oficiales asignadas a esto si usted esta especialmente nervioso, entre en el canal IRC en freenode.net y pregunte por alguien que pueda ver sus cambios.
 
-Committing to Products.CMFPlone
--------------------------------
-If you are working a bug fix on Products.CMFPlone,
-there are a couple other things to take notice of.
-First and foremost, 
-you'll see that there are several branches.
-At the time of writing this document,
-there are branches for 4.1, 4.2, and master, which is the implied 4.3.
+Generando revisiones al paquete Products.CMFPlone
+-------------------------------------------------
+Si usted esta trabajando un corregir un fallo en el paquete Products.CMFPlone,
+hay un par de otras cosas que debe tomar en cuenta.
+Primero y mas importante, 
+puede ver que este paquete tiene varias branches.
+Al momento de escribir este documento,
+habían tres branches para 4.1, 4.2, y master, el cual es implícitamente 4.3.
 
-Still with me? So you have a bug fix for 4.x.
-If the fix is only for one version,
-make sure to get that branch and party on.
-However, chances are the bug is in multiple branches. 
+Aun me sigue? Entonces usted tiene un corrección de falla para 4.x.
+Si la corrección es solamente para una versión,
+asegúrese de obtener la branch y aplicar sus cambios allí.
+Sin embargo, si la corrección del fallo es en múltiples branches. 
 
-Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there with tests.
+Por ejemplo el fallo inicia en la versión 4.1. Obtenga la branch 4.1 y aplicar sus cambios allí con varias revisiones por cada cambio con sus respectivos tests.
 
-If your fix only involved a single commit,
-you can use git's ``cherry-pick`` command to apply the same commit
-to a different branch.
+Su su corrección involucra una simple revisión de cambios,
+usted puede usar el comando git ``cherry-pick`` para aplicar la misma revisión
+a un branch diferente.
 
-First check out the branch::
+Primero cambie a la branch::
 
   > git checkout 4.2
 
-And then cherry-pick the commit (you can get the SHA hash from git log).
+Y entonces con el comando git cherry-pick y el número de revisión (usted puede obtener el número SHA hash desde el git log).
 
   > git cherry-pick b6ff4309
 
-There may be conflicts; if so, resolve them and then follow the directions
-git gives you to complete the cherry-pick.
+Tal ves allá conflictos; entonces, resolverlos y seguir las instrucciones 
+que la herramienta git le da a usted para completar el cherry-pick.
 
-If your fix involved multiple commits, cherry-picking them one by one can get tedious.
-In this case things are easiest if you did your fix in a separate feature branch.
+Si su corrección involucra múltiples revisiones, cherry-picking entonces uno a uno puede resultar tedioso.
+En este caso las cosas son más fáciles si usted hizo su corrección en una branch con una característica separada.
 
-In that scenario, you first merge the feature branch to the 4.1 branch::
+En ese escenario, primero fusiones la branch característica a la branch 4.1::
 
   > git checkout 4.1
   > git merge my-awesome-feature
 
-Then you return to the feature branch and make a branch for `rebasing` it onto the 4.2 branch::
+A continuación, regrese a la branch característica y haga una branch para `establecerlo` dentro de la branch 4.2::
 
   > git checkout my-awesome-feature
   > git checkout -b my-awesome-feature-4.2
   > git rebase ef978a --onto 4.2
 
-(ef978a happens to be the last commit in the feature branch's history before
-it was branched off of 4.1. You can look at git log to find this.)
+(ef978a pasa a ser la ultima revisión en el histórico de la branch característica antes
+de que sea bifurcaba de la versión 4.1. Usted puede mirar el histórico de su repositorio git para encontrar este.)
 
-At this point, the feature branch's history has been updated, but it hasn't actually
-been merged to 4.2 yet. This lets you deal with resolving conflicts before you
-actually merge it to the 4.2 release branch. Let's do that now::
+Al llegar a este punto, la historia de la branch característica ha sido actualizada, pero no ha sido de hecho 
+fusionada con la versión 4.2 aún. Este le permite a usted resolver conflictos antes de que usted
+lo fusione a la branch release 4.2. Hacerlo ahora así::
 
   > git checkout 4.2
   > git merge my-awesome-feature-4.2
 
 
-Branches and Forks and Direct Commits - Oh My!
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the contributor agreement, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be master).
+Branches y Forks y Hacer revisiones directamente - ¡Por Dios!
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Plone uso un repositorio svn, así que todo el mundo es familiar y acostumbrado a hacer revisiones directamente a las branches. Después de que la migración de los repositorios svn al servicio github, la comunidad decidió mantener este espíritu. Si usted ha firmado el contributor agreement, puedes cometer directamente a la branch (para plone esto sería la versión del branch ej. la branch 4.1, para más otros paquetes esto sería el branch llamado master).
 
-HOWEVER, there are a few situations where a branch is appropriate. If you:
- * are just getting started, 
- * are not sure about your changes
- * want feedback/code review
- * are implementing a non-trivial change
+NO OBSTANTE, hay unas cuantas situaciones donde una hacer un nuevo branch es apropiado. Si usted:
+ * usted se esta iniciando, 
+ * usted no esta seguro acerca de sus cambios
+ * quiere revisión de comentario/código
+ * están llevando a cabo un cambio no trivial
 
-then you likely want to create a branch of whatever packages you are using and then use the pull request feature of github to get review. Everything about this process would be the same except you need to work on a branch. Take the plone.app.caching example. After checking it out with mr.developer, create your own branch with::
+Entonces probablemente quieres crear una branch de cualquier paquete que está utilizando y entonces use la característica de pull request del servicio github para conseguir revisión. Todo acerca de este proceso sería el mismo, excepto que necesita para trabajar en una branch. Tome de ejemplo el paquete plone.app.caching. Después de comprobarlo con mr.developer, cree su propia branch con::
 
   > cd src/plone.app.caching
   > git checkout -b my_descriptive_branch_name
 
-*Note*: Branching or forking is your choice. I prefer branching, and I'm writing the docs so this uses the branch method. If you branch, it helps us because we *know* that you have committer rights. Either way it's your call.
+*Nota*: Hacer Branch o fork es su elección. Yo prefiero hacer branch, y yo estoy escribiendo la documentación en esto usando el método de branch. Si usted hace un branch, nos ayudo porque nosotros *sabemos* que tienes permisos para aplicar revisiones a este branch. De cualquier forma, es tu decisión.
 
-Proceed as normal. When you are ready to push your fix, push to a remote branch with::
+Proceda como de costumbre. Cuándo usted este a punto para hacer push de la corrección de su fallo, debe hacer un push a una branch remota con el siguiente comando::
 
   > git push origin my_descriptive_branch_name
 
-This will make a remote branch in github. Navigate to this branch in the github UI and on the top right there will be a button that says "Pull Request". This will turn your request into a pull request on the main branch. There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary. The reviewers are informal and very nice so don't worry - they are there to help! If you want immediate feedback, jump into IRC with the pull request link and ask for a review.
+Esto hará un branch remoto en el servicio github. Vaya a esta branch de la interfaz de usuario github y en la parte superior derecha habrá un botón que dice "Pull Request". Este le permitirá hacer una solicitud dentro de un pull request en la branch principal. Hay personas que se ven una vez a la semana o más para revisar las solicitudes pull requests y confirmaran si es o no es una buena corrección y le dará una retroalimentación cuando sea necesario. Los revisores son informales y muy agradables, así que no se preocupe - que están ahí para ayudar! Si usted quieres retroalimentación inmediata, valla a la sala IRC con el enlace de pull request y pedida una revisión.
 
-*Note*: you still need to update checkouts.cfg in the correct branches of buildout.coredev!
+*Nota*: todavía necesitas actualizar el archivo *checkouts.cfg* en las branches correctas de proyecto buildout.coredev!
 
 Jenkins
 -------
-You STILL aren't done! Please check jenkins to make sure your changes haven't borked things. It runs every half an hour and takes a while to run so checking back in an hour is a safe bet. Have a beer and head over to the `Jenkins control panel <https://jenkins.plone.org/>`_.
+Usted TODAVÍA no está listo! Por favor, compruebe que el servicio jenkins se asegure que sus cambios no hallan roto cosas. Se ejecuta cada media hora y tarda un rato para ejecutar la comprobación en una hora es una apuesta segura. Ten una cerveza y tu mirada sobre el `panel de control Jenkins <https://jenkins.plone.org/>`_.
 
-Finalizing Tickets
-------------------
-If you are working from a ticket, please don't forget to go back to the ticket and add a link to the changeset. We don't have integration with github yet so it's a nice way to track changes. It also lets the reporter know that you care. If the bug is really bad, consider pinging the release manager and asking him to make a release pronto.
+Finalizando Tickets
+-------------------
+Si usted esta trabajando de un ticket asignado, por favor no olvide en volver a actualizar el ticket y agregar un enlace a sus revisión de cambios. Actualmente no tenemos una integración de nuestro sistema de ticket con el servicio github pero es una forma agradable de seguir sus cambios. Eso también le permite al reportero saber que usted preocupa. Si el fallo es realmente mala, considere en contactar al release manager y he invitarle a hacer un pronto lanzamiento.
 
 FAQ
 ---
- * *How do I know when my package got made?* 
-    You can follow the project on github and watch its timeline. You can also check the CHANGES.txt of every plone release for a comprehensive list of all changes and validate that yours is present.
+ * *¿Cómo puedo saber si se tomo mis cambios en mi paquete?* 
+    Usted puede seguir el proyecto en github y mirar la linea del tiempo de cambios. Usted también puede descargar el CHANGES.txt de cada liberación de Plone para ver una lista comprensible de todos los cambios y validar que su contribuciones estén presente.
 
