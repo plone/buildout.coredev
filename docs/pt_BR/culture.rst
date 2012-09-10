@@ -6,7 +6,7 @@ Se você deseja contribuir com o desenvolvimento do Plone, siga algumas instruç
 
 1) Cadastre-se na lista `plone-developers <https://lists.sourceforge.net/lists/listinfo/Plone-developers>`_ e veja como as pessoas trabalham e como costumam abordar as discussões no grupo.
 
-2) Peça ajuda sobre configuração do ambiente no IRC. A maioria dos desenvolvedores está lá.
+2) Peça ajuda sobre configuração do ambiente no IRC. A maioria dos desenvolvedores estão lá.
 
 Baixe um cliente de IRC e acesse o canal #plone-framework ou #plone, ambos no freenode. As pessoas no #plone-framework usam Plone há muito tempo e ficam felizes em poder ajudar. Mais informações podem ser obtidas no endereço http://plone.org/support/chat.
 

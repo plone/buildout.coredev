@@ -1,73 +1,73 @@
-Reviewing PLIPs
-===============
+Revisando PLIP's
+================
 
-Expectations
+Expectativas
 ------------
-A good PLIP review takes about 4 hours so please plan accordingly. When you are done, if you have access to core please commit the review to the plips folder and reference the PLIP in your commit message. If you do not have access, please attach your review to the PLIP ticket itself.
+Uma boa revisão de PLIP leva aproximadamente 4 horas, então se programe corretamente. Quando terminar, se tiver acesso ao núcleo, comite a revisão no diretório de PLIP's e referencie a PLIP na mensagem do seu commit. Se não tiver acesso, anexe sua revisão ao ticket aberto da PLIP.
 
-Setting up the environment
---------------------------
-Follow the instructions on [wiki:DevelopmentEnvironment setting up a development environment] for "Getting the Code". You will need to checkout the branch to which the PLIP is assigned. Instead of running the buildout with the default buildout file, you will run the config specific to that plip::
+Configurando o ambiente
+-----------------------
+Siga as instruções em [wiki:DevelopmentEnvironment setting up a development environment], "Obtendo o Código". Você deverá fazer o checkout do branch ao qual a PLIP está vinculada. Ao invés de rodar o buildout usando o arquivo de buildout padrão, você deverá rodar a configuração específica para a PLIP::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
-Functionality Review
---------------------
-There are several things that could be addressed in a PLIP review depending on the nature of the PLIP itself. This is by no means an exhaustive list, but a place to start. Things to think about when reviewing:
+Revisão de funcionalidade
+-------------------------
+Existem várias coisas que podem ser abordadas em uma revisão de PLIP, dependendo da sua natureza. A lista abaixo não é, absolutamente, uma lista completa, mas um ponto de partida sobre o que pode ser observado em uma revisão:
 
-General
--------
- * Does the PLIP actually do what the implementors proposed? Are there incomplete variations? 
- * Were there any errors running buildout? Did the migration(s) work?
- * Do error and status messages make sense? Are they properly internationalized?
- * Are there any performance considerations? Has the implementor addressed them if so?
+Geral
+-----
+ * A PLIP realmente faz o que os implementadores propuseram? Existem variações incompletas?
+ * Ocorreram erros durante a execução do buildout? As migrações funcionaram?
+ * Os erros e mensagens de status fazem sentido? Estão internacionalizados corretamente?
+ * Existem considerações sobre a performance? O implementador as observou?
 
-Bugs
-----
- * Are there any bugs? Nothing is too big nor small.
- * Do fields handle whacky data? How about strings in date fields or nulls in required?
- * Is validation up to snuff and sensical? Is it too restrictive or not restrictive enough?
+Erros
+-----
+ * Existem erros? Nada é muito grande ou muito pequeno.
+ * Os campos manipulam dados estranhos? E situações como strings em campos de data ou campos obrigatórios deixados em branco?
+ * A validação não está pouco exigente nem exigente demais?
 
-Usability Issues
-----------------
- * Is the implementation usable? 
- * How will novice end users respond to the change? 
- * Does this PLIP need a usability review? If you think this PLIP needs a usability review, please change the state to "please review" and add a note in the comments. 
- * Is the PLIP consistent with the rest of Plone? For example, if there is control panel configuration, does the new form fit in with the rest of the panels? 
- * Does everything flow nicely for novice and advanced users? Is there any workflow that feels odd?
- * Are there any new permissions and do they work properly? Does their role assignment make sense?
+Qestões de usabilidade
+----------------------
+ * A implementação está usável?
+ * Como usuários finais iniciantes reagirão à mudança?
+ * A PLIP necessita de uma revisão de usabilidade? Se você considerar que sim, altere o estado para "please review" e adicione uma nota nos comentários.
+ * A PLIP está consistente com o resto do Plone? Por exemplo, se existe uma configuração no painel de controle, o novo formulário se adequa aos outros painéis?
+ * Tudo está fluindo bem para usuários iniciantes e avançados? Existem fluxos que parecem estranhos?
+ * Existem permissões novas e elas funcionam apropriadamente? A atribuição de papéis (roles) faz sentido?
 
-Documentation Issues
---------------------
- * Is the corresponding documentation for the end user, be it developer or plone user, sufficient?
- * Is the change itself properly documented?
+Questões de documentação
+------------------------
+ * A documentação correspondente é suficiente para usuários finais, seja ele desenvolvedor ou usuário Plone?
+ * A mudança está bem documentada?
 
-Please report bugs/issues in Trac as you would for any Plone bug. Reference the PLIP in the bug, assign to its implementor, and add a tag for the PLIP in the form of plip-xxx. This way the implementor can find help if he needs it. Please also prioritize the ticket. The PLIP will not be merged until all blockers and critical bugs are fixed.
+Reporte erros/solicitações no Trac, como faria com qualquer outro erro do Plone. Referencie a PLIP no erro, atribua a seu desenvolvedor e adicione uma tag para a PLIP como plip-xxx, pois fica mais fácil do desenvolvedor encontrar, se precisar. Também coloque prioridade no ticket. A PLIP não será mesclada até que os erros sejam corrigidos.
 
-Code Review
------------
+Revisão de Código
+-----------------
 
 Python
 ^^^^^^
- * Is this code maintainable?
- * Is the code properly documented?
- * Does the code adhere to PEP8 standards (more or less)?
- * Are they importing deprecated modules?
+ * O código é possível de manter?
+ * O código está documentado corretamente?
+ * O código segue os padrões da PEP8? Quanto?
+ * Está importando módulos obsoletos?
 
 Javascript
 ^^^^^^^^^^
- * Does the javascript meet our set of javascript standards? See http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
- * Does the Javascript work in all currently supported browsers? Is it performant? 
+ * O javascript segue os padrões utilizados? Veja a referência em http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
+ * O javascript funciona em todas os navegadores suportados atualmente? Como está o desempenho?
 
 ME/TAL
 ^^^^^^
- * Does the PLIP use views appropriately and avoiding too much logic?
- * Is there any code in a loop that could potentially be a performance issue?
- * Are there any deprecated or old style ME/TAL lines of code such as using DateTime?
- * Is the rendered html standards compliant? Are ids and classes used appropriately?
+ * A PLIP usa views apropriadas e evita implementar muita lógica?
+ * Existe algum loop no código que pode ter, potencialmente, problema de desempenho?
+ * Existem linhas de código obsoletas ou no estilo antigo, como DateTime?
+ * O HTML renderizado é compatível com as normas? Os ids e classes são usadas apropriadamente?
 
-Example PLIP Reviews
-^^^^^^^^^^^^^^^^^^^^
+Exemplos de revisões de PLIP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-davisagli.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip10886-review-cah190.txt
  * https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-rossp.txt
