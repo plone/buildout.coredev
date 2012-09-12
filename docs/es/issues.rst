@@ -1,14 +1,14 @@
-Troubleshooting
-===============
+Troubleshooting: solucionar problemas
+=====================================
 
-Buildout Issues
----------------
+Incidencias Buildout
+--------------------
 
-Buildout can be frustrating for those unfamiliar with parsing through autistic robot language. Fear not! These errors are almost always a quick fix and a little bit of understanding goes a long ways. 
+Buildout puede ser muy frustrante para aquellos no familiarizados con el análisis a través del lenguaje robot autista. ¡No tema! Estos errores son casi siempre tienen una solución rápida y un con poco de comprensión le lleva a un largo camino. 
 
-Errors Running bootstrap.py
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-You may not even get to running buildout and then you will already have an error. Let's take this one for example::
+Errores ejecutando bootstrap.py
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Ni siquiera se puede llegar a correr buildout y entonces ya tendrá un error. Déjeme darle un ejemplo de esto::
 
     ...
      File "/usr/local/lib/python2.6/site-packages/distribute-0.6.13-py2.6.egg/pkg_resources.py", line 556, in resolve
@@ -16,119 +16,119 @@ You may not even get to running buildout and then you will already have an error
      pkg_resources.VersionConflict: (zc.buildout 1.5.1 (/usr/local/lib/python2.6/site-packages/zc.buildout-1.5.1-py2.6.egg), Requirement.parse('zc.buildout==1.5.2'))
 
 
-You may think the buildout god is angry because it's been MONTHS since you've made a human sacrifice to her but be strong and follow along. Buildout has simply noticed that the version of buildout required by the bootstrap.py file you are trying to run does not match the version of buildout in your python library. In the error above, your system has buildout 1.5.1 installed and the bootstrap.py file wants to run with 1.5.2.
+Usted puede pensar que la diosa buildout está enfadada porque han pasado MESES desde que usted hizo un sacrificio humano para ella, pero sea fuerte y siga adelante. Buildout simplemente se ha dado cuenta de que la versión de buildout requerida por el archivo bootstrap.py que usted está intentando ejecutar no coincide con la versión de buildout en la biblioteca de python. En el error anterior, el sistema dispone de buildout 1.5.1 instalado y el archivo bootstrap.py quiere correr con 1.5.2.
 
-To fix, you have a couple options. First, you can force buildout to run with the version you already have installed by invoking the version tag. This tells your [Plone] bootstrap.py file to play nicely with the version that you already have installed. In the case of the error pasted above, that would be::
+Para solucionarlo, hay un par de opciones. En primer lugar, puede hacer que se ejecute buildout con la versión que ya se han instalado mediante la invocación de la etiqueta de versión. Esto le dice a su archivo bootstrap.py [Plone] para ejecutar muy bien con la versión que ya se ha instalado. En el caso de que el error pegado encima, que sería::
 
    > python bootstrap.py --version=1.5.1
 
-I personally know that versions 1.4.4, 1.5.1, and 1.5.2 all work this way.
+Yo conozco personalmente que las versiones 1.4.4, 1.5.1, 1.5.2 y todo funciona de esta manera.
 
-The other option is to delete your current egg and force the upgrade. In the case of the error above, all you need to do is delete the egg the system currently has. eg::
+La otra opción es eliminar el paquete egg actual y forzar la actualización. En el caso de que el error anterior, todo lo que necesita para eliminar del paquete egg que tiene actualmente en ell sistema. ej::
 
   > rm -rf /usr/local/lib/python2.6/site-packages/zc.buildout-1.5.1-py2.6.egg
 
-When you rerun bootstrap, it will look for the buildout of the egg, note that there isn't one, and then go fetch a new egg in the version that it wants for you.
+Al volver a ejecutar el archivo bootstrap.py, este buscará para el paquete egg para el buildout, ya que no hay uno, y luego ir a buscar el paquete egg con la nueva versión que se quiere para su construcción buildout.
 
-Do one of those, say two hail marys, and re-run bootstrap. Tada!
+De una de esas, digamos dos Ave Marías, con tres padres nuestros y ejecute de nuevo bootstrap.py. ¡Tada!
 
-One other thing of note is that running bootstrap effectively ties that python executable and all of its libraries to your buildout. If you have several python installs and want to switch which python is tied to your buildout, simply rerun bootstrap.py with the new python (and then rerun buildout). You may get the same error above again but now that you know how to fix it, you can spend that time drinking beer instead of smashing your keyboard. 
+Otra cosa de la nota es que está ejecutando bootstrap efectivamente asocia al ejecutable python y todas sus bibliotecas a su buildout. Si tiene varias instalaciones Python y quiere cambiar a cual Python está asociando a su buildout, sólo tiene que volver a ejecutar bootstrap.py con el nuevo python (y vuelva a ejecutar el buildout). Usted puede obtener el mismo error anterior nuevamente, ahora que sabes cómo solucionarlo, usted puede pasar ese tiempo bebiendo cerveza en vez de aplastar el teclado. 
 
-Hooray!
+¡Hurra!
 
-When Mr. Developer is Unhappy
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-mr.developer is never unhappy, except when it is. Although this technically isn't a buildout issues, it happens when running buildout so I'm putting it under buildout issues.
+Cuando Mr. Developer no es feliz
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+mr.developer nunca es feliz, excepto cuando es. A pesar de que esto técnicamente no es un incidente buildout, pasa cuándo esta ejecutando buildout, entonces yo lo estoy poniéndolo en las incidencias buildout.
 
-When working with the dev instance, especially with all the moving back and forth between github and svn, you may have an old copy of a src package. The error looks like::
+Cuándo trabajando con la instancia de desarrollo, especialmente con toda el movimiento de ida y vuelta de cambios entre github y svn,usted puedes tener una copia vieja de un paquete en le directorio src. El error luce así::
  
     mr.developer: Can't update package 'Products.CMFPlone' because its URL doesn't match.
 
 
-As long as you don't have any pending commits, you just need to remove the package from src/ and it will recheck it out for you when it updates. 
+Mientras usted no tenga cualquier revisión de cambios pendiente, usted solo necesita remover el paquete del directorio src/ y se vuelve a revisar para usted cuando se actualiza. 
 
 
-You can also get such fun errors as::
+Usted también se puede conseguir con errores tan divertidos tales como::
 
     Link to http://sphinx.pocoo.org/ ***BLOCKED*** by --allow-hosts
 
 
-These are ok to ignore IF and ONLY IF the lines following it say::
+Estos errores están bien para ser ignorados SI y SÓLO SI las líneas que siguen diga::
 
     Getting distribution for 'Sphinx==1.0.7'.
     Got Sphinx 1.0.7.
 
 
-If buildout ends with warning you that some packages could not be downloaded, then chances are that package wasn't downloaded. This is bad and could cause all sorts of whack out errors when you start or try to run things because it never actually downloaded the package.
+Si buildout termina con un aviso de que algunos paquetes no se pudo descargar, entonces es probable que el paquete no se ha descargado. Esto es malo y puede causar todo tipo de errores al iniciar o tratar de hacer las cosas porque nunca se llegan a descargar el paquete.
 
-There are two ways to get this error to go away. The first is to delete all instances of host filtering. Comb through all the files and delete any lines which say "allow-hosts =" and "allow-hosts +=". In theory, by restricting which hosts you download from, buildout will go faster. Whether that actually happens or not I can not judge. The point is that they are safely deletable.
+Hay dos maneras de obtener este error desaparezca. Lo primero es eliminar todas las instancias del host filtrado. registrar minuciosamente todos los archivos y elimine cualquier lineas la cual diga así "allow-hosts =" y "allow-hosts +=". En teoría, mediante la restricción de los hosts del cual se va a descarga, buildout irá más rápido. Ya sea que realmente sucede o no, yo no puedo opinar. El punto es que son de seguramente se pueden eliminar.
 
-The second option is to allow the host that it is pointing to by adding something like this to your .cfg::
+La segunda opción es el permitir al host al cual ese apunta para ser añadido de algo como esto a su archivo .cfg::
 
     allow-hosts += sphinx.pocoo.org
 
-Again, this is only necessary if the package wasn't found in the end. 
+Otra vez, esto es sólo necesario si el paquete no fue encontrado al final. 
 
-Hooray!
+¡Hurra!
 
-mr.developer Path Errors
-^^^^^^^^^^^^^^^^^^^^^^^^
+Errores de ruta mr.developer
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
 
-When running any ``./bin/develop`` command.
+Cuando ejecuta algún comando ``./bin/develop``.
 
-To fix, simply do::
+Para solucionar, simplemente ejecute el siguiente comando::
 
   ``ln -s plips/.mr.developer.cfg``
 
 
 
-Other Random Issues
--------------------
+Otros incidentes aleatorios
+---------------------------
 .. TODO: These need to be revalidated
 
-Dirty Packages
-^^^^^^^^^^^^^^
+Paquetes Sucios
+^^^^^^^^^^^^^^^
 
 "ERROR: Can't update package '[Some package]', because it's dirty."
 
-Fix
-~~~
-mr.developer is complaining because a file has been changed/added, but not
-committed.
+Solución
+~~~~~~~~
+mr.developer se queja porque un archivo se ha cambiado / añadido, pero no
+se ha generado una revisión.
 
-Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
-.installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` to your subversion
-config's global-ignores has been suggested as a more permanent solution.
+Utilice el comando ``bin/develop update --force``. Añadiendo ``*.pyc *~.nib *.egg-info
+.installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` a su configuración subversion
+global-ignores ha sido sugerido como una solución más permanente.
 
 
 No module named zope 2
 ^^^^^^^^^^^^^^^^^^^^^^
 ``ImportError: No module named Zope2" when building using a PLIP cfg file.``
 
-Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
-rerun buildout to correct this if you're finding it irksome.
+Parece no ser en realidad el caso. Eliminar el archivo 'mkzopeinstance.py' desde el directorio bin/ y
+ejecute de nuevo el script buildout para corregir esto si usted está encontrando fastidioso.
 
-Can't open file '/Startup/run.py'
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Two possible fixes, you are using Python 2.4 by mistake, so use 2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run buildout, develop, buildout.
+No puede abrir el archivo '/Startup/run.py'
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Dos posibles soluciones, usted esta usando Python 2.4 por equivocación, así que por favor use Python 2.6 en cambio. O, usted tal ves necesitar asegurarse que usted ejecuto el script 'bin/buildout …' después ejecutar el script 'bin/develop …'. Trate de remover los directorios parts/*, bin/*, el archivo .installed.cfg, entonces ejecute de nuevo el archivo bootstrap.py y ejecute de nuevo buildout, develop, buildout.
 
-Missing PIL
+PIL perdido
 ^^^^^^^^^^^
-pil.cfg is include within this buildout to aid in PIL installation. Run
-bin/buildout -c pil.cfg to install. This method does not work on Windows, so
-we're unable to run it by default.
+El archivo pil.cfg es incluido con esta configuración buildout para ayudar en instalación PIL. Ejecutar
+bin/buildout -c pil.cfg a instalar la librería PIL. Este método no funciona en Windows, así que
+nosotros somos incapaces de correr él por defecto.
 
 
-Modified Egg Issues
-^^^^^^^^^^^^^^^^^^^
-bin/develop status is showing that the Products.CMFActionIcons egg has been
-modified, but I haven't touched it.  And this is preventing bin/develop up
-from updating all the eggs.
+Incidencias con paquetes egg modificado
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+El comando bin/develop status el mostrara que el paquete egg Products.CMFActionIcons ha sido
+modificado, but I haven't touched it.  Y ejecutando este comando bin/develop up esta previniendo 
+la actualización de todos los paquetes egg.
 
-Fix
-~~~
+Solución
+~~~~~~~~
 
-Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
+Editar el archivo ~/.subversion/config y añadir eggtest*.egg a la lista de global-ignores
 
