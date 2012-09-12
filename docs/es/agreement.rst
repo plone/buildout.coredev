@@ -3,9 +3,9 @@ Contribuyendo al núcleo de Plone
 
 Hay muchas personas y compañías quiénes confían en Plone diariamente, por tanto nosotros tenemos que introducir algún nivel de control en la calidad del código fuente. El código de fuente de Plone es hospedado en un repositorio git en https://github.com/plone, solo para los miembros del equipo de desarrollado que tienen derecho de hacer revisiones. 
 
-El enviar el acuerdo de contribuciones (contributors agreement) no garantiza que se otorguen acceso al repositorio, pero una vez que lo envía siempre lo tenemos en el archivo para cuando usted está listo para contribuir. Nosotros pedimos que antes de solicitar el acceso de escritura al core de Plone, usted debe familiarizarse un poco con la comunidad, ya que le ayudará a acelerar su iniciación:
+El enviar el acuerdo de contribuciones (contributors agreement) no garantiza que se otorguen acceso al repositorio, pero una vez que lo envía siempre lo tenemos en el archivo para cuando usted está listo para contribuir. Nosotros pedimos que antes de solicitar el acceso de escritura al núcleo de Plone, usted debe familiarizarse un poco con la comunidad, ya que le ayudará a acelerar su iniciación:
 
-* Preguntar y (especialmente) responder a preguntas acerca del stack desbordamiento y :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
+* Preguntar y (especialmente) responder a preguntas acerca del stack desbordamiento y el canal :doc:`IRC <culture>` usarlo con un enfoque para conocer un poco a los desarrolladores activos. 
 
 * Atender un simposio/conferencia o participar en un sprint/tuneup Hay abundancia de oportunidades de conocer la comunidad y comenzar a contribuir a través de varias sesiones de codificación, ya sea en persona o en la web. Usted puede incluso ser capaz de obtener acceso inmediato en una conferencia si usted está flexionando sus habilidades de codificación locos y la gente adecuada asisten.
 
@@ -21,4 +21,4 @@ Una vez te se allá familiarizado usted mismo con la comunidad y usted está ent
 
 Si no eres seguro por dónde para empezar o justo querer más dirección, siente libre de usar el IRC, las listas de correo, Twitter, etc... Y pedir ayuda. Si bien no existe un proceso oficial de tutoría, hay un montón de personas dispuestas a actuar en ese rol y le guiará por los pasos de involucrarse en la comunidad. Una manera común de empezar contribuyendo es para participar en un día de tune-up de Plone. Los Tune-ups está llenado con una buena mezcla de programadores recién iniciados y experimentados igualmente. Para más información, por favor ver http://plone.org/tuneup.
 
-Sea bienvenido a la comunidad Plone!
+¡Sea bienvenido a la comunidad Plone!

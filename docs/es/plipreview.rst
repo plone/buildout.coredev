@@ -25,7 +25,7 @@ General
 Errores
 -------
  * ¿Hay algún error? Nada es demasiado grande ni pequeño.
- * ¿Los campos a manejar data estrafalarias? ¿Como son las cadenas en los campos de fecha o los campos nulos son requeridos?
+ * ¿Los campos a manejar data estrafalarias? ¿Cómo son las cadenas en los campos de fecha o los campos nulos son requeridos?
  * Es validación y cuestión de puro sentido? ¿Es demasiado restrictiva o no es lo suficiente restrictivo?
 
 Incidentes de usabilidad

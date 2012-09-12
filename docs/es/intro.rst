@@ -56,7 +56,7 @@ Para ver qué branch que se encuentra actualmente, acaba de hacer::
 La línea con un * por él indicará qué rama actualmente estás trabajando.
 
 .. important::
-   Asegúrese de volver a ejecutar buildout si estuviera en una rama diferente antes para obtener las versiones correctas de los paquetes, de lo contrario obtendrá un comportamiento extraño! 
+   ¡Asegúrese de volver a ejecutar buildout si estuviera en una branch diferente antes para obtener las versiones correctas de los paquetes, de lo contrario obtendrá un comportamiento extraño! 
 
 Para mas información sobre buildout, por favor ver la `documentación sobre buildout en el manual de desarrollador collective <http://collective-docs.plone.org/en/latest/tutorials/buildout/index.html>`_.
 
@@ -86,19 +86,19 @@ Alternativamente, nosotros podemos administrar los checkouts desde la línea de 
   > ./bin/develop co plone.caching
   > ./bin/buildout
 
-No olvide volver a ejecutar buildout! En ambos métodos, mr.developer descargará la fuente de github (o de donde se definió) y poner el paquete en el directorio src. Usted puede repetir este proceso con tan muchos o cuando pocos paquetes cuando necesite. Para algunos más consejos en la forma de trabajo con mr.developer, por favor :doc:`lea mas aquí <mrdeveloper>`.
+¡No olvide volver a ejecutar buildout! En ambos métodos, mr.developer descargará la fuente de github (o de donde se definió) y poner el paquete en el directorio src. Usted puede repetir este proceso con tan muchos o cuando pocos paquetes cuando necesite. Para algunos más consejos en la forma de trabajo con mr.developer, por favor :doc:`lea mas aquí <mrdeveloper>`.
 
 Probando localmente
 -------------------
 En un mundo ideal, usted debería escribir un caso de prueba para su incidencia antes de tratar de corregirlo. En realidad esto rara ves sucede. Ningún asunto cómo  te lo acercas, usted tiene que SIEMPRE probar la ejecución de los test cases para ambos el módulo y plone.org antes de que generar una revisión con cualquiera de cambios. 
 
-Si usted no comienza con un caso de prueba, se ahorrará problemas potenciales y validar el fallo antes de llegar demasiado profundo en la incidencia!
+¡Si usted no comienza con un caso de prueba, se ahorrará problemas potenciales y validar el fallo antes de llegar demasiado profundo en la incidencia!
 
 Para correr una prueba para el módulo específico ejecute el siguiente comando::
 
   > ./bin/test -m plone.app.caching
 
-Estos deberían ejecutarse todo sin fallos. Por favor, no verifique ninguna cosa adicional! Si usted no lo ha escrito ya, este es un buen momento para escribir un caso de prueba para la falla que usted está reparando y asegúrese de que todo está funcionando como debería.
+Estos deberían ejecutarse todo sin fallos. ¡Por favor, no verifique nada adicional! Si usted no lo ha escrito ya, este es un buen momento para escribir un caso de prueba para la falla que usted está reparando y asegúrese de que todo está funcionando como debería.
 
 Después de las pruebas de nivel de módulo se ejecutan con su cambio realizado, por favor asegúrese de que los otros módulos no se ven afectados por su cambio realizado, para esto ejecute todas as pruebas con el siguiente comando::
 
@@ -221,7 +221,7 @@ Esto hará un branch remoto en el servicio github. Vaya a esta branch de la inte
 
 Jenkins
 -------
-Usted TODAVÍA no está listo! Por favor, compruebe que el servicio jenkins se asegure que sus cambios no hallan roto cosas. Se ejecuta cada media hora y tarda un rato para ejecutar la comprobación en una hora es una apuesta segura. Ten una cerveza y tu mirada sobre el `panel de control Jenkins <https://jenkins.plone.org/>`_.
+¡Usted TODAVÍA no está listo! Por favor, compruebe que el servicio jenkins se asegure que sus cambios no hallan roto cosas. Se ejecuta cada media hora y tarda un rato para ejecutar la comprobación en una hora es una apuesta segura. Ten una cerveza y tu mirada sobre el `panel de control Jenkins <https://jenkins.plone.org/>`_.
 
 Finalizando Tickets
 -------------------

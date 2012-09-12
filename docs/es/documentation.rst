@@ -45,7 +45,7 @@ Al menos, su paquete tendría que incluir las siguientes formas de documentació
     Este incluye temas como los siguientes:
 
     * ¿Qué características poseen?
-    * Documentos ¿Cómo usar? (en no-inglés doctests!)
+    * Documentos ¿Cómo usar? (¡doctests que no estén en Inglés!)
     * Información aproximadamente de la arquitectura
     * Común gotchas
 
