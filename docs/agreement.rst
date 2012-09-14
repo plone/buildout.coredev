@@ -5,17 +5,17 @@ There are many people and companies who rely on Plone on a day-to-day basis so w
 
 Just sending in a contributors agreement does not guarantee you access to the repository, but once you send it in we will always have it on file for when you are ready to contribute. We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
-* Ask and (especially) answer questions on stack overflow and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
+* Ask and (especially) answer questions on `stack overflow <http://stackoverflow.com/>`_ and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
 
-* Attend a conference/symposium or participate in a sprint/tuneup. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
+* Attend a `conference <http://plone.org/events/conferences>`_ / `symposium <http://plone.org/events/regional>`_ or participate in a `sprints <http://plone.org/events/sprints>`_ / `tune-ups <http://plone.org/events/plone-tuneups>`_. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
-* Get your feet wet by contributing to the collective. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. 
+* Get your feet wet by contributing to the `collective <http://collective.github.com/>`_. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. 
 
 * **Patches** Historically we encouraged people to submit patches to the ticket collector. These tickets often rotted in place and technically, in order for us to accept your patch you must sign the contributors agreement. If you want to contribute fixes, please just sign the agreement and go through the standard github pull request  process described until you feel comfortable to bypass review.
 
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
-* Sign and snail mail the contributor agreement at  http://plone.org/foundation/contributors-agreement/agreement.pdf/at_download/file. This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase, ensuring it is not appropriated for someone's unethical purposes. For questions about why the agreement is required, please see  :doc:`Contributor’s Agreement for Plone Explained <contributors_agreement_explained>`. 
+* Sign and snail mail the contributor agreement at  http://plone.org/foundation/contributors-agreement/agreement.pdf/at_download/file. This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase, ensuring it is not appropriated for someone's unethical purposes. For questions about why the agreement is required, please see :doc:`Contributor’s Agreement for Plone Explained <contributors_agreement_explained>`. 
 
 * After your form has been signed and received, fill out a trac ticket for core access at https://dev.plone.org/newticket. Make sure you are logged in and please specify "core" not collective on the trac ticket, your github username, and select the CoreAccess component. If you are not logged in, you will not be able to select a component so make sure you are logged in. If you are at a sprint, you will likely just hand this paper to the sprint
 
