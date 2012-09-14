@@ -198,7 +198,7 @@ actually merge it to the 4.2 release branch. Let's do that now::
 
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the :doc:`contributor agreement <contributors_agreement_explained>`_ form, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be ``master``).
+Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the :doc:`contributor agreement <contributors_agreement_explained>` form, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be ``master``).
 
 HOWEVER, there are a few situations where a branch is appropriate. If you:
  * are just getting started, 
