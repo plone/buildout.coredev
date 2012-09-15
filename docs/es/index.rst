@@ -1,10 +1,10 @@
 Introducción
 ============
-Esta documentación describes el proceso para el desarrollo en Plone. Esto es principalmente un recurso técnico para instalar su buildout del core developer, corregir fallos, y escribir plips. 
+Esta documentación describes el proceso para desarrollar en Plone. Este es principalmente un recurso técnico para instalar su configuración buildout del desarrollador del núcleo del CMS, corregir fallos, y escribir plips. 
 
-¡DETENTE!
-=========
-Legalmente, NO puedes contribuir código a no ser que usted allá firmado el :doc:`acuerdo de acuerdo <agreement>`. Esto significa que NO podemos aceptar peticiones de mejoras de usted a no ser que allá hecho esto, por favor, ponga código fuente para ser revisado de ninguna forma. Enviando el acuerdo de contribución es fácil (y pronto será más fácil) y si quieres acceso rápido y es familiar con comunidad, ir dentro :doc:`irc <culture>` y preguntar por los administradores del repositorio para dar acceso con una versión digitalizada del acuerdo. ¡Ellos lo harán lo mas rápido como sea posible!
+¡DETÉNGASE!
+===========
+Legalmente, NO puede contribuir al código al menos que usted allá firmado el :doc:`acuerdo de contribución <agreement>`. Esto significa que nosotros NO podemos aceptar las peticiones de mejoras de usted pueda presentar a no ser que allá hecho cumplido con este requisito, por favor, no ponga código fuente para ser revisado de ninguna forma si no ha hecho eso. Presentar el acuerdo de contribución es fácil (y pronto será más fácil) y si quieres acceso rápido y esta familiarizado con comunidad, entre dentro del canal :doc:`irc <culture>` y preguntar por los administradores del repositorio para otorgarle acceso en base a una versión digitalizada del acuerdo. ¡Ellos lo harán lo mas rápido posible!
 
 Tabla de contenidos
 ----------------
