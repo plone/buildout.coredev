@@ -8,8 +8,8 @@ Como una comunidad, Plone mantienen muchos tipos de documentación:
 * Documentos *mantenidos*. Esto es un conjunto limitado de documentación que está pretendido para ser cuidadosamente dirigido y regularmente actualizado.
 
   * `Manual de Usuario <http://plone.org/documentation/manual/plone-4-user-manual>`_
-  * `Instalando Plone <http://plone.org/documentation/manual/installing-plone>`_
-  * `Referencia de Temas <http://plone.org/documentation/manual/theme-reference>`_
+  * `Instalando Plone <http://plone-spanish-docs.readthedocs.org/en/latest/manuales/instalando_plone.html>`_, la versión original de esta documentación en Ingles esta disponible como `Installing Plone <http://plone.org/documentation/manual/installing-plone>`_.
+  * `Referencia de Temas <http://plone-spanish-docs.readthedocs.org/en/latest/plone/apariencias/referencias_temas/index.html>`_, la versión original de esta documentación en Ingles esta disponible como `Plone Theme Reference <http://plone.org/documentation/manual/theme-reference>`_.
   * `Manual de Desarrollo <http://plone.org/documentation/manual/developer-manual>`_
 
   Las mejoras a los documentos mantenidos pueden ser discutidos en la lista de correo `plone-docs <https://lists.sourceforge.net/lists/listinfo/plone-docs>`_.
