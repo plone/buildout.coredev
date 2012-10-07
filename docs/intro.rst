@@ -106,7 +106,8 @@ Updating CHANGES.rst and checkouts.cfg
 --------------------------------------
 Once all the tests are running locally on your machine, you are ALMOST ready to commit the changes. A couple housekeeping things before moving on. 
 
-First, please edit CHANGES.rst (or CHANGES.txt) in each pakage you have modified and add a summary of the change. This change note will be collated for the next Plone release and is important for integrators and developers.
+First, please edit CHANGES.rst (or CHANGES.txt, or HISTORY.txt) in each package you have modified and add a summary of the change. This change note will be collated for the next Plone release and is important for integrators and developers to be able to see what they will get if they upgrade.
+New changelog entries should be added at the very top of CHANGES.txt.
 
 *Most importantly*, if you didn't do it earlier, edit checkouts.cfg in the buildout directory and add your changes package to the auto-checkout list. This lets the release manager know that the package has been updated so that when the next release of Plone is cut a new egg will be released and Plone will need to pin to the next version of that package. READ: this is how your fix becomes an egg! 
 
