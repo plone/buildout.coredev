@@ -19,3 +19,15 @@ Table of Awesome
    plips
    issues
    updateme
+   
+
+Translations available
+----------------------
+
+There are some initiatives to maintenance available translations in other languages for this documentation like:
+
+.. toctree::
+   :maxdepth: 2
+
+   Spanish version <es/index>
+   Portuguese version <pt_BR/index>
