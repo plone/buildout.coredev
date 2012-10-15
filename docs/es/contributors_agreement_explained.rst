@@ -1,3 +1,5 @@
+.. -*- coding: utf-8 -*-
+
 Acuerdo de contribución para Plone explicado
 ===========================================
 

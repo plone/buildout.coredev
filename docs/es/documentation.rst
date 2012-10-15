@@ -1,3 +1,5 @@
+.. -*- coding: utf-8 -*-
+
 Escribiendo documentación
 
 Documentación de Plone

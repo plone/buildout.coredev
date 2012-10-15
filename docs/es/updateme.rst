@@ -1,3 +1,5 @@
+.. -*- coding: utf-8 -*-
+
 Cómo actualizar estas documentaciones
 =====================================
 

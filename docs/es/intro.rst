@@ -1,3 +1,5 @@
+.. -*- coding: utf-8 -*-
+
 Como presentar corrección de fallos al núcleo de Plone
 ======================================================
 Este documento supone que usted quiere corregir un fallo y detallará el proceso completo para hacerlo. Para más información en la redacción de PLIPS, por favor :doc:`valla aquí <plips>`.

@@ -1,3 +1,5 @@
+.. -*- coding: utf-8 -*-
+
 Contribuyendo al núcleo de Plone
 ================================
 
