@@ -1,4 +1,6 @@
-This is the theme resources directory. See:
+This is the Sunburst Theme applied through Diazo.
 
-  * http://pypi.python.org/pypi/plone.app.theming#themes-in-resources-directories
-  * http://pypi.python.org/pypi/plone.resource
+To apply this theme, in site setup:
+- Install "Diazo theme support" under Add-on
+- Select "(Unstyles)" as Default themes under Themes
+- Enable "Sunburst Theme (sunburst)" under Diazo themes
