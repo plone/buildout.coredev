@@ -34,21 +34,22 @@ Known issues, weak points and TODOs
 
 - For recurring events, plone.app.event.recurrence.RecurrenceSupport.occurrence
   goes through the whole recurrence set, which is inefficient. This is, because
-  we turn the recurrence set, which is a generator to a list, waking all
-  objects too. While this is mainly a problem with recurring events, it should
-  be changed and optimized.
+  we turn the generator based recurrence set to a list. While this is mainly a
+  problem with recurring events, it should be changed and optimized.
   One (soft) reason, which hinders us from doing so, is that in the event view,
-  we want to show only the first 7 occurrences and the very last occurrence in.
-  To get the last occurrence, we have to walk through the whole recurrence set.
+  we want to show only the first 7 occurrences and the very last occurrence. To
+  get the last occurrence, we have to walk through the whole recurrence set.
   This problem is documented here:
   https://github.com/plone/plone.app.event/issues/60
 
 - We use plone.event.IEventAccessor as a wrapper for Archetypes and Dexterity
-  based events. While this is a good and flexible concept, the EventAccessor
-  implementations always adapt the object itself. We use this whereever
-  possible, even when accessing a brain's information would be sufficient. This
-  might be inefficient too, in some cases.
+  based events. While I think, this is a good and flexible concept, the
+  EventAccessor implementations always adapt the object itself. We use this
+  whereever possible, even when accessing a brain's information would be
+  sufficient. This might be inefficient too, in some cases.
 
+- There are some open TODO's at:
+  https://github.com/plone/plone.app.event/issues
 
 Dependencies
 ------------
