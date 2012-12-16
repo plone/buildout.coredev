@@ -19,6 +19,10 @@ Overview
 Known issues, weak points and TODOs
 -----------------------------------
 
+- Icalendar export doesn't export timezones properly. It just converts
+  everything to UTC, with no timezone definitions in the ical export. This can
+  be fixed quite straight forward.
+
 - One test fails only from time to time (Microsecond comparison bug):
     plone.app.event.tests.test_atevent.PAEventATTest.test_edit, 156-162
   Maybe we should remove the (partial) support of Microseconds alltogether and
