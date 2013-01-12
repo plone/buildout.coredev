@@ -28,7 +28,7 @@ To set up a plone 4.2 development environment::
   > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
   > virtualenv --no-site-packages plone42devpy
   > cd plone42devel
-  > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 binary). 
+  > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 or 2.7 binary). 
   > bin/buildout -v
 
 If you run into issues in this process, please see the doc :doc:`issues`.
