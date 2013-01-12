@@ -3,18 +3,18 @@ Implementing PLIPS
 
 All about PLIPS
 ---------------
-What is a PLIP? 
+**What is a PLIP? **
     A PLIP is a PLone Improvement Proposal. It is a change to a Plone package that would affect everyone. PLIPs go through a different process than bug fixes because of their broad reaching effect. The Plone 4.x Framework Team reviews all PLIPs to be sure that it’s in the best interest of the broader community to be implemented and that it is of high quality.
 
-Is it a PLIP or a bugfix?
+**Is it a PLIP or a bugfix?**
     In general, anything that changes the API of Plone in the backend or UI on the front end should be filed as a PLIP. When in doubt, submit it as a PLIP. The framework team is eager to reduce it’s own workload and will re-classify it for you.
 
-Who can submit PLIPs?
+**Who can submit PLIPs?**
     Anyone who has signed a Plone core contributor agreement can work on a PLIP. Don’t let the wording freak you out: signing the agreement is easy and you will get access almost immediately.
     You do not have to be the most amazing coder in the entire world to submit a PLIP. The Framework Team is happy to help you at any point in the process. Submitting a PLIP can be a great learning process and we encourage people of all backgrounds to submit.  When the PLIP is accepted, a Framework Team member will “champion” your PLIP and be dedicated to seeing it completed.
     PLIPs are not just for code monkeys. If you have ideas on new interactions or UI your ideas are more than welcome. We will even help you pair up with implementors if needed.
 
-What is a PLIP champion?
+**What is a PLIP champion?**
    When you submit your PLIP and it is approved, 1 Framework Team member who is especially excited about seeing the PLIP completed will be assigned to your PLIP as a champion. They are there to push you through completion as well as answer any questions and provide guidance. 
     A champion should:
       * Answer any questions the PLIP implementor has, technically and otherwise
@@ -24,19 +24,19 @@ What is a PLIP champion?
 
     Keep in mind that champions are in passive mode by default. If you need help or guidance, please reach out to them as soon as possible to activate help mode.
  
-I’m still nervous. Can I get involved other ways at first?
+**I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `following link <https://dev.plone.org/report/24>`_. Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_ and sending a quick email.
     Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`. Thank you in advance!
 
-When can I submit a PLIP?
+**When can I submit a PLIP?**
     Today, tomorrow, any time! After the PLIP is accepted, the Framework Team will try to judge complexity and time to completion and assign it to a milestone. You can begin working immediately, and we encourage submitting fast and furious.
 
-When is the PLIP due?
+**When is the PLIP due?**
     Summary: As soon as you get it done.
     &tldr; Technically, we want to see it completed for the release to which it’s assigned. We know that things get busy and new problems make PLIPs more complicated and we will push it to the next release. 
     In general, we don’t want to track a PLIP for more than a year. If your PLIP is accepted and we haven’t seen activity in over a year, we will probably ask you to restart the whole process.
 
-You don’t like my PLIP :( What now?
+**You don’t like my PLIP :( What now?**
     Just because a PLIP isn’t accepted in core doesn’t mean it’s a bad idea. It is often the case that there are competing implementations and we want to see it vetted as an add on before “blessing” a preferred implementation. 
 
 Process Overview
