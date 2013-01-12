@@ -11,7 +11,7 @@ Just sending in a contributors agreement does not guarantee you access to the re
 
 * Get your feet wet by contributing to the `collective <http://collective.github.com/>`_. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. 
 
-* **Patches** Historically we encouraged people to submit patches to the ticket collector. These tickets often rotted in place and technically, in order for us to accept your patch you must sign the contributors agreement. If you want to contribute fixes, please just sign the agreement and go through the standard github pull request  process described until you feel comfortable to bypass review.
+* **Patches:** Historically we encouraged people to submit patches to the ticket collector. These tickets are usually ignored forever. Technically, in order for us to accept your patch you must sign the contributors agreement. If you want to contribute fixes, please just sign the agreement and go through the standard github pull request process described until you feel comfortable to bypass review. If the ticket is trivial, or you're fixing documentation, you do not need to sign a contributor's agreement.
 
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
