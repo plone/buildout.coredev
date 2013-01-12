@@ -20,7 +20,7 @@ Dependencies
 
 Setting up Your Development Environment
 ---------------------------------------
-The first step in fixing a bug is getting this `buildout <http://collective-docs.plone.org/en/latest/buildout/index.html>`_ running. We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary. `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch. More information on switching release branches is below.
+The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running. We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary. `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch. More information on switching release branches is below.
 
 To set up a plone 4.2 development environment::
 
