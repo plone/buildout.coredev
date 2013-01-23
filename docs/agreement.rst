@@ -7,7 +7,7 @@ Just sending in a contributors agreement does not guarantee you access to the re
 
 * Ask and (especially) answer questions on `stack overflow <http://stackoverflow.com/>`_ and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
 
-* Attend a `conference <http://plone.org/events/conferences>`_ / `symposium <http://plone.org/events/regional>`_ or participate in a `sprints <http://plone.org/events/sprints>`_ / `tune-ups <http://plone.org/events/plone-tuneups>`_. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
+* Attend a `conference <http://plone.org/events/conferences>`_ / `symposium <http://plone.org/events/regional>`_ or participate in a `sprint <http://plone.org/events/sprints>`_ / `tune-up <http://plone.org/events/plone-tuneups>`_. There are plenty of opportunities to meet the community and start contributing through various coding sessions, either in person or on the web. You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
 * Get your feet wet by contributing to the `collective <http://collective.github.com/>`_. Don't worry about getting it perfect or asking for help; this way you get to know us and we improve our code together as a community. 
 
