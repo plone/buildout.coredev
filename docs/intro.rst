@@ -63,7 +63,7 @@ For more information on buildout, please see the `collective developer manual do
 
 Checking out Packages for Fixing
 --------------------------------
-Most packages are not in ``src/`` by default, so you can user ``mr.developer`` to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question, but just ask on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
+Most packages are not in ``src/`` by default, so you can use ``mr.developer`` to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question, but just ask on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
 
 You can get the source of the package with ``mr.developer`` and the checkout command, or you can go directly to editing ``checkouts.cfg``. We recommend the latter but will describe both. In the end, ``checkouts.cfg`` must be configured either way so you might as well start there.
 
