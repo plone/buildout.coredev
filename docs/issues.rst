@@ -1,4 +1,4 @@
-Troubleshooting
+﻿Troubleshooting
 ===============
 
 Buildout Issues
@@ -38,7 +38,7 @@ Hooray!
 
 When Mr. Developer is Unhappy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-mr.developer is never unhappy, except when it is. Although this technically isn't a buildout issues, it happens when running buildout so I'm putting it under buildout issues.
+mr.developer is never unhappy, except when it is. Although this technically isn't a buildout issue, it happens when running buildout so I'm putting it under buildout issues.
 
 When working with the dev instance, especially with all the moving back and forth between github and svn, you may have an old copy of a src package. The error looks like::
  
