@@ -158,7 +158,3 @@ Tests wouldn't run under newest versions in coredev 4.3::
 
 Conclusion
 ----------
-
-I would be +1 on this PLIS. However first dependency packages need to be fixed,
-(by removing completely the presentation mode) or a proper version pin
-(plone.app.colllection >= 2.0) need to be added.
