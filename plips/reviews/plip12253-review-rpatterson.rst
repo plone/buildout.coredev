@@ -221,10 +221,6 @@ Notes and observations
 
   Fine for this PLIP, but worth noting
 
-- Some forms are still formlib:
-
-  * @@usergroup-controlpanel
-
 - The "Member Registration" field doesn't seem to have any effect on
   the @@register form
 
@@ -240,6 +236,4 @@ as we make changes.  If we're going to merge this PLIP then we should
 
 Also important, the "Member Registration" has to work before merging.
 
-Other than that, if the tests passed, @@usergroup-controlpanel is
-converted to z3c.form, and there were no more formlib imports, I'd
-be +1 for merging.
+Other than that, if the tests passed, I'd be +1 for merging.
