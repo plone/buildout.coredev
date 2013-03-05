@@ -12,6 +12,7 @@ Firefox 18.0.
 Review steps
 ------------
 
+
 - Ran buildout using the plip13270-presentation-mode.cfg file.
 
 - Ran tests for plone.app.layout, Products.ATContentTypes,
@@ -20,12 +21,14 @@ Review steps
 - Reviewed the code changes in plone.app.layout, Products.ATContentTypes,
   plone.app.s5slideshow
 
+
 Notes and observations
 ----------------------
 
- - the tests (plone.app.layout and Products.ATContentTypes) failed due to 
-   errors in plone.app.collection and Products.CMFPlone. I have used following
-   patches to proceed with tests::
+
+- the tests (plone.app.layout and Products.ATContentTypes) failed due to 
+  errors in plone.app.collection and Products.CMFPlone. I have used following
+  patches to proceed with tests::
 
         diff --git a/plone/app/collection/collection.py b/plone/app/collection/collection.py
         index 1b45716..5584c2d 100644
@@ -38,7 +41,7 @@ Notes and observations
        -CollectionSchema['presentation'].widget.visible = False
         CollectionSchema['tableContents'].widget.visible = False
 
-   and::
+  and::
 
         diff --git a/Products/CMFPlone/setuphandlers.py b/Products/CMFPlone/setuphandlers.py
         index 6c8f08d..0fdc77e 100644
@@ -54,20 +57,19 @@ Notes and observations
                 # Mark as fully created
                 fp.unmarkCreationFlag()
 
- - after patching the packages (plone.app.collection and Products.ATContentTypes)
-   all tests passed.
+- after patching the packages (plone.app.collection and Products.ATContentTypes)
+  all tests passed.
 
- - code changes are minor, basically removing any presence of presentation mode.
+- code changes are minor, basically removing any presence of presentation mode.
 
- - I didn't noticed any problems using the plone.app.s5slideshow - it's quite
-   simple and straightforward.
+- I didn't noticed any problems using the plone.app.s5slideshow - it's quite
+  simple and straightforward.
 
- - minor observations:
+- minor observations:
 
-    - the plone.app.s5slideshow package has several not used imports that
-      could be cleaned up.
+  - the plone.app.s5slideshow package has several not used imports that could be cleaned up.
 
-    - declare_namespace is not needed in plone/app/s5slideshow/__init__.py
+  - declare_namespace is not needed in plone/app/s5slideshow/__init__.py
 
 
 Conclusion
