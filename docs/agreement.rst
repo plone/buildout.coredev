@@ -20,3 +20,16 @@ Once you have familiarized yourself with the community and you are excited to co
 If you aren't sure where to start or just want more direction, feel free to get on IRC, mailing lists, Twitter, etc... and ask for help. While there is no official mentoring process, there are plenty of people willing to act in that role and guide you through the steps of getting involved in the community. A common way to start contributing is to participate in a Plone tune-up day. Tune-ups are filled with a good mix of newbies and experienced devs alike. For more information, please see  http://plone.org/tuneup.
 
 Welcome to the Plone community!
+
+
+Dealing with pull requests on GitHub
+------------------------------------
+
+Before we can merge a pull request, we have to check that the author has signed the contributor's agreement.
+
+If they're listed in https://github.com/plone?tab=members, the author has signed so we can go ahead and merge.
+
+If they aren't listed there, there's still a chance they have signed the contributor's agreement.
+Check on IRC #plone-framework.
+
+Pull requests without contributor's agreement can only be merged in trivial cases, and only by the release manager.
