@@ -95,6 +95,6 @@ Using Sphinx
 ~~~~~~~~~~~~
 
 reST References:
- * `Plone Oriented Shpinx Documentation <http://collective-docs.plone.org/en/latest/introduction/writing.html>`_
+ * `Plone Oriented Shpinx Documentation <http://developer.plone.org/reference_manuals/active/writing/index.html>`_
  * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_ 
 
