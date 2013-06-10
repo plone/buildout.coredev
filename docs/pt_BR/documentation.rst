@@ -98,3 +98,4 @@ reST References:
  * `Plone Oriented Shpinx Documentation <http://collective-docs.plone.org/en/latest/introduction/writing.html>`_
  * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_ 
 
+To add Sphinx to your package...
