@@ -17,8 +17,10 @@ Todo sobre los PLIPS
     Las PLIPs no solamente son código fuente monkeys. Si usted tiene ideas sobre nuevas formas de interactuar o de la interfaz de usuario sus ideas son mas que bienvenidas. Incluso te ayudaremos a la par con los implementores si necesario.
 
 ¿Qué es un defensor PLIP?
-   Cuando usted presenta su PLIP y esta es aprobada, Un miembro del equipo de Framework que este especialmente animado a ver hecho realidad el PLIP sera asignado a su PLIP como un defensor. Ellos están ahí para animar hasta su culminación, así que responde a cualquier pregunta y proporcionar orientación necesaria. 
+    Cuando usted presenta su PLIP y esta es aprobada, Un miembro del equipo de Framework que este especialmente animado a ver hecho realidad el PLIP sera asignado a su PLIP como un defensor. Ellos están ahí para animar hasta su culminación, así que responde a cualquier pregunta y proporcionar orientación necesaria. 
+
     Un defensor debería:
+
       * Responda a las preguntas formuladas por el implementador tiene sobre el PLIP, técnica y de cualquier otra
       * Fomentar el autor PLIP por su constantemente retroalimentación y estímulo
       * Cuidar que el implementador logre la lineas de tiempo y coloque las cosas listas a tiempo
@@ -55,7 +57,7 @@ Información general del proceso
 .. _how_submit_plip:
 
 Como presentar a PLIP
---------------------
+---------------------
  Si usted necesita ayuda en algun punto de este proceso, por favor, contacte a un miembro del equipo del framework personalmente o pida ayuda en la `lista de correo FWT <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_.
 
 Un PLIP es un ticket con una plantilla especial. Para iniciar, `abra un nuevo ticket <https://dev.plone.org/newticket>`_ y seleccione "PLIP" como el tipo de ticket. Un nueva plantilla de ticket se cargara y usted debería planear llenarla en todas sus secciones y campos.

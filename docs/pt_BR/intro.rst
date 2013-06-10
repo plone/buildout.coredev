@@ -136,7 +136,7 @@ If you answered YES to all of these questions, you are ready to push your change
 
  * Only commit directly to the development branch if you're confident your code won't break anything badly and the changes are small and fairly trivial. Otherwise, please create a pull request (more on that below).
  * Please try to make one change per commit. If you are fixing three bugs, make three commits. That way, it is easier to see what was done when, and easier to roll back any changes if necessary. If you want to make large changes cleaning up whitespace or renaming variables, it is especially important to do so in a separate commit for this reason.
-* We have a few angels that follow the changes and each commit to see what happens to their favourite CMS! If you commit something REALLY sketchy, they will politely contact you, most likely after immediately reverting changes. There is no official people assigned to this so if you are especially nervous, jump into #plone and ask for a quick eyeball on your changes.
+ * We have a few angels that follow the changes and each commit to see what happens to their favourite CMS! If you commit something REALLY sketchy, they will politely contact you, most likely after immediately reverting changes. There is no official people assigned to this so if you are especially nervous, jump into #plone and ask for a quick eyeball on your changes.
 
 Committing to Products.CMFPlone
 -------------------------------

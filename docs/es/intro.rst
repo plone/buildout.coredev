@@ -200,7 +200,7 @@ lo fusione a la branch release 4.2. Hacerlo ahora así con los siguientes comand
 
 Los branches y los forks y hacer revisiones directamente - ¡Por Dios!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Plone uso un repositorio svn, así que todo el mundo es familiar y acostumbrado a hacer revisiones directamente a las branches. Después de la migración de los repositorios svn a los repositorios git en el servicio github, la comunidad decidió mantener este espíritu. Si usted ha firmado el documento :doc:`contributor agreement <contributors_agreement_explained>`_, puedes cometer directamente a la branch (para plone esto sería la versión del branch ej. la branch 4.1, para más otros paquetes esto sería el branch llamado ``master``).
+Plone uso un repositorio svn, así que todo el mundo es familiar y acostumbrado a hacer revisiones directamente a las branches. Después de la migración de los repositorios svn a los repositorios git en el servicio github, la comunidad decidió mantener este espíritu. Si usted ha firmado el documento :doc:`contributor agreement <contributors_agreement_explained>`, puedes cometer directamente a la branch (para plone esto sería la versión del branch ej. la branch 4.1, para más otros paquetes esto sería el branch llamado ``master``).
 
 AUN ASÍ, hay unas cuantas situaciones donde una hacer un nuevo branch es apropiado. Si usted:
  * usted se esta iniciando, 

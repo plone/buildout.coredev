@@ -89,7 +89,7 @@ Al menos, su paquete tendría que incluir las siguientes formas de documentació
   Licencias
     Información sobre la licencia del código abierto utilizada para el paquete tendría que ser colocado dentro del directorio ``docs``.
 
-    Para paquetes del núcleo Plone, esto incluye ``LICENSE.txt`` Y ``LICENSE.GPL`.
+    Para paquetes del núcleo Plone, esto incluye ``LICENSE.txt`` Y ``LICENSE.GPL``.
 
 
 Utilizando Sphinx

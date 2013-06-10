@@ -113,7 +113,7 @@ Parece no ser en realidad el caso. Eliminar el archivo 'mkzopeinstance.py' desde
 ejecute de nuevo el script buildout para corregir esto si usted está encontrando fastidioso.
 
 No puede abrir el archivo '/Startup/run.py'
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Dos posibles soluciones, usted esta usando Python 2.4 por equivocación, así que por favor use Python 2.6 en cambio. O, usted tal ves necesitar asegurarse que usted ejecuto el script 'bin/buildout …' después ejecutar el script 'bin/develop …'. Trate de remover los directorios parts/*, bin/*, el archivo .installed.cfg, entonces ejecute de nuevo el archivo bootstrap.py y ejecute de nuevo buildout, develop, buildout.
 
 PIL perdido

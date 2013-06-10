@@ -16,14 +16,16 @@ Who can submit PLIPs?
 
 What is a PLIP champion?
    When you submit your PLIP and it is approved, 1 Framework Team member who is especially excited about seeing the PLIP completed will be assigned to your PLIP as a champion. They are there to push you through completion as well as answer any questions and provide guidance. 
-    A champion should:
+
+    A champion should
+
       * Answer any questions the PLIP implementor has, technically and otherwise
       * Encourage the PLIP author by constantly giving feedback and encouragement
       * Keep the implementor aware of timelines and push to get things done on time
       * Assist with finding additional help when needed to complete the implementation in a timely matter
 
     Keep in mind that champions are in passive mode by default. If you need help or guidance, please reach out to them as soon as possible to activate help mode.
- 
+
 I’m still nervous. Can I get involved other ways at first?
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at XXX:Link. Make sure to let us know you intend to review the PLIP by joining the Framework Team mailing list (XXX:link) and sending a quick email.
     Then, follow the simple instructions for reviewing a PLIP (XXX:link). Thank you in advance!

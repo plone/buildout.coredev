@@ -1,7 +1,7 @@
 .. -*- coding: utf-8 -*-
 
 Acuerdo de contribución para Plone explicado
-===========================================
+============================================
 
 Prospective contributors to the Plone core code base are required to sign a
 contributor’s agreement, which assigns copyright in the code to the Plone
@@ -13,7 +13,7 @@ El acuerdo de contribución para Plone puede ser encontrado en:
 `http://plone.org/foundation/contributors-agreement/agreement.pdf`_
 
 Acerca del acuerdo de contribuidor de Plone
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The Foundation feels that it benefits the community for a single organization
 to hold the rights to Plone. Prior to the Foundation, the intellectual
@@ -36,7 +36,7 @@ felt that having the Foundation hold these rights provides several benefits:
 
 
 Preguntas & Respuestas
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 What does the contributor's agreement cover?
 
