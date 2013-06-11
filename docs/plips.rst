@@ -3,17 +3,10 @@ Implementing PLIPS
 
 All about PLIPS
 ---------------
-<<<<<<< HEAD
-What is a PLIP?
-    A PLIP is a Plone Improvement Proposal. It is a change to a Plone package that would affect everyone. PLIPs go through a different process than bug fixes because of their broad reaching effect. The Plone 4.x Framework Team reviews all PLIPs to be sure that it’s in the best interest of the broader community to be implemented and that it is of high quality.
-
-Is it a PLIP or a bugfix?
-=======
 **What is a PLIP?**
     A PLIP is a Plone Improvement Proposal. It is a change to a Plone package that would affect everyone. PLIPs go through a different process than bug fixes because of their broad reaching effect. The Plone 4.x Framework Team reviews all PLIPs to be sure that it’s in the best interest of the broader community to be implemented and that it is of high quality.
 
 **Is it a PLIP or a bugfix?**
->>>>>>> 4.4
     In general, anything that changes the API of Plone in the backend or UI on the front end should be filed as a PLIP. When in doubt, submit it as a PLIP. The framework team is eager to reduce its own workload and will re-classify it for you.
 
 **Who can submit PLIPs?**
@@ -21,14 +14,9 @@ Is it a PLIP or a bugfix?
     You do not have to be the most amazing coder in the entire world to submit a PLIP. The Framework Team is happy to help you at any point in the process. Submitting a PLIP can be a great learning process and we encourage people of all backgrounds to submit.  When the PLIP is accepted, a Framework Team member will “champion” your PLIP and be dedicated to seeing it completed.
     PLIPs are not just for code monkeys. If you have ideas on new interactions or UI your ideas are more than welcome. We will even help you pair up with implementors if needed.
 
-<<<<<<< HEAD
-What is a PLIP champion?
-    When you submit your PLIP and it is approved, 1 Framework Team member who is especially excited about seeing the PLIP completed will be assigned to your PLIP as a champion. They are there to push you through completion as well as answer any questions and provide guidance.
-=======
 **What is a PLIP champion?**
     When you submit your PLIP and it is approved, 1 Framework Team member who is especially excited about seeing the PLIP completed will be assigned to your PLIP as a champion. They are there to push you through completion as well as answer any questions and provide guidance.
 
->>>>>>> 4.4
     A champion should:
 
       * Answer any questions the PLIP implementor has, technically and otherwise
@@ -37,13 +25,6 @@ What is a PLIP champion?
       * Assist with finding additional help when needed to complete the implementation in a timely matter
 
     Keep in mind that champions are in passive mode by default. If you need help or guidance, please reach out to them as soon as possible to activate help mode.
-<<<<<<< HEAD
-
-I’m still nervous. Can I get involved other ways at first?
-    If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at XXX:Link. Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list <news://news.gmane.org/gmane.comp.web.zope.plone.teams.framework>`_ and sending a quick email.
-    Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`. Thank you in advance!
-=======
->>>>>>> 4.4
 
 **I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up. Simply ask on  of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `following link <https://dev.plone.org/report/24>`_. Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_ and sending a quick email.
@@ -75,11 +56,7 @@ Process Overview
 
 How to Submit a PLIP
 --------------------
-<<<<<<< HEAD
-Whether you want to update the default theme or rip out a piece of architecture, everyone should go through the PLIP process. If you need help at any point in this process, please contact a member of the framework team personally or ask for help on the `FWT mailing list <news://news.gmane.org/gmane.comp.web.zope.plone.teams.framework>`_.
-=======
 Whether you want to update the default theme or rip out a piece of architecture, everyone should go through the PLIP process. If you need help at any point in this process, please contact a member of the framework team personally or ask for help on the `FWT mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_.
->>>>>>> 4.4
 
 A PLIP is just a ticket with a special template. To get started, `open a new ticket <https://dev.plone.org/newticket>`_ and select "PLIP" as the ticket type. A new ticket template will reload and you should plan to fill in all of the fields.
 
