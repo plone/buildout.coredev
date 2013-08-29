@@ -27,9 +27,13 @@ Just add your name to the package that you are working on.
  [ ] plone.app.versioningbehavior
 
  [ ] plone.formwidget.datetime
- [ ] plone.formwidget.recurrence
 
  [ ] plonetheme.sunburst
 
  [ ] zope.testing
 
+
+DONE
+----
+
+ [X] plone.formwidget.recurrence (thet)
