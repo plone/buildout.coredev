@@ -12,7 +12,7 @@ Just add your name to the package that you are working on.
 
  [ ] plone.dexterity
 
- [ ] plone.app.content
+ [ ] plone.app.content (tisto)
  [ ] plone.app.controlpanel
  [ ] plone.app.dexterity
  [ ] plone.app.intid
