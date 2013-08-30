@@ -12,7 +12,6 @@ Just add your name to the package that you are working on.
 
  [ ] plone.dexterity
 
- [ ] plone.app.content (tisto)
  [ ] plone.app.controlpanel
  [ ] plone.app.dexterity
  [ ] plone.app.intid
@@ -32,6 +31,7 @@ Just add your name to the package that you are working on.
 DONE
 ----
 
+ [X] plone.app.content (tisto)
  [X] plone.app.discussion (tisto)
  [X] plone.app.redirector (tisto)
  [X] plone.formwidget.recurrence (thet)
