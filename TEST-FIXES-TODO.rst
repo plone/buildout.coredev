@@ -6,8 +6,6 @@ Just add your name to the package that you are working on.
  [ ] Products.CMFPlacefulWorkflow (tisto)
  [ ] Products.CMFPlone
 
- [ ] collective.elephantvocabulary
-
  [ ] grokcore.security
 
  [ ] plone.dexterity
@@ -28,6 +26,7 @@ Just add your name to the package that you are working on.
 DONE
 ----
 
+ [X] collective.elephantvocabulary (tisto)
  [X] plone.app.content (tisto)
  [X] plone.app.discussion (tisto)
  [X] plone.app.intid (tisto)
