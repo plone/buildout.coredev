@@ -24,8 +24,6 @@ Just add your name to the package that you are working on.
 
  [ ] plonetheme.sunburst
 
- [ ] zope.testing
-
 
 DONE
 ----
@@ -35,3 +33,4 @@ DONE
  [X] plone.app.intid (tisto)
  [X] plone.app.redirector (tisto)
  [X] plone.formwidget.recurrence (thet)
+ [X] zope.testing/zc.relation (tisto)
