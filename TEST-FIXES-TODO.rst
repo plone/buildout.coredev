@@ -3,7 +3,7 @@ TEST-FIXES TODO LIST
 
 Just add your name to the package that you are working on.
 
- [ ] Products.CMFPlacefulWorkflow
+ [ ] Products.CMFPlacefulWorkflow (tisto)
  [ ] Products.CMFPlone
 
  [ ] collective.elephantvocabulary
