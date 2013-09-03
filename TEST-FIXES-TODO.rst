@@ -6,7 +6,6 @@ Just add your name to the package that you are working on.
 | [ ] Products.CMFPlacefulWorkflow (tisto)
 | [ ] Products.CMFPlone
 |
-| [ ] plone.app.controlpanel
 | [ ] plone.app.layout
 | [ ] plone.app.portlets (thet)
 | [ ] plone.app.theming
@@ -22,6 +21,7 @@ DONE
 | [X] collective.elephantvocabulary (tisto)
 | [X] grokcore.security (davisagli)
 | [X] plone.app.content (tisto)
+| [X] plone.app.controlpanel (davisagli)
 | [X] plone.app.dexterity (davisagli)
 | [X] plone.app.discussion (tisto)
 | [X] plone.app.intid (tisto)
