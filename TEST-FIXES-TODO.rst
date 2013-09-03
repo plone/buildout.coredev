@@ -8,8 +8,6 @@ Just add your name to the package that you are working on.
 
  [ ] grokcore.security
 
- [ ] plone.dexterity
-
  [ ] plone.app.controlpanel
  [ ] plone.app.dexterity
  [ ] plone.app.layout
