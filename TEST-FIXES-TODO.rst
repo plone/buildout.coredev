@@ -10,14 +10,14 @@ Just add your name to the package that you are working on.
 
  [ ] plone.app.controlpanel
  [ ] plone.app.layout
- [ ] plone.app.portlets
+ [ ] plone.app.portlets (thet)
  [ ] plone.app.theming
  [ ] plone.app.users
  [ ] plone.app.versioningbehavior
 
- [ ] plone.formwidget.datetime
+ [ ] plone.formwidget.datetime (thet)
 
- [ ] plonetheme.sunburst
+ [ ] plonetheme.sunburst (thet)
 
 
 DONE
