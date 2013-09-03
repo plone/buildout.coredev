@@ -6,8 +6,6 @@ Just add your name to the package that you are working on.
 | [ ] Products.CMFPlacefulWorkflow (tisto)
 | [ ] Products.CMFPlone
 |
-| [ ] grokcore.security
-|
 | [ ] plone.app.controlpanel
 | [ ] plone.app.layout
 | [ ] plone.app.portlets (thet)
@@ -18,11 +16,11 @@ Just add your name to the package that you are working on.
 | [ ] plone.formwidget.datetime (thet)
 
 
-
 DONE
 ----
 
 | [X] collective.elephantvocabulary (tisto)
+| [X] grokcore.security (davisagli)
 | [X] plone.app.content (tisto)
 | [X] plone.app.dexterity (davisagli)
 | [X] plone.app.discussion (tisto)
