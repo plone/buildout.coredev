@@ -17,7 +17,6 @@ Just add your name to the package that you are working on.
 
  [ ] plone.formwidget.datetime (thet)
 
- [ ] plonetheme.sunburst (thet)
 
 
 DONE
@@ -31,4 +30,5 @@ DONE
  [X] plone.app.redirector (tisto)
  [X] plone.dexterity (davisagli)
  [X] plone.formwidget.recurrence (thet)
+ [X] plonetheme.sunburst (thet)
  [X] zope.testing/zc.relation (tisto)
