@@ -7,7 +7,6 @@ Just add your name to the package that you are working on.
 | [ ] Products.CMFPlone
 |
 | [ ] plone.app.layout
-| [ ] plone.app.portlets (thet)
 | [ ] plone.app.theming
 | [ ] plone.app.users
 | [ ] plone.app.versioningbehavior
@@ -25,6 +24,7 @@ DONE
 | [X] plone.app.dexterity (davisagli)
 | [X] plone.app.discussion (tisto)
 | [X] plone.app.intid (tisto)
+| [X] plone.app.portlets (thet)
 | [X] plone.app.redirector (tisto)
 | [X] plone.dexterity (davisagli)
 | [X] plone.formwidget.recurrence (thet)
