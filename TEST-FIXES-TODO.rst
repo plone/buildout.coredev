@@ -9,7 +9,6 @@ Just add your name to the package that you are working on.
  [ ] grokcore.security
 
  [ ] plone.app.controlpanel
- [ ] plone.app.dexterity
  [ ] plone.app.layout
  [ ] plone.app.portlets
  [ ] plone.app.theming
@@ -26,8 +25,10 @@ DONE
 
  [X] collective.elephantvocabulary (tisto)
  [X] plone.app.content (tisto)
+ [X] plone.app.dexterity (davisagli)
  [X] plone.app.discussion (tisto)
  [X] plone.app.intid (tisto)
  [X] plone.app.redirector (tisto)
+ [X] plone.dexterity (davisagli)
  [X] plone.formwidget.recurrence (thet)
  [X] zope.testing/zc.relation (tisto)
