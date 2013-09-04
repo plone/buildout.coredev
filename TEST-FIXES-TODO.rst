@@ -7,7 +7,7 @@ Just add your name to the package that you are working on.
 | [ ] Products.CMFPlone
 |
 | [ ] plone.app.layout
-| [ ] plone.app.theming
+| [ ] plone.app.theming (maartenkling)
 | [ ] plone.app.users
 | [ ] plone.app.versioningbehavior
 |
