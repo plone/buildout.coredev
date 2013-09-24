@@ -6,6 +6,7 @@ Just add your name to the package that you are working on.
 | [ ] Products.CMFPlacefulWorkflow (tisto)
 | [ ] Products.CMFPlone
 |
+| [ ] plone.app.caching
 | [ ] plone.app.layout
 | [ ] plone.app.theming (maartenkling)
 | [ ] plone.app.users
