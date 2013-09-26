@@ -13,6 +13,14 @@ Done
 | [X] plone.app.dexterity (tisto)
 
 
+Packages with test isolation problems
+=====================================
+
+ToDo
+
+| [ ] plone.app.dexterity (add it to the dexterity alltests group)
+
+
 Packages that use PloneTestCase
 ===============================
 
