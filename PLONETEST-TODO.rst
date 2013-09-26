@@ -1,3 +1,18 @@
+Packages that fail randomly
+===========================
+
+ToDo
+----
+
+| [ ] Products.CMFPlone.tests.test_robot.RobotTestCase.Scenario Delete content action overlay opens
+
+Done
+----
+
+| [X] plone.openid (tisto)
+| [X] plone.app.dexterity (tisto)
+
+
 Packages that use PloneTestCase
 ===============================
 
