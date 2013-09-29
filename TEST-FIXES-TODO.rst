@@ -5,6 +5,7 @@ Just add your name to the package that you are working on.
 
 | [ ] Products.CMFPlacefulWorkflow (tisto)
 | [ ] Products.CMFPlone
+| [ ] Products.TinyMCE
 |
 | [ ] plone.app.caching
 | [ ] plone.app.contentlisting
