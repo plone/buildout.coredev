@@ -34,3 +34,47 @@ DONE
 | [X] plone.formwidget.recurrence (thet)
 | [X] plonetheme.sunburst (thet)
 | [X] zope.testing/zc.relation (tisto)
+
+
+How To Fix
+==========
+
+plone.app.contenttypes fixture
+------------------------------
+
+setup.py::
+
+    extras_require={
+        'test': [
+            'plone.app.contenttypes',
+        ]
+    }
+
+testing.py::
+
+    from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
+
+    class PloneAppDiscussion(PloneSandboxLayer):
+
+        defaultBases = (PLONE_APP_CONTENTTYPES_FIXTURE,)
+
+
+dexterity
+---------
+
+setup.py::
+
+    extras_require={
+        'test': [
+            'dexterity',
+        ]
+    }
+
+testing.py::
+
+    from plone.dexterity.fti import DexterityFTI
+
+    def setUpPlone(self, portal):
+        fti = DexterityFTI('Document')
+        types_tool = getToolByName(portal, "portal_types")
+        types_tool._setObject('Document', fti)
