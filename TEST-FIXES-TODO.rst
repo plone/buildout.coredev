@@ -12,6 +12,7 @@ Just add your name to the package that you are working on.
 | [ ] plone.app.theming (maartenkling)
 | [ ] plone.app.users
 | [ ] plone.app.versioningbehavior
+| [ ] plone.portlet.collection
 |
 | [ ] plone.formwidget.datetime (thet)
 
