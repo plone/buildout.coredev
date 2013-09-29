@@ -13,7 +13,6 @@ Just add your name to the package that you are working on.
 | [ ] plone.app.theming (maartenkling)
 | [ ] plone.app.users
 | [ ] plone.app.versioningbehavior
-| [ ] plone.portlet.collection
 |
 | [ ] plone.formwidget.datetime (thet)
 
@@ -32,6 +31,7 @@ DONE
 | [X] plone.app.redirector (tisto)
 | [X] plone.dexterity (davisagli)
 | [X] plone.formwidget.recurrence (thet)
+| [X] plone.portlet.collection (tisto)
 | [X] plonetheme.sunburst (thet)
 | [X] zope.testing/zc.relation (tisto)
 
