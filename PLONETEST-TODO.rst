@@ -6,6 +6,9 @@ ToDo
 
 | [ ] Products.CMFPlone.tests.test_robot.RobotTestCase.Scenario Delete content action overlay opens
 
+| [ ] plone.app.blob.tests.test_replacements.ImageReplacementTests.testCatalogAfterImageMigration
+
+
 Done
 ----
 
