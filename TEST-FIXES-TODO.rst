@@ -29,11 +29,11 @@ DONE
 | [X] plone.app.redirector (tisto)
 | [X] plone.app.uuid (tisto)
 | [X] plone.dexterity (davisagli)
+| [X] plone.formwidget.datetime (thet)
 | [X] plone.formwidget.recurrence (thet)
 | [X] plone.portlet.collection (tisto)
 | [X] plonetheme.sunburst (thet)
 | [X] zope.testing/zc.relation (tisto)
-| [X] plone.formwidget.datetime (thet)
 
 
 How To Fix
