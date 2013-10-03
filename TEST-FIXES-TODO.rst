@@ -14,7 +14,6 @@ Just add your name to the package that you are working on.
 | [ ] plone.app.versioningbehavior
 |
 | [ ] plone.event
-| [ ] plone.formwidget.datetime (thet)
 
 
 DONE
@@ -36,6 +35,7 @@ DONE
 | [X] plone.portlet.collection (tisto)
 | [X] plonetheme.sunburst (thet)
 | [X] zope.testing/zc.relation (tisto)
+| [X] plone.formwidget.datetime (thet)
 
 
 How To Fix
