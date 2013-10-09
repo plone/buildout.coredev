@@ -68,7 +68,7 @@ Al menos, su paquete tendría que incluir las siguientes formas de documentació
 
     Si el código base está escrito con docstrings, la documentación de la API puede ser automáticamente generada utilizando Sphinx.
 
-  ``CHANGES.txt``
+  ``CHANGES.rst``
     El changelog o registro de cambios es un registro de todos los cambios que hizo al paquete y quién les hicieron, con los cambios más recientes en la parte superior. Esto está mantenido por separado del historial de revisión del git para dar una posibilidad de mensajes mas amigables al usuario al registrar cuándo las liberaciones estuvieran listas.
 
     Un changelog se parece a algo así::
@@ -97,6 +97,6 @@ Utilizando Sphinx
 
 Referencias reST:
  * `Documentación Shpinx orientada a Plone <http://collective-docs.plone.org/en/latest/introduction/writing.html>`_
- * `Manual básico Sphinx reST <http://sphinx.pocoo.org/rest.html>`_ 
+ * `Manual básico Sphinx reST <http://sphinx.pocoo.org/rest.html>`_
 
 Para añadir Sphinx a su paquete...
