@@ -282,13 +282,16 @@ This will make a remote branch in github. Navigate to this branch in the github 
 
     you still need to update ``checkouts.cfg`` file in the correct branches of buildout.coredev!
 
-Jenkins
--------
+Jenkins / mr.roboto
+-------------------
 
-You STILL aren't done! When you push any information to any Plone core package Mr. Roboto starts to work running all the needed tests to be sure that you don't breake anything. For each plone version, python version we run two jobs, one fast to get a fast answer about your package and a slow answer with all the tests on all the packages related to plone with your push.
-For more information you can check :doc:`Mr. Roboto workflow <roboto>` or our  `Jenkins machine <https://jenkins.plone.org/>`_.
+You STILL aren't done! When you push a change to any Plone core package our testing/CI middleware ``mr.roboto`` starts running all the tests that are
+needed to make sure that you don't break anything. For each Plone and Python
+version we run two jobs, one for the package itself (which will give you a fast feedback, within 10 minutes) and one on the full coredev build (which can take up until an hour, but makes sure no other packages are effected by
+your change.
 
-
+For more information you can check :doc:`Mr. Roboto workflow <roboto>` or our
+`Jenkins machine <https://jenkins.plone.org/>`_.
 
 The CI system at jenkins.plone.org is a shared resource for Plone core
 developers to notify them of regressions in Plone core code. Build breakages are a normal and expected part of the development process. Our aim is to find errors and eliminate them as quickly as possible, without expecting perfection and zero errors. Though, there are some essential practices that
