@@ -285,10 +285,9 @@ This will make a remote branch in github. Navigate to this branch in the github 
 Jenkins
 -------
 
-You STILL aren't done! Please check jenkins to make sure your changes haven't borked things. It runs every half an hour and takes a while to run so checking back in an hour is a safe bet. Have a beer and head over to the `Jenkins control panel <https://jenkins.plone.org/>`_.
+You STILL aren't done! When you push any information to any Plone core package Mr. Roboto starts to work running all the needed tests to be sure that you don't breake anything. For each plone version, python version we run two jobs, one fast to get a fast answer about your package and a slow answer with all the tests on all the packages related to plone with your push.
+For more information you can check :doc:`Mr. Roboto workflow <roboto>` or our  `Jenkins machine <https://jenkins.plone.org/>`_.
 
-.. note::
-    The paragraph above needs to be refactored.
 
 
 The CI system at jenkins.plone.org is a shared resource for Plone core
