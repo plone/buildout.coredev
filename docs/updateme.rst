@@ -1,11 +1,11 @@
 How to Update these Docs
 ========================
 
-These documents are currently stored with the coredev buildout in github in ``/docs``. To update them, please checkout the coredev buildout and update there. Make the changes on the latest version branch (as of this writing ``4.4``)::
+These documents are currently stored with the coredev buildout in github in ``/docs``. To update them, please checkout the coredev buildout and update there. Make the changes on the latest version branch (as of this writing ``5.0``)::
 
   > git clone git@github.com:plone/buildout.coredev.git
   > cd buildout.coredev
-  > git checkout 4.4
+  > git checkout 5.0
 
 To test your changes locally, re-run buildout and then::
 
