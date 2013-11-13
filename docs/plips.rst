@@ -134,6 +134,21 @@ In file ``plips/plip-1234-widget-frobbing.cfg``::
 Use the same naming convention when branching existing packages, and you
 should always be branching packages when working on PLIPs.
 
+If you are using a ``local.cfg`` to extend your plip file with some
+changes that you do not want to commit accidentally, be aware that you
+need to override some settings from ``plipbase.cfg`` to avoid some
+files being created in the plips directory or in the directory above
+the buildout directory.  Like this::
+
+  [buildout]
+  extends = plips/plip-1234-widget-frobbing.cfg
+  develop-eggs-directory = ./develop-eggs
+  bin-directory = ./bin
+  parts-directory = ./parts
+  sources-dir = ./src
+  installed = .installed.cfg
+
+
 Finishing Up
 ^^^^^^^^^^^^
 Before marking your PLIP as ready for review, please add a file to give a set of instructions to the PLIP reviewer.
