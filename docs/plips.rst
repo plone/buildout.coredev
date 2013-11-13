@@ -134,6 +134,14 @@ In file ``plips/plip-1234-widget-frobbing.cfg``::
 Use the same naming convention when branching existing packages, and you
 should always be branching packages when working on PLIPs.
 
+Working on a PLIP
+^^^^^^^^^^^^^^^^^
+
+To work on a PLIP, you run the bootstrap and then tell buildout to use
+this plip config::
+
+  bin/buildout -c plips/plip-1234-widget-frobbing.cfg
+
 If you are using a ``local.cfg`` to extend your plip file with some
 changes that you do not want to commit accidentally, be aware that you
 need to override some settings from ``plipbase.cfg`` to avoid some
