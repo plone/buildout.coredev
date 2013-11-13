@@ -156,6 +156,9 @@ the buildout directory.  Like this::
   sources-dir = ./src
   installed = .installed.cfg
 
+  [instance]
+  var = ./var
+
 
 Finishing Up
 ^^^^^^^^^^^^
