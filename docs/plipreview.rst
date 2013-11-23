@@ -7,7 +7,7 @@ A good PLIP review takes about 4 hours so please plan accordingly. When you are 
 
 Setting up the environment
 --------------------------
-Follow the instructions on [wiki:DevelopmentEnvironment setting up a development environment] for "Getting the Code". You will need to checkout the branch to which the PLIP is assigned. Instead of running the buildout with the default buildout file, you will run the config specific to that plip::
+Follow the instructions on `setting up a development environment <https://dev.plone.org/wiki/DevelopmentEnvironment>`_ for "Getting the Code". You will need to checkout the branch to which the PLIP is assigned. Instead of running the buildout with the default buildout file, you will run the config specific to that plip::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
@@ -56,7 +56,7 @@ Python
 
 Javascript
 ^^^^^^^^^^
- * Does the javascript meet our set of javascript standards? See http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
+ * Does the javascript meet our set of javascript standards? See http://developer.plone.org/templates_css_and_javascripts/javascript.html
  * Does the Javascript work in all currently supported browsers? Is it performant? 
 
 ME/TAL

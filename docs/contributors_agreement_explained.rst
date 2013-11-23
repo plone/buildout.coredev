@@ -102,9 +102,9 @@ How much would a non-GPL version of Plone cost?
   Would a small company be able to afford one? -- Neither the Foundation nor the Board have 
   made any decisions about a non-GPL version, let alone about pricing. However, one of the 
   Foundation's stated goals is to maintain a level playing field for Plone while trying to 
-  benefit all of the Plone commons.If a non-GPL version was available, and a large company 
+  benefit all of the Plone commons. If a non-GPL version was available, and a large company 
   bought it, added features to it, and sold it, wouldn't they be using our work without an
-  obligation to give back?It's helpful to remember the core value open source provides: distributed 
+  obligation to give back? It's helpful to remember the core value open source provides: distributed 
   development, maintenance, security checking, and support. Companies that build large features 
   for Plone are **already** having to make decisions of whether to release their products 
   under an open source license or not (since they could always release them as a Product, not 
