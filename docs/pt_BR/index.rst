@@ -1,3 +1,9 @@
+.. -*- coding: utf-8 -*-
+
+====================================
+Process for Plone core's development
+====================================
+
 Introdução
 ==========
 Esta documentação descreve o processo para desenvolvimento usando o Plone e é um recurso técnico para configurar seu core developer buildout, corrigir erros e escrever PLIP's (PLone Improvement Proposal - Propostas de Melhoria do Plone).
@@ -20,3 +26,14 @@ Sumário
    plips
    issues
    updateme
+   
+Others
+------
+
+These are some documents using as reference for this documentation.
+
+.. toctree::
+   :maxdepth: 1
+
+   mrdeveloper 
+   plipreview
