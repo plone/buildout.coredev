@@ -40,14 +40,14 @@ Otra cosa de la nota es que está ejecutando bootstrap efectivamente asocia al e
 
 Cuando Mr. Developer no es feliz
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-mr.developer nunca es feliz, excepto cuando es. A pesar de que esto técnicamente no es un incidente buildout, pasa cuándo esta ejecutando buildout, entonces yo lo estoy poniéndolo en las incidencias buildout.
+``mr.developer`` nunca es feliz, excepto cuando es. A pesar de que esto técnicamente no es un incidente buildout, pasa cuándo esta ejecutando buildout, entonces yo lo estoy poniéndolo en las incidencias buildout.
 
-Cuándo trabajando con la instancia de desarrollo, especialmente con toda el movimiento de ida y vuelta de cambios entre github y svn,usted puedes tener una copia vieja de un paquete en le directorio src. El error luce así::
+Cuándo trabajando con la instancia de desarrollo, especialmente con toda el movimiento de ida y vuelta de cambios entre github y svn, usted puedes tener una copia vieja de un paquete en le directorio ``src``. El error luce así::
  
     mr.developer: Can't update package 'Products.CMFPlone' because its URL doesn't match.
 
 
-Mientras usted no tenga cualquier revisión de cambios pendiente, usted solo necesita remover el paquete del directorio src/ y se vuelve a revisar para usted cuando se actualiza. 
+Mientras usted no tenga cualquier revisión de cambios pendiente, usted solo necesita remover el paquete del directorio ``src/`` y se vuelve a revisar para usted cuando se actualiza. 
 
 
 Usted también se puede conseguir con errores tan divertidos tales como::
@@ -63,7 +63,7 @@ Estos errores están bien para ser ignorados SI y SÓLO SI las líneas que sigue
 
 Si buildout termina con un aviso de que algunos paquetes no se pudo descargar, entonces es probable que el paquete no se ha descargado. Esto es malo y puede causar todo tipo de errores al iniciar o tratar de hacer las cosas porque nunca se llegan a descargar el paquete.
 
-Hay dos maneras de obtener este error desaparezca. Lo primero es eliminar todas las instancias del host filtrado. registrar minuciosamente todos los archivos y elimine cualquier lineas la cual diga así "allow-hosts =" y "allow-hosts +=". En teoría, mediante la restricción de los hosts del cual se va a descarga, buildout irá más rápido. Ya sea que realmente sucede o no, yo no puedo opinar. El punto es que son de seguramente se pueden eliminar.
+Hay dos maneras de obtener este error desaparezca. Lo primero es eliminar todas las instancias del host filtrado. registrar minuciosamente todos los archivos y elimine cualquier lineas la cual diga así ``allow-hosts =`` y ``allow-hosts +=``. En teoría, mediante la restricción de los hosts del cual se va a descarga, buildout irá más rápido. Ya sea que realmente sucede o no, yo no puedo opinar. El punto es que son de seguramente se pueden eliminar.
 
 La segunda opción es el permitir al host al cual ese apunta para ser añadido de algo como esto a su archivo .cfg::
 
@@ -76,19 +76,19 @@ Otra vez, esto es sólo necesario si el paquete no fue encontrado al final.
 Errores de ruta mr.developer
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
+``ERROR: You are not in a path which has mr.developer installed (:file:`.mr.developer.cfg` not found).``
 
-Cuando ejecuta algún comando ``./bin/develop``.
+Cuando ejecuta algún comando :command:`./bin/develop`.
 
 Para solucionar, simplemente ejecute el siguiente comando::
 
-  ``ln -s plips/.mr.developer.cfg``
+  ln -s plips/.mr.developer.cfg
 
 
 
 Otros incidentes aleatorios
 ---------------------------
-.. TODO: These need to be revalidated
+.. TODO: Esto necesita ser revalidada
 
 Paquetes Sucios
 ^^^^^^^^^^^^^^^
@@ -97,10 +97,10 @@ Paquetes Sucios
 
 Solución
 ~~~~~~~~
-mr.developer se queja porque un archivo se ha cambiado / añadido, pero no
+``mr.developer`` se queja porque un archivo se ha cambiado / añadido, pero no
 se ha generado una revisión.
 
-Utilice el comando ``bin/develop update --force``. Añadiendo ``*.pyc *~.nib *.egg-info
+Utilice el comando :command:`bin/develop update --force`. Añadiendo ``*.pyc *~.nib *.egg-info
 .installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` a su configuración subversion
 global-ignores ha sido sugerido como una solución más permanente.
 
@@ -109,28 +109,28 @@ No module named zope 2
 ^^^^^^^^^^^^^^^^^^^^^^
 ``ImportError: No module named Zope2" when building using a PLIP cfg file.``
 
-Parece no ser en realidad el caso. Eliminar el archivo 'mkzopeinstance.py' desde el directorio bin/ y
+Parece no ser en realidad el caso. Eliminar el archivo :file:`mkzopeinstance.py` desde el directorio :file:`bin/` y
 ejecute de nuevo el script buildout para corregir esto si usted está encontrando fastidioso.
 
 No puede abrir el archivo '/Startup/run.py'
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Dos posibles soluciones, usted esta usando Python 2.4 por equivocación, así que por favor use Python 2.6 en cambio. O, usted tal ves necesitar asegurarse que usted ejecuto el script 'bin/buildout …' después ejecutar el script 'bin/develop …'. Trate de remover los directorios parts/*, bin/*, el archivo .installed.cfg, entonces ejecute de nuevo el archivo bootstrap.py y ejecute de nuevo buildout, develop, buildout.
+Dos posibles soluciones, usted esta usando Python 2.4 por equivocación, así que por favor use Python 2.6 en cambio. O, usted tal ves necesitar asegurarse que usted ejecuto el script :command:`bin/buildout …` después ejecutar el script :command:`bin/develop …`. Trate de remover los directorios :file:`parts/*`, :file:`bin/*`, el archivo :file:`.installed.cfg`, entonces ejecute de nuevo el archivo :file:`bootstrap.py` y ejecute de nuevo buildout, develop, buildout.
 
 PIL perdido
 ^^^^^^^^^^^
-El archivo pil.cfg es incluido con esta configuración buildout para ayudar en instalación PIL. Ejecutar
-bin/buildout -c pil.cfg a instalar la librería PIL. Este método no funciona en Windows, así que
+El archivo :file:`pil.cfg` es incluido con esta configuración buildout para ayudar en instalación PIL. Ejecutar
+:command:`bin/buildout -c pil.cfg` a instalar la librería PIL. Este método no funciona en Windows, así que
 nosotros somos incapaces de correr él por defecto.
 
 
 Incidencias con paquetes egg modificado
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-El comando bin/develop status el mostrara que el paquete egg Products.CMFActionIcons ha sido
-modificado, but I haven't touched it.  Y ejecutando este comando bin/develop up esta previniendo 
+El comando :command:`bin/develop status` el mostrara que el paquete egg ``Products.CMFActionIcons`` ha sido
+modificado, pero no lo he tocado.  Y ejecutando este comando :command:`bin/develop up` esta previniendo 
 la actualización de todos los paquetes egg.
 
 Solución
 ~~~~~~~~
 
-Editar el archivo ~/.subversion/config y añadir eggtest*.egg a la lista de global-ignores
+Editar el archivo :file:`~/.subversion/config` y añadir eggtest*.egg a la lista de ``global-ignores``
 

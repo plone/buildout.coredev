@@ -31,20 +31,21 @@ comparar eso a::
 
 A la primera es, obviamente, mucho más fácil de leer, menos redundante y por lo general estéticamente más agradable.
 
-**Nota** Este ejemplo es casi tan terrible como el que viene. Necesitamos una mejor.
+.. note::
+    Este ejemplo es casi tan terrible como el que viene. Necesitamos una mejor.
 
 Reglas específicas
 ------------------
- * ¡No utiliza tabuladores en código de Python! Use espacios como indentado, a 4 espacios para cada nivel. Nosotros no "requerimos" `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, pero mucha gente lo usa y eso es bueno para usted.
+ * ¡No utiliza tabuladores en código de Python! Use espacios como indentado, a 4 espacios para cada nivel. Nosotros no **"requerimos"** `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, pero mucha gente lo usa y eso es bueno para usted.
  * Indentar apropiadamente, incluso en HTML. 
  * Nunca usar una excepción bare. Cualquier cosa como 'except: pass' es probable que sea revertido instantáneamente
  * Evitar tal:on-error, desde estas excepciones swallows
- * No use hasattr() - esto son swallows exceptions, por favor, en este caso use getattr(foo, 'bar', None). El problema con las swallowed exceptions,no es sólo el informe de errores pobre. Sino que esto también puede ocultar errores de conflicto (ConflictErrors), que indican que algo ha ido mal en el nivel de la ZODB!
+ * No use ``hasattr()`` - esto son swallows exceptions, por favor, en este caso use ``getattr(foo, 'bar', None)``. El problema con las swallowed exceptions,no es sólo el informe de errores pobre. Sino que esto también puede ocultar errores de conflicto (ConflictErrors), que indican que algo ha ido mal en el nivel de la ZODB!
  * Nunca, coloque ningún código HTML dentro del código Python y lo retorne como una cadena
- * No adquirir nada menos que sea absolutamente necesario, especialmente herramientas. Por ejemplo, en vez de utilizar g 'context.plone_utils', use::
+ * No adquirir nada menos que sea absolutamente necesario, especialmente herramientas. Por ejemplo, en vez de utilizar ``context.plone_utils``, use::
   
     from Products.CMFCore.utils import getToolByName
     plone_utils = getToolByName(context, 'plone_utils')
 
  * No coloque mucho de la lógica en las Plantillas de pagina Zope - ZPT (use Views en este caso!)
- * Recuerde agregar etiquetas i18n en ZPTs y código Python
+ * Recuerde agregar etiquetas `i18n <http://developer.plone.org/i18n/index.html>`_ en ZPTs y código Python
