@@ -43,28 +43,29 @@ Barceloneta theme
 
 - IMO, each column could be a "section" (column1-container, column2-container, content-container).
 
-- Wouldn't it be better to have each portlet wrapped in individual <aside> tags, contained within a <section> tag? I've done this for a client project like so::
+- Wouldn't it be better to have each portlet wrapped in individual <aside> tags, contained within a <section> tag? I've done this for a client project like so
+  ::
 
-  <!-- PORTLETS: wrap them in aside structure -->
-  <xsl:template match="//div[@id='portal-column-two']/div[contains(@class, 'portletWrapper')]">
-    <xsl:call-template name="portlet-aside-wrapper">
-      <xsl:with-param name="hash" select="./@id"/>
-      <xsl:with-param name="portlet" select="./dl"/>
-    </xsl:call-template>
-  </xsl:template>
-  <xsl:template name="portlet-aside-wrapper">
-    <xsl:param name="hash"/><!-- TODO: copy portlet hash to aside -->
-    <xsl:param name="portlet"/>
-    <aside>
-      <h2><xsl:copy-of select="$portlet/dt/*"/></h2>
-      <div class="portlet_body">
-        <xsl:for-each select="$portlet/dd">
-          <div class="block"><xsl:copy-of select="./*"/></div>
-          <!-- TODO: add even|odd to class attr vals of div -->
-        </xsl:for-each>
-      </div>
-    </aside>
-  </xsl:template>
+      <!-- PORTLETS: wrap them in aside structure -->
+      <xsl:template match="//div[@id='portal-column-two']/div[contains(@class, 'portletWrapper')]">
+        <xsl:call-template name="portlet-aside-wrapper">
+          <xsl:with-param name="hash" select="./@id"/>
+          <xsl:with-param name="portlet" select="./dl"/>
+        </xsl:call-template>
+      </xsl:template>
+      <xsl:template name="portlet-aside-wrapper">
+        <xsl:param name="hash"/><!-- TODO: copy portlet hash to aside -->
+        <xsl:param name="portlet"/>
+        <aside>
+          <h2><xsl:copy-of select="$portlet/dt/*"/></h2>
+          <div class="portlet_body">
+            <xsl:for-each select="$portlet/dd">
+              <div class="block"><xsl:copy-of select="./*"/></div>
+              <!-- TODO: add even|odd to class attr vals of div -->
+            </xsl:for-each>
+          </div>
+        </aside>
+      </xsl:template>
 
 
 - (In the long run, portlets itself should provide aside tags. Well, but then portlets already might be replaced by something better (tiles?).)
