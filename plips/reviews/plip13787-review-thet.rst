@@ -93,4 +93,3 @@ Open for discussion
 - What about Bootstrap 3 in Barceloneta and Bootstrap 2 in p.a.widgets? Can p.a.widgets be migrated to use Bootstrap 3, including all of it's widgets?  Can both coexist without interfering? It would be better to chose one framework and consistently use this one.
 
 - Should Barceloneta really include it's own Toolbar? Maybe p.a.Toolbar can be made in a way to optionally work without an iframe, by having everything toolbar specific in an own namespace and strong CSS/jQuery selectors using this namespace. Or maybe the iframe thing isn't so much of an issue.
-
