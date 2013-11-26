@@ -1,6 +1,9 @@
 PLIP 13787 Main Template / Barceloneta review
 =============================================
 
+Reviewer: Johannes Raggam, thet
+Platform: Ubuntu 12.10, Firefox 25.0.1
+
 
 General
 -------
@@ -15,6 +18,7 @@ General
 
 - There should be a note in README.rst, how to install Barceloneta. Running 
   ``$ make bootstrap`` is required.
+
 
 Clean theme
 -----------
@@ -111,24 +115,4 @@ Open for discussion
   made in a way to optionally work without an iframe, by having everything
   toolbar specific in an own namespace and strong CSS/jQuery selectors using
   this namespace. Or maybe the iframe thing isn't so much of an issue.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
