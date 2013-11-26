@@ -55,7 +55,7 @@ Barceloneta theme
     tags, contained within a <section> tag? I've done this for a client project
     like so:
 
-..code-block XML::
+.. code-block:: xml
 
       <!-- PORTLETS: wrap them in aside structure -->
       <xsl:template match="//div[@id='portal-column-two']/div[contains(@class, 'portletWrapper')]">
