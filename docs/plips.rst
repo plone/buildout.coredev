@@ -107,11 +107,11 @@ Creating a New PLIP Branch
 
 Create a buildout configuration file for your PLIP in the ``plips`` folder.
 Give it a descriptive name, starting with the PLIP number;
-``plip-1234-widget-frobbing.cfg`` for example. This file will define the
+:file:`plip-1234-widget-frobbing.cfg` for example. This file will define the
 branches/trunks you're working with in your PLIP. It should look something
 like this:
 
-In file ``plips/plip-1234-widget-frobbing.cfg``::
+In file :file:`plips/plip-1234-widget-frobbing.cfg`::
 
  [buildout]
  extends = plipbase.cfg
@@ -142,10 +142,10 @@ this plip config::
 
   bin/buildout -c plips/plip-1234-widget-frobbing.cfg
 
-If you are using a ``local.cfg`` to extend your plip file with some
+If you are using a :file:`local.cfg` to extend your plip file with some
 changes that you do not want to commit accidentally, be aware that you
-need to override some settings from ``plipbase.cfg`` to avoid some
-files being created in the plips directory or in the directory above
+need to override some settings from :file:`plipbase.cfg` to avoid some
+files being created in the :file:`plips` directory or in the directory above
 the buildout directory.  Like this::
 
   [buildout]
@@ -164,7 +164,7 @@ Finishing Up
 ^^^^^^^^^^^^
 Before marking your PLIP as ready for review, please add a file to give a set of instructions to the PLIP reviewer.
 
-This file should be called ``plip_<number>_notes.txt``. This should include (but is not limited to):
+This file should be called :file:`plip_<number>_notes.txt`. This should include (but is not limited to):
  * URLs pointing to all documentation created / updated
  * Any concerns, issues still remaining
  * Any weird buildout things

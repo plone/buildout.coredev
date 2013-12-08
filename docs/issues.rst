@@ -1,4 +1,4 @@
-﻿Troubleshooting
+Troubleshooting
 ===============
 
 Buildout Issues
@@ -38,14 +38,14 @@ Hooray!
 
 When Mr. Developer is Unhappy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-mr.developer is never unhappy, except when it is. Although this technically isn't a buildout issue, it happens when running buildout so I'm putting it under buildout issues.
+``mr.developer`` is never unhappy, except when it is. Although this technically isn't a buildout issue, it happens when running buildout so I'm putting it under buildout issues.
 
 When working with the dev instance, especially with all the moving back and forth between github and svn, you may have an old copy of a src package. The error looks like::
  
     mr.developer: Can't update package 'Products.CMFPlone' because its URL doesn't match.
 
 
-As long as you don't have any pending commits, you just need to remove the package from src/ and it will recheck it out for you when it updates. 
+As long as you don't have any pending commits, you just need to remove the package from :file:`src/` and it will recheck it out for you when it updates. 
 
 
 You can also get such fun errors as::
@@ -61,7 +61,7 @@ These are ok to ignore IF and ONLY IF the lines following it say::
 
 If buildout ends with warning you that some packages could not be downloaded, then chances are that package wasn't downloaded. This is bad and could cause all sorts of whack out errors when you start or try to run things because it never actually downloaded the package.
 
-There are two ways to get this error to go away. The first is to delete all instances of host filtering. Comb through all the files and delete any lines which say "allow-hosts =" and "allow-hosts +=". In theory, by restricting which hosts you download from, buildout will go faster. Whether that actually happens or not I can not judge. The point is that they are safely deletable.
+There are two ways to get this error to go away. The first is to delete all instances of host filtering. Comb through all the files and delete any lines which say ``allow-hosts =`` and ``allow-hosts +=``. In theory, by restricting which hosts you download from, buildout will go faster. Whether that actually happens or not I can not judge. The point is that they are safely deletable.
 
 The second option is to allow the host that it is pointing to by adding something like this to your .cfg::
 
@@ -74,13 +74,13 @@ Hooray!
 mr.developer Path Errors
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-``ERROR: You are not in a path which has mr.developer installed (.mr.developer.cfg not found).``
+``ERROR: You are not in a path which has mr.developer installed (:file:`.mr.developer.cfg` not found).``
 
-When running any ``./bin/develop`` command.
+When running any :command:`./bin/develop` command.
 
 To fix, simply do::
 
-  ``ln -s plips/.mr.developer.cfg``
+  ln -s plips/.mr.developer.cfg
 
 
 
@@ -95,10 +95,10 @@ Dirty Packages
 
 Fix
 ~~~
-mr.developer is complaining because a file has been changed/added, but not
+``mr.developer`` is complaining because a file has been changed/added, but not
 committed.
 
-Use ``bin/develop update --force``. Adding ``*.pyc *~.nib *.egg-info
+Use :command:`bin/develop update --force`. Adding ``*.pyc *~.nib *.egg-info
 .installed.cfg *.pt.py *.cpt.py *.zpt.py *.html.py *.egg`` to your subversion
 config's global-ignores has been suggested as a more permanent solution.
 
@@ -107,28 +107,28 @@ No module named zope 2
 ^^^^^^^^^^^^^^^^^^^^^^
 ``ImportError: No module named Zope2" when building using a PLIP cfg file.``
 
-Appears to not actually be the case. Delete 'mkzopeinstance.py' from bin/ and
+Appears to not actually be the case. Delete :file:`mkzopeinstance.py` from :file:`bin/` and
 rerun buildout to correct this if you're finding it irksome.
 
 Can't open file '/Startup/run.py'
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Two possible fixes, you are using Python 2.4 by mistake, so use 2.6 instead. Or, you may need to make sure you run 'bin/buildout …' after 'bin/develop …'. Try removing parts/*, bin/*, .installed.cfg, then re-bootstrap and re-run buildout, develop, buildout.
+Two possible fixes, you are using Python 2.4 by mistake, so use 2.6 instead. Or, you may need to make sure you run :command:`bin/buildout …` after :command:`bin/develop …`. Try removing :file:`parts/*`, :file:`bin/*`, :file:`.installed.cfg`, then re-bootstrap and re-run buildout, develop, buildout.
 
 Missing PIL
 ^^^^^^^^^^^
-pil.cfg is include within this buildout to aid in PIL installation. Run
-bin/buildout -c pil.cfg to install. This method does not work on Windows, so
+:file:`pil.cfg` is include within this buildout to aid in PIL installation. Run
+:command:`bin/buildout -c pil.cfg` to install. This method does not work on Windows, so
 we're unable to run it by default.
 
 
 Modified Egg Issues
 ^^^^^^^^^^^^^^^^^^^
-bin/develop status is showing that the Products.CMFActionIcons egg has been
+:command:`bin/develop status` is showing that the ``Products.CMFActionIcons`` egg has been
 modified, but I haven't touched it.  And this is preventing bin/develop up
 from updating all the eggs.
 
 Fix
 ~~~
 
-Edit ~/.subversion/config and add eggtest*.egg to the list of global-ignores
+Edit :file:`~/.subversion/config` and add eggtest*.egg to the list of global-ignores
 

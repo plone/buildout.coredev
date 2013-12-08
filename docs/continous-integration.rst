@@ -34,7 +34,7 @@ continue to work without breaking the first rule.
 There might be changes that have been checked in before your last update from
 the version control that might lead to a build failure in Jenkins in
 combination with your changes. Therefore it is essential that you check out
-(git pull) and run the tests again before you push your changes to github.
+(:command:`git pull`) and run the tests again before you push your changes to github.
 
 Furthermore, a common source of errors on check-in is to forget to add some
 files to the repository. If you follow this rule and your local build passes, you can be sure that this is because someone else checked in in the meantime,
@@ -81,7 +81,7 @@ developers to continue to work.
 
 Once you begin to enforce the previous rule, the result is often that
 developers start commenting out failing tests in order to get the build
-passign again as quick as possible. While this impulse is understandable, it is wrong. The tests have been passing for a while and then start to fail.
+passing again as quick as possible. While this impulse is understandable, it is wrong. The tests have been passing for a while and then start to fail.
 This means that we either caused a regression, made assumptions that are no
 longer valid, or the application has changed the functionality being tested for a valid reason.
 
@@ -95,12 +95,12 @@ delete it (if the functionality under test no longer exists).
 
 If you commit a change and all the tests you wrote pass, but others break, the
 build is still broken. This also applies to tests that fail in
-buildout.coredev and don't belong directly to the package you worked on.
+``buildout.coredev`` and don't belong directly to the package you worked on.
 Usually this means that you have introduced a regression bug into the
 application. It is  your responsibility — because you made the change — to fix all tests that are not passing as a result of your changes.
 
 There are some tests in Plone that fail randomly, we are always working on fixing those. If you think you hit such a test, try to fix it (better) or re-run the Jenkins job to see if it passes again. In any case the developer who
-made the commit is resposible to make it pass.
+made the commit is responsible to make it pass.
 
 
 *) Break the Build and Buy Caipirinhas for Everybody
@@ -111,7 +111,7 @@ fixed the build of course).
 
 .. note::
 
-    This rules applies only during sprints in Brazil.
+    This rule applies only during sprints in Brazil.
 
 
 Further Reading

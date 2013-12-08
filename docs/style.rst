@@ -29,20 +29,21 @@ compare that to::
 
 The former is obviously much easier to read, less redundant and generally more aesthetically pleasing.
 
-**Note** This example is just about as terrible as they come. We need a better one.
+.. note::
+    This example is just about as terrible as they come. We need a better one.
 
 Concrete Rules
 --------------
- * Do not use tabs in Python code! Use spaces as indenting, 4 spaces for each level. We don't "require" `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, but most people use it and it's good for you.
+ * Do not use tabs in Python code! Use spaces as indenting, 4 spaces for each level. We don't **"require"** `PEP8 <http://www.python.org/dev/peps/pep-0008/>`_, but most people use it and it's good for you.
  * Indent properly, even in HTML. 
- * Never use a bare except. Anything like 'except: pass' will likely be reverted instantly
- * Avoid tal:on-error, since this swallows exceptions
- * Don't use hasattr() - this swallows exceptions, use getattr(foo, 'bar', None) instead. The problem with swallowed exceptions is not just poor error reporting. This can also mask ConflictErrors, which indicate that something has gone wrong at the ZODB level!
+ * Never use a bare except. Anything like ``except: pass`` will likely be reverted instantly
+ * Avoid ``tal:on-error``, since this swallows exceptions
+ * Don't use ``hasattr()`` - this swallows exceptions, use ``getattr(foo, 'bar', None)`` instead. The problem with swallowed exceptions is not just poor error reporting. This can also mask ``ConflictErrors``, which indicate that something has gone wrong at the `ZODB level <http://developer.plone.org/troubleshooting/transactions.html#conflicterror>`_!
  * Never, ever put any HTML in Python code and return it as a string
- * Do not acquire anything unless absolutely necessary, especially tools. For example, instead of using 'context.plone_utils', use::
+ * Do not acquire anything unless absolutely necessary, especially tools. For example, instead of using ``context.plone_utils``, use::
   
     from Products.CMFCore.utils import getToolByName
     plone_utils = getToolByName(context, 'plone_utils')
 
- * Do not put too much logic in ZPT (use Views instead!)
- * Remember to add i18n tags in ZPTs and Python code
+ * Do not put too much logic in ZPT (use `Views <http://developer.plone.org/views/index.html>`_ instead!)
+ * Remember to add `i18n <http://developer.plone.org/i18n/index.html>`_ tags in ZPTs and Python code

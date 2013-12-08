@@ -25,12 +25,28 @@ Table of Awesome
    plips
    issues
    updateme
-   
+
+Others
+------
+
+These are some documents using as reference for this documentation.
+
+.. toctree::
+   :maxdepth: 1
+
+   contributors_agreement_explained
+   continous-integration
+   roboto
+   mrdeveloper 
+   plipreview
 
 Translations available
 ----------------------
 
 There are some initiatives to maintenance available translations in other languages for this documentation like:
 
--   :doc:`Spanish version <es/index>`.
--   :doc:`Portuguese version <pt_BR/index>`.
+.. toctree::
+   :maxdepth: 1
+
+   Spanish version <es/index>
+   Portuguese version <pt_BR/index>
