@@ -9,7 +9,7 @@ Una buena revisión del PLIP toma aproximadamente 4 horas así que por favor hag
 
 Instalando el entorno
 ---------------------
-Seguir las instrucciones en [wiki:DevelopmentEnvironment setting up a development environment] para "Conseguir el Código". Usted necesitará a tener una copia al branch del repositorio del cual el PLIP fue asignado. En vez de correr el buildout con el archivo predeterminado buildout, usted lo ejecutara el archivo especifico de configuración del plip::
+Seguir las instrucciones en `definiendo un entorno de desarrollo <https://dev.plone.org/wiki/DevelopmentEnvironment>`_ para "obtener el código fuente". Usted necesitará a tener una copia al branch del repositorio del cual el PLIP fue asignado. En vez de correr el buildout con el archivo predeterminado buildout, usted lo ejecutara el archivo especifico de configuración del plip::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
@@ -58,7 +58,7 @@ Python
 
 Javascript
 ^^^^^^^^^^
- * ¿El javascript conocer a nuestro conjunto de normas javascript? Ver http://plone.org/documentation/manual/developer-manual/client-side-functionality-javascript/javascript-standards/referencemanual-all-pages
+ * ¿El javascript conocer a nuestro conjunto de normas javascript? Ver http://developer.plone.org/templates_css_and_javascripts/javascript.html
  * ¿El Javascript funciona en todos los navegadores soportados actualmente? ¿Es eficaz? 
 
 ME/TAL

@@ -25,12 +25,28 @@ Tabla de contenidos
    plips
    issues
    updateme
-   
+
+Otros
+------
+
+Estos son algunos documentos a utilizar como referencia para esta documentación.
+
+.. toctree::
+   :maxdepth: 1
+
+   contributors_agreement_explained
+   continous-integration
+   roboto
+   mrdeveloper 
+   plipreview
 
 Traducciones disponibles
 ---------------------------
 
 Hay algunas iniciativas para mantener las traducciones disponibles en otros idiomas para esta documentación como las siguientes:
 
--   :doc:`Versión en Ingles <../index>`.
--   :doc:`Versión en Portugués <../pt_BR/index>`.
+.. toctree::
+   :maxdepth: 1
+
+   Versión en Ingles <../index>
+   Versión en Portugués <../pt_BR/index>
