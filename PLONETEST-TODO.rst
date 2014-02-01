@@ -79,3 +79,4 @@ Wont be migrated
 
 | [X] Products.ATContentTypes
 | [X] Products.PloneTestCase
+
