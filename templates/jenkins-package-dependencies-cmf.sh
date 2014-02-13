@@ -1,12 +1,12 @@
 #!/bin/sh
 PACKAGES="cmfcore cmfdefault cmfdifftool cmfdynamicviewfti cmfeditions cmfformcontroller cmfplacefulworkflow cmfquickinstallertool cmfuid"
 FOLDER=cmf-deps
-if [[ ! -d $FOLDER ]]
+if [ ! -d $FOLDER ]
 then
     mkdir $FOLDER
 fi
 
-if [[ ! -e package-dependencies.dot ]]
+if [ ! -e package-dependencies.dot ]
 then
     ./bin/jenkins-package-dependencies
 fi

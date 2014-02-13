@@ -1,7 +1,7 @@
 #!/bin/sh
 PACKAGES="CMFCore CMFDefault CMFDiffTool CMFDynamicViewFTI CMFEditions CMFFormController CMFPlacefulWorkflow CMFQuickInstallerTool CMFUid"
 FOLDER=cmf
-if [[ ! -d $FOLDER ]]
+if [ ! -d $FOLDER ]
 then
     mkdir $FOLDER
 fi
