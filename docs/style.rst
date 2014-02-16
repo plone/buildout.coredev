@@ -7,7 +7,7 @@ If you are not familiar with `PEP 8 <http://www.python.org/dev/peps/pep-0008>`_ 
 
 Naming Conventions
 ------------------
-Above all else, be consistent with any code your are modifying! Historically the code is all camel case, but many new libraries are in the PEP8 convention. The mailing list is exploding with debate over what is better so we'll leave the excersize of deciding what to do with the user.
+Above all else, be consistent with any code your are modifying! Historically the code is all camel case, but many new libraries are in the PEP8 convention. The mailing list is exploding with debate over what is better so we'll leave the exersize of deciding what to do with the user.
 
 File Conventions
 ----------------
