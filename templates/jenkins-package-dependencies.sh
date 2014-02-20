@@ -1,17 +1,28 @@
 #!/bin/sh
+DISTRIBUTIONS="${distributions}"
+FOLDER=deps
+if [ ! -d $FOLDER ]
+then
+    mkdir $FOLDER
+fi
+
 if [ ! -e package-dependencies.dot ]
 then
     ./bin/jenkins-package-dependencies
 fi
 
-package_name="${distribution}"
+for dist in $DISTRIBUTIONS
+do
+    echo "Generating dependencies graph for $dist"
 
-echo "Generating dependencies graph for $package_name"
+    dist_lowercase=`echo $dist | tr '[:upper:]' '[:lower:]'`
+    dist_path="$FOLDER/$dist"
 
-grep $package_name package-dependencies.dot > $package_name.dot
+    grep $dist_lowercase package-dependencies.dot > $dist_path.dot
 
-echo "digraph {" > $package_name-tmp.dot
-cat $package_name.dot >> $package_name-tmp.dot
-echo "}" >> $package_name-tmp.dot
+    echo "digraph {" > $dist_path-tmp.dot
+    cat $dist_path.dot >> $dist_path-tmp.dot
+    echo "}" >> $dist_path-tmp.dot
 
-dot -Tpng $package_name-tmp.dot -o $package_name.png
+    dot -Tpng $dist_path-tmp.dot -o $dist_path.png
+done
