@@ -1,9 +1,20 @@
 #!/bin/sh
-package_name="${distribution}"
-echo "Scanning for imports of $package_name"
+DISTRIBUTIONS="${distributions}"
+FOLDER=deps
+if [ ! -d $FOLDER ]
+then
+    mkdir $FOLDER
+fi
 
-grep --include=*.py -R $package_name parts/packages | grep -v "plone/app/contenttypes" > $package_name.txt
-sed -i 's/parts\/packages\///' $package_name.txt
+for dist in $DISTRIBUTIONS
+do
+    echo "Scanning for imports of $dist"
+    dist_folder=`echo $dist | sed 's/\./\//g'`
+    dist_path="$FOLDER/$dist"
 
-counter=`wc -l $package_name.txt |cut -d" " -f1`
-echo "Found $counter imports"
+    grep --include=*.py -R $dist parts/packages | grep -v $dist_folder > $dist_path.txt
+    sed -i 's/parts\/packages\///' $dist_path.txt
+
+    counter=`wc -l $dist_path.txt |cut -d" " -f1`
+    echo "Found $counter imports"
+done
