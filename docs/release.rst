@@ -34,6 +34,18 @@ https://github.com/esteele/esteele.manager/ has a script to handle
 
 - Check if CHANGES.rst is up-to-date (all changes, release date)
 - Check if version in setup.py is correct (alpha, beta, final release version)
+- Check if MANIFEST.in includes all files
 - Make release
 - Remove pkg from checkouts.cfg auto-checkout section
 - Add release to versions.cfg
+
+MANIFEST.in::
+
+  include *.txt
+  include *.rst
+
+  recursive-include docs *
+  recursive-include plone *
+
+  global-include *.mo
+  global-exclude *.pyc
