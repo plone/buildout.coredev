@@ -27,3 +27,13 @@ it's linked from the homepage
 
 https://github.com/esteele/esteele.manager/ has a script to handle
 #1 and zest.releaser hooks that take care of updating versions.cfg/checkouts.cfg after a package is released.
+
+
+#1 Check all packages for updates
+---------------------------------
+
+- Check if CHANGES.rst is up-to-date (all changes, release date)
+- Check if version in setup.py is correct (alpha, beta, final release version)
+- Make release
+- Remove pkg from checkouts.cfg auto-checkout section
+- Add release to versions.cfg
