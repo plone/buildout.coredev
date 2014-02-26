@@ -10,23 +10,32 @@ Plone Release Process
 6. Upload sdist packages
 7. Add versions.cfg
 8. Generate unified changelog
-9. Announce the soft-release to plone-dev, plone-qa
-10. (...wait...)
-11. Move from -pending to final.
-12. Update -latest links
-13. Create new release on launchpad (https://launchpad.net/plone/)
-14. Create release page on http://plone.org/products/plone/releases
-15. Send link to installers list (plone-installers@lists.sourceforge.net
-<mailto:plone-installers@lists.sourceforge.net>)
-16. Wait for installers to be uploaded to Launchpad, link on plone.org
+9. Notify i18n-team of upcoming release
+10. Announce the soft-release to plone-dev, plone-qa
+11. (...wait...)
+12. Update plone.app.locales version
+13. Move from -pending to final.
+14. Update -latest links
+15. Create new release on launchpad (https://launchpad.net/plone/)
+16. Create release page on http://plone.org/products/plone/releases
+17. Send links to installers list (plone-installers@lists.sourceforge.net
+<mailto:plone-installers@lists.sourceforge.net>)_
+18. Wait for installers to be uploaded to Launchpad, link on plone.org
 release page
-17. Mark release page as "final"
-18. Update PloneSoftwareCenter pointer to the newest release, so that
+19. Mark release page as "final"
+20. Update PloneSoftwareCenter pointer to the newest release, so that
 it's linked from the homepage
-19. Send out announcement to plone-announce
+21. Send out announcement to plone-announce
+22. Update #plone topic
 
-https://github.com/esteele/esteele.manager/ has a script to handle
-#1 and zest.releaser hooks that take care of updating versions.cfg/checkouts.cfg after a package is released.
+
+`esteele.manager<https://github.com/esteele/esteele.manager/>`_ has a script to handle:
+- Checking all packages for updates, modify versions.cfg/checkouts.cfg
+  accordingly (#1 above)
+- zest.releaser hooks to:
+  - Check to make sure the user has permission to upload the release to
+    pypi
+  - Update versions.cfg/checkouts.cfg after the package is released. (#)
 
 
 #1 Check all packages for updates
