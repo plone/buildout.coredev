@@ -40,6 +40,7 @@ https://github.com/esteele/esteele.manager/ has a script to handle
 - Make release ("bin/fullrelease")
 - Remove pkg from checkouts.cfg auto-checkout section
 - Add release to versions.cfg
+- Delete pkg from src directory
 - Run local buildout (to make sure the package is installable)
 - Run pkg tests (run alltests)
 
