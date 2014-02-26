@@ -32,12 +32,16 @@ https://github.com/esteele/esteele.manager/ has a script to handle
 #1 Check all packages for updates
 ---------------------------------
 
-- Check if CHANGES.rst is up-to-date (all changes, release date)
+- Check if CHANGES.rst is up-to-date (are all changes since the last release
+  included?)
 - Check if version in setup.py is correct (alpha, beta, final release version)
-- Check if MANIFEST.in includes all files
-- Make release
+- Check if MANIFEST.in includes all files (README.rst, CHANGES.rst)
+- Check if pkg follows best practice (README.rst, CHANGES.rst, src directory)
+- Make release ("bin/fullrelease")
 - Remove pkg from checkouts.cfg auto-checkout section
 - Add release to versions.cfg
+- Run local buildout (to make sure the package is installable)
+- Run pkg tests (run alltests)
 
 MANIFEST.in::
 
