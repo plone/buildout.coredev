@@ -1,10 +1,6 @@
 TEST-FIXES TODO LIST
 ====================
 
-Just add your name to the package that you are working on.
-
-| [ ] Products.CMFPlone
-|
 | [ ] plone.app.caching (tisto)
 | [ ] plone.app.contentlisting
 | [ ] plone.app.layout
@@ -17,6 +13,7 @@ DONE
 ----
 
 | [X] Products.CMFPlacefulWorkflow (tisto)
+| [X] Products.CMFPlone
 | [X] Products.TinyMCE (excluded from tests)
 | [X] collective.elephantvocabulary (tisto)
 | [X] grokcore.security (davisagli)
