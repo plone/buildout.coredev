@@ -47,9 +47,9 @@ it's linked from the homepage
 - Check if MANIFEST.in includes all files (README.rst, CHANGES.rst)
 - Check if pkg follows best practice (README.rst, CHANGES.rst, src directory)
 - Make release ("bin/fullrelease")
+- Delete pkg from src directory
 - Remove pkg from checkouts.cfg auto-checkout section
 - Add release to versions.cfg
-- Delete pkg from src directory
 - Run local buildout (to make sure the package is installable)
 - Run pkg tests (run alltests)
 
