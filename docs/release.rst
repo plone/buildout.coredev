@@ -42,16 +42,29 @@ it's linked from the homepage
 ---------------------------------
 
 - Check if CHANGES.rst is up-to-date (are all changes since the last release
-  included?)
-- Check if version in setup.py is correct (alpha, beta, final release version)
+  included?) => (compare "git log HEAD...<LAST_RELESE_TAG>" with CHANGES.rst)
+
+- Check if version in setup.py is correct and follows our versioning best practice (where to find this best practice?)
+
 - Check if MANIFEST.in includes all files (README.rst, CHANGES.rst)
+
 - Check if pkg follows best practice (README.rst, CHANGES.rst, src directory)
+
+- Commit and push changes if necessary.
+
 - Make release ("bin/fullrelease")
-- Delete pkg from src directory
+
+- Delete pkg from src directory (e.g. "rm -rf plone.app.layout")
+
 - Remove pkg from checkouts.cfg auto-checkout section
-- Add release to versions.cfg
+
+- Update package version in versions.cfg
+
 - Run local buildout (to make sure the package is installable)
-- Run pkg tests (run alltests)
+
+- Run pkg tests (e.g. "bin/test -s plone.app.layout")
+
+- Push Changes (Since we always start on a green build, we do not have to wait for Jenkins finish the build (the releas)
 
 MANIFEST.in::
 
