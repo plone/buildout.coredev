@@ -2,7 +2,33 @@
 Plone Release Process
 =====================
 
-1. Check all packages for updates, add to/remove from checkouts.cfg accordingly
+1. Check Jenkins Status
+
+Check latest Plone coredev job on jenkins.plone.org, it should be green, if it is not fix the problem first.
+
+2. Check out buildout.coredev
+
+git clone ...
+git checkout 5.0
+python bootstrap.py
+bin/buildout -c release.cfg
+
+3. Check Packages for Updates
+
+Check all packages for updates, add to/remove from checkouts.cfg accordingly.
+
+TODO: Add esteele.manager command for checks.
+
+This step might become obsolete in the future if we do the check for every single commit.
+
+4. Check packages individually
+
+  a) Check changelog (make sure CHANGES.rst is up-to-date)
+
+  b) Run checkmanifest
+
+
+
 2. Wait for green light from Jenkins
 3. Tag, release all packages
 4. Update versions.cfg, checkouts.cfg accordingly
