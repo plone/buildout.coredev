@@ -6,7 +6,7 @@ Process for Plone core's development
 
 Introduction
 ============
-This documentation describes the process for developing Plone. It is primarily a technical resource for setting up your core developer buildout, fixing bugs, and writing plips. 
+This documentation describes the process for developing Plone. It is primarily a technical resource for setting up your core developer buildout, fixing bugs, and writing plips.
 
 STOP!
 -----
@@ -24,6 +24,7 @@ Table of Awesome
    style
    plips
    issues
+   release
    updateme
 
 Others
@@ -37,7 +38,7 @@ These are some documents using as reference for this documentation.
    contributors_agreement_explained
    continous-integration
    roboto
-   mrdeveloper 
+   mrdeveloper
    plipreview
 
 Translations available
