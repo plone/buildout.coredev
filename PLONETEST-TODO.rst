@@ -29,6 +29,9 @@ Packages that use PloneTestCase
 
 (Add your name in brackets right behind the package if you plan to work on it)
 
+The number after each package is the issue number on Products.CMFPlone github
+issue tracker.
+
 Todo
 ----
 
