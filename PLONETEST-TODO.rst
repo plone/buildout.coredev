@@ -32,47 +32,50 @@ Packages that use PloneTestCase
 Todo
 ----
 
-| [ ] Products.CMFEditions
-| [ ] Products.CMFPlacefulWorkflow
-| [ ] Products.CMFPlone
-| [ ] Products.CMFFormController
-| [ ] Products.LinguaPlone
-| [ ] Products.PasswordResetTool
-| [ ] Products.PlonePAS
-| [ ] Products.ResourceRegistries
-| [ ] Products.contentmigration
+| [ ] Products.CMFEditions (#250)
+| [ ] Products.CMFPlacefulWorkflow (#249)
+| [ ] Products.CMFPlone (#248)
+| [ ] Products.CMFFormController (#247)
+| [ ] Products.LinguaPlone (#246)
+| [ ] Products.PasswordResetTool (#245)
+| [ ] Products.ResourceRegistries (#244)
+| [ ] Products.contentmigration (#243)
 
-| [ ] borg.localrole
+| [ ] borg.localrole (tomgross #222)
 
-| [ ] plone.app.openid
-| [ ] plone.app.upgrade
-| [ ] plone.app.versioningbehavior
-| [ ] plone.app.kss
-| [ ] plone.app.users
-| [ ] plone.app.viewletmanager
-| [ ] plone.app.customerize
-| [ ] plone.app.form
-| [ ] plone.app.iterate
-| [ ] plone.app.textfield
-| [ ] plone.app.layout
-| [ ] plone.app.portlets
-| [ ] plone.app.querystring
-| [ ] plone.app.workflow
-| [ ] plone.app.contentmenu
-| [ ] plone.app.vocabularies
-| [ ] plone.app.content
+| [ ] plone.app.upgrade (#234)
+| [ ] plone.app.versioningbehavior (jone - timo #223)
+| [ ] plone.app.kss (needs to be ported? - gforcada)
+| [ ] plone.app.users (gforcada #230)
+| [ ] plone.app.form (#241)
+| [ ] plone.app.iterate (bogdangi #227)
+| [ ] plone.app.content (#242)
+| [ ] plone.app.controlpanel (tomgross #222)
 
-| [ ] plone.browserlayer
-| [ ] plone.locking
-| [ ] plone.outputfilters
-| [ ] plone.portlet.static
-| [ ] plone.session
-| [ ] plone.theme
-| [ ] plonetheme.sunburst
+| [ ] plone.locking (tomgross #231)
+| [ ] plone.outputfilters (tisto #225)
 
 Done
 ----
 
+| [X] Products.PlonePAS (tomgross)
+
+| [X] plone.app.openid (tomgross)
+| [X] plone.app.viewletmanager (gforcada)
+| [X] plone.app.customerize (bogdangi)
+| [X] plone.app.textfield (tomgross)
+| [X] plone.app.layout (tomgross)
+| [X] plone.app.portlets (bogdangi)
+| [X] plone.app.querystring (tisto)
+| [X] plone.app.workflow (tomgross)
+| [X] plone.app.contentmenu (tomgross)
+| [X] plone.app.vocabularies (tisto)
+
+| [X] plone.browserlayer (tisto)
+| [X] plone.portlet.static (tisto)
+| [X] plone.session (tomgross)
+| [X] plone.theme (tisto)
+| [X] plonetheme.sunburst (tomgross)
 
 Wont be migrated
 ----------------
