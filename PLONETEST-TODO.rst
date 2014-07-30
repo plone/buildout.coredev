@@ -37,9 +37,8 @@ Todo
 
 | [ ] Products.CMFEditions (#250)
 | [ ] Products.CMFPlacefulWorkflow (#249)
-| [ ] Products.CMFPlone (#248)
+| [ ] Products.CMFPlone (half done #248)
 | [ ] Products.CMFFormController (#247)
-| [ ] Products.LinguaPlone (#246)
 | [ ] Products.PasswordResetTool (#245)
 | [ ] Products.ResourceRegistries (#244)
 | [ ] Products.contentmigration (#243)
@@ -86,3 +85,4 @@ Wont be migrated
 | [X] Products.ATContentTypes
 | [X] Products.PloneTestCase
 
+| [X] Products.LinguaPlone
