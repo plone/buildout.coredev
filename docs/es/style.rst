@@ -19,7 +19,7 @@ En Zope 2, los nombres de archivos que solía ser así MixedCase. En Python, y a
 
 comparar eso a::
 
-  from Products.PageTemplates.PageTemplate import PageTemplatePageTemplate
+  from Products.PageTemplates.PageTemplate import PageTemplate
 
 Los nombres de archivos debe ser ordenados y descriptivos. Piensa acerca de como un import podría leerse::
 

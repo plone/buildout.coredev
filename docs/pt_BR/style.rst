@@ -17,7 +17,7 @@ In Zope 2, file names used to be MixedCase. In Python, and thus in Plone going f
 
 compare that to::
 
-  from Products.PageTemplates.PageTemplate import PageTemplatePageTemplate
+  from Products.PageTemplates.PageTemplate import PageTemplate
 
 Filenames should be short and descriptive. Think about how an import would read::
 
