@@ -1,6 +1,10 @@
-How To Commit Fixes to Plone Core
+Getting started with development
 =================================
-This document assumes you want to fix a bug and will detail the full process. For more information on writing PLIPS, please :doc:`go here <plips>`.
+
+This document assumes you want to run the current latest Plone source,
+fix a bug in Plone, or test an addon in the context of the latest code,
+and will detail the full process.
+For more information on writing PLIPS, please :doc:`go here <plips>`.
 
 Version Support Policy
 ----------------------
