@@ -67,7 +67,7 @@ At the very least, your package should include the following forms of documentat
 
     If the codebase is written with docstrings, API documentation can be automatically generated using Sphinx.
 
-  :file:`CHANGES.txt`
+  :file:`CHANGES.rst`
     The changelog is a record of all the changes made to the package and who made them, with the most recent changes at the top. This is maintained separately from the git commit history to give a chance for more user-friendly messages and to and record when releases were made.
 
     A changelog looks something like::
@@ -88,7 +88,7 @@ At the very least, your package should include the following forms of documentat
   Licenses
     Information about the open source license used for the package should be placed within the :file:`docs` directory.
 
-    For Plone core packages, this includes :file:`LICENSE.txt` and :file:`LICENSE.GPL`.
+    For Plone core packages, this includes :file:`LICENSE.rst` and :file:`LICENSE.GPL`.
 
 
 Using Sphinx
@@ -96,5 +96,5 @@ Using Sphinx
 
 reST References:
  * `Plone Oriented Shpinx Documentation <http://developer.plone.org/reference_manuals/active/writing/index.html>`_
- * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_ 
+ * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_
 
