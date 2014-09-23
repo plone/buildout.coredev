@@ -1,10 +1,16 @@
+Build Status
+============
+
+Jenkins CI - Plone 5.0 - core:
 
 .. image:: http://jenkins.plone.org/buildStatus/icon?job=plone-5.0-python-2.7
     :target: http://jenkins.plone.org/job/plone-5.0-python-2.7/
     :alt: Jenkins CI - Plone 5.0 - core
 
+Jenkins CI - Plone 5.0 - with archetypes:
+
 .. image:: http://jenkins.plone.org/buildStatus/icon?job=plone-5.0-python-2.7-at
-    :target: http://jenkins.plone.org/job/plone-5.0-python-2.7/
+    :target: http://jenkins.plone.org/job/plone-5.0-python-2.7-at/
     :alt: Jenkins CI - Plone 5.0 - with Archetypes
 
 Introduction
