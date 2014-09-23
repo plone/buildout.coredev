@@ -7,11 +7,11 @@ Jenkins CI - Plone 4.3 - Python 2.7:
     :target: http://jenkins.plone.org/job/plone-4.3-python-2.7/
     :alt: Jenkins CI - Plone 4.3 - Python 2.7
 
-Jenkins CI - Plone 4.3 - Pythoin 2.6:
+Jenkins CI - Plone 4.3 - Python 2.6:
 
 .. image:: http://jenkins.plone.org/buildStatus/icon?job=plone-4.3-python-2.6
     :target: http://jenkins.plone.org/job/plone-4.3-python-2.6/
-    :alt: Jenkins CI - Plone 4.3 - Pyhton 2.6
+    :alt: Jenkins CI - Plone 4.3 - Python 2.6
 
 
 Introduction
