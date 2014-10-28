@@ -4,6 +4,7 @@ setSite(p)
 
 from zope.site.hooks import getSite
 
+import os
 
 portal = getSite()
 
@@ -31,10 +32,13 @@ module.exports = function(grunt) {{
         requirejs: {{
             {requirejs}
         }},
+        sed: {{
+            {sed}
+        }},
         watch: {{
             scripts: {{
                 files: {files},
-                tasks: ['requirejs', 'less']
+                tasks: ['requirejs', 'less', 'sed']
             }}
         }}
     }});
@@ -42,10 +46,19 @@ module.exports = function(grunt) {{
     grunt.loadNpmTasks('grunt-contrib-watch');
     grunt.loadNpmTasks('grunt-contrib-requirejs');
     grunt.loadNpmTasks('grunt-contrib-less');
+    grunt.loadNpmTasks('grunt-sed');
 
     grunt.registerTask('default', ['watch']);
-    grunt.registerTask('compile', ['requirejs', 'less']);
+    grunt.registerTask('compile', ['requirejs', 'less', 'sed']);
 }}
+"""
+
+sed_config = """
+    {name}: {{
+      path: '{path}',
+      pattern: '{pattern}',
+      replacement: '{destination}',
+    }},
 """
 
 requirejs_config = """
@@ -68,6 +81,7 @@ requirejs_config = """
 less_config = """
             {name}: {{
                 options: {{
+                    paths: {less_paths},
                     strictMath: false,
                     sourceMap: true,
                     outputSourceFiles: true,
@@ -169,11 +183,18 @@ for name, value in lessvariables.items():
         t_object = portal.unrestrictedTraverse(str(t.replace('LOCAL/', '').replace('\\"', '')), None)
         if t_object:
             t_file = resource_to_dir(t_object)
-            globalVars[name] = "'%s%s/'" % (less_trick, t_file)
+            t_file = t_file.replace(os.getcwd() + '/','')
+            globalVars[name] = "'%s/'" % t_file
         else:
             print "No file found: " + str(t.replace('LOCAL/', '').replace('\\"', ''))
     else:
         globalVars[name] = t
+
+# Path to search for less
+less_paths = []
+
+# To replace later with sed
+less_directories = {}
 
 for name, value in resources.items():
     for css in value.css:
@@ -181,7 +202,10 @@ for name, value in resources.items():
         local_src = portal.unrestrictedTraverse(css, None)
         if local_src:
             local_file = resource_to_dir(local_src)
-            globalVars[name.replace('.', '_')] = "'%s%s'" % (less_trick, local_file)
+            less_directories[css.rsplit('/', 1)[0]] = local_file.rsplit('/', 1)[0].replace(os.getcwd() + '/', '')
+            globalVars[name.replace('.', '_')] = "'%s'" % local_file.split('/')[-1]
+            if '/'.join(local_file.split('/')[:-1]) not in less_paths:
+                less_paths.append('/'.join(local_file.split('/')[:-1]))
         else:
             print "No file found: " + css
 
@@ -194,8 +218,9 @@ for g, src in globalVars.items():
 require_configs = ""
 less_files = ""
 less_final_config = ""
+sed_config_final = ""
 watch_files = []
-
+sed_count = 0
 for bkey, bundle in bundles.items():
     if bundle.compile:
         for resource in bundle.resources:
@@ -221,6 +246,10 @@ for bkey, bundle in bundles.items():
                 for css_file in res_obj.css:
                     css = portal.unrestrictedTraverse(css_file, None)
                     if css:
+                        # We count how many folders to bundle to plone
+                        elements = len(css_file.split('/'))
+                        relative_paths = '../' * (elements - 1)
+
                         main_css_path = resource_to_dir(css)
                         target_dir = '/'.join(bundle.csscompilation.split('/')[:-1])
                         target_name = bundle.csscompilation.split('/')[-1]
@@ -228,19 +257,31 @@ for bkey, bundle in bundles.items():
                         less_file = "\"%s/%s\": \"%s\"," % (target_path, target_name, main_css_path)
                         less_files += less_file
                         watch_files.append(main_css_path)
+                        # replace urls
+
+                        for webpath, direc in less_directories.items():
+                            sed_config_final += sed_config.format(
+                                path=target_path + '/' + target_name,
+                                name='sed' + str(sed_count),
+                                pattern=direc,
+                                destination=relative_paths + webpath)
+                            sed_count += 1
+
                     else:
                         print "No file found: " + script.js
                 less_files += '\n'
         less_final_config = less_config.format(
             name=bkey,
             globalVars=globalVars_string,
-            files=less_files)
+            files=less_files,
+            less_paths=json.dumps(less_paths))
 
 
 gruntfile = open('Gruntfile.js', 'w')
 gruntfile.write(gruntfile_template.format(
     less=less_final_config,
     requirejs=require_configs,
+    sed=sed_config_final,
     files=json.dumps(watch_files))
 )
 gruntfile.close()
