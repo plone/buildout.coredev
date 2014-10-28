@@ -42,18 +42,10 @@ module.exports = function(grunt) {{
     grunt.loadNpmTasks('grunt-contrib-watch');
     grunt.loadNpmTasks('grunt-contrib-requirejs');
     grunt.loadNpmTasks('grunt-contrib-less');
-    grunt.loadNpmTasks('grunt-contrib-concat');
 
     grunt.registerTask('default', ['watch']);
-    grunt.registerTask('compile', ['requirejs', 'less', 'concat']);
+    grunt.registerTask('compile', ['requirejs', 'less']);
 }}
-"""
-
-concat_config = """
-            "{name}": {{
-              src: {sources},
-              dest: {destination},
-            }},
 """
 
 requirejs_config = """
@@ -98,6 +90,7 @@ from plone.resource.file import FilesystemFile
 from Products.Five.browser.resource import FileResource
 from Products.Five.browser.resource import DirectoryResource
 from plone.resource.directory import FilesystemResourceDirectory
+from Products.CMFCore.FSFile import FSFile
 
 
 def resource_to_dir(resource):
@@ -117,6 +110,8 @@ def resource_to_dir(resource):
         return resource.context.path
     elif isinstance(resource, FilesystemResourceDirectory):
         return resource.directory
+    elif isinstance(resource, FSFile):
+        return resource._filepath
     else:
         print "Missing resource type"
         return None
