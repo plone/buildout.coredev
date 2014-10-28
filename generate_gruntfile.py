@@ -59,7 +59,8 @@ requirejs_config = """
                     wrapShim: true,
                     name: '{name}',
                     out: '{out}',
-                    optimize: "uglify"
+                    optimize: "uglify",
+                    exclude: ['jquery']
                 }}
             }},
 """
