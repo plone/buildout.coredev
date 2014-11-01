@@ -72,8 +72,7 @@ requirejs_config = """
                     wrapShim: true,
                     name: '{name}',
                     out: '{out}',
-                    optimize: "uglify",
-                    exclude: ['jquery']
+                    optimize: "uglify"
                 }}
             }},
 """
@@ -266,6 +265,14 @@ for bkey, bundle in bundles.items():
                                 pattern=direc,
                                 destination=relative_paths + webpath)
                             sed_count += 1
+
+                        # replace the final missing paths
+                        sed_config_final += sed_config.format(
+                            path=target_path + '/' + target_name,
+                            name='sed' + str(sed_count),
+                            pattern=os.getcwd(),
+                            destination='')
+                        sed_count += 1
 
                     else:
                         print "No file found: " + script.js
