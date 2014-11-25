@@ -1,4 +1,4 @@
-p = app.Plone
+p = app.Plone  # noqa
 from zope.site.hooks import setSite
 setSite(p)
 
@@ -17,8 +17,8 @@ from zope.component import getUtility
 from plone.registry.interfaces import IRegistry
 
 registry = getUtility(IRegistry)
-bundles = registry.collectionOfInterface(IBundleRegistry, prefix="plone.bundles")
-resources = registry.collectionOfInterface(IResourceRegistry, prefix="plone.resources")
+bundles = registry.collectionOfInterface(IBundleRegistry, prefix="plone.bundles")  # noqa
+resources = registry.collectionOfInterface(IResourceRegistry, prefix="plone.resources")  # noqa
 lessvariables = registry.records['plone.lessvariables'].value
 
 gruntfile_template = """
@@ -90,7 +90,7 @@ less_config = """
                     }}
                 }},
                 files: {{
-                    {files}                  
+                    {files}
                 }}
             }}
 """
@@ -158,7 +158,7 @@ for requirejs, script in resources.items():
             print "No file found: " + script.js
     if script.url:
         # Resources available under name-url name
-        paths[requirejs + '-url'] = resource_to_dir(portal.unrestrictedTraverse(script.url))
+        paths[requirejs + '-url'] = resource_to_dir(portal.unrestrictedTraverse(script.url))  # noqa
 
 
 # LESS CONFIGURATION
@@ -179,13 +179,13 @@ for name, value in lessvariables.items():
 for name, value in lessvariables.items():
     t = value.format(**less_vars_params)
     if 'LOCAL' in t:
-        t_object = portal.unrestrictedTraverse(str(t.replace('LOCAL/', '').replace('\\"', '')), None)
+        t_object = portal.unrestrictedTraverse(str(t.replace('LOCAL/', '').replace('\\"', '')), None)  # noqa
         if t_object:
             t_file = resource_to_dir(t_object)
-            t_file = t_file.replace(os.getcwd() + '/','')
+            t_file = t_file.replace(os.getcwd() + '/', '')
             globalVars[name] = "'%s/'" % t_file
         else:
-            print "No file found: " + str(t.replace('LOCAL/', '').replace('\\"', ''))
+            print "No file found: " + str(t.replace('LOCAL/', '').replace('\\"', ''))  # noqa
     else:
         globalVars[name] = t
 
@@ -201,8 +201,8 @@ for name, value in resources.items():
         local_src = portal.unrestrictedTraverse(css, None)
         if local_src:
             local_file = resource_to_dir(local_src)
-            less_directories[css.rsplit('/', 1)[0]] = local_file.rsplit('/', 1)[0].replace(os.getcwd() + '/', '')
-            globalVars[name.replace('.', '_')] = "'%s'" % local_file.split('/')[-1]
+            less_directories[css.rsplit('/', 1)[0]] = local_file.rsplit('/', 1)[0].replace(os.getcwd() + '/', '')  # noqa
+            globalVars[name.replace('.', '_')] = "'%s'" % local_file.split('/')[-1]  # noqa
             if '/'.join(local_file.split('/')[:-1]) not in less_paths:
                 less_paths.append('/'.join(local_file.split('/')[:-1]))
         else:
@@ -230,7 +230,7 @@ for bkey, bundle in bundles.items():
                     main_js_path = resource_to_dir(js_object)
                     target_dir = '/'.join(bundle.jscompilation.split('/')[:-1])
                     target_name = bundle.jscompilation.split('/')[-1]
-                    target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))
+                    target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))  # noqa
                     watch_files.append(main_js_path)
                     rc = requirejs_config.format(
                         bkey=resource,
@@ -250,10 +250,10 @@ for bkey, bundle in bundles.items():
                         relative_paths = '../' * (elements - 1)
 
                         main_css_path = resource_to_dir(css)
-                        target_dir = '/'.join(bundle.csscompilation.split('/')[:-1])
+                        target_dir = '/'.join(bundle.csscompilation.split('/')[:-1])  # noqa
                         target_name = bundle.csscompilation.split('/')[-1]
-                        target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))
-                        less_file = "\"%s/%s\": \"%s\"," % (target_path, target_name, main_css_path)
+                        target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))  # noqa
+                        less_file = "\"%s/%s\": \"%s\"," % (target_path, target_name, main_css_path)  # noqa
                         less_files += less_file
                         watch_files.append(main_css_path)
                         # replace urls
