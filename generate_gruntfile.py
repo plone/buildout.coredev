@@ -35,10 +35,13 @@ module.exports = function(grunt) {{
         sed: {{
             {sed}
         }},
+        uglify: {{
+            {uglify}
+        }},
         watch: {{
             scripts: {{
                 files: {files},
-                tasks: ['requirejs', 'less', 'sed']
+                tasks: ['requirejs', 'less', 'sed', 'uglify']
             }}
         }}
     }});
@@ -46,10 +49,11 @@ module.exports = function(grunt) {{
     grunt.loadNpmTasks('grunt-contrib-watch');
     grunt.loadNpmTasks('grunt-contrib-requirejs');
     grunt.loadNpmTasks('grunt-contrib-less');
+    grunt.loadNpmTasks('grunt-contrib-uglify');
     grunt.loadNpmTasks('grunt-sed');
 
     grunt.registerTask('default', ['watch']);
-    grunt.registerTask('compile', ['requirejs', 'less', 'sed']);
+    grunt.registerTask('compile', ['requirejs', 'less', 'sed', 'uglify']);
 }}
 """
 
@@ -72,9 +76,21 @@ requirejs_config = """
                     wrapShim: true,
                     name: '{name}',
                     out: '{out}',
-                    optimize: "uglify"
+                    optimize: "none"
                 }}
             }},
+"""
+uglify_config = """
+        {bkey}: {{
+          options: {{
+            sourceMap: true,
+            sourceMapName: '{src}.min.js.map',
+            sourceMapIncludeSources: false
+          }},
+          files: {{
+            '{src}.min.js': ['{src}.js']
+          }}
+        }}
 """
 
 less_config = """
@@ -215,6 +231,7 @@ for g, src in globalVars.items():
 # BUNDLE LOOP
 
 require_configs = ""
+uglify_configs = ""
 less_files = ""
 less_final_config = ""
 sed_config_final = ""
@@ -230,6 +247,11 @@ for bkey, bundle in bundles.items():
                     main_js_path = resource_to_dir(js_object)
                     target_dir = '/'.join(bundle.jscompilation.split('/')[:-1])
                     target_name = bundle.jscompilation.split('/')[-1]
+                    if '.min.js' in target_name:
+                        # minified version in new resource registry
+                        target_name = target_name.rpartition('.min.js')[0]
+                    else:
+                        target_name = target_name.rpartition('.js')[0]
                     target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))  # noqa
                     watch_files.append(main_js_path)
                     rc = requirejs_config.format(
@@ -237,9 +259,14 @@ for bkey, bundle in bundles.items():
                         paths=json.dumps(paths),
                         shims=json.dumps(shims),
                         name=main_js_path,
-                        out=target_path + '/' + target_name
+                        out=target_path + '/' + target_name + '.js'
                     )
                     require_configs += rc
+                    uc = uglify_config.format(
+                        bkey=resource,
+                        src=target_path + '/' + target_name  # noqa
+                    )
+                    uglify_configs += uc
 
             if res_obj.css:
                 for css_file in res_obj.css:
@@ -288,6 +315,7 @@ gruntfile = open('Gruntfile.js', 'w')
 gruntfile.write(gruntfile_template.format(
     less=less_final_config,
     requirejs=require_configs,
+    uglify=uglify_configs,
     sed=sed_config_final,
     files=json.dumps(watch_files))
 )
