@@ -59,6 +59,8 @@ parser.add_option("-f", "--find-links",
 parser.add_option("--allow-site-packages",
                   action="store_true", default=False,
                   help=("Let bootstrap.py use existing site packages"))
+parser.add_option("--setuptools-version",
+                  help="use a specific setuptools version")
 
 
 options, args = parser.parse_args()
@@ -75,8 +77,8 @@ except ImportError:
     from urllib2 import urlopen
 
 ez = {}
-exec(urlopen('https://bootstrap.pypa.io/ez_setup.py'
-            ).read(), ez)
+exec(urlopen('https://bootstrap.pypa.io/ez_setup.py').read(), ez)
+
 if not options.allow_site_packages:
     # ez_setup imports site, which adds site packages
     # this will remove them from the path to ensure that incompatible versions
@@ -89,6 +91,10 @@ if not options.allow_site_packages:
             sys.path[:] = [x for x in sys.path if sitepackage_path not in x]
 
 setup_args = dict(to_dir=tmpeggs, download_delay=0)
+
+if options.setuptools_version is not None:
+    setup_args['version'] = options.setuptools_version
+
 ez['use_setuptools'](**setup_args)
 import setuptools
 import pkg_resources
@@ -128,10 +134,15 @@ if version is None and not options.accept_buildout_test_releases:
     _final_parts = '*final-', '*final'
 
     def _final_version(parsed_version):
-        for part in parsed_version:
-            if (part[:1] == '*') and (part not in _final_parts):
-                return False
-        return True
+        try:
+            return not parsed_version.is_prerelease
+        except AttributeError:
+            # Older setuptools
+            for part in parsed_version:
+                if (part[:1] == '*') and (part not in _final_parts):
+                    return False
+            return True
+
     index = setuptools.package_index.PackageIndex(
         search_path=[setuptools_path])
     if find_links:
@@ -158,8 +169,7 @@ cmd.append(requirement)
 import subprocess
 if subprocess.call(cmd, env=dict(os.environ, PYTHONPATH=setuptools_path)) != 0:
     raise Exception(
-        "Failed to execute command:\n%s",
-        repr(cmd)[1:-1])
+        "Failed to execute command:\n%s" % repr(cmd)[1:-1])
 
 ######################################################################
 # Import and run buildout
