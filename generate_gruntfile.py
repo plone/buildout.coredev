@@ -5,11 +5,12 @@ setSite(p)
 from zope.site.hooks import getSite
 
 import os
+import uuid
 
 portal = getSite()
 
 import json
-
+from plone.subrequest import subrequest
 from Products.CMFPlone.interfaces import (
     IBundleRegistry,
     IResourceRegistry)
@@ -90,7 +91,7 @@ uglify_config = """
           files: {{
             '{src}.min.js': ['{src}.js']
           }}
-        }}
+        }},
 """
 
 less_config = """
@@ -100,7 +101,11 @@ less_config = """
                     strictMath: false,
                     sourceMap: true,
                     outputSourceFiles: true,
+                    strctImports: true,
                     relativeUrls: true,
+                    plugins: [
+                        new require('less-plugin-inline-urls'),
+                    ],
                     modifyVars: {{
                       {globalVars}
                     }}
@@ -111,10 +116,6 @@ less_config = """
             }}
 """
 
-less_trick = ".."
-for i in range(20):
-    less_trick += "/.."
-
 
 from plone.resource.file import FilesystemFile
 from Products.Five.browser.resource import FileResource
@@ -122,8 +123,10 @@ from Products.Five.browser.resource import DirectoryResource
 from plone.resource.directory import FilesystemResourceDirectory
 from Products.CMFCore.FSFile import FSFile
 
+temp_resource_folder = 'temp_resources'
 
-def resource_to_dir(resource):
+
+def resource_to_dir(resource, file_type='.js'):
     if resource.__module__ == 'Products.Five.metaclass':
         try:
             return resource.chooseContext().path
@@ -131,7 +134,25 @@ def resource_to_dir(resource):
             try:
                 return resource.context.path
             except:
-                return None
+                try:
+                    if callable(resource):
+                        file_name = uuid.uuid4().hex
+                        try:
+                            os.mkdir(temp_resource_folder)
+                        except OSError:
+                            pass
+                        full_file_name = temp_resource_folder + '/' + file_name + file_type
+                        temp_file = open(full_file_name, 'w')
+                        temp_file.write(resource().encode('utf-8'))
+                        temp_file.close()
+
+                        return os.getcwd() + '/' + full_file_name
+                    else:
+                        print "Missing resource type"
+                        return None
+                except:
+                    print "Missing resource type"
+                    return None
     elif isinstance(resource, FilesystemFile):
         return resource.path
     elif isinstance(resource, FileResource):
@@ -154,22 +175,39 @@ for requirejs, script in resources.items():
     if script.js:
         # Main resource js file
         resource_file = portal.unrestrictedTraverse(script.js, None)
+        src = None
         if resource_file:
-            src = resource_to_dir(resource_file)
-            if src:
-                # Extract .js
-                paths[requirejs] = src[:-3]
-                exports = script.export
-                deps = script.deps
-                inits = script.init
-                if exports != '' or deps != '' or inits != '':
-                    shims[requirejs] = {}
-                    if exports != '' and exports is not None:
-                        shims[requirejs]['exports'] = exports
-                    if deps != '' and deps is not None:
-                        shims[requirejs]['deps'] = deps.split(',')
-                    if inits != '' and inits is not None:
-                        shims[requirejs]['init'] = inits
+            local_file = resource_to_dir(resource_file)
+        else:
+            # In case is not found on traverse we dump it from request to file
+            response = subrequest(portal.absolute_url() + '/' + script.js)
+            local_file = None
+            if response.status == 200:
+                js_body = response.getBody()
+                file_name = uuid.uuid4().hex
+                try:
+                    os.mkdir(temp_resource_folder)
+                except OSError:
+                    pass
+                local_file = temp_resource_folder + '/' + file_name + '.js'
+                temp_file = open(local_file, 'w')
+                temp_file.write(js_body.encode('utf-8'))
+                temp_file.close()
+
+        if local_file:
+            # Extract .js
+            paths[requirejs] = local_file[:-3]
+            exports = script.export
+            deps = script.deps
+            inits = script.init
+            if exports != '' or deps != '' or inits != '':
+                shims[requirejs] = {}
+                if exports != '' and exports is not None:
+                    shims[requirejs]['exports'] = exports
+                if deps != '' and deps is not None:
+                    shims[requirejs]['deps'] = deps.split(',')
+                if inits != '' and inits is not None:
+                    shims[requirejs]['init'] = inits
         else:
             print "No file found: " + script.js
     if script.url:
@@ -215,9 +253,32 @@ for name, value in resources.items():
     for css in value.css:
         # less vars can't have dots on it
         local_src = portal.unrestrictedTraverse(css, None)
+        extension = css.split('.')[-1]
         if local_src:
-            local_file = resource_to_dir(local_src)
+            local_file = resource_to_dir(local_src, file_type=extension)
+        else:
+            # In case is not found on traverse we dump it from request to file
+            response = subrequest(portal.absolute_url() + '/' + css)
+            local_file = None
+            if response.status == 200:
+                css_body = response.getBody()
+                file_name = uuid.uuid4().hex
+                try:
+                    os.mkdir(temp_resource_folder)
+                except OSError:
+                    pass
+                local_file = temp_resource_folder + '/' + file_name + '.js'
+                temp_file = open(local_file, 'w')
+                temp_file.write(css_body.encode('utf-8'))
+                temp_file.close()
+
+        if local_file:
             less_directories[css.rsplit('/', 1)[0]] = local_file.rsplit('/', 1)[0].replace(os.getcwd() + '/', '')  # noqa
+            # local_file = local_file.replace(os.getcwd(), '')
+            # relative = ''
+            # for i in range(len(local_file.split('/'))):
+            #     relative += '../'
+            # globalVars[name.replace('.', '_')] = "'%s'" % local_file  # noqa
             globalVars[name.replace('.', '_')] = "'%s'" % local_file.split('/')[-1]  # noqa
             if '/'.join(local_file.split('/')[:-1]) not in less_paths:
                 less_paths.append('/'.join(local_file.split('/')[:-1]))
