@@ -14,7 +14,7 @@ Dependencies
 ------------
 * `Git <http://help.github.com/mac-set-up-git/>`_
 * `Subversion <http://subversion.apache.org/>`_
-* `Python <http://python.org/>`_ 2.6 or 2.7 including development headers.
+* `Python <http://python.org/>`_ 2.7 including development headers.
 * If you are on Mac OSX, you will need to install `XCode <https://developer.apple.com/xcode/>`_. You can do this through the app store or several other soul-selling methods. You will likely want to install your own python 2.6 as well since they strip out all the header files which makes compiling some extensions weird. You can ignore this advice to start, but have faith, you'll come back to it later. They always do...
 * `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_. Make sure to install this into the proper python environment.
 * `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment.
@@ -26,13 +26,14 @@ Setting up Your Development Environment
 ---------------------------------------
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running. We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary. `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch. More information on switching release branches is below.
 
-To set up a plone 4.2 development environment::
+To set up a plone 5 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 4.2  https://github.com/plone/buildout.coredev ./plone42devel
-  > virtualenv --no-site-packages plone42devpy
-  > cd plone42devel
-  > ../plone42devpy/bin/python bootstrap.py # (where "python" is your python 2.6 or 2.7 binary).
+  > git clone -b 5.0  https://github.com/plone/buildout.coredev ./plone5devel
+  > virtualenv --no-site-packages plone5devpy
+  > cd plone5devel
+  > pip install -r requirements.txt
+  > buildout boostrap
   > bin/buildout -v
 
 If you run into issues in this process, please see the doc :doc:`issues`.
@@ -60,7 +61,7 @@ To see what branch you are currently on, just do::
 The line with a * by it will indicate which branch you are currently working on.
 
 .. important::
-   Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior! 
+   Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages, otherwise you will get some weird behavior!
 
 For more information on buildout, please see the `collective developer manual documentation on buildout <http://developer.plone.org/reference_manuals/old/buildout/index.html>`_.
 
