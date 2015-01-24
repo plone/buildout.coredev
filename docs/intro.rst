@@ -29,7 +29,7 @@ The first step in fixing a bug is getting this `buildout <https://github.com/plo
 To set up a plone 5 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 5.0https://github.com/plone/buildout.coredev ./plone5devel
+  > git clone -b 5.0 https://github.com/plone/buildout.coredev ./plone5devel
   > virtualenv --no-site-packages plone5devpy
   > cd plone5devel
   > ../plone5devpy/bin/pip install -r requirements.txt
