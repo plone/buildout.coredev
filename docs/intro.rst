@@ -33,7 +33,7 @@ To set up a plone 5 development environment::
   > virtualenv --no-site-packages plone5devpy
   > cd plone5devel
   > pip install -r requirements.txt
-  > buildout boostrap
+  > buildout bootstrap
   > bin/buildout -v
 
 If you run into issues in this process, please see the doc :doc:`issues`.
