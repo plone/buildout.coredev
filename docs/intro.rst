@@ -66,6 +66,44 @@ The line with a * by it will indicate which branch you are currently working on.
 For more information on buildout, please see the `collective developer manual documentation on buildout <http://developer.plone.org/reference_manuals/old/buildout/index.html>`_.
 
 
+Jenkins / mr.roboto
+-------------------
+
+Plone has a Continuous Integration setup and follows CI rules.
+
+When you push a change to any Plone core package our testing/CI middleware ``mr.roboto`` starts running all the tests that are
+needed to make sure that you don't break anything. For each Plone and Python
+version we run two jobs, one for the package itself (which will give you a fast feedback, within 10 minutes) and one on the full coredev build (which can take up until an hour, but makes sure no other packages are effected by
+your change.
+
+For more information you can check :doc:`Mr. Roboto workflow <roboto>` or our
+`Jenkins machine <https://jenkins.plone.org/>`_.
+
+The CI system at jenkins.plone.org is a shared resource for Plone core
+developers to notify them of regressions in Plone core code. Build breakages are a normal and expected part of the development process. Our aim is to find errors and eliminate them as quickly as possible, without expecting perfection and zero errors. Though, there are some essential practices that
+needs to be followed in order to achieve a stable build:
+
+1) Don’t Check In on a Broken Build - check Jenkins before
+2) Always Run All Commit Tests Locally before Committing
+3) Wait for Commit Tests to Pass before Moving On
+4) Never Go Home on a Broken Build
+5) Always Be Prepared to Revert to the Previous Revision
+6) Time-Box Fixing before Reverting
+7) Don’t Comment Out Failing Tests
+8) Take Responsibility for All Breakages That Result from Your Changes
+
+See :doc:`Essential Continuous Integration Practices <continous-integration>` for more information.
+
+Since it can be burdensome to check this manually, install yourself the tools
+to always see the current state of the Plone CI Server:
+
+- For (Ubuntu?) Linux there is `BuildNotify <https://bitbucket.org/Anay/buildnotify/wiki/Home>`_.
+- For Mac there is `CCMenu <http://ccmenu.org/>`_.
+- For windows there is `CCTray <http://cruisecontrolnet.org/projects/ccnet/wiki/CCTray_Download_Plugin>`_.
+- For Firefox there is `CruiseControl Monitor <https://addons.mozilla.org/en-US/firefox/addon/cruisecontrol-monitor/>`_ and many other jenkins specific plugins.
+
+These tools were built to parse a specific file that CruiseControl another CI tool generated. Jenkins generates this file too. You want to configure your notifier of choice with this url: ``http://jenkins.plone.org/cc.xml``
+
 Checking out Packages for Fixing
 --------------------------------
 Most packages are not in :file:`src/` by default, so you can use ``mr.developer`` to get the latest and make sure you are always up to date. It can be a little daunting at first to find out which packages are causing the bug in question, but just ask on irc if you need some help. Once you [think you] know which package(s) you want, we need to pull the source.
@@ -95,15 +133,11 @@ Don't forget to rerun buildout! In both methods, ``mr.developer`` will download 
 
 Testing Locally
 ---------------
-In an ideal world, you would write a test case for your issue before actually trying to fix it. In reality this rarely happens. No matter how you approach it, you should ALWAYS run test cases for both the module and plone.org before commiting any changes.
-
-If you don't start with a test case, save yourself potential problems and validate the bug before getting too deep into the issue!
-
 To run a test for the specific module you are modifying::
 
   > ./bin/test -m plone.app.caching
 
-These should all run without error. Please don't check in anything that doesn't! If you haven't written it already, this is a good time to write a test case for the bug you are fixing and make sure everything is running as it should.
+These should all run without error. Please don't check in anything that doesn't! Now write a test case for the bug you are fixing and make sure everything is running as it should.
 
 After the module level tests run with your change, please make sure other modules aren't affected by the change by running the full suite::
 
@@ -202,62 +236,6 @@ actually merge it to the 4.2 release branch. Let's do that now::
   > git merge my-awesome-feature-4.2
 
 
-Committing to Products.CMFPlone
--------------------------------
-If you are working a bug fix on ``Products.CMFPlone``,
-there are a couple other things to take notice of.
-First and foremost,
-you'll see that there are several branches.
-At the time of writing this document,
-there are branches for 4.1, 4.2, and master, which is the implied 4.3.
-
-Still with me? So you have a bug fix for 4.x.
-If the fix is only for one version,
-make sure to get that branch and party on.
-However, chances are the bug is in multiple branches.
-
-Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there with tests.
-
-If your fix only involved a single commit,
-you can use git's ``cherry-pick`` command to apply the same commit
-to a different branch.
-
-First check out the branch::
-
-  > git checkout 4.2
-
-And then ``cherry-pick`` the commit (you can get the SHA hash from git log).
-
-  > git cherry-pick b6ff4309
-
-There may be conflicts; if so, resolve them and then follow the directions
-git gives you to complete the ``cherry-pick``.
-
-If your fix involved multiple commits, ``cherry-picking`` them one by one can get tedious.
-In this case things are easiest if you did your fix in a separate feature branch.
-
-In that scenario, you first merge the feature branch to the 4.1 branch::
-
-  > git checkout 4.1
-  > git merge my-awesome-feature
-
-Then you return to the feature branch and make a branch for `rebasing` it onto the 4.2 branch::
-
-  > git checkout my-awesome-feature
-  > git checkout -b my-awesome-feature-4.2
-  > git rebase ef978a --onto 4.2
-
-(ef978a happens to be the last commit in the feature branch's history before
-it was branched off of 4.1. You can look at git log to find this.)
-
-At this point, the feature branch's history has been updated, but it hasn't actually
-been merged to 4.2 yet. This lets you deal with resolving conflicts before you
-actually merge it to the 4.2 release branch. Let's do that now::
-
-  > git checkout 4.2
-  > git merge my-awesome-feature-4.2
-
-
 Branches and Forks and Direct Commits - Oh My!
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches. After the migration to github, the community decided to maintain this spirit. If you have signed the :doc:`contributor agreement <contributors_agreement_explained>` form, you can commit directly to the branch (for plone this would be the version branch, for most other packages this would be ``master``).
@@ -286,32 +264,6 @@ This will make a remote branch in github. Navigate to this branch in the github 
 .. note::
 
     you still need to update :file:`checkouts.cfg` file in the correct branches of buildout.coredev!
-
-Jenkins / mr.roboto
--------------------
-
-You STILL aren't done! When you push a change to any Plone core package our testing/CI middleware ``mr.roboto`` starts running all the tests that are
-needed to make sure that you don't break anything. For each Plone and Python
-version we run two jobs, one for the package itself (which will give you a fast feedback, within 10 minutes) and one on the full coredev build (which can take up until an hour, but makes sure no other packages are effected by
-your change.
-
-For more information you can check :doc:`Mr. Roboto workflow <roboto>` or our
-`Jenkins machine <https://jenkins.plone.org/>`_.
-
-The CI system at jenkins.plone.org is a shared resource for Plone core
-developers to notify them of regressions in Plone core code. Build breakages are a normal and expected part of the development process. Our aim is to find errors and eliminate them as quickly as possible, without expecting perfection and zero errors. Though, there are some essential practices that
-needs to be followed in order to achieve a stable build:
-
-1) Don’t Check In on a Broken Build - check Jenkins before
-2) Always Run All Commit Tests Locally before Committing
-3) Wait for Commit Tests to Pass before Moving On
-4) Never Go Home on a Broken Build
-5) Always Be Prepared to Revert to the Previous Revision
-6) Time-Box Fixing before Reverting
-7) Don’t Comment Out Failing Tests
-8) Take Responsibility for All Breakages That Result from Your Changes
-
-See :doc:`Essential Continuous Integration Practices <continous-integration>` for more information.
 
 
 Finalizing Tickets
