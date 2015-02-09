@@ -48,17 +48,18 @@ Total: 1275 tests, 4 failures, 1 errors
 
 - I think the code coverage by automated testing should be increased. These are the numbers I got, filtering only files affected by this work:
 
-lines   cov%   module   (path)
-   74    86%   plone.app.users.browser.personalpreferences
+  lines   cov%   module   (path)
+
+  74    86%   plone.app.users.browser.personalpreferences
   390    87%   plone.app.users.browser.register
   206    74%   plone.app.users.browser.schemaeditor
-   27   100%   plone.app.users.browser.schemaprovider
-   75    77%   plone.app.users.browser.userdatapanel
-   55    94%   plone.app.users.field_extender
+  27   100%   plone.app.users.browser.schemaprovider
+  75    77%   plone.app.users.browser.userdatapanel
+  55    94%   plone.app.users.field_extender
   120    90%   plone.app.users.schema
-   16    56%   plone.app.users.setuphandlers
-    9    44%   plone.app.users.upgrades
-   53    98%   plone.app.users.vocabularies
+  16    56%   plone.app.users.setuphandlers
+  9    44%   plone.app.users.upgrades
+  53    98%   plone.app.users.vocabularies
 
 Manual testing
 ++++++++++++++
