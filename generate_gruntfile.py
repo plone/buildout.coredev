@@ -67,7 +67,7 @@ sed_config = """
 """
 
 requirejs_config = """
-            {bkey}: {{
+            "{bkey}": {{
                 options: {{
                     baseUrl: '/',
                     generateSourceMaps: false,
@@ -76,13 +76,14 @@ requirejs_config = """
                     shim: {shims},
                     wrapShim: true,
                     name: '{name}',
+                    exclude: ['jquery'],
                     out: '{out}',
                     optimize: "none"
                 }}
             }},
 """
 uglify_config = """
-        {bkey}: {{
+        "{bkey}": {{
           options: {{
             sourceMap: true,
             sourceMapName: '{src}.min.js.map',
@@ -95,13 +96,14 @@ uglify_config = """
 """
 
 less_config = """
-            {name}: {{
+            "{name}": {{
                 options: {{
                     paths: {less_paths},
                     strictMath: false,
                     sourceMap: true,
                     outputSourceFiles: true,
-                    strctImports: true,
+                    strictImports: true,
+                    sourceMapURL: "{sourcemap_url}",
                     relativeUrls: true,
                     plugins: [
                         new require('less-plugin-inline-urls'),
@@ -295,6 +297,7 @@ require_configs = ""
 uglify_configs = ""
 less_files = ""
 less_final_config = ""
+sourceMap_url = ""
 sed_config_final = ""
 watch_files = []
 sed_count = 0
@@ -342,6 +345,7 @@ for bkey, bundle in bundles.items():
                         target_name = bundle.csscompilation.split('/')[-1]
                         target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))  # noqa
                         less_file = "\"%s/%s\": \"%s\"," % (target_path, target_name, main_css_path)  # noqa
+                        sourceMap_url = target_name + '.map'
                         less_files += less_file
                         watch_files.append(main_css_path)
                         # replace urls
@@ -369,7 +373,8 @@ for bkey, bundle in bundles.items():
             name=bkey,
             globalVars=globalVars_string,
             files=less_files,
-            less_paths=json.dumps(less_paths))
+            less_paths=json.dumps(less_paths),
+            sourcemap_url=sourceMap_url)
 
 
 gruntfile = open('Gruntfile.js', 'w')
