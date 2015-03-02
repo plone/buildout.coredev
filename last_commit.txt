@@ -1,27 +1,1035 @@
-Repository: plone.app.contentlisting
+Repository: plone.app.collection
 Branch: refs/heads/master
-Date: 2015-03-01T21:52:01+01:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.contentlisting/commit/13a347c33cdde81d72a2cbbae5b79e832c084b04
+Date: 2015-01-26T19:50:04+01:00
+Author: Jure Cerjak (jcerjak) <jcerjak@termitnjak.si>
+Commit: https://github.com/plone/plone.app.collection/commit/67e37245332dc2286f3e0a18496c2448935a8492
 
-document last change
+Read "allow_anon_views_about" from registry instead of properties
 
 Files changed:
-M CHANGES.txt
+M CHANGES.rst
+M plone/app/collection/browser/templates/standard_view.pt
 
-diff --git a/CHANGES.txt b/CHANGES.txt
-index bf48e4c..bffaa65 100644
---- a/CHANGES.txt
-+++ b/CHANGES.txt
-@@ -4,6 +4,9 @@ Changelog
- 1.1.1 (unreleased)
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 169f9c9..9adfd4e 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,9 @@ Changelog
+ 1.1.3 (unreleased)
  ------------------
  
-+- Add remaining, implemented but missing IContentListing interface methods.
-+  [thet]
-+
- - forward getURL's relative kw for contentlistings (plone4 compat)
-   [kiorky]
+-- Nothing changed yet.
++- Read ``allow_anon_views_about`` setting from the registry instead of portal
++  properties (see https://github.com/plone/Products.CMFPlone/issues/216).
++  [jcerjak]
  
+ 
+ 1.1.2 (2014-10-23)
+diff --git a/plone/app/collection/browser/templates/standard_view.pt b/plone/app/collection/browser/templates/standard_view.pt
+index 052ebf8..408e4d2 100644
+--- a/plone/app/collection/browser/templates/standard_view.pt
++++ b/plone/app/collection/browser/templates/standard_view.pt
+@@ -33,7 +33,7 @@
+                              isAnon context/@@plone_portal_state/anonymous;
+                              normalizeString nocall: context/plone_utils/normalizeString;
+                              toLocalizedTime nocall: context/@@plone/toLocalizedTime;
+-                             show_about python:not isAnon or site_properties.allowAnonymousViewAbout;
++                             show_about python:not isAnon or context.portal_registry['plone.allow_anon_views_about'];
+                              navigation_root_url context/@@plone_portal_state/navigation_root_url;
+                              pas_member context/@@pas_member;">
+         <tal:listing condition="batch">
+
+
+Repository: plone.app.collection
+Branch: refs/heads/master
+Date: 2015-02-27T07:50:17+01:00
+Author: Timo Stollenwerk () <contact@timostollenwerk.net>
+Commit: https://github.com/plone/plone.app.collection/commit/321bd072ea1a5a2b2394070376fe429f5a158d17
+
+Merge branch 'master' into plip10359-security-controlpanel
+
+Conflicts:
+	CHANGES.rst
+
+Files changed:
+A plone/app/collection/marshaller.py
+M CHANGES.rst
+M plone/app/collection/collection.py
+M plone/app/collection/configure.zcml
+M plone/app/collection/tests/test_collection.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 9adfd4e..d42b982 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,9 @@ Changelog
+   properties (see https://github.com/plone/Products.CMFPlone/issues/216).
+   [jcerjak]
+ 
++- Support for import and export of collections using FTP, DAV and GenericSetup
++  [matthewwilkes]
++
+ 
+ 1.1.2 (2014-10-23)
+ ------------------
+diff --git a/plone/app/collection/collection.py b/plone/app/collection/collection.py
+index eac3bce..5504a4e 100644
+--- a/plone/app/collection/collection.py
++++ b/plone/app/collection/collection.py
+@@ -2,7 +2,7 @@
+ from OFS.ObjectManager import ObjectManager
+ from plone.app.collection.field import QueryField
+ from plone.app.contentlisting.interfaces import IContentListing
+-from plone.app.widgets.at import QueryStringWidget
++from Products.Archetypes.Widget import QueryStringWidget
+ from Products.ATContentTypes.content import document, schemata
+ from Products.Archetypes import atapi
+ from Products.Archetypes.atapi import (BooleanField,
+@@ -20,7 +20,7 @@
+ from plone.app.collection import PloneMessageFactory as _
+ from plone.app.collection.config import ATCT_TOOLNAME, PROJECTNAME
+ from plone.app.collection.interfaces import ICollection
+-
++from plone.app.collection.marshaller import CollectionRFC822Marshaller
+ 
+ CollectionSchema = document.ATDocumentSchema.copy() + atapi.Schema((
+ 
+@@ -86,6 +86,9 @@
+         ),
+ ))
+ 
++# Use the extended marshaller that understands queries
++CollectionSchema.registerLayer("marshall", CollectionRFC822Marshaller())
++
+ CollectionSchema.moveField('query', after='description')
+ if 'presentation' in CollectionSchema:
+     CollectionSchema['presentation'].widget.visible = False
+diff --git a/plone/app/collection/configure.zcml b/plone/app/collection/configure.zcml
+index 33ce9dc..d2bda5d 100644
+--- a/plone/app/collection/configure.zcml
++++ b/plone/app/collection/configure.zcml
+@@ -14,7 +14,7 @@
+     name="default"
+     title="plone.app.collection"
+     directory="profiles/default"
+-    description="Adds support for new style collections to Plone"
++    description="Archetypes-based collections"
+     provides="Products.GenericSetup.interfaces.EXTENSION"
+     />
+ 
+diff --git a/plone/app/collection/marshaller.py b/plone/app/collection/marshaller.py
+new file mode 100644
+index 0000000..acab0ad
+--- /dev/null
++++ b/plone/app/collection/marshaller.py
+@@ -0,0 +1,68 @@
++from types import ListType, TupleType
++
++from zope.contenttype import guess_content_type
++
++from AccessControl import ClassSecurityInfo
++from App.class_init import InitializeClass
++from Products.Archetypes.interfaces.base import IBaseUnit
++from Products.Archetypes.utils import mapply
++from Products.Archetypes.Marshall import RFC822Marshaller, parseRFC822, formatRFC822Headers
++
++
++class CollectionRFC822Marshaller(RFC822Marshaller):
++
++    security = ClassSecurityInfo()
++    security.declareObjectPrivate()
++    security.setDefaultAccess('deny')
++
++    def demarshall(self, instance, data, **kwargs):
++        # We don't want to pass file forward.
++        if 'file' in kwargs:
++            if not data:
++                # TODO Yuck! Shouldn't read the whole file, never.
++                # OTOH, if you care about large files, you should be
++                # using the PrimaryFieldMarshaller or something
++                # similar.
++                data = kwargs['file'].read()
++            del kwargs['file']
++        headers, body = parseRFC822(data)
++        
++        query = {}
++        for k, v in headers.items():
++            if not k.startswith("query"):
++                continue
++            else:
++                index = int(k[5])
++                sub_key = k.split("_")[1]
++                query_part = query.get(index, {})
++                query_part[sub_key] = v
++                query[index] = query_part
++                del headers[k]
++        query = [facet[1] for facet in sorted(query.items())]
++        
++        header = formatRFC822Headers(headers.items())
++        data = '%s\n\n%s' % (header, body)
++        
++        try:
++            return RFC822Marshaller.demarshall(self, instance, data, **kwargs)
++        finally:
++            instance.query = query
++
++    def marshall(self, instance, **kwargs):
++        content_type, length, data = RFC822Marshaller.marshall(self, instance, **kwargs)
++        headers, body = parseRFC822(data)
++        
++        headers = headers.items()
++        for i, query in enumerate(instance.query):
++            for key, value in query.items():
++                if isinstance(value, list):
++                    value = "\n".join(value)
++                header_key = 'query%d_%s' % (i, key)
++                headers.append((header_key, value))
++        
++        header = formatRFC822Headers(headers)
++        data = '%s\n\n%s' % (header, body)
++        length = len(data)
++        return (content_type, length, data)
++
++InitializeClass(CollectionRFC822Marshaller)
+\ No newline at end of file
+diff --git a/plone/app/collection/tests/test_collection.py b/plone/app/collection/tests/test_collection.py
+index f1611e7..9599d3e 100644
+--- a/plone/app/collection/tests/test_collection.py
++++ b/plone/app/collection/tests/test_collection.py
+@@ -7,6 +7,7 @@
+ from plone.app.testing import setRoles
+ from plone.testing.z2 import Browser
+ from transaction import commit
++from Products.Archetypes.Marshall import parseRFC822
+ 
+ import unittest2 as unittest
+ 
+@@ -235,3 +236,94 @@ def test_selectedViewFields(self):
+     def test_syndication_enabled_by_default(self):
+         syn = getToolByName(self.portal, 'portal_syndication')
+         self.assertTrue(syn.isSyndicationAllowed(self.collection))
++
++
++class TestMarshalling(unittest.TestCase):
++
++    layer = PLONEAPPCOLLECTION_INTEGRATION_TESTING
++
++    def test_simple_query_included_in_marshall_results(self):
++        portal = self.layer['portal']
++        login(portal, 'admin')
++        query = [{
++            'i': 'portal_type',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'News Item',
++        }]
++        portal.invokeFactory("Collection",
++                             "collection",
++                             query=query,
++                             title="New Collection")
++        collection = portal['collection']
++        rfc822 = collection.manage_FTPget()
++        data = parseRFC822(rfc822)
++        self.assertIn('query0_i', data[0])
++        self.assertIn('query0_o', data[0])
++        self.assertIn('query0_v', data[0])
++        
++        self.assertEqual(data[0]['query0_i'], query[0]['i'])
++        self.assertEqual(data[0]['query0_o'], query[0]['o'])
++        self.assertEqual(data[0]['query0_v'], query[0]['v'])
++    
++    def test_multiple_query_items_included_in_marshall_results(self):
++        portal = self.layer['portal']
++        login(portal, 'admin')
++        query = [{
++            'i': 'portal_type',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'News Item',
++        },{ 'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Test News Item',
++        }]
++        
++        portal.invokeFactory("Collection",
++                             "collection",
++                             query=query,
++                             title="New Collection")
++        collection = portal['collection']
++        rfc822 = collection.manage_FTPget()
++        data = parseRFC822(rfc822)
++        
++        self.assertIn('query0_i', data[0])
++        self.assertIn('query0_o', data[0])
++        self.assertIn('query0_v', data[0])
++        self.assertIn('query1_i', data[0])
++        self.assertIn('query1_o', data[0])
++        self.assertIn('query1_v', data[0])
++        
++        self.assertEqual(data[0]['query0_i'], query[0]['i'])
++        self.assertEqual(data[0]['query0_o'], query[0]['o'])
++        self.assertEqual(data[0]['query0_v'], query[0]['v'])
++        self.assertEqual(data[0]['query1_i'], query[1]['i'])
++        self.assertEqual(data[0]['query1_o'], query[1]['o'])
++        self.assertEqual(data[0]['query1_v'], query[1]['v'])
++    
++    def test_query_gets_set_on_PUT(self):
++        portal = self.layer['portal']
++        login(portal, 'admin')
++        query = [{
++            'i': 'portal_type',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'News Item',
++        }]
++        
++        expected_query = [{
++            'i': 'portal_type',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'LOREM IPSUM DOLOR',
++        }]
++        
++        portal.invokeFactory("Collection",
++                             "collection",
++                             query=query,
++                             title="New Collection")
++        collection = portal['collection']
++        rfc822 = collection.manage_FTPget()
++        # Modify the response to put in a sentinal, to check it's been updated
++        rfc822 = rfc822.replace(query[0]['v'], expected_query[0]['v'])
++        
++        portal.REQUEST.set("BODY", rfc822)
++        collection.PUT(portal.REQUEST, None)
++        self.assertEqual(collection.query, expected_query)
++    
+diff --git a/setup.py b/setup.py
+index c4d4d8d..9a982fb 100644
+--- a/setup.py
++++ b/setup.py
+@@ -31,7 +31,7 @@
+           'plone.app.widgets',
+           'plone.portlet.collection',
+           'plone.portlets',
+-          'Products.Archetypes',
++          'Products.Archetypes>=1.10.4.dev0',
+           'Products.CMFCore',
+           'Products.CMFPlone',
+           'Products.CMFQuickInstallerTool',
+
+
+Repository: plone.app.collection
+Branch: refs/heads/master
+Date: 2015-02-27T14:39:17+01:00
+Author: Jure Cerjak (jcerjak) <jcerjak@termitnjak.si>
+Commit: https://github.com/plone/plone.app.collection/commit/2da6fa1be86d7440137671a0945b65c72c73ba14
+
+restore plone 4 compatibility for 'show about' setting
+
+Files changed:
+M CHANGES.rst
+M plone/app/collection/browser/templates/standard_view.pt
+M plone/app/collection/tests/test_collection.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index d42b982..10ee51a 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,8 +4,8 @@ Changelog
+ 1.1.3 (unreleased)
+ ------------------
+ 
+-- Read ``allow_anon_views_about`` setting from the registry instead of portal
+-  properties (see https://github.com/plone/Products.CMFPlone/issues/216).
++- Read ``allow_anon_views_about`` setting from the registry, with fallback to
++  portal properties (see https://github.com/plone/Products.CMFPlone/issues/216)
+   [jcerjak]
+ 
+ - Support for import and export of collections using FTP, DAV and GenericSetup
+diff --git a/plone/app/collection/browser/templates/standard_view.pt b/plone/app/collection/browser/templates/standard_view.pt
+index 408e4d2..2d036bc 100644
+--- a/plone/app/collection/browser/templates/standard_view.pt
++++ b/plone/app/collection/browser/templates/standard_view.pt
+@@ -29,11 +29,14 @@
+         <tal:results define="b_start python:request.get('b_start', 0);
+                              batch python:context.results(b_start=b_start);
+                              site_properties context/portal_properties/site_properties;
++                             portal_registry context/portal_registry|nothing;
+                              use_view_action site_properties/typesUseViewActionInListings|python:();
+                              isAnon context/@@plone_portal_state/anonymous;
+                              normalizeString nocall: context/plone_utils/normalizeString;
+                              toLocalizedTime nocall: context/@@plone/toLocalizedTime;
+-                             show_about python:not isAnon or context.portal_registry['plone.allow_anon_views_about'];
++                             show_about_bbb site_properties/allowAnonymousViewAbout|nothing;
++                             show_about_registry python:portal_registry and portal_registry.get('plone.allow_anon_views_about');
++                             show_about python:not isAnon or show_about_registry or show_about_bbb;
+                              navigation_root_url context/@@plone_portal_state/navigation_root_url;
+                              pas_member context/@@pas_member;">
+         <tal:listing condition="batch">
+diff --git a/plone/app/collection/tests/test_collection.py b/plone/app/collection/tests/test_collection.py
+index 9599d3e..b2640ff 100644
+--- a/plone/app/collection/tests/test_collection.py
++++ b/plone/app/collection/tests/test_collection.py
+@@ -42,6 +42,14 @@ def setUp(self):
+             pass
+         self.collection = self.portal['col']
+ 
++    def _set_up_collection(self):
++        self.portal.invokeFactory(
++            'Document',
++            'doc1',
++            title='Collection Test Page'
++        )
++        self.collection.setQuery(query)
++
+     def test_addCollection(self):
+         self.portal.invokeFactory("Collection",
+                                   "col1",
+@@ -114,6 +122,160 @@ def test_viewingCollection(self):
+         browser.open(self.collection.absolute_url())
+         self.assertTrue("Collection Test Page" in browser.contents)
+ 
++    def test_show_about_no_registry_has_property_noshow(self):
++        """Test the case where we fetch show about information from portal
++        properties (Plone < 5) and show about is False.
++        """
++        # disable show about in site properties
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = None
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_no_registry_has_property_show(self):
++        """Test the case where we fetch show about information from portal
++        properties (Plone < 5) and show about is True.
++        """
++        # enable show about in site properties
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', True, 'boolean')
++        except:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=True)
++        self.portal.portal_registry = None
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_has_property_and_registry_noshow(self):
++        """Test the case where we fetch show about information from portal
++        properties, but registry is also present (Plone < 5, with
++        plone.app.registry installed) and show about is False.
++        """
++        # disable show about in site properties, create an empty registry
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = {}  # mock the registry
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_has_property_and_registry_show(self):
++        """Test the case where we fetch show about information from portal
++        properties, but registry is also present (Plone < 5, with
++        plone.app.registry installed) and show about is True.
++        """
++        # enable show about in site properties, create an empty registry
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', True, 'boolean')
++        except:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=True)
++        self.portal.portal_registry = {}  # mock the registry
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_has_registry_no_property_noshow(self):
++        """Test the case where we fetch show about information from the
++        registry (Plone >= 5) and show about is False.
++        """
++        # disable show about in the registry, delete 'allowAnonymousViewAbout'
++        # property
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_delProperties(
++                ['allowAnonymousViewAbout'])
++        except:
++            pass
++        self.portal.portal_registry = {'plone.allow_anon_views_about': False}
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_has_registry_no_property_show(self):
++        """Test the case where we fetch show about information from the
++        registry (Plone >= 5) and show about is True.
++        """
++        # enable show about in the registry, delete 'allowAnonymousViewAbout'
++        # property
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_delProperties(
++                ['allowAnonymousViewAbout'])
++        except:
++            pass
++        self.portal.portal_registry = {'plone.allow_anon_views_about': True}
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_logged_in(self):
++        """Test the case where we show about information if a user is logged in
++        even though show about is set to False
++        """
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = {'plone.allow_anon_views_about': False}
++
++        self._set_up_collection()
++
++        # check if author information is shown
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
+     def test_collection_templates(self):
+         data = getData('image.png')
+         # add an image that will be listed by the collection
+@@ -260,11 +422,11 @@ def test_simple_query_included_in_marshall_results(self):
+         self.assertIn('query0_i', data[0])
+         self.assertIn('query0_o', data[0])
+         self.assertIn('query0_v', data[0])
+-        
++
+         self.assertEqual(data[0]['query0_i'], query[0]['i'])
+         self.assertEqual(data[0]['query0_o'], query[0]['o'])
+         self.assertEqual(data[0]['query0_v'], query[0]['v'])
+-    
++
+     def test_multiple_query_items_included_in_marshall_results(self):
+         portal = self.layer['portal']
+         login(portal, 'admin')
+@@ -276,7 +438,7 @@ def test_multiple_query_items_included_in_marshall_results(self):
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'Test News Item',
+         }]
+-        
++
+         portal.invokeFactory("Collection",
+                              "collection",
+                              query=query,
+@@ -284,21 +446,21 @@ def test_multiple_query_items_included_in_marshall_results(self):
+         collection = portal['collection']
+         rfc822 = collection.manage_FTPget()
+         data = parseRFC822(rfc822)
+-        
++
+         self.assertIn('query0_i', data[0])
+         self.assertIn('query0_o', data[0])
+         self.assertIn('query0_v', data[0])
+         self.assertIn('query1_i', data[0])
+         self.assertIn('query1_o', data[0])
+         self.assertIn('query1_v', data[0])
+-        
++
+         self.assertEqual(data[0]['query0_i'], query[0]['i'])
+         self.assertEqual(data[0]['query0_o'], query[0]['o'])
+         self.assertEqual(data[0]['query0_v'], query[0]['v'])
+         self.assertEqual(data[0]['query1_i'], query[1]['i'])
+         self.assertEqual(data[0]['query1_o'], query[1]['o'])
+         self.assertEqual(data[0]['query1_v'], query[1]['v'])
+-    
++
+     def test_query_gets_set_on_PUT(self):
+         portal = self.layer['portal']
+         login(portal, 'admin')
+@@ -307,13 +469,13 @@ def test_query_gets_set_on_PUT(self):
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'News Item',
+         }]
+-        
++
+         expected_query = [{
+             'i': 'portal_type',
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'LOREM IPSUM DOLOR',
+         }]
+-        
++
+         portal.invokeFactory("Collection",
+                              "collection",
+                              query=query,
+@@ -322,8 +484,7 @@ def test_query_gets_set_on_PUT(self):
+         rfc822 = collection.manage_FTPget()
+         # Modify the response to put in a sentinal, to check it's been updated
+         rfc822 = rfc822.replace(query[0]['v'], expected_query[0]['v'])
+-        
++
+         portal.REQUEST.set("BODY", rfc822)
+         collection.PUT(portal.REQUEST, None)
+         self.assertEqual(collection.query, expected_query)
+-    
+
+
+Repository: plone.app.collection
+Branch: refs/heads/master
+Date: 2015-02-27T18:30:41+01:00
+Author: Jure Cerjak (jcerjak) <jcerjak@termitnjak.si>
+Commit: https://github.com/plone/plone.app.collection/commit/8dc58e5bfb095104f579cfea43049ae1fa6f5174
+
+don't do bare excepts
+
+Files changed:
+M plone/app/collection/tests/test_collection.py
+
+diff --git a/plone/app/collection/tests/test_collection.py b/plone/app/collection/tests/test_collection.py
+index b2640ff..0804004 100644
+--- a/plone/app/collection/tests/test_collection.py
++++ b/plone/app/collection/tests/test_collection.py
+@@ -1,3 +1,4 @@
++from Products.Archetypes.Marshall import parseRFC822
+ from Products.CMFCore.utils import getToolByName
+ from plone.app.collection.testing import PLONEAPPCOLLECTION_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID
+@@ -7,7 +8,7 @@
+ from plone.app.testing import setRoles
+ from plone.testing.z2 import Browser
+ from transaction import commit
+-from Products.Archetypes.Marshall import parseRFC822
++from zExceptions import BadRequest
+ 
+ import unittest2 as unittest
+ 
+@@ -131,7 +132,7 @@ def test_show_about_no_registry_has_property_noshow(self):
+         try:
+             properties.site_properties.manage_addProperty(
+                 'allowAnonymousViewAbout', False, 'boolean')
+-        except:
++        except BadRequest:
+             properties.site_properties.manage_changeProperties(
+                 allowAnonymousViewAbout=False)
+         self.portal.portal_registry = None
+@@ -153,7 +154,7 @@ def test_show_about_no_registry_has_property_show(self):
+         try:
+             properties.site_properties.manage_addProperty(
+                 'allowAnonymousViewAbout', True, 'boolean')
+-        except:
++        except BadRequest:
+             properties.site_properties.manage_changeProperties(
+                 allowAnonymousViewAbout=True)
+         self.portal.portal_registry = None
+@@ -176,7 +177,7 @@ def test_show_about_has_property_and_registry_noshow(self):
+         try:
+             properties.site_properties.manage_addProperty(
+                 'allowAnonymousViewAbout', False, 'boolean')
+-        except:
++        except BadRequest:
+             properties.site_properties.manage_changeProperties(
+                 allowAnonymousViewAbout=False)
+         self.portal.portal_registry = {}  # mock the registry
+@@ -199,7 +200,7 @@ def test_show_about_has_property_and_registry_show(self):
+         try:
+             properties.site_properties.manage_addProperty(
+                 'allowAnonymousViewAbout', True, 'boolean')
+-        except:
++        except BadRequest:
+             properties.site_properties.manage_changeProperties(
+                 allowAnonymousViewAbout=True)
+         self.portal.portal_registry = {}  # mock the registry
+@@ -222,7 +223,7 @@ def test_show_about_has_registry_no_property_noshow(self):
+         try:
+             properties.site_properties.manage_delProperties(
+                 ['allowAnonymousViewAbout'])
+-        except:
++        except BadRequest:
+             pass
+         self.portal.portal_registry = {'plone.allow_anon_views_about': False}
+ 
+@@ -244,7 +245,7 @@ def test_show_about_has_registry_no_property_show(self):
+         try:
+             properties.site_properties.manage_delProperties(
+                 ['allowAnonymousViewAbout'])
+-        except:
++        except BadRequest:
+             pass
+         self.portal.portal_registry = {'plone.allow_anon_views_about': True}
+ 
+@@ -264,7 +265,7 @@ def test_show_about_logged_in(self):
+         try:
+             properties.site_properties.manage_addProperty(
+                 'allowAnonymousViewAbout', False, 'boolean')
+-        except:
++        except BadRequest:
+             properties.site_properties.manage_changeProperties(
+                 allowAnonymousViewAbout=False)
+         self.portal.portal_registry = {'plone.allow_anon_views_about': False}
+
+
+Repository: plone.app.collection
+Branch: refs/heads/master
+Date: 2015-03-02T18:07:09+01:00
+Author: Timo Stollenwerk (tisto) <tisto@plone.org>
+Commit: https://github.com/plone/plone.app.collection/commit/f50678fd553a5d0c89373a998b1891b43a7b38c1
+
+Merge pull request #22 from plone/plip10359-security-controlpanel
+
+Plip 10359 - Security Control Panel migration
+
+Files changed:
+M CHANGES.rst
+M plone/app/collection/browser/templates/standard_view.pt
+M plone/app/collection/tests/test_collection.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 734edfa..10ee51a 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,10 @@ Changelog
+ 1.1.3 (unreleased)
+ ------------------
+ 
++- Read ``allow_anon_views_about`` setting from the registry, with fallback to
++  portal properties (see https://github.com/plone/Products.CMFPlone/issues/216)
++  [jcerjak]
++
+ - Support for import and export of collections using FTP, DAV and GenericSetup
+   [matthewwilkes]
+ 
+diff --git a/plone/app/collection/browser/templates/standard_view.pt b/plone/app/collection/browser/templates/standard_view.pt
+index 052ebf8..2d036bc 100644
+--- a/plone/app/collection/browser/templates/standard_view.pt
++++ b/plone/app/collection/browser/templates/standard_view.pt
+@@ -29,11 +29,14 @@
+         <tal:results define="b_start python:request.get('b_start', 0);
+                              batch python:context.results(b_start=b_start);
+                              site_properties context/portal_properties/site_properties;
++                             portal_registry context/portal_registry|nothing;
+                              use_view_action site_properties/typesUseViewActionInListings|python:();
+                              isAnon context/@@plone_portal_state/anonymous;
+                              normalizeString nocall: context/plone_utils/normalizeString;
+                              toLocalizedTime nocall: context/@@plone/toLocalizedTime;
+-                             show_about python:not isAnon or site_properties.allowAnonymousViewAbout;
++                             show_about_bbb site_properties/allowAnonymousViewAbout|nothing;
++                             show_about_registry python:portal_registry and portal_registry.get('plone.allow_anon_views_about');
++                             show_about python:not isAnon or show_about_registry or show_about_bbb;
+                              navigation_root_url context/@@plone_portal_state/navigation_root_url;
+                              pas_member context/@@pas_member;">
+         <tal:listing condition="batch">
+diff --git a/plone/app/collection/tests/test_collection.py b/plone/app/collection/tests/test_collection.py
+index 9599d3e..0804004 100644
+--- a/plone/app/collection/tests/test_collection.py
++++ b/plone/app/collection/tests/test_collection.py
+@@ -1,3 +1,4 @@
++from Products.Archetypes.Marshall import parseRFC822
+ from Products.CMFCore.utils import getToolByName
+ from plone.app.collection.testing import PLONEAPPCOLLECTION_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID
+@@ -7,7 +8,7 @@
+ from plone.app.testing import setRoles
+ from plone.testing.z2 import Browser
+ from transaction import commit
+-from Products.Archetypes.Marshall import parseRFC822
++from zExceptions import BadRequest
+ 
+ import unittest2 as unittest
+ 
+@@ -42,6 +43,14 @@ def setUp(self):
+             pass
+         self.collection = self.portal['col']
+ 
++    def _set_up_collection(self):
++        self.portal.invokeFactory(
++            'Document',
++            'doc1',
++            title='Collection Test Page'
++        )
++        self.collection.setQuery(query)
++
+     def test_addCollection(self):
+         self.portal.invokeFactory("Collection",
+                                   "col1",
+@@ -114,6 +123,160 @@ def test_viewingCollection(self):
+         browser.open(self.collection.absolute_url())
+         self.assertTrue("Collection Test Page" in browser.contents)
+ 
++    def test_show_about_no_registry_has_property_noshow(self):
++        """Test the case where we fetch show about information from portal
++        properties (Plone < 5) and show about is False.
++        """
++        # disable show about in site properties
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except BadRequest:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = None
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_no_registry_has_property_show(self):
++        """Test the case where we fetch show about information from portal
++        properties (Plone < 5) and show about is True.
++        """
++        # enable show about in site properties
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', True, 'boolean')
++        except BadRequest:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=True)
++        self.portal.portal_registry = None
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_has_property_and_registry_noshow(self):
++        """Test the case where we fetch show about information from portal
++        properties, but registry is also present (Plone < 5, with
++        plone.app.registry installed) and show about is False.
++        """
++        # disable show about in site properties, create an empty registry
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except BadRequest:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = {}  # mock the registry
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_has_property_and_registry_show(self):
++        """Test the case where we fetch show about information from portal
++        properties, but registry is also present (Plone < 5, with
++        plone.app.registry installed) and show about is True.
++        """
++        # enable show about in site properties, create an empty registry
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', True, 'boolean')
++        except BadRequest:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=True)
++        self.portal.portal_registry = {}  # mock the registry
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_has_registry_no_property_noshow(self):
++        """Test the case where we fetch show about information from the
++        registry (Plone >= 5) and show about is False.
++        """
++        # disable show about in the registry, delete 'allowAnonymousViewAbout'
++        # property
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_delProperties(
++                ['allowAnonymousViewAbout'])
++        except BadRequest:
++            pass
++        self.portal.portal_registry = {'plone.allow_anon_views_about': False}
++
++        self._set_up_collection()
++
++        # logout and check if author information is hidden
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertFalse("author" in result)
++        self.assertFalse("test-user" in result)
++
++    def test_show_about_has_registry_no_property_show(self):
++        """Test the case where we fetch show about information from the
++        registry (Plone >= 5) and show about is True.
++        """
++        # enable show about in the registry, delete 'allowAnonymousViewAbout'
++        # property
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_delProperties(
++                ['allowAnonymousViewAbout'])
++        except BadRequest:
++            pass
++        self.portal.portal_registry = {'plone.allow_anon_views_about': True}
++
++        self._set_up_collection()
++
++        # logout and check if author information is shown
++        logout()
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
++    def test_show_about_logged_in(self):
++        """Test the case where we show about information if a user is logged in
++        even though show about is set to False
++        """
++        properties = getToolByName(self.portal, 'portal_properties')
++        try:
++            properties.site_properties.manage_addProperty(
++                'allowAnonymousViewAbout', False, 'boolean')
++        except BadRequest:
++            properties.site_properties.manage_changeProperties(
++                allowAnonymousViewAbout=False)
++        self.portal.portal_registry = {'plone.allow_anon_views_about': False}
++
++        self._set_up_collection()
++
++        # check if author information is shown
++        result = self.collection.restrictedTraverse('standard_view')()
++        self.assertTrue("author" in result)
++        self.assertTrue("test-user" in result)
++
+     def test_collection_templates(self):
+         data = getData('image.png')
+         # add an image that will be listed by the collection
+@@ -260,11 +423,11 @@ def test_simple_query_included_in_marshall_results(self):
+         self.assertIn('query0_i', data[0])
+         self.assertIn('query0_o', data[0])
+         self.assertIn('query0_v', data[0])
+-        
++
+         self.assertEqual(data[0]['query0_i'], query[0]['i'])
+         self.assertEqual(data[0]['query0_o'], query[0]['o'])
+         self.assertEqual(data[0]['query0_v'], query[0]['v'])
+-    
++
+     def test_multiple_query_items_included_in_marshall_results(self):
+         portal = self.layer['portal']
+         login(portal, 'admin')
+@@ -276,7 +439,7 @@ def test_multiple_query_items_included_in_marshall_results(self):
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'Test News Item',
+         }]
+-        
++
+         portal.invokeFactory("Collection",
+                              "collection",
+                              query=query,
+@@ -284,21 +447,21 @@ def test_multiple_query_items_included_in_marshall_results(self):
+         collection = portal['collection']
+         rfc822 = collection.manage_FTPget()
+         data = parseRFC822(rfc822)
+-        
++
+         self.assertIn('query0_i', data[0])
+         self.assertIn('query0_o', data[0])
+         self.assertIn('query0_v', data[0])
+         self.assertIn('query1_i', data[0])
+         self.assertIn('query1_o', data[0])
+         self.assertIn('query1_v', data[0])
+-        
++
+         self.assertEqual(data[0]['query0_i'], query[0]['i'])
+         self.assertEqual(data[0]['query0_o'], query[0]['o'])
+         self.assertEqual(data[0]['query0_v'], query[0]['v'])
+         self.assertEqual(data[0]['query1_i'], query[1]['i'])
+         self.assertEqual(data[0]['query1_o'], query[1]['o'])
+         self.assertEqual(data[0]['query1_v'], query[1]['v'])
+-    
++
+     def test_query_gets_set_on_PUT(self):
+         portal = self.layer['portal']
+         login(portal, 'admin')
+@@ -307,13 +470,13 @@ def test_query_gets_set_on_PUT(self):
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'News Item',
+         }]
+-        
++
+         expected_query = [{
+             'i': 'portal_type',
+             'o': 'plone.app.querystring.operation.string.is',
+             'v': 'LOREM IPSUM DOLOR',
+         }]
+-        
++
+         portal.invokeFactory("Collection",
+                              "collection",
+                              query=query,
+@@ -322,8 +485,7 @@ def test_query_gets_set_on_PUT(self):
+         rfc822 = collection.manage_FTPget()
+         # Modify the response to put in a sentinal, to check it's been updated
+         rfc822 = rfc822.replace(query[0]['v'], expected_query[0]['v'])
+-        
++
+         portal.REQUEST.set("BODY", rfc822)
+         collection.PUT(portal.REQUEST, None)
+         self.assertEqual(collection.query, expected_query)
+-    
 
 
