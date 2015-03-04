@@ -1,68 +1,102 @@
-Repository: plone.app.viewletmanager
+Repository: plone.app.contenttypes
 Branch: refs/heads/master
-Date: 2015-03-04T16:54:35+01:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.app.viewletmanager/commit/fba1f5850c51e91757549e7574ff6e73e0b2506e
+Date: 2015-03-05T00:52:40+01:00
+Author: Johannes Raggam (thet) <raggam-nl@adm.at>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/61aaacf59a54d42fe48cec4cd90162d90667823d
 
-Revert "Sort viewlets on export"
-
-This reverts commit 9171d6ee81548feea6b9a00179f49d4189a04f54.
+For the link_redirect_view, don't modify the urls for mailto:, tel:, callto: and file: link types but render them as-is.
 
 Files changed:
-M plone/app/viewletmanager/exportimport/storage.py
-M plone/app/viewletmanager/tests/test_exportimport.py
+M docs/CHANGES.rst
+M plone/app/contenttypes/browser/link_redirect_view.py
+M plone/app/contenttypes/tests/test_link.py
 
-diff --git a/plone/app/viewletmanager/exportimport/storage.py b/plone/app/viewletmanager/exportimport/storage.py
-index 22c1d2f..3e0b500 100644
---- a/plone/app/viewletmanager/exportimport/storage.py
-+++ b/plone/app/viewletmanager/exportimport/storage.py
-@@ -123,8 +123,8 @@ def _exportNode(self):
-         output = self._doc.createElement('object')
-         for nodename in ('order', 'hidden'):
-             skins = getattr(self.context, '_'+nodename)
--            for skin in sorted(skins):
--                for name in sorted(skins[skin]):
-+            for skin in skins:
-+                for name in skins[skin]:
-                     node = self._doc.createElement(nodename)
-                     node.setAttribute('skinname', skin)
-                     node.setAttribute('manager', name)
-diff --git a/plone/app/viewletmanager/tests/test_exportimport.py b/plone/app/viewletmanager/tests/test_exportimport.py
-index d9db226..8839c06 100644
---- a/plone/app/viewletmanager/tests/test_exportimport.py
-+++ b/plone/app/viewletmanager/tests/test_exportimport.py
-@@ -42,14 +42,14 @@
- _VIEWLETS_XML = """\
- <?xml version="1.0"?>
- <object>
-- <order manager="top" skinname="basic">
--  <viewlet name="one"/>
-- </order>
-  <order manager="top" skinname="fancy">
-   <viewlet name="two"/>
-   <viewlet name="three"/>
-   <viewlet name="one"/>
-  </order>
-+ <order manager="top" skinname="basic">
-+  <viewlet name="one"/>
-+ </order>
-  <hidden manager="top" skinname="light">
-   <viewlet name="two"/>
-  </hidden>
-@@ -353,11 +353,11 @@ def test_normal(self):
-         context._files['viewlets.xml'] = self._VIEWLETS_XML
-         importViewletSettingsStorage(context)
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 61d9679..e5495af 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -4,6 +4,10 @@ Changelog
+ 1.2 (unreleased)
+ ----------------
  
--        self.assertEqual(utility.getOrder('top', 'basic'), ('one', ))
--        self.assertEqual(utility.getOrder('top', 'undefined (fallback)'),
--                         ('one', ))
-         self.assertEqual(utility.getOrder('top', 'fancy'),
-                          ('two', 'three', 'one'))
-+        self.assertEqual(utility.getOrder('top', 'undefined (fallback)'),
-+                         ('two', 'three', 'one'))
-+        self.assertEqual(utility.getOrder('top', 'basic'), ('one', ))
-         self.assertEqual(utility.getHidden('top', 'light'), ('two', ))
++- For the link_redirect_view, don't modify the urls for ``mailto:``, ``tel:``,
++  ``callto:`` and ``file:`` link types but render them as-is.
++  [thet]
++
+ - When installing the default profile, restrict uninstalling of old types to
+   old FTI based ones.
+   [thet]
+diff --git a/plone/app/contenttypes/browser/link_redirect_view.py b/plone/app/contenttypes/browser/link_redirect_view.py
+index 4e4a45d..0bd5ae8 100644
+--- a/plone/app/contenttypes/browser/link_redirect_view.py
++++ b/plone/app/contenttypes/browser/link_redirect_view.py
+@@ -32,7 +32,8 @@ def __call__(self):
  
-     def test_fragment_skip_purge(self):
+     def absolute_target_url(self):
+         """Compute the absolute target URL."""
+-        if self.context.remoteUrl.startswith('.'):
++        url = self.context.remoteUrl
++        if url.startswith('.'):
+             # we just need to adapt ../relative/links, /absolute/ones work
+             # anyway -> this requires relative links to start with ./ or
+             # ../
+@@ -41,13 +42,17 @@ def absolute_target_url(self):
+             )
+             url = '/'.join([
+                 context_state.canonical_object_url(),
+-                self.context.remoteUrl
++                url
+             ])
++        elif url.startswith('mailto:')\
++                or url.startswith('tel:')\
++                or url.startswith('callto:')\
++                or url.startswith('file:')\
++                or url.startswith('#'):
++            # Do nothing for html/html5 links
++            pass
+         else:
+-            url = replace_link_variables_by_paths(
+-                self.context,
+-                self.context.remoteUrl
+-            )
++            url = replace_link_variables_by_paths(self.context, url)
+             if not (url.startswith('http://') or url.startswith('https://')):
+                 url = self.request.physicalPathToURL(url)
+ 
+diff --git a/plone/app/contenttypes/tests/test_link.py b/plone/app/contenttypes/tests/test_link.py
+index 88d5b45..144069c 100644
+--- a/plone/app/contenttypes/tests/test_link.py
++++ b/plone/app/contenttypes/tests/test_link.py
+@@ -162,6 +162,30 @@ def test_link_redirect_view_path_with_variable(self):
+         self.assertTrue(view())
+         self._assert_redirect('http://nohost/plone/my-folder/my-item')
+ 
++    def test_mailto_type(self):
++        self.link.remoteUrl = 'mailto:stress@test.us'
++        view = self._get_link_redirect_view(self.link)
++        rendered = view()
++        self.assertTrue('href="mailto:stress@test.us"' in rendered)
++
++    def test_tel_type(self):
++        self.link.remoteUrl = 'tel:123'
++        view = self._get_link_redirect_view(self.link)
++        rendered = view()
++        self.assertTrue('href="tel:123"' in rendered)
++
++    def test_callto_type(self):
++        self.link.remoteUrl = 'callto:123'
++        view = self._get_link_redirect_view(self.link)
++        rendered = view()
++        self.assertTrue('href="callto:123"' in rendered)
++
++    def test_file_type(self):
++        self.link.remoteUrl = 'file:///tmp'
++        view = self._get_link_redirect_view(self.link)
++        rendered = view()
++        self.assertTrue('href="file:///tmp"' in rendered)
++
+     def _publish(self, obj):
+         portal_workflow = getToolByName(self.portal, "portal_workflow")
+         portal_workflow.doActionFor(obj, 'publish')
 
 
