@@ -1,174 +1,27 @@
 Repository: plone.app.contenttypes
 Branch: refs/heads/master
-Date: 2015-03-08T01:19:41+01:00
+Date: 2015-03-08T02:15:27+01:00
 Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/fa1ca015ae2763e7580550f629f7b7c96874f822
+Commit: https://github.com/plone/plone.app.contenttypes/commit/6d79e241db2e28cc053c05c205df61bbfeba7ef1
 
-optimize album_view for better performance
+bugfix
 
 Files changed:
 M plone/app/contenttypes/browser/collection.py
-M plone/app/contenttypes/browser/folder.py
-M plone/app/contenttypes/browser/templates/listing_album.pt
 
 diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py
-index 23953c0..dffd130 100644
+index dffd130..e49eefe 100644
 --- a/plone/app/contenttypes/browser/collection.py
 +++ b/plone/app/contenttypes/browser/collection.py
-@@ -5,6 +5,8 @@
- from plone.app.contenttypes.behaviors.collection import ICollection
- from plone.app.contenttypes.browser.folder import FolderView
- from plone.app.contenttypes import _
-+from plone.memoize.view import memoize
-+import random
- 
- 
- class CollectionView(FolderView):
-@@ -35,8 +37,9 @@ def results(self, **kwargs):
+@@ -37,8 +37,8 @@ def results(self, **kwargs):
  
          return self.collection_behavior.results(**kwargs)
  
-+    @memoize
+-    @memoize
      @property
--    def album_results(self):
-+    def _album_results(self):
++    @memoize
+     def _album_results(self):
          """Get results to display an album with subalbums.
          """
-         results = self.results()
-@@ -51,6 +54,18 @@ def album_results(self):
-                 folders.append(it)
-         return {'images': images, 'folders': folders}
- 
-+    @property
-+    def album_images(self):
-+        """Get all images within this collection.
-+        """
-+        return self._album_results['images']
-+
-+    @property
-+    def album_folders(self):
-+        """Get all folders within this collection.
-+        """
-+        return self._album_results['folders']
-+
-     def tabular_fields(self):
-         """Returns a list of all metadata fields from the catalog that were
-            selected.
-diff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py
-index 72d8e72..8fcf386 100644
---- a/plone/app/contenttypes/browser/folder.py
-+++ b/plone/app/contenttypes/browser/folder.py
-@@ -7,10 +7,12 @@
- from plone.app.contenttypes.interfaces import IFolder
- from plone.app.contenttypes.interfaces import IImage
- from plone.event.interfaces import IEvent
-+from plone.memoize.view import memoize
- from plone.registry.interfaces import IRegistry
- from zope.component import getMultiAdapter
- from zope.component import getUtility
- from zope.contentprovider.interfaces import IContentProvider
-+import random
- 
- HAS_SECURITY_SETTINGS = True
- try:
-@@ -161,18 +163,43 @@ def formatted_date(self, item):
-         return provider(item)
- 
-     @property
--    def album_results(self):
--        """Get results to display an album with subalbums.
-+    @memoize
-+    def album_images(self):
-+        """Get all images within this folder.
-         """
-         images = self.results(
-             batch=False,
-             object_provides=IImage.__identifier__
-         )
--        folders = self.results(
-+        return images
-+
-+    @property
-+    @memoize
-+    def album_folders(self):
-+        """Get all folders within this folder.
-+        """
-+        images = self.results(
-             batch=False,
-             object_provides=IFolder.__identifier__
-         )
--        return {'images': images, 'folders': folders}
-+        return images
-+
-+    @property
-+    def album_random_image(self):
-+        """Get random image from this folder.
-+        """
-+        img = None
-+        images = self.album_images
-+        if images:
-+            img = random.choice(images)
-+        return img
-+
-+    @property
-+    def album_number_images(self):
-+        """Get number of images from this folder.
-+        """
-+        images = self.album_images
-+        return len(images)
- 
-     @property
-     def no_items_message(self):
-diff --git a/plone/app/contenttypes/browser/templates/listing_album.pt b/plone/app/contenttypes/browser/templates/listing_album.pt
-index ab9c319..61f46e6 100644
---- a/plone/app/contenttypes/browser/templates/listing_album.pt
-+++ b/plone/app/contenttypes/browser/templates/listing_album.pt
-@@ -9,9 +9,8 @@
- 
- <metal:content-core fill-slot="content-core">
- <metal:main_macro define-macro="content-core"
--    tal:define="result view/album_results;
--                images result/images;
--                albums result/folders">
-+    tal:define="images view/album_images;
-+                albums view/album_folders">
- 
-   <div metal:define-macro="text-field-view"
-       id="parent-fieldname-text" class="stx"
-@@ -42,25 +41,21 @@
- 
-   <tal:albums tal:repeat="album albums">
-     <div class="photoAlbumEntry photoAlbumFolder"
--        tal:define="ob album/getObject;
--                    subalbum_view nocall:ob/@@album_view;
--                    subalbum_results subalbum_view/album_results;
--                    subalbum_images subalbum_results/images;
--                    number_of_images python:len(subalbum_images);
--                    random python:modules['random'];
--                    random_image python:number_of_images and random.choice(subalbum_images).getObject() or None">
-+        tal:define="album_ob album/getObject;
-+                    subalbum_view nocall:album_ob/@@album_view;
-+                    random_image subalbum_view/album_random_image;
-+                    number_images subalbum_view/album_number_images"
-+        tal:condition="random_image">
-       <a tal:attributes="href album/getURL;
-                          title album/Description">
-         <span class="photoAlbumEntryWrapper">
--          <tal:block condition="number_of_images">
--            <img tal:define="scale random_image/@@images;
--                             img_tag python:scale.scale('image', scale='thumb').tag()"
--                 tal:replace="structure img_tag" />
--          </tal:block>
-+          <img tal:define="random_img_ob random_image/getObject;
-+                           scales random_img_ob/@@images"
-+               tal:replace="structure python:scales.tag(fieldname='image', scale='thumb')" />
-         </span>
-         <span class="photoAlbumEntryTitle">
-           <tal:title content="album/Title">Title</tal:title>
--          (<tal:number content="number_of_images" />)
-+          (<tal:number content="number_images" />)
-         </span>
-       </a>
-     </div>
 
 
