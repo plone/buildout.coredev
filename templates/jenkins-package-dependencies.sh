@@ -20,9 +20,9 @@ do
 
     grep $dist_lowercase package-dependencies.dot > $dist_path.dot
 
-    echo "digraph {" > $dist_path-tmp.dot
-    cat $dist_path.dot >> $dist_path-tmp.dot
-    echo "}" >> $dist_path-tmp.dot
+    echo "digraph {" > tmp.dot
+    cat $dist_path.dot >> tmp.dot
+    echo "}" >> tmp.dot
 
-    dot -Tpng $dist_path-tmp.dot -o $dist_path.png
+    mv tmp.dot $dist_path.dot
 done
