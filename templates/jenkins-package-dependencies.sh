@@ -6,10 +6,7 @@ then
     mkdir $FOLDER
 fi
 
-if [ ! -e package-dependencies.dot ]
-then
-    ./bin/jenkins-package-dependencies
-fi
+./bin/jenkins-package-dependencies
 
 for dist in $DISTRIBUTIONS
 do
