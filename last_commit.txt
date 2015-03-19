@@ -1,59 +1,151 @@
-Repository: plone.app.theming
+Repository: Products.CMFPlone
 Branch: refs/heads/master
-Date: 2015-03-19T15:20:38+01:00
-Author: Vincent Fretin (vincentfretin) <vincent.fretin@gmail.com>
-Commit: https://github.com/plone/plone.app.theming/commit/f5fe018a100022a8366b4329c56825272e9508b3
+Date: 2015-03-19T16:13:17+01:00
+Author: Timo Stollenwerk (tisto) <tisto@plone.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/23308a5ee0cc937686aec9fb73f8d8427667976a
 
-Add an error log if the subrequest failed (probably a relative xi:include) instead of silently returning None (and so having a xi:include returning nothing).
-
-Conflicts:
-	docs/HISTORY.rst
+Move syndication doctest from plone.app.controlpanel to CMFPlone and refactor the test into a zope.testbrowser test. The test itself still kind of sucks and we need more tests for the syndication control panel in general.
 
 Files changed:
-M docs/HISTORY.rst
-M src/plone/app/theming/utils.py
+A Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_syndication.py
+M Products/CMFPlone/interfaces/__init__.py
 
-diff --git a/docs/HISTORY.rst b/docs/HISTORY.rst
-index 9d5aa6b..6aa7435 100644
---- a/docs/HISTORY.rst
-+++ b/docs/HISTORY.rst
-@@ -4,6 +4,11 @@ Changelog
- 1.3.0 (unreleased)
- ------------------
- 
-+- Add an error log if the subrequest failed (probably a relative xi:include)
-+  instead of silently returning None (and so having a xi:include returning
-+  nothing).
-+  [vincentfretin]
+diff --git a/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_syndication.py b/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_syndication.py
+new file mode 100644
+index 0000000..f20f91d
+--- /dev/null
++++ b/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_syndication.py
+@@ -0,0 +1,119 @@
++# -*- coding: utf-8 -*-
++from plone.app.testing import SITE_OWNER_NAME, SITE_OWNER_PASSWORD
++from plone.registry.interfaces import IRegistry
++from plone.testing.z2 import Browser
 +
- - Fix transform to not affect the result when theming is disabled
-   [datakurre]
- 
-diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
-index b8850da..6cce4e4 100644
---- a/src/plone/app/theming/utils.py
-+++ b/src/plone/app/theming/utils.py
-@@ -1,3 +1,4 @@
-+import logging
- import Globals
- 
- import pkg_resources
-@@ -48,6 +49,8 @@
- from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFPlone.utils import safe_unicode
- 
-+LOGGER = logging.getLogger('plone.app.theming')
++from zope.component import getMultiAdapter
++from zope.component import getUtility
++from Products.CMFPlone.interfaces import ISiteSyndicationSettings
++from Products.CMFPlone.testing import \
++    PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
 +
- 
- class NetworkResolver(etree.Resolver):
-     """Resolver for network urls
-@@ -117,6 +120,7 @@ def resolve(self, system_url, public_id, context):
- 
-         response = subrequest(system_url, root=root)
-         if response.status != 200:
-+            LOGGER.error("Couldn't resolve %s", system_url)
-             return None
-         result = response.getBody()
-         content_type = response.headers.get('content-type')
++import unittest2 as unittest
++import transaction
++
++
++class SyndicationControlPanelFunctionalTest(unittest.TestCase):
++
++    layer = PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
++
++    def setUp(self):
++        self.app = self.layer['app']
++        self.portal = self.layer['portal']
++        self.portal_url = self.portal.absolute_url()
++        self.browser = Browser(self.app)
++        self.browser.handleErrors = False
++        self.browser.addHeader(
++            'Authorization',
++            'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,)
++        )
++
++    def test_syndication_controlpanel_link(self):
++        self.browser.open(
++            "%s/plone_control_panel" % self.portal_url)
++        self.browser.getLink('Syndication').click()
++
++    def test_syndication_controlpanel_backlink(self):
++        self.browser.open(
++            "%s/@@syndication-controlpanel" % self.portal_url)
++        self.assertTrue("Plone Configuration" in self.browser.contents)
++
++    def test_syndication_controlpanel_sidebar(self):
++        self.browser.open(
++            "%s/@@syndication-controlpanel" % self.portal_url)
++        self.browser.getLink('Site Setup').click()
++        self.assertEqual(
++            self.browser.url,
++            'http://nohost/plone/@@overview-controlpanel')
++
++    def test_syndication_controlpanel_view(self):
++        view = getMultiAdapter((self.portal, self.portal.REQUEST),
++                               name="syndication-controlpanel")
++        view = view.__of__(self.portal)
++        self.assertTrue(view())
++
++    def test_syndication_controlpanel_enabled(self):
++        self.browser.open(
++            "%s/@@syndication-controlpanel" % self.portal_url)
++        self.browser.getControl(
++            name='form.widgets.default_enabled:list').value = True
++        self.browser.getControl(
++            name='form.widgets.show_author_info:list').value = False
++        self.browser.getControl(
++            name='form.widgets.show_syndication_link:list').value = True
++        self.browser.getControl('Save').click()
++
++        self.assertTrue('Changes saved' in self.browser.contents)
++        self.browser.open(
++            "%s/@@syndication-controlpanel" % self.portal_url)
++
++        self.assertEqual(
++            self.browser.getControl(
++                name='form.widgets.default_enabled:list'
++            ).value,
++            ['selected']
++        )
++        self.assertEqual(
++            self.browser.getControl(
++                name='form.widgets.show_author_info:list').value,
++            []
++        )
++        self.assertEqual(
++            self.browser.getControl(
++                name='form.widgets.show_syndication_link:list'
++            ).value,
++            ['selected']
++        )
++
++    def test_create_collection(self):
++        """Create collection and check if synPropertiesForm link is present.
++        """
++        # create collection
++        self.portal.invokeFactory('Collection', 'collection')
++        self.portal.collection.query = [
++            {
++                "i": "portal_type",
++                "o": "plone.app.querystring.operation.selection.is",
++                "v": ["News Item"]
++            },
++            {
++                "i": "review_state",
++                "o": "plone.app.querystring.operation.selection.is",
++                "v": ["published"]
++            }
++        ]
++        transaction.commit()
++        # Enable syndication
++        self.browser.open(
++            "%s/@@syndication-controlpanel" % self.portal_url)
++        self.browser.getControl(
++            name='form.widgets.default_enabled:list').value = ['selected']
++        self.browser.getControl(
++            name='form.widgets.show_syndication_link:list'
++        ).value = ['selected']
++        self.browser.getControl('Save').click()
++        self.assertTrue('Changes saved' in self.browser.contents)
++
++        self.browser.open(self.portal_url + '/collection')
++        self.assertTrue('/RSS' in self.browser.contents)
++
+diff --git a/Products/CMFPlone/interfaces/__init__.py b/Products/CMFPlone/interfaces/__init__.py
+index 3eeebf2..35214b8 100644
+--- a/Products/CMFPlone/interfaces/__init__.py
++++ b/Products/CMFPlone/interfaces/__init__.py
+@@ -38,6 +38,7 @@
+ from siteroot import IPloneSiteRoot
+ from siteroot import ITestCasePloneSiteRoot
+ from structure import INonStructuralFolder
++from syndication import ISiteSyndicationSettings
+ from translationservice import ITranslationServiceTool
+ from workflow import IWorkflowChain
+ from resources import IResourceRegistry
 
 
