@@ -5,7 +5,7 @@ There are many people and companies who rely on Plone on a day-to-day basis so w
 Plone's source code is hosted in git repositories at  https://github.com/plone,
 but only members of the developer team have commit-rights.
 
-Just sending in a contributors agreement does not guarantee you access to the repository,
+Just sending in a contributors agreement does not guarantee you access to the repositories,
 but once you send it in we will always have it on file for when you are ready to contribute.
 We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
@@ -25,7 +25,7 @@ We do ask that before requesting core access you familiarize yourself a little w
   Technically,
   in order for us to accept your patch you must sign the contributors agreement.
   If you want to contribute fixes,
-  please just sign the agreement and go through the standard github pull request process described until you feel comfortable to bypass review.
+  please just sign the agreement and go through the standard github pull request process described below until you feel comfortable to bypass review.
   If the ticket is trivial,
   or you're fixing documentation,
   you do not need to sign a contributor's agreement.
