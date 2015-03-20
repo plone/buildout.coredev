@@ -4,7 +4,10 @@ Plone Release Process
 
 1. Check Jenkins Status
 
-Check latest Plone coredev job on jenkins.plone.org, it should be green, if it is not, fix the problem first.
+Check latest Plone coredev job on jenkins.plone.org,
+it should be green,
+if it is not,
+fix the problem first.
 
 2. Check out buildout.coredev
 
@@ -15,7 +18,8 @@ bin/buildout -c release.cfg
 
 3. Check Packages for Updates
 
-Check all packages for updates, add to/remove from checkouts.cfg accordingly.
+Check all packages for updates,
+add to/remove from checkouts.cfg accordingly.
 
 TODO: Add esteele.manager command for checks.
 
@@ -23,9 +27,12 @@ This step might become obsolete in the future if we do the check for every singl
 
 4. Check packages individually
 
-  a) Check changelog (Check if CHANGES.rst is up-to-date, all changes since the last release should be included? Compare "git log HEAD...<LAST_RELESE_TAG>" with CHANGES.rst)
+  a) Check changelog
+     (Check if CHANGES.rst is up-to-date,
+     all changes since the last release should be included?
+     Compare "git log HEAD...<LAST_RELESE_TAG>" with CHANGES.rst)
 
-  b) Run checkmanifest (TODO: Include in zest.releaser/esteele.manager)
+  b) Run `checkmanifest<https://pypi.python.org/pypi/check-manifest/>`_ (TODO: Include in zest.releaser/esteele.manager)
 
   c) Check package "best practices" (README.rst, CHANGES.rst, src directory)
 
@@ -37,9 +44,10 @@ This step might become obsolete in the future if we do the check for every singl
 
 5. Make sure plone.app.upgrade contains an upgrade step for the future Plone release.
 
-6. Update CMFPlone version in profiles/default/metadata.xml
+6. Update CMFPlone version in ``profiles/default/metadata.xml``
 
-7. Write an email to the translation team, asking them to do a plone.app.locales release.
+7. Write an email to the translation team,
+   asking them to do a plone.app.locales release.
 
 8. Ask Rok to make a plone.app.widgets release (TODO!)
 
@@ -61,16 +69,16 @@ This step might become obsolete in the future if we do the check for every singl
 
 17. Create release page on http://plone.org/products/plone/releases
 
-18. Send links to installers list (plone-installers@lists.sourceforge.net
-<mailto:plone-installers@lists.sourceforge.net>)_
+18. Send links to installers list
+    (plone-installers@lists.sourceforge.net <mailto:plone-installers@lists.sourceforge.net>)
 
-19. Wait for installers to be uploaded to Launchpad, link on plone.org
-release page
+19. Wait for installers to be uploaded to Launchpad,
+    link on plone.org release page
 
 20. Mark release page as "final" (launchpad?)
 
-20. Update PloneSoftwareCenter pointer to the newest release, so that
-it's linked from the homepage
+20. Update PloneSoftwareCenter pointer to the newest release,
+    so that it's linked from the homepage
 
 21. Send out announcement to plone-announce
 
@@ -78,9 +86,10 @@ it's linked from the homepage
 
 
 `esteele.manager<https://github.com/esteele/esteele.manager/>`_ has a script to handle:
-- Checking all packages for updates, modify versions.cfg/checkouts.cfg
-  accordingly (#1 above)
+
+- Checking all packages for updates, modify versions.cfg/checkouts.cfg accordingly (#1 above)
 - zest.releaser hooks to:
+
   - Check to make sure the user has permission to upload the release to
     pypi
   - Update versions.cfg/checkouts.cfg after the package is released. (#)
