@@ -2,7 +2,7 @@ Contributing to Plone Core
 ==========================
 
 There are many people and companies who rely on Plone on a day-to-day basis so we have to introduce some level of code quality control.
-Plone's source code is hosted in a git repository at  https://github.com/plone,
+Plone's source code is hosted in git repositories at  https://github.com/plone,
 but only members of the developer team have commit-rights.
 
 Just sending in a contributors agreement does not guarantee you access to the repository,
