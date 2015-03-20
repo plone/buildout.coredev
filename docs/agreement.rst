@@ -1,3 +1,6 @@
+.. -*- coding: utf-8 -*-
+
+==========================
 Contributing to Plone Core
 ==========================
 
@@ -52,7 +55,7 @@ please see  http://plone.org/tuneup.
 
 
 Dealing with pull requests on GitHub
-------------------------------------
+====================================
 
 Before we can merge a pull request,
 we have to check that the author has signed the contributor's agreement.

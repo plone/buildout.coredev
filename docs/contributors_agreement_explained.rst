@@ -1,3 +1,6 @@
+.. -*- coding: utf-8 -*-
+
+===========================================
 Contributor’s Agreement for Plone Explained
 ===========================================
 
@@ -11,7 +14,7 @@ The Plone Contributor Agreement can be found at:
 `http://plone.org/foundation/contributors-agreement/agreement.pdf`_
 
 About the Plone Contributor Agreement
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+=====================================
 
 The Foundation feels that it benefits the community for a single organization to hold the rights to Plone.
 Prior to the Foundation,
@@ -30,7 +33,7 @@ The community members who formed the Foundation felt that having the Foundation 
     The Foundation's contributor agreement ensures that there will **always** be an OSI-approved version of Plone.
 
 Questions & Answers
-~~~~~~~~~~~~~~~~~~~
+===================
 
 What does the contributor's agreement cover?
 

@@ -1,3 +1,6 @@
+.. -*- coding: utf-8 -*-
+
+==========================================
 Essential Continuous Integration Practices
 ==========================================
 
@@ -9,7 +12,7 @@ Though,
 there are some essential rules that needs to be followed in order to achieve a stable build.
 
 1) Don’t Check In on a Broken Build
------------------------------------
+===================================
 Do not make things more complicated for the developer who is responsible for breaking the build.
 If the build breaks,
 the developer has to identify the cause of the breakage as soon as possible and should fix it.
@@ -36,7 +39,7 @@ or just revert the commit in order to be able to continue to work.
 
 
 2) Always Run All Commit Tests Locally before Committing
---------------------------------------------------------
+========================================================
 Following this practice ensures the build stays green and other developers can continue to work without breaking the first rule.
 
 There might be changes that have been checked in before your last update from the version control that might lead to a build failure in Jenkins in combination with your changes.
@@ -50,7 +53,7 @@ or because you forgot to add a new class or configuration file that you have bee
 
 
 3) Wait for Commit Tests to Pass before Moving On
--------------------------------------------------
+=================================================
 Always monitor the build’s progress and fix the problem right away if it fails.
 You have a far better chance of fixing the build,
 if you just introduced a regression than later.
@@ -59,7 +62,7 @@ making things more complicated for your.
 
 
 4) Never Go Home on a Broken Build
-----------------------------------
+==================================
 Taking into account the first rule of CI ("Don't check in on a broken build"),
 breaking the build essentially stops all other developers from working on it.
 Therefore going home on a broken build (or even on a build that has not finished yet) is not acceptable,
@@ -67,13 +70,13 @@ because it will prevent all the other developers to stop working on the build or
 
 
 5) Always Be Prepared to Revert to the Previous Revision
---------------------------------------------------------
+========================================================
 In order for the other developers to be able to work on the build,
 you should always be prepared to revert to the previous (passing) revision.
 
 
 6) Time-Box Fixing before Reverting
------------------------------------
+===================================
 When the build breaks on check-in,
 try to fix it for ten minutes.
 If,
@@ -84,7 +87,7 @@ This way you will allow other developers to continue to work.
 
 
 7) Don’t Comment Out Failing Tests
-----------------------------------
+==================================
 Once you begin to enforce the previous rule,
 the result is often that developers start commenting out failing tests in order to get the build passing again as quick as possible.
 While this impulse is understandable,
@@ -100,7 +103,7 @@ or delete it (if the functionality under test no longer exists).
 
 
 8) Take Responsibility for All Breakages That Result from Your Changes
-----------------------------------------------------------------------
+======================================================================
 If you commit a change and all the tests you wrote pass,
 but others break,
 the build is still broken.
@@ -116,7 +119,7 @@ In any case the developer who made the commit is responsible to make it pass.
 
 
 *) Break the Build and Buy Caipirinhas for Everybody
-----------------------------------------------------
+====================================================
 If you break the build you have to buy Caipirinhas for everybody (after you fixed the build of course).
 
 .. note::
@@ -124,7 +127,7 @@ If you break the build you have to buy Caipirinhas for everybody (after you fixe
 
 
 Further Reading
----------------
+===============
 Those rules were taken from the excellent book "Continuous Delivery" by Jez Humble and David Farley (Addison Wesley),
 and have been adopted and rewritten for the Plone community.
 If you want to learn more about Continuous Integration and Continuous Delivery,

@@ -1,8 +1,11 @@
+.. -*- coding: utf-8 -*-
+
+=====================
 Writing documentation
 =====================
 
 Documentation of Plone
-----------------------
+======================
 
 As a community,
 Plone maintains several types of documentation:
@@ -27,10 +30,10 @@ Plone maintains several types of documentation:
     Anyone may `contribute <http://collective-docs.readthedocs.org/en/latest/introduction/developermanual.html>`_.
 
 Documenting a package
----------------------
+=====================
 
 The basics
-~~~~~~~~~~
+----------
 
 At the very least,
 your package should include the following forms of documentation:
@@ -114,7 +117,7 @@ your package should include the following forms of documentation:
 
 
 Using Sphinx
-~~~~~~~~~~~~
+------------
 
 reST References:
  * `Plone Oriented Shpinx Documentation <http://developer.plone.org/reference_manuals/active/writing/index.html>`_
