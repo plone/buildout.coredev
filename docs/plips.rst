@@ -1,8 +1,11 @@
+.. -*- coding: utf-8 -*-
+
+==================
 Implementing PLIPS
 ==================
 
 All about PLIPS
----------------
+===============
 **What is a PLIP?**
     A PLIP is a Plone Improvement Proposal.
     It is a change to a Plone package that would affect everyone.
@@ -75,7 +78,7 @@ All about PLIPS
     It is often the case that there are competing implementations and we want to see it vetted as an add on before “blessing” a preferred implementation.
 
 Process Overview
-----------------
+================
 #. Submit a PLIP (at any time)
 #. PLIP is approved for inclusion into core for a given release
 #. Developer implements PLIP (code, tests, documentation)
@@ -95,7 +98,7 @@ Process Overview
 .. _how_submit_plip:
 
 How to Submit a PLIP
---------------------
+====================
 Whether you want to update the default theme or rip out a piece of architecture,
 everyone should go through the PLIP process.
 If you need help at any point in this process,
@@ -149,7 +152,7 @@ That or I got lazy when writing these docs.
 I'm betting on the latter.
 
 Evaluating PLIPs
-^^^^^^^^^^^^^^^^
+----------------
 After you submit your PLIP,
 the Framework Team will meet within a couple weeks and let you know if the PLIP is accepted.
 If the PLIP is not accepted,
@@ -169,12 +172,12 @@ These are the criteria by which the framework team will review your bundle:
 See the :doc:`plipreview` page for more information.
 
 Implementing Your PLIP
-----------------------
+======================
 You can start the development at any time - but if you are going to modify Plone itself,
 you might want to wait to see if your idea is approved first to save yourself some work if it isn't.
 
 General Rules
-^^^^^^^^^^^^^
+-------------
  * Any new packages must be in a branch in the plone namespace in github.
    You don't have to develop there,
    but it must be there when submitted.
@@ -188,7 +191,7 @@ General Rules
     * `Be tested <http://collective-docs.plone.org/en/latest/testing_and_debugging/index.html>`_
 
 Creating a New PLIP Branch
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------
 .. TODO: This needs to be updated for branches
 
 Create a buildout configuration file for your PLIP in the ``plips`` folder.
@@ -221,7 +224,7 @@ Use the same naming convention when branching existing packages,
 and you should always be branching packages when working on PLIPs.
 
 Working on a PLIP
-^^^^^^^^^^^^^^^^^
+-----------------
 To work on a PLIP,
 you run the bootstrap and then tell buildout to use this plip config::
 
@@ -244,7 +247,7 @@ Like this::
 
 
 Finishing Up
-^^^^^^^^^^^^
+------------
 Before marking your PLIP as ready for review,
 please add a file to give a set of instructions to the PLIP reviewer.
 

@@ -1,5 +1,8 @@
+.. -*- coding: utf-8 -*-
+
+================================
 Getting started with development
-=================================
+================================
 
 This document assumes you want to run the current latest Plone source,
 fix a bug in Plone, or test an addon in the context of the latest code,
@@ -7,12 +10,12 @@ and will detail the full process.
 For more information on writing PLIPS, please :doc:`go here <plips>`.
 
 Version Support Policy
-----------------------
+======================
 If you are triaging or fixing bugs,
 keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
 
 Dependencies
-------------
+============
 * `Git <http://help.github.com/mac-set-up-git/>`_
 * `Subversion <http://subversion.apache.org/>`_
 * `Python <http://python.org/>`_ 2.7 including development headers.
@@ -33,7 +36,7 @@ Dependencies
 
 
 Setting up Your Development Environment
----------------------------------------
+=======================================
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running.
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
 `Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
@@ -61,7 +64,7 @@ you can start your new instance with::
 The default username/password for a dev instance is **admin/admin**.
 
 Switching Branches
-^^^^^^^^^^^^^^^^^^
+------------------
 If your bug is specific to one branch or you think it should be `backported <http://en.wikipedia.org/wiki/Backporting>`_,
 you can easily switch branches. The first time you get a branch, you must do::
 
@@ -88,8 +91,7 @@ please see the `collective developer manual documentation on buildout <http://de
 
 
 Jenkins / mr.roboto
--------------------
-
+===================
 Plone has a Continuous Integration setup and follows CI rules.
 
 When you push a change to any Plone core package,
@@ -132,7 +134,7 @@ Jenkins generates this file too.
 You want to configure your notifier of choice with this url: ``http://jenkins.plone.org/cc.xml``
 
 Checking out Packages for Fixing
---------------------------------
+================================
 Most packages are not in :file:`src/` by default,
 so you can use ``mr.developer`` to get the latest and make sure you are always up to date.
 It can be a little daunting at first to find out which packages are causing the bug in question,
@@ -178,7 +180,7 @@ For some more tips on working with ``mr.developer``,
 please :doc:`read more here <mrdeveloper>`.
 
 Testing Locally
----------------
+===============
 To run a test for the specific module you are modifying::
 
   > ./bin/test -m plone.app.caching
@@ -199,7 +201,7 @@ please make sure other modules aren't affected by the change by running the full
     More on that below.
 
 Updating CHANGES.rst and checkouts.cfg
---------------------------------------
+======================================
 Once all the tests are running locally on your machine,
 you are **ALMOST** ready to commit the changes.
 A couple housekeeping things before moving on.
@@ -231,7 +233,7 @@ If your bug is in more than one release (e.g. 4.1 and 4.2),
 please checkout both branches and add to the :file:`checkouts.cfg` file.
 
 Committing and Pull Requests
-----------------------------
+============================
 Phew! We are in the home stretch.
 How about a last minute checklist:
 
@@ -265,7 +267,7 @@ A couple quick reminders:
    jump into `#plone <http://webchat.freenode.net?channels=plone>`_ and ask for a quick eyeball on your changes.
 
 Committing to Products.CMFPlone
--------------------------------
+===============================
 If you are working a bug fix on ``Products.CMFPlone``,
 there are a couple other things to take notice of.
 First and foremost,
@@ -328,7 +330,7 @@ Let's do that now::
 
 
 Branches and Forks and Direct Commits - Oh My!
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------------------------------
 Plone used to be in an svn repository,
 so everyone is familiar and accustomed to committing directly to the branches.
 After the migration to github,
@@ -382,7 +384,7 @@ jump into IRC with the ``pull request`` link and ask for a review.
     You still need to update :file:`checkouts.cfg` file in the correct branches of buildout.coredev!
 
 Finalizing Tickets
-------------------
+==================
 If you are working from a ticket,
 please don't forget to go back to the ticket and add a link to the changeset.
 We don't have integration with github yet so it's a nice way to track changes.
@@ -391,7 +393,7 @@ If the bug is really bad,
 consider pinging the release manager and asking him to make a release pronto.
 
 FAQ
----
+===
  * *How do I know when my package got made?*
     You can follow the project on github and watch its `timeline <https://github.com/organizations/plone>`_.
     You can also check the :file:`CHANGES.rst` of every plone release for a comprehensive list of all changes and validate that yours is present.

@@ -1,3 +1,6 @@
+.. -*- coding: utf-8 -*-
+
+===========
 Style Guide
 ===========
 
@@ -13,7 +16,7 @@ We don't require it but we as a community really,
 really appreciate it.
 
 Naming Conventions
-------------------
+==================
 Above all else,
 be consistent with any code your are modifying!
 Historically the code is all camel case,
@@ -21,7 +24,7 @@ but many new libraries are in the PEP8 convention.
 The mailing list is exploding with debate over what is better so we'll leave the exercise of deciding what to do with the user.
 
 File Conventions
-----------------
+================
 In Zope 2, file names used to be MixedCase.
 In Python,
 and thus in Plone going forward,
@@ -51,7 +54,7 @@ less redundant and generally more aesthetically pleasing.
     We need a better one.
 
 Concrete Rules
---------------
+==============
  * Do not use tabs in Python code!
    Use spaces as indenting,
    4 spaces for each level.

@@ -1,8 +1,11 @@
+.. -*- coding: utf-8 -*-
+
+==========
 Mr. Roboto
 ==========
 
 Github push
------------
+===========
 When a push happens on Github,
 ``mr.roboto`` is triggered so starts to analyze the push.
 
@@ -14,7 +17,7 @@ When a push happens on Github,
 * If it's on a plip specification it runs the job that is configured Through The Web on ``mr.roboto`` interface. (http://jenkins.plone.org/roboto/plips)
 
 Job finishes
-------------
+============
 When jenkins finish a job it does a callback to ``mr.roboto`` in order to :
 
 * If it comes from a ``coredev`` job,
