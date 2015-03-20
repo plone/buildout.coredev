@@ -118,8 +118,8 @@ try to fix it (better) or re-run the Jenkins job to see if it passes again.
 In any case the developer who made the commit is responsible to make it pass.
 
 
-*) Break the Build and Buy Caipirinhas for Everybody
-====================================================
+\*) Break the Build and Buy Caipirinhas for Everybody
+=====================================================
 If you break the build you have to buy Caipirinhas for everybody (after you fixed the build of course).
 
 .. note::

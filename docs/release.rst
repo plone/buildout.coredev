@@ -34,7 +34,7 @@ This step might become obsolete in the future if we do the check for every singl
      all changes since the last release should be included?
      Compare "git log HEAD...<LAST_RELESE_TAG>" with CHANGES.rst)
 
-  b) Run `checkmanifest<https://pypi.python.org/pypi/check-manifest/>`_ (TODO: Include in zest.releaser/esteele.manager)
+  b) Run `checkmanifest <https://pypi.python.org/pypi/check-manifest/>`_ (TODO: Include in zest.releaser/esteele.manager)
 
   c) Check package "best practices" (README.rst, CHANGES.rst, src directory)
 
@@ -87,7 +87,7 @@ This step might become obsolete in the future if we do the check for every singl
 22. Update #plone topic
 
 
-`esteele.manager<https://github.com/esteele/esteele.manager/>`_ has a script to handle:
+`esteele.manager <https://github.com/esteele/esteele.manager/>`_ has a script to handle:
 
 - Checking all packages for updates, modify versions.cfg/checkouts.cfg accordingly (#1 above)
 - zest.releaser hooks to:
