@@ -1,110 +1,3062 @@
-Repository: plone.app.i18n
+Repository: plone.i18n
 Branch: refs/heads/master
-Date: 2015-03-22T12:33:04+01:00
+Date: 2015-02-27T16:31:38+01:00
 Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
-Commit: https://github.com/plone/plone.app.i18n/commit/4e995a04469d80161e3bdafc8b813c9401dd3f2f
+Commit: https://github.com/plone/plone.i18n/commit/d18ecc8629bf53e2be80250993f8d10deb68d54d
 
-Language selector adapted to plone 5
+Branch for multilingual integration
 
 Files changed:
-M plone/app/i18n/locales/browser/selector.py
+A plone/i18n/interfaces.py
+A plone/i18n/negotiate/negotiate.py
+A plone/i18n/utility.py
+M plone/i18n/configure.zcml
 
-diff --git a/plone/app/i18n/locales/browser/selector.py b/plone/app/i18n/locales/browser/selector.py
-index b1c3042..efb8e75 100644
---- a/plone/app/i18n/locales/browser/selector.py
-+++ b/plone/app/i18n/locales/browser/selector.py
-@@ -27,18 +27,16 @@ class LanguageSelector(BrowserView):
-       ...
-       ...     def __init__(self, **kw):
-       ...         self.__dict__.update(kw)
-+      ...         self.showFlags = True
-       ...
-       ...     def getSupportedLanguages(self):
-       ...         return self.supported_langs
-       ...
--      ...     def showFlags(self):
--      ...         return True
--      ...
-       ...     def getAvailableLanguageInformation(self):
-       ...         return dict(en={'selected' : True}, de={'selected' : False},
-       ...                     nl={'selected' : True}, ar={'selected': True})
-       ...
--      ...     def getLanguageBindings(self):
-+      ...     def getLanguageBindings(self, request):
-       ...         # en = selected by user, nl = default, [] = other options
-       ...         return ('en', 'nl', [])
-       ...
-@@ -112,7 +110,7 @@ def languages(self):
-         if self.tool is None:
-             return []
+diff --git a/plone/i18n/configure.zcml b/plone/i18n/configure.zcml
+index f7de816..9f75101 100644
+--- a/plone/i18n/configure.zcml
++++ b/plone/i18n/configure.zcml
+@@ -3,5 +3,7 @@
  
--        bound = self.tool.getLanguageBindings()
-+        bound = self.tool.getLanguageBindings(self.request)
-         current = bound[0]
+     <include package=".locales" />
+     <include package=".normalizer" />
++    
++    <utility factory=".utility.LanguageUtility" name="portal_language"/>
  
-         def merge(lang, info):
-@@ -141,5 +139,5 @@ def index(info):
-     def showFlags(self):
-         """Do we use flags?."""
-         if self.tool is not None:
--            return self.tool.showFlags()
-+            return self.tool.showFlags
-         return False
+ </configure>
+diff --git a/plone/i18n/interfaces.py b/plone/i18n/interfaces.py
+new file mode 100644
+index 0000000..1054c57
+--- /dev/null
++++ b/plone/i18n/interfaces.py
+@@ -0,0 +1,14 @@
++from zope.interface import Interface, Attribute
++
++
++class ILanguageUtility(Interface):
++    """Marker interface for the portal_languages tool.
++    """
++
++
++class INegotiateLanguage(Interface):
++    """Result of language negotiation
++    """
++    language = Attribute('Language to use')
++    default_language = Attribute('Default language')
++    language_list = Attribute('List of language preferences in order')
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+new file mode 100644
+index 0000000..2eea79f
+--- /dev/null
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -0,0 +1,65 @@
++from zope.interface import implements
++from plone.i18n.interfaces import INegotiateLanguage
++from Products.CMFCore.utils import getToolByName
++
++
++class NegotiateLanguage(object):
++    """Perform default language negotiation"""
++    implements(INegotiateLanguage)
++
++    def __init__(self, site, request):
++        """Setup the current language stuff."""
++        tool = getToolByName(site, 'portal_languages')
++        langs = []
++        useContent = tool.use_content_negotiation
++        useCcTLD = tool.use_cctld_negotiation
++        useSubdomain = tool.use_subdomain_negotiation
++        usePath = tool.use_path_negotiation
++        useCookie = tool.use_cookie_negotiation
++        setCookieEverywhere = tool.set_cookie_everywhere
++        authOnly = tool.authenticated_users_only
++        useRequest = tool.use_request_negotiation
++        useDefault = 1 # This should never be disabled
++        langsCookie = None
++
++        if usePath:
++            # This one is set if there is an allowed language in the current path
++            langs.append(tool.getPathLanguage())
++
++        if useContent:
++            langs.append(tool.getContentLanguage())
++
++        if useCookie and not (authOnly and tool.isAnonymousUser()):
++            # If we are using the cookie stuff we provide the setter here
++            set_language = tool.REQUEST.get('set_language', None)
++            if set_language:
++                langsCookie = tool.setLanguageCookie(set_language)
++            else:
++                # Get from cookie
++                langsCookie = tool.getLanguageCookie()
++            langs.append(langsCookie)
++
++        if useSubdomain:
++            langs.extend(tool.getSubdomainLanguages())
++
++        if useCcTLD:
++            langs.extend(tool.getCcTLDLanguages())
++
++        # Get langs from request
++        if useRequest:
++            langs.extend(tool.getRequestLanguages())
++
++        # Get default
++        if useDefault:
++            langs.append(tool.getDefaultLanguage())
++
++        # Filter None languages
++        langs = [lang for lang in langs if lang is not None]
++
++        # Set cookie language to language
++        if setCookieEverywhere and useCookie and langs[0] != langsCookie:
++            tool.setLanguageCookie(langs[0], noredir=True)
++
++        self.default_language = langs[-1]
++        self.language = langs[0]
++        self.language_list = langs[1:-1]
+\ No newline at end of file
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+new file mode 100644
+index 0000000..4172978
+--- /dev/null
++++ b/plone/i18n/utility.py
+@@ -0,0 +1,401 @@
++from zope.interface import implements
++from plone.i18n.interfaces import ILanguageUtility, INegotiateLanguage
++from zope.component import queryUtility
++from plone.i18n.locales.interfaces import ICountryAvailability
++from plone.i18n.locales.interfaces import IContentLanguageAvailability
++from plone.i18n.locales.interfaces import ICcTLDInformation
++from Products.SiteAccess.VirtualHostMonster import VirtualHostMonster
++from ZODB.POSException import ConflictError
++from AccessControl import ClassSecurityInfo
++from zope.component.hooks import getSite
++from zope.component import getMultiAdapter
++from Products.CMFCore.utils import getToolByName
++from zope.component import getUtility
++from Products.CMFCore.interfaces import ISiteRoot
++from Products.CMFCore.interfaces import IDublinCore
++
++
++class LanguageUtility(object):
++    implements(ILanguageUtility)
++
++    def getSupportedLanguages(self):
++        """Returns a list of supported language codes."""
++        return self.supported_langs
++
++    def listSupportedLanguages(self):
++        """Returns a list of supported language names."""
++        r = []
++        available = self.getAvailableLanguages()
++        for i in self.supported_langs:
++            if available.get(i):
++                r.append((i, available[i][u'name']))
++        return r
++
++    def getAvailableLanguages(self):
++        """Returns the dictionary of available languages.
++        """
++        util = queryUtility(IContentLanguageAvailability)
++        if self.use_combined_language_codes:
++            languages = util.getLanguages(combined=True)
++        else:
++            languages = util.getLanguages()
++        return languages
++
++    def getCcTLDInformation(self):
++        util = queryUtility(ICcTLDInformation)
++        return util.getTLDs()
++
++    def listAvailableLanguages(self):
++        """Returns sorted list of available languages (code, name)."""
++        util = queryUtility(IContentLanguageAvailability)
++        if self.use_combined_language_codes:
++            languages = util.getLanguageListing(combined=True)
++        else:
++            languages = util.getLanguageListing()
++        languages.sort(lambda x, y: cmp(x[1], y[1]))
++        return languages
++
++    def listAvailableLanguageInformation(self):
++        """Returns list of available languages."""
++        langs = self.getAvailableLanguageInformation()
++        new_langs = []
++        for lang in langs:
++            # add language-code to dict
++            langs[lang][u'code'] = lang
++            # flatten outer dict to list to make it sortable
++            new_langs.append(langs[lang])
++        new_langs.sort(lambda x, y: cmp(x.get(u'native', x.get(u'name')), y.get(u'native', y.get(u'name'))))
++        return new_langs
++
++    def getAvailableLanguageInformation(self):
++        """Returns the dictionary of available languages."""
++        util = queryUtility(IContentLanguageAvailability)
++        if self.use_combined_language_codes:
++            languages = util.getLanguages(combined=True)
++        else:
++            languages = util.getLanguages()
++
++        for lang in languages:
++            languages[lang]['code'] = lang
++            if lang in self.supported_langs:
++                languages[lang]['selected'] = True
++            else:
++                languages[lang]['selected'] = False
++        return languages
++
++    def getDefaultLanguage(self):
++        """Returns the default language."""
++        portal_properties = getToolByName(self, "portal_properties", None)
++        if portal_properties is None:
++            return 'en'
++        site_properties = getattr(portal_properties, 'site_properties', None)
++        if site_properties is not None:
++            if site_properties.hasProperty('default_language'):
++                return site_properties.getProperty('default_language')
++        portal = getUtility(ISiteRoot)
++        if portal.hasProperty('default_language'):
++            return portal.getProperty('default_language')
++        return getattr(self, 'default_lang', 'en')
++
++    def setDefaultLanguage(self, langCode):
++        """Sets the default language."""
++        portal_properties = getToolByName(self, "portal_properties")
++        site_properties = getattr(portal_properties, 'site_properties', None)
++        if site_properties is not None:
++            if site_properties.hasProperty('default_language'):
++                return site_properties._updateProperty('default_language', langCode)
++        portal = getUtility(ISiteRoot)
++        if portal.hasProperty('default_language'):
++            return portal._updateProperty('default_language', langCode)
++        self.default_lang = langCode
++
++    def getNameForLanguageCode(self, langCode):
++        """Returns the name for a language code."""
++        info = self.getAvailableLanguageInformation().get(langCode, None)
++        if info is not None:
++            return info.get(u'name', None)
++        return None
++
++    def getFlagForLanguageCode(self, langCode):
++        """Returns the name of the flag for a language code."""
++        info = self.getAvailableLanguageInformation().get(langCode, None)
++        if info is not None:
++            return info.get(u'flag', None)
++        return None
++
++    def addSupportedLanguage(self, langCode):
++        """Registers a language code as supported."""
++        alist = self.supported_langs[:]
++        if (langCode in self.getAvailableLanguages().keys()) and not langCode in alist:
++            alist.append(langCode)
++            self.supported_langs = alist
++
++    def removeSupportedLanguages(self, langCodes):
++        """Unregisters language codes from supported."""
++        alist = self.supported_langs[:]
++        for i in langCodes:
++            alist.remove(i)
++        self.supported_langs = alist
++
++    def setLanguageCookie(self, lang=None, REQUEST=None, noredir=None):
++        """Sets a cookie for overriding language negotiation."""
++        res = None
++        if lang and lang in self.getSupportedLanguages():
++            if lang != self.getLanguageCookie():
++                self.REQUEST.RESPONSE.setCookie('I18N_LANGUAGE', lang, path='/')
++            res = lang
++        if noredir is None:
++            if REQUEST:
++                REQUEST.RESPONSE.redirect(REQUEST['HTTP_REFERER'])
++        return res
++
++    def getLanguageCookie(self):
++        """Gets the preferred cookie language."""
++        if not hasattr(self, 'REQUEST'):
++            return None
++        langCookie = self.REQUEST.cookies.get('I18N_LANGUAGE')
++        if langCookie in self.getSupportedLanguages():
++            return langCookie
++        return None
++
++    def getPreferredLanguage(self):
++        """Gets the preferred site language."""
++        l = self.getLanguageBindings()
++        if l[0]:
++            if not self.use_combined_language_codes:
++                return l[0].split('-')[0]
++            else:
++                return l[0]
++            return l[0]
++        # this is the default language
++        return l[1]
++
++    def getPathLanguage(self):
++        """Checks if a language is part of the current path."""
++        if not hasattr(self, 'REQUEST'):
++            return []
++        items = self.REQUEST.get('TraversalRequestNameStack')
++        # XXX Why this try/except?
++        try:
++            for item in items:
++                if item in self.getSupportedLanguages():
++                    return item
++        except (ConflictError, KeyboardInterrupt):
++            raise
++        except:
++            pass
++        return None
++
++    def getContentLanguage(self):
++        """Checks the language of the current content if not folderish."""
++        if not hasattr(self, 'REQUEST'):
++            return []
++        try: # This will actually work nicely with browserdefault as we get attribute error...
++            contentpath = self.REQUEST.path[:]
++
++            # Now check if we need to exclude from using language specific path
++            # See https://dev.plone.org/ticket/11263
++            if (bool([1 for p in self.exclude_paths if p in contentpath]) or
++                bool([1 for p in self.exclude_exts if contentpath[0].endswith(p)])
++                ):
++                return None
++
++            obj = self.aq_parent
++            traversed = []
++            while contentpath:
++                name = contentpath.pop()
++                if name[0] in '@+':
++                    break
++                next = obj.unrestrictedTraverse(name, None)
++                if next is None:
++                    break
++                if isinstance(next, VirtualHostMonster):
++                    # next element is the VH subpath
++                    contentpath.pop()
++                    continue
++                obj = next
++                traversed.append(obj)
++            for obj in reversed(traversed):
++                if IDublinCore.providedBy(obj):
++                    lang = obj.Language()
++                    if not lang:
++                        continue
++                    if lang in self.getSupportedLanguages():
++                        return lang
++                    else:
++                        return None
++        except ConflictError:
++            raise
++        except:
++            pass
++        return None
++
++    def getCcTLDLanguages(self):
++        if not hasattr(self, 'REQUEST'):
++            return None
++        request = self.REQUEST
++        if not "HTTP_HOST" in request:
++            return None
++        host = request["HTTP_HOST"].split(":")[0].lower()
++        tld = host.split(".")[-1]
++        wanted = self.getCcTLDInformation().get(tld, [])
++        allowed = self.getSupportedLanguages()
++        return [lang for lang in wanted if lang in allowed]
++
++    def getSubdomainLanguages(self):
++        if not hasattr(self, 'REQUEST'):
++            return None
++        request = self.REQUEST
++        if not "HTTP_HOST" in request:
++            return None
++        host = request["HTTP_HOST"].split(":")[0].lower()
++        tld = host.split(".")[0]
++        wanted = self.getCcTLDInformation().get(tld, [])
++        allowed = self.getSupportedLanguages()
++        return [lang for lang in wanted if lang in allowed]
++
++    def getRequestLanguages(self):
++        """Parses the request and return language list."""
++
++        if not hasattr(self, 'REQUEST'):
++            return None
++
++        # Get browser accept languages
++        browser_pref_langs = self.REQUEST.get('HTTP_ACCEPT_LANGUAGE', '')
++        browser_pref_langs = browser_pref_langs.split(',')
++
++        i = 0
++        langs = []
++        length = len(browser_pref_langs)
++
++        # Parse quality strings and build a tuple like
++        # ((float(quality), lang), (float(quality), lang))
++        # which is sorted afterwards
++        # If no quality string is given then the list order
++        # is used as quality indicator
++        for lang in browser_pref_langs:
++            lang = lang.strip().lower().replace('_', '-')
++            if lang:
++                l = lang.split(';', 2)
++                quality = []
++
++                if len(l) == 2:
++                    try:
++                        q = l[1]
++                        if q.startswith('q='):
++                            q = q.split('=', 2)[1]
++                            quality = float(q)
++                    except:
++                        pass
++
++                if quality == []:
++                    quality = float(length-i)
++
++                language = l[0]
++                if (self.use_combined_language_codes and
++                        language in self.getSupportedLanguages()):
++                    # If allowed add the language
++                    langs.append((quality, language))
++                else:
++                    # if we only use simply language codes, we should recognize
++                    # combined codes as their base code. So 'de-de' is treated
++                    # as 'de'.
++                    baselanguage = language.split('-')[0]
++                    if baselanguage in self.getSupportedLanguages():
++                        langs.append((quality, baselanguage))
++                i = i + 1
++
++        # Sort and reverse it
++        langs.sort()
++        langs.reverse()
++
++        # Filter quality string
++        langs = map(lambda x: x[1], langs)
++
++        return langs
++
++    def setLanguageBindings(self):
++        """Setups the current language stuff."""
++        if not hasattr(self, 'REQUEST'):
++            return
++        settings = getMultiAdapter((getSite(), self.REQUEST), INegotiateLanguage)
++        binding = self.REQUEST.get('LANGUAGE_TOOL', None)
++        if not isinstance(binding, LanguageBinding):
++            # Create new binding instance
++            binding = LanguageBinding(self)
++            # Set bindings instance to request here to avoid infinite recursion
++            self.REQUEST['LANGUAGE_TOOL'] = binding
++        # Bind languages
++        binding.LANGUAGE = lang = settings.language
++        binding.DEFAULT_LANGUAGE = settings.default_language
++        binding.LANGUAGE_LIST = list(settings.language_list)
++        # Set LANGUAGE to request
++        self.REQUEST['LANGUAGE'] = lang
++        return lang
++
++    def getLanguageBindings(self):
++        """Returns the bound languages.
++
++        (language, default_language, languages_list)
++        """
++        if not hasattr(self, 'REQUEST'):
++            # Can't do anything
++            return (None, self.getDefaultLanguage(), [])
++        binding = self.REQUEST.get('LANGUAGE_TOOL', None)
++        if not isinstance(binding, LanguageBinding):
++            # Not bound -> bind
++            self.setLanguageBindings()
++            binding = self.REQUEST.get('LANGUAGE_TOOL')
++        return binding.getLanguageBindings()
++
++    def getAvailableCountries(self):
++        """Returns the dictionary of available countries."""
++        util = queryUtility(ICountryAvailability)
++        return util.getCountries()
++
++    def listAvailableCountries(self):
++        """Returns the sorted list of available countries (code, name)."""
++        util = queryUtility(ICountryAvailability)
++        countries = util.getCountryListing()
++        countries.sort(lambda x, y: cmp(x[1], y[1]))
++        return countries
++
++    def getNameForCountryCode(self, countryCode):
++        """Returns the name for a country code."""
++        return self.getAvailableCountries().get(countryCode, countryCode)
++
++    def isAnonymousUser(self):
++        from AccessControl import getSecurityManager
++        user = getSecurityManager().getUser()
++        return not user.has_role('Authenticated')
++
++    def showSelector(self):
++        """Returns True if the selector viewlet should be shown."""
++        if self.always_show_selector:
++            return True
++        if (self.use_cookie_negotiation and
++            not (self.authenticated_users_only and self.isAnonymousUser())):
++            return True
++        return False
++
++
++class LanguageBinding:
++    """Helper which holding language infos in request."""
++    security = ClassSecurityInfo()
++    __allow_access_to_unprotected_subobjects__ = 1
++
++    DEFAULT_LANGUAGE = None
++    LANGUAGE = None
++    LANGUAGE_LIST = []
++
++    def __init__(self, tool):
++        self.tool = tool
++
++    security.declarePublic('getLanguageBindings')
++
++    def getLanguageBindings(self):
++        """Returns the bound languages.
++
++        (language, default_language, languages_list)
++        """
++        return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
 
 
-Repository: plone.app.i18n
+Repository: plone.i18n
 Branch: refs/heads/master
-Date: 2015-03-25T21:36:34+01:00
+Date: 2015-03-02T14:31:45+01:00
 Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
-Commit: https://github.com/plone/plone.app.i18n/commit/566ceec41a0b7107a433c7976dedd06ecf8f15de
+Commit: https://github.com/plone/plone.i18n/commit/f7384bcb41c588a84e4a905266d8564514fa1eea
 
-Merge pull request #3 from plone/plip13091
-
-Language selector adapted to plone 5
+Code from the old tool moved to utility and adapter
 
 Files changed:
-M plone/app/i18n/locales/browser/selector.py
+A plone/i18n/negotiate/__init__.py
+M plone/i18n/__init__.py
+M plone/i18n/configure.zcml
+M plone/i18n/negotiate/negotiate.py
+M plone/i18n/utility.py
 
-diff --git a/plone/app/i18n/locales/browser/selector.py b/plone/app/i18n/locales/browser/selector.py
-index b1c3042..efb8e75 100644
---- a/plone/app/i18n/locales/browser/selector.py
-+++ b/plone/app/i18n/locales/browser/selector.py
-@@ -27,18 +27,16 @@ class LanguageSelector(BrowserView):
-       ...
-       ...     def __init__(self, **kw):
-       ...         self.__dict__.update(kw)
-+      ...         self.showFlags = True
-       ...
-       ...     def getSupportedLanguages(self):
-       ...         return self.supported_langs
-       ...
--      ...     def showFlags(self):
--      ...         return True
--      ...
-       ...     def getAvailableLanguageInformation(self):
-       ...         return dict(en={'selected' : True}, de={'selected' : False},
-       ...                     nl={'selected' : True}, ar={'selected': True})
-       ...
--      ...     def getLanguageBindings(self):
-+      ...     def getLanguageBindings(self, request):
-       ...         # en = selected by user, nl = default, [] = other options
-       ...         return ('en', 'nl', [])
-       ...
-@@ -112,7 +110,7 @@ def languages(self):
-         if self.tool is None:
+diff --git a/plone/i18n/__init__.py b/plone/i18n/__init__.py
+index e69de29..55e10df 100644
+--- a/plone/i18n/__init__.py
++++ b/plone/i18n/__init__.py
+@@ -0,0 +1,5 @@
++from Products.CMFCore.utils import registerToolInterface
++from plone.i18n.interfaces import ILanguageUtility
++
++
++registerToolInterface('portal_languages', ILanguageUtility)
+diff --git a/plone/i18n/configure.zcml b/plone/i18n/configure.zcml
+index 9f75101..5e67140 100644
+--- a/plone/i18n/configure.zcml
++++ b/plone/i18n/configure.zcml
+@@ -1,9 +1,18 @@
+ <configure
+     xmlns="http://namespaces.zope.org/zope">
+ 
++    <include package="plone.registry" />
++
+     <include package=".locales" />
+     <include package=".normalizer" />
+     
+-    <utility factory=".utility.LanguageUtility" name="portal_language"/>
++    <utility factory=".utility.LanguageUtility"/>
++    <adapter for="* *" factory=".negotiate.negotiate.NegotiateLanguage"/>
++
++    <subscriber
++       for="Products.CMFCore.interfaces.ISiteRoot
++            zope.traversing.interfaces.IBeforeTraverseEvent"
++       handler=".utility.onRequest"
++       />
+ 
+ </configure>
+diff --git a/plone/i18n/negotiate/__init__.py b/plone/i18n/negotiate/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+index 2eea79f..a028b87 100644
+--- a/plone/i18n/negotiate/negotiate.py
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -11,43 +11,43 @@ def __init__(self, site, request):
+         """Setup the current language stuff."""
+         tool = getToolByName(site, 'portal_languages')
+         langs = []
+-        useContent = tool.use_content_negotiation
+-        useCcTLD = tool.use_cctld_negotiation
+-        useSubdomain = tool.use_subdomain_negotiation
+-        usePath = tool.use_path_negotiation
+-        useCookie = tool.use_cookie_negotiation
+-        setCookieEverywhere = tool.set_cookie_everywhere
+-        authOnly = tool.authenticated_users_only
+-        useRequest = tool.use_request_negotiation
++        useContent = tool.settings.use_content_negotiation
++        useCcTLD = tool.settings.use_cctld_negotiation
++        useSubdomain = tool.settings.use_subdomain_negotiation
++        usePath = tool.settings.use_path_negotiation
++        useCookie = tool.settings.use_cookie_negotiation
++        setCookieEverywhere = tool.settings.set_cookie_always
++        authOnly = tool.settings.authenticated_users_only
++        useRequest = tool.settings.use_request_negotiation
+         useDefault = 1 # This should never be disabled
+         langsCookie = None
+ 
+         if usePath:
+             # This one is set if there is an allowed language in the current path
+-            langs.append(tool.getPathLanguage())
++            langs.append(tool.getPathLanguage(request))
+ 
+         if useContent:
+-            langs.append(tool.getContentLanguage())
++            langs.append(tool.getContentLanguage(request))
+ 
+         if useCookie and not (authOnly and tool.isAnonymousUser()):
+             # If we are using the cookie stuff we provide the setter here
+-            set_language = tool.REQUEST.get('set_language', None)
++            set_language = request.get('set_language', None)
+             if set_language:
+-                langsCookie = tool.setLanguageCookie(set_language)
++                langsCookie = tool.setLanguageCookie(set_language, request=request)
+             else:
+                 # Get from cookie
+-                langsCookie = tool.getLanguageCookie()
++                langsCookie = tool.getLanguageCookie(request)
+             langs.append(langsCookie)
+ 
+         if useSubdomain:
+-            langs.extend(tool.getSubdomainLanguages())
++            langs.extend(tool.getSubdomainLanguages(request))
+ 
+         if useCcTLD:
+-            langs.extend(tool.getCcTLDLanguages())
++            langs.extend(tool.getCcTLDLanguages(request))
+ 
+         # Get langs from request
+         if useRequest:
+-            langs.extend(tool.getRequestLanguages())
++            langs.extend(tool.getRequestLanguages(request))
+ 
+         # Get default
+         if useDefault:
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 4172978..b397e6e 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -9,18 +9,67 @@
+ from AccessControl import ClassSecurityInfo
+ from zope.component.hooks import getSite
+ from zope.component import getMultiAdapter
+-from Products.CMFCore.utils import getToolByName
+ from zope.component import getUtility
+-from Products.CMFCore.interfaces import ISiteRoot
+ from Products.CMFCore.interfaces import IDublinCore
+ 
++from plone.registry.interfaces import IRegistry
++from Products.CMFPlone.interfaces import ILanguageSchema
++
++
++class LanguageBinding:
++    """Helper which holding language infos in request."""
++    security = ClassSecurityInfo()
++    __allow_access_to_unprotected_subobjects__ = 1
++
++    DEFAULT_LANGUAGE = None
++    LANGUAGE = None
++    LANGUAGE_LIST = []
++
++    security.declarePublic('getLanguageBindings')
++
++    def getLanguageBindings(self):
++        """Returns the bound languages.
++
++        (language, default_language, languages_list)
++        """
++        return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
++
++
++def onRequest(object, event):
++    """Set Language headers in the request.
++    """
++    request = event.request
++    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
++    binding = request.get('LANGUAGE_TOOL', None)
++
++    if not isinstance(binding, LanguageBinding):
++        # Create new binding instance
++        binding = LanguageBinding()
++        # Set bindings instance to request here to avoid infinite recursion
++        request['LANGUAGE_TOOL'] = binding
++    # Bind languages
++    binding.LANGUAGE = lang = settings.language
++    binding.DEFAULT_LANGUAGE = settings.default_language
++    binding.LANGUAGE_LIST = list(settings.language_list)
++    # Set LANGUAGE to request
++    request['LANGUAGE'] = lang
++    return lang
++
+ 
+ class LanguageUtility(object):
+     implements(ILanguageUtility)
+ 
++    @property
++    def settings(self):
++        registry = getUtility(IRegistry)
++        return registry.forInterface(
++            ILanguageSchema,
++            prefix='plone',
++        )
++
+     def getSupportedLanguages(self):
+         """Returns a list of supported language codes."""
+-        return self.supported_langs
++        return self.settings.available_languages
+ 
+     def listSupportedLanguages(self):
+         """Returns a list of supported language names."""
+@@ -84,30 +133,12 @@ def getAvailableLanguageInformation(self):
+         return languages
+ 
+     def getDefaultLanguage(self):
+-        """Returns the default language."""
+-        portal_properties = getToolByName(self, "portal_properties", None)
+-        if portal_properties is None:
+-            return 'en'
+-        site_properties = getattr(portal_properties, 'site_properties', None)
+-        if site_properties is not None:
+-            if site_properties.hasProperty('default_language'):
+-                return site_properties.getProperty('default_language')
+-        portal = getUtility(ISiteRoot)
+-        if portal.hasProperty('default_language'):
+-            return portal.getProperty('default_language')
+-        return getattr(self, 'default_lang', 'en')
++        """Returns the default language. D"""
++        return self.settings.default_language
+ 
+     def setDefaultLanguage(self, langCode):
+-        """Sets the default language."""
+-        portal_properties = getToolByName(self, "portal_properties")
+-        site_properties = getattr(portal_properties, 'site_properties', None)
+-        if site_properties is not None:
+-            if site_properties.hasProperty('default_language'):
+-                return site_properties._updateProperty('default_language', langCode)
+-        portal = getUtility(ISiteRoot)
+-        if portal.hasProperty('default_language'):
+-            return portal._updateProperty('default_language', langCode)
+-        self.default_lang = langCode
++        """Sets the default language. D"""
++        self.settings.default_language = langCode
+ 
+     def getNameForLanguageCode(self, langCode):
+         """Returns the name for a language code."""
+@@ -125,44 +156,44 @@ def getFlagForLanguageCode(self, langCode):
+ 
+     def addSupportedLanguage(self, langCode):
+         """Registers a language code as supported."""
+-        alist = self.supported_langs[:]
++        alist = self.settings.available_languages[:]
+         if (langCode in self.getAvailableLanguages().keys()) and not langCode in alist:
+             alist.append(langCode)
+-            self.supported_langs = alist
++            self.settings.available_languages = alist
+ 
+     def removeSupportedLanguages(self, langCodes):
+         """Unregisters language codes from supported."""
+-        alist = self.supported_langs[:]
++        alist = self.settings.available_languages[:]
+         for i in langCodes:
+             alist.remove(i)
+-        self.supported_langs = alist
++        self.settings.available_languages = alist
+ 
+-    def setLanguageCookie(self, lang=None, REQUEST=None, noredir=None):
++    def setLanguageCookie(self, lang=None, request=None, noredir=None):
+         """Sets a cookie for overriding language negotiation."""
+         res = None
+         if lang and lang in self.getSupportedLanguages():
+-            if lang != self.getLanguageCookie():
+-                self.REQUEST.RESPONSE.setCookie('I18N_LANGUAGE', lang, path='/')
++            if lang != self.getLanguageCookie(request):
++                request.RESPONSE.setCookie('I18N_LANGUAGE', lang, path='/')
+             res = lang
+         if noredir is None:
+-            if REQUEST:
+-                REQUEST.RESPONSE.redirect(REQUEST['HTTP_REFERER'])
++            if request:
++                request.RESPONSE.redirect(request['HTTP_REFERER'])
+         return res
+ 
+-    def getLanguageCookie(self):
++    def getLanguageCookie(self, request):
+         """Gets the preferred cookie language."""
+-        if not hasattr(self, 'REQUEST'):
++        if not request:
+             return None
+-        langCookie = self.REQUEST.cookies.get('I18N_LANGUAGE')
++        langCookie = request.cookies.get('I18N_LANGUAGE')
+         if langCookie in self.getSupportedLanguages():
+             return langCookie
+         return None
+ 
+-    def getPreferredLanguage(self):
++    def getPreferredLanguage(self, request):
+         """Gets the preferred site language."""
+-        l = self.getLanguageBindings()
++        l = self.getLanguageBindings(request)
+         if l[0]:
+-            if not self.use_combined_language_codes:
++            if not self.settings.use_combined_language_codes:
+                 return l[0].split('-')[0]
+             else:
+                 return l[0]
+@@ -170,11 +201,11 @@ def getPreferredLanguage(self):
+         # this is the default language
+         return l[1]
+ 
+-    def getPathLanguage(self):
++    def getPathLanguage(self, request):
+         """Checks if a language is part of the current path."""
+         if not hasattr(self, 'REQUEST'):
              return []
+-        items = self.REQUEST.get('TraversalRequestNameStack')
++        items = request.get('TraversalRequestNameStack')
+         # XXX Why this try/except?
+         try:
+             for item in items:
+@@ -186,12 +217,12 @@ def getPathLanguage(self):
+             pass
+         return None
  
--        bound = self.tool.getLanguageBindings()
-+        bound = self.tool.getLanguageBindings(self.request)
-         current = bound[0]
+-    def getContentLanguage(self):
++    def getContentLanguage(self, request):
+         """Checks the language of the current content if not folderish."""
+-        if not hasattr(self, 'REQUEST'):
++        if not request:
+             return []
+         try: # This will actually work nicely with browserdefault as we get attribute error...
+-            contentpath = self.REQUEST.path[:]
++            contentpath = request.path[:]
  
-         def merge(lang, info):
-@@ -141,5 +139,5 @@ def index(info):
-     def showFlags(self):
-         """Do we use flags?."""
-         if self.tool is not None:
--            return self.tool.showFlags()
-+            return self.tool.showFlags
+             # Now check if we need to exclude from using language specific path
+             # See https://dev.plone.org/ticket/11263
+@@ -230,11 +261,10 @@ def getContentLanguage(self):
+             pass
+         return None
+ 
+-    def getCcTLDLanguages(self):
+-        if not hasattr(self, 'REQUEST'):
++    def getCcTLDLanguages(self, request):
++        if not request:
+             return None
+-        request = self.REQUEST
+-        if not "HTTP_HOST" in request:
++        if "HTTP_HOST" not in request:
+             return None
+         host = request["HTTP_HOST"].split(":")[0].lower()
+         tld = host.split(".")[-1]
+@@ -242,11 +272,10 @@ def getCcTLDLanguages(self):
+         allowed = self.getSupportedLanguages()
+         return [lang for lang in wanted if lang in allowed]
+ 
+-    def getSubdomainLanguages(self):
+-        if not hasattr(self, 'REQUEST'):
++    def getSubdomainLanguages(self, request):
++        if not request:
+             return None
+-        request = self.REQUEST
+-        if not "HTTP_HOST" in request:
++        if "HTTP_HOST" not in request:
+             return None
+         host = request["HTTP_HOST"].split(":")[0].lower()
+         tld = host.split(".")[0]
+@@ -254,14 +283,14 @@ def getSubdomainLanguages(self):
+         allowed = self.getSupportedLanguages()
+         return [lang for lang in wanted if lang in allowed]
+ 
+-    def getRequestLanguages(self):
++    def getRequestLanguages(self, request):
+         """Parses the request and return language list."""
+ 
+-        if not hasattr(self, 'REQUEST'):
++        if not request:
+             return None
+ 
+         # Get browser accept languages
+-        browser_pref_langs = self.REQUEST.get('HTTP_ACCEPT_LANGUAGE', '')
++        browser_pref_langs = request.get('HTTP_ACCEPT_LANGUAGE', '')
+         browser_pref_langs = browser_pref_langs.split(',')
+ 
+         i = 0
+@@ -314,38 +343,19 @@ def getRequestLanguages(self):
+ 
+         return langs
+ 
+-    def setLanguageBindings(self):
+-        """Setups the current language stuff."""
+-        if not hasattr(self, 'REQUEST'):
+-            return
+-        settings = getMultiAdapter((getSite(), self.REQUEST), INegotiateLanguage)
+-        binding = self.REQUEST.get('LANGUAGE_TOOL', None)
+-        if not isinstance(binding, LanguageBinding):
+-            # Create new binding instance
+-            binding = LanguageBinding(self)
+-            # Set bindings instance to request here to avoid infinite recursion
+-            self.REQUEST['LANGUAGE_TOOL'] = binding
+-        # Bind languages
+-        binding.LANGUAGE = lang = settings.language
+-        binding.DEFAULT_LANGUAGE = settings.default_language
+-        binding.LANGUAGE_LIST = list(settings.language_list)
+-        # Set LANGUAGE to request
+-        self.REQUEST['LANGUAGE'] = lang
+-        return lang
+-
+-    def getLanguageBindings(self):
++    def getLanguageBindings(self, request):
+         """Returns the bound languages.
+ 
+         (language, default_language, languages_list)
+         """
+-        if not hasattr(self, 'REQUEST'):
++        if not request:
+             # Can't do anything
+             return (None, self.getDefaultLanguage(), [])
+-        binding = self.REQUEST.get('LANGUAGE_TOOL', None)
++        binding = request.get('LANGUAGE_TOOL', None)
+         if not isinstance(binding, LanguageBinding):
+             # Not bound -> bind
+             self.setLanguageBindings()
+-            binding = self.REQUEST.get('LANGUAGE_TOOL')
++            binding = request.get('LANGUAGE_TOOL')
+         return binding.getLanguageBindings()
+ 
+     def getAvailableCountries(self):
+@@ -371,31 +381,12 @@ def isAnonymousUser(self):
+ 
+     def showSelector(self):
+         """Returns True if the selector viewlet should be shown."""
+-        if self.always_show_selector:
+-            return True
+-        if (self.use_cookie_negotiation and
+-            not (self.authenticated_users_only and self.isAnonymousUser())):
++        # if self.always_show_selector:
++        #     return True
++        if (self.settings.use_cookie_negotiation and
++            not (self.settings.authenticated_users_only and self.isAnonymousUser())):
+             return True
          return False
+ 
+ 
+-class LanguageBinding:
+-    """Helper which holding language infos in request."""
+-    security = ClassSecurityInfo()
+-    __allow_access_to_unprotected_subobjects__ = 1
+-
+-    DEFAULT_LANGUAGE = None
+-    LANGUAGE = None
+-    LANGUAGE_LIST = []
+-
+-    def __init__(self, tool):
+-        self.tool = tool
+-
+-    security.declarePublic('getLanguageBindings')
+ 
+-    def getLanguageBindings(self):
+-        """Returns the bound languages.
+-
+-        (language, default_language, languages_list)
+-        """
+-        return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-02T18:06:35+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/91faa9bbf7a954839d3753f20013db50fe61772b
+
+User native utility instead of portal tool on negatiation
+
+Files changed:
+M plone/i18n/negotiate/negotiate.py
+
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+index a028b87..70dbda4 100644
+--- a/plone/i18n/negotiate/negotiate.py
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -1,6 +1,7 @@
+ from zope.interface import implements
+ from plone.i18n.interfaces import INegotiateLanguage
+-from Products.CMFCore.utils import getToolByName
++from zope.component import getUtility
++from plone.i18n.interfaces import ILanguageUtility
+ 
+ 
+ class NegotiateLanguage(object):
+@@ -9,7 +10,7 @@ class NegotiateLanguage(object):
+ 
+     def __init__(self, site, request):
+         """Setup the current language stuff."""
+-        tool = getToolByName(site, 'portal_languages')
++        tool = getUtility(ILanguageUtility)
+         langs = []
+         useContent = tool.settings.use_content_negotiation
+         useCcTLD = tool.settings.use_cctld_negotiation
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-04T17:32:14+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/7debd5767bd33c7da5e360d04d0c79d2c505b507
+
+Typo on where the combined langauge codes is
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index b397e6e..1e43f46 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -84,7 +84,7 @@ def getAvailableLanguages(self):
+         """Returns the dictionary of available languages.
+         """
+         util = queryUtility(IContentLanguageAvailability)
+-        if self.use_combined_language_codes:
++        if self.settings.use_combined_language_codes:
+             languages = util.getLanguages(combined=True)
+         else:
+             languages = util.getLanguages()
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-16T19:08:29+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/2193c71be6d6fa8eeb77c976c54b93af4c16e403
+
+Missing PTS connection
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 1e43f46..438ec36 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -388,5 +388,29 @@ def showSelector(self):
+             return True
+         return False
+ 
++try:
++    from Products.PlacelessTranslationService.Negotiator import registerLangPrefsMethod
++    _hasPTS = 1
++except ImportError:
++    _hasPTS = 0
++
++
++class PrefsForPTS:
++    """A preference to hook into PTS."""
++    def __init__(self, context):
++        self._env = context
++        self.languages = []
++        binding = context.get('LANGUAGE_TOOL')
++        if not isinstance(binding, LanguageBinding):
++            return None
++        self.pref = binding.getLanguageBindings()
++        self.languages = [self.pref[0]] + self.pref[2] + [self.pref[1]]
++        return None
++
++    def getPreferredLanguages(self):
++        """Returns the list of the bound languages."""
++        return self.languages
+ 
+ 
++if _hasPTS:
++    registerLangPrefsMethod({'klass':PrefsForPTS, 'priority':100 })
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-16T23:47:44+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/7a05e5b0a96c457ad7205f9deeec50be5878f942
+
+Missing request None check
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 438ec36..fb39e8a 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -203,7 +203,7 @@ def getPreferredLanguage(self, request):
+ 
+     def getPathLanguage(self, request):
+         """Checks if a language is part of the current path."""
+-        if not hasattr(self, 'REQUEST'):
++        if not request:
+             return []
+         items = request.get('TraversalRequestNameStack')
+         # XXX Why this try/except?
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-19T09:52:17+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/f00936d79ad18dd6e468396e8640f63f80b23bbe
+
+adding the use_combined_language_codes attribute on the utility for bbb
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index fb39e8a..50a9245 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -67,6 +67,10 @@ def settings(self):
+             prefix='plone',
+         )
+ 
++    @property
++    def use_combined_language_codes(self):
++        return self.settings.use_combined_language_codes   
++
+     def getSupportedLanguages(self):
+         """Returns a list of supported language codes."""
+         return self.settings.available_languages
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-19T11:30:31+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/ce0818746001d34f366891195b3ed28566029b31
+
+adding supported_langs property for BBB
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 50a9245..b8517fe 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -67,10 +67,15 @@ def settings(self):
+             prefix='plone',
+         )
+ 
++    # BBB propouses
+     @property
+     def use_combined_language_codes(self):
+         return self.settings.use_combined_language_codes   
+ 
++    @property
++    def supported_langs(self):
++        return self.settings.supported_langs   
++
+     def getSupportedLanguages(self):
+         """Returns a list of supported language codes."""
+         return self.settings.available_languages
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-19T13:53:13+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/6d782b71139117e0b5340e8528ac8fff760d887c
+
+Adding the tests of Products.PloneLanguageTool
+
+Files changed:
+A plone/i18n/tests/__init__.py
+A plone/i18n/tests/base.py
+A plone/i18n/tests/test_languageutility.py
+A plone/i18n/tests/test_negotiation.py
+M CHANGES.txt
+M plone/i18n/negotiate/negotiate.py
+M plone/i18n/utility.py
+
+diff --git a/CHANGES.txt b/CHANGES.txt
+index f111cd0..6bbe524 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,7 @@ Changelog
+ 2.0.10 (unreleased)
+ -------------------
+ 
+-- Nothing changed yet.
++- Added the Products.PloneLanguageTool on this package [bloodbare]
+ 
+ 
+ 2.0.9 (2013-08-13)
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+index 70dbda4..39d3ad8 100644
+--- a/plone/i18n/negotiate/negotiate.py
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -22,7 +22,6 @@ def __init__(self, site, request):
+         useRequest = tool.settings.use_request_negotiation
+         useDefault = 1 # This should never be disabled
+         langsCookie = None
+-
+         if usePath:
+             # This one is set if there is an allowed language in the current path
+             langs.append(tool.getPathLanguage(request))
+@@ -58,8 +57,8 @@ def __init__(self, site, request):
+         langs = [lang for lang in langs if lang is not None]
+ 
+         # Set cookie language to language
+-        if setCookieEverywhere and useCookie and langs[0] != langsCookie:
+-            tool.setLanguageCookie(langs[0], noredir=True)
++        if setCookieEverywhere  and langs[0] != langsCookie:
++            tool.setLanguageCookie(langs[0], noredir=True, request=request)
+ 
+         self.default_language = langs[-1]
+         self.language = langs[0]
+diff --git a/plone/i18n/tests/__init__.py b/plone/i18n/tests/__init__.py
+new file mode 100644
+index 0000000..4287ca8
+--- /dev/null
++++ b/plone/i18n/tests/__init__.py
+@@ -0,0 +1 @@
++#
+\ No newline at end of file
+diff --git a/plone/i18n/tests/base.py b/plone/i18n/tests/base.py
+new file mode 100644
+index 0000000..a7dabbd
+--- /dev/null
++++ b/plone/i18n/tests/base.py
+@@ -0,0 +1,27 @@
++from plone.app.testing import bbb
++from plone.app import testing
++from plone.testing import z2
++
++
++class PloneTestCaseFixture(bbb.PloneTestCaseFixture):
++
++    defaultBases = (bbb.PTC_FIXTURE, )
++
++    def setUpZope(self, app, configurationContext):
++        import plone.i18n
++        self.loadZCML(package=plone.i18n)
++
++PLT_FIXTURE = PloneTestCaseFixture()
++PLT_FUNCTIONAL_TESTING = testing.FunctionalTesting(
++    bases=(PLT_FIXTURE, ), name='Plonei18nTestCase:Functional')
++
++
++class TestCase(bbb.PloneTestCase):
++    """Simple test case
++    """
++    layer = PLT_FUNCTIONAL_TESTING
++
++
++class FunctionalTestCase(TestCase):
++    """Simple test case for functional tests
++    """
+\ No newline at end of file
+diff --git a/plone/i18n/tests/test_languageutility.py b/plone/i18n/tests/test_languageutility.py
+new file mode 100644
+index 0000000..8cf4457
+--- /dev/null
++++ b/plone/i18n/tests/test_languageutility.py
+@@ -0,0 +1,88 @@
++from zope.interface import alsoProvides
++from Products.CMFCore.interfaces import IDublinCore
++from Products.CMFCore.utils import getToolInterface, getToolByName
++from plone.registry.interfaces import IRegistry
++from zope.component import getUtility
++from Products.CMFPlone.interfaces import ILanguageSchema
++from plone.i18n.interfaces import ILanguageUtility
++
++from plone.i18n.tests import base
++
++
++class TestLanguageTool(base.TestCase):
++
++    def afterSetUp(self):
++        self.ltool = getToolByName(self.portal, 'portal_languages')
++        self.settings = getUtility(IRegistry).forInterface(
++            ILanguageSchema,
++            prefix='plone')
++
++    def testLanguageSettings(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.default_language = defaultLanguage
++        self.settings.available_languages = supportedLanguages
++        self.settings.use_combined_language_codes = False
++        self.failUnless(self.ltool.getDefaultLanguage() == defaultLanguage)
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++    def testSupportedLanguages(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.settings.default_language = defaultLanguage
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++        self.ltool.removeSupportedLanguages(supportedLanguages)
++        self.failUnless(self.ltool.getSupportedLanguages() == [])
++
++        for lang in supportedLanguages:
++            self.ltool.addSupportedLanguage(lang)
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++    def testDefaultLanguage(self):
++        supportedLanguages = ['de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage('no')
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++        self.failUnless(self.ltool.getDefaultLanguage() == 'no')
++
++        # default not in supported languages, should set to first supported
++        self.ltool.setDefaultLanguage('nl')
++
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++        self.failUnless(self.ltool.getDefaultLanguage() == 'de')
++
++    def testAvailableLanguage(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage(defaultLanguage)
++        availableLanguages = self.ltool.getAvailableLanguageInformation()
++        for lang in availableLanguages:
++            if lang in supportedLanguages:
++                self.failUnless(availableLanguages[lang]['selected'] == True)
++
++    def testGetContentLanguage(self):
++        # tests for issue #11263
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage(defaultLanguage)
++        request = self.layer['request']
++        request.path = ['Members', ]
++        content = self.portal.Members
++        content.setLanguage('de')
++        alsoProvides(content, IDublinCore)
++        self.ltool.getContentLanguage(request)
++        self.failUnless(self.ltool.getContentLanguage(request) == 'de')
++        request.path = ['view', 'foo.jpg', 'Members', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == 'de')
++        request.path = ['foo.jpg', 'Members', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == None)
++        request.path = ['foo', 'portal_javascript', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == None)
++
++    def testRegisterInterface(self):
++        iface = getToolInterface('portal_languages')
++        self.assertEqual(iface, ILanguageUtility)
+\ No newline at end of file
+diff --git a/plone/i18n/tests/test_negotiation.py b/plone/i18n/tests/test_negotiation.py
+new file mode 100644
+index 0000000..049adfe
+--- /dev/null
++++ b/plone/i18n/tests/test_negotiation.py
+@@ -0,0 +1,264 @@
++from plone.i18n.tests import base
++
++from plone.app.testing import TEST_USER_PASSWORD
++from plone.app.testing import TEST_USER_NAME
++
++from plone.registry.interfaces import IRegistry
++from zope.component import getUtility
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import ILanguageSchema
++from Products.CMFPlone.interfaces import ILanguage
++
++
++class LanguageNegotiationTestCase(base.FunctionalTestCase):
++
++    def afterSetUp(self):
++        self.basic_auth = '%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD)
++        self.portal_path = self.portal.absolute_url(1)
++        self.tool = getToolByName(self.portal, 'portal_languages')
++        self.settings = getUtility(IRegistry).forInterface(
++            ILanguageSchema,
++            prefix='plone')
++        self.settings.always_show_selector = 1
++        self.settings.set_cookie_always = 1
++
++    def checkLanguage(self, response, language):
++        self.assertEquals(response.getStatus(), 200)
++        cookie = response.getCookie('I18N_LANGUAGE')['value']
++        self.assertEquals(cookie, language)
++
++
++class TestDefaultLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def testLanguageNegotiation(self):
++        # Once PLT is installed only English is allowed as a language
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "en")
++
++
++class TestNoCombinedLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        # set some allowed languages and make sure we don't use combined
++        # language codes
++        self.settings.available_languages = ['en', 'pt', 'de']
++        self.settings.use_request_negotiation = 1
++        self.settings.use_combined_language_codes = 0
++        self.settings.display_flags = 0
++
++    def testLanguageNegotiation(self):
++
++        # Test simple supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "pt")
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de'})
++        self.checkLanguage(response, "de")
++
++        # Test combined unsupported codes, should fall back
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt-br'})
++        self.checkLanguage(response, "pt")
++
++
++class TestCombinedLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        # set some allowed languages and make sure we don't use combined
++        # language codes
++        self.settings.use_combined_language_codes = True
++        self.settings.available_languages = ['en', 'pt', 'de', 'pt-br']
++        self.settings.use_request_negotiation = True
++        self.settings.display_flags = 0
++
++    def testLanguageNegotiation(self):
++
++        # Test simple supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "pt")
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de'})
++        self.checkLanguage(response, "de")
++
++        # Test combined supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt-br'})
++        self.checkLanguage(response, "pt-br")
++
++        # Test combined unsupported codes, should fall back
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de-de'})
++        self.checkLanguage(response, "de")
++
++
++class TestContentLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_content_negotiation = 1
++        self.settings.display_flags = 0
++        registry = getUtility(IRegistry)
++        # disable cooking of assets because this gives unwanted
++        # sideeffects in the request handling
++        registry['plone.resources.development'] = True
++
++    def testContentObject(self):
++        self.folder.invokeFactory('Document', 'doc')
++        doc = self.folder.doc
++        ILanguage(doc).set_language('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(doc.getPhysicalPath())
++        response = self.publish(docpath, self.basic_auth,
++                                env={'PATH_INFO': docpath})
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMPortal(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++        vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/" % self.portal.getId()
++
++        self.folder.invokeFactory('Folder', 'sub')
++        sub = self.folder['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(self.portal.portal_url.getRelativeContentPath(doc))
++        response = self.publish(vhmBasePath + docpath, self.basic_auth)
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMPortalVHSubpath(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++        vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/_vh_one/_vh_two/" % self.portal.getId()
++
++        self.folder.invokeFactory('Folder', 'sub')
++        sub = self.folder['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(self.portal.portal_url.getRelativeContentPath(doc))
++        response = self.publish(vhmBasePath + docpath, self.basic_auth)
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMFolder(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++
++        folder_path = '/'.join(self.folder.getPhysicalPath())
++        vhmBasePath = "/VirtualHostBase/http/example.org:80%s/VirtualHostRoot/" % folder_path
++
++        self.folder.invokeFactory('Folder', 'sub')
++        sub = self.folder['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(doc.getPhysicalPath())
++        docpath = docpath[len(folder_path) + 1:]
++
++        response = self.publish(vhmBasePath + docpath, self.basic_auth,
++                                env={'diazo.off': "1"})
++        self.checkLanguage(response, "nl")
++
++
++class TestCcTLDLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_cctld_negotiation = 1
++        self.settings.display_flags = 0
++
++    def testSimpleHostname(self):
++        # For a simple hostname without ccTLD the canonical language is used
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'localhost'})
++        self.checkLanguage(response, "en")
++
++    def testIPAddress(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': '127.0.0.1'})
++        self.checkLanguage(response, "en")
++
++    def testDutchDomain(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.nl'})
++        self.checkLanguage(response, "nl")
++
++    def testAcceptedLanguages(self):
++        # Brazil uses Portugese, which is not in the accepted languages list
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.br'})
++        self.checkLanguage(response, "en")
++
++    def testMultiLingualCountries(self):
++        # Some countries refuse to pick a single language. Belgium
++        # uses both Dutch and French, with a preference for Dutch.
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.be'})
++        self.checkLanguage(response, "nl")
++
++        # If we stop allowing Dutch we should now fall back to French
++        self.settings.available_languages = ['en', 'fr']
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.be'})
++        self.checkLanguage(response, "fr")
++
++
++class TestSubdomainLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_subdomain_negotiation = 1
++        self.settings.display_flags = 0
++
++    def testSimpleHostname(self):
++        # For a simple hostname without ccTLD the canonical language is used
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'localhost'})
++        self.checkLanguage(response, "en")
++
++    def testIPAddress(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': '127.0.0.1'})
++        self.checkLanguage(response, "en")
++
++    def testDutchDomain(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'nl.plone.org'})
++        self.checkLanguage(response, "nl")
++
++    def testAcceptedLanguages(self):
++        # Brazil uses Portugese, which is not in the accepted languages list
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'br.plone.org'})
++        self.checkLanguage(response, "en")
++
++    def testMultiLingualCountries(self):
++        # Some countries refuse to pick a single language. Belgium
++        # uses both Dutch and French, with a preference for Dutch.
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'be.plone.org'})
++        self.checkLanguage(response, "nl")
++
++        # If we stop allowing Dutch we should now fall back to French
++        self.settings.available_languages = ['en', 'fr']
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'be.plone.org'})
++        self.checkLanguage(response, "fr")
+\ No newline at end of file
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index b8517fe..b8ece75 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -11,6 +11,7 @@
+ from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ from Products.CMFCore.interfaces import IDublinCore
++from zope.component.hooks import getSite
+ 
+ from plone.registry.interfaces import IRegistry
+ from Products.CMFPlone.interfaces import ILanguageSchema
+@@ -59,6 +60,25 @@ def onRequest(object, event):
+ class LanguageUtility(object):
+     implements(ILanguageUtility)
+ 
++    # resources that must not use language specific URLs
++    exclude_paths = frozenset((
++        'portal_css',
++        'portal_javascripts',
++        'portal_kss',
++        'portal_factory'
++    ))
++
++    exclude_exts = frozenset((
++        'css',
++        'js',
++        'kss',
++        'xml',
++        'gif',
++        'jpg',
++        'png',
++        'jpeg'
++    ))
++
+     @property
+     def settings(self):
+         registry = getUtility(IRegistry)
+@@ -74,7 +94,7 @@ def use_combined_language_codes(self):
+ 
+     @property
+     def supported_langs(self):
+-        return self.settings.supported_langs   
++        return self.settings.available_languages   
+ 
+     def getSupportedLanguages(self):
+         """Returns a list of supported language codes."""
+@@ -147,6 +167,11 @@ def getDefaultLanguage(self):
+ 
+     def setDefaultLanguage(self, langCode):
+         """Sets the default language. D"""
++        if langCode not in self.settings.available_languages:
++            # If its not in supported langs
++            if len(self.settings.available_languages) > 0:
++                self.settings.default_language = self.settings.available_languages[0]
++            return
+         self.settings.default_language = langCode
+ 
+     def getNameForLanguageCode(self, langCode):
+@@ -240,7 +265,7 @@ def getContentLanguage(self, request):
+                 ):
+                 return None
+ 
+-            obj = self.aq_parent
++            obj = getSite()
+             traversed = []
+             while contentpath:
+                 name = contentpath.pop()
+@@ -390,8 +415,8 @@ def isAnonymousUser(self):
+ 
+     def showSelector(self):
+         """Returns True if the selector viewlet should be shown."""
+-        # if self.always_show_selector:
+-        #     return True
++        if self.settings.always_show_selector:
++            return True
+         if (self.settings.use_cookie_negotiation and
+             not (self.settings.authenticated_users_only and self.isAnonymousUser())):
+             return True
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-20T13:17:25+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/554e2861923bebab8919da8da841931d7d377c0d
+
+Show flags attribute for BBB
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index b8ece75..91a2e76 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -90,11 +90,15 @@ def settings(self):
+     # BBB propouses
+     @property
+     def use_combined_language_codes(self):
+-        return self.settings.use_combined_language_codes   
++        return self.settings.use_combined_language_codes
+ 
+     @property
+     def supported_langs(self):
+-        return self.settings.available_languages   
++        return self.settings.available_languages
++
++    @property
++    def showFlags(self):
++        return self.settings.display_flags
+ 
+     def getSupportedLanguages(self):
+         """Returns a list of supported language codes."""
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-22T12:29:54+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/23a38a9589380db264959f8448ba455dee2dd72b
+
+setLangaugeBindign
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 91a2e76..6f20531 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -36,11 +36,7 @@ def getLanguageBindings(self):
+         return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
+ 
+ 
+-def onRequest(object, event):
+-    """Set Language headers in the request.
+-    """
+-    request = event.request
+-    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
++def setLanguageBinding(request, settings):
+     binding = request.get('LANGUAGE_TOOL', None)
+ 
+     if not isinstance(binding, LanguageBinding):
+@@ -57,6 +53,15 @@ def onRequest(object, event):
+     return lang
+ 
+ 
++def onRequest(object, event):
++    """Set Language headers in the request.
++    """
++    request = event.request
++    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
++
++    return setLanguageBinding(request, settings)
++
++
+ class LanguageUtility(object):
+     implements(ILanguageUtility)
+ 
+@@ -392,7 +397,7 @@ def getLanguageBindings(self, request):
+         binding = request.get('LANGUAGE_TOOL', None)
+         if not isinstance(binding, LanguageBinding):
+             # Not bound -> bind
+-            self.setLanguageBindings()
++            setLanguageBinding(request, self.settings)
+             binding = request.get('LANGUAGE_TOOL')
+         return binding.getLanguageBindings()
+ 
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-22T13:01:32+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/a56d1bbd86417b7fab5049db80e13b694f222dd8
+
+Setting Bindings only needs the request
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 6f20531..6ecad5a 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -36,8 +36,9 @@ def getLanguageBindings(self):
+         return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
+ 
+ 
+-def setLanguageBinding(request, settings):
++def setLanguageBinding(request):
+     binding = request.get('LANGUAGE_TOOL', None)
++    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
+ 
+     if not isinstance(binding, LanguageBinding):
+         # Create new binding instance
+@@ -57,9 +58,8 @@ def onRequest(object, event):
+     """Set Language headers in the request.
+     """
+     request = event.request
+-    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
+ 
+-    return setLanguageBinding(request, settings)
++    return setLanguageBinding(request)
+ 
+ 
+ class LanguageUtility(object):
+@@ -397,7 +397,7 @@ def getLanguageBindings(self, request):
+         binding = request.get('LANGUAGE_TOOL', None)
+         if not isinstance(binding, LanguageBinding):
+             # Not bound -> bind
+-            setLanguageBinding(request, self.settings)
++            setLanguageBinding(request)
+             binding = request.get('LANGUAGE_TOOL')
+         return binding.getLanguageBindings()
+ 
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-23T02:37:02+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/15da491c91719c37982b9183b3ffbf4b9b2a31ef
+
+breaks a subrequest
+
+Files changed:
+M plone/i18n/utility.py
+
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+index 6ecad5a..cedb07f 100644
+--- a/plone/i18n/utility.py
++++ b/plone/i18n/utility.py
+@@ -218,9 +218,6 @@ def setLanguageCookie(self, lang=None, request=None, noredir=None):
+             if lang != self.getLanguageCookie(request):
+                 request.RESPONSE.setCookie('I18N_LANGUAGE', lang, path='/')
+             res = lang
+-        if noredir is None:
+-            if request:
+-                request.RESPONSE.redirect(request['HTTP_REFERER'])
+         return res
+ 
+     def getLanguageCookie(self, request):
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-23T14:29:57+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/31e34c6b51dc30ad5a895c74604d24385a8b9815
+
+Solving tests problems with subrequests on virtualhostmonster
+
+Files changed:
+M plone/i18n/negotiate/negotiate.py
+M plone/i18n/tests/base.py
+M plone/i18n/tests/test_languageutility.py
+M plone/i18n/tests/test_negotiation.py
+
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+index 39d3ad8..c2d9e7d 100644
+--- a/plone/i18n/negotiate/negotiate.py
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -58,7 +58,11 @@ def __init__(self, site, request):
+ 
+         # Set cookie language to language
+         if setCookieEverywhere  and langs[0] != langsCookie:
+-            tool.setLanguageCookie(langs[0], noredir=True, request=request)
++            # We need to make sure its not a subrequest otherwise we are going
++            # To change the language of the main request
++            from plone.subrequest import ISubRequest
++            if not ISubRequest.providedBy(request):
++                tool.setLanguageCookie(langs[0], noredir=True, request=request)
+ 
+         self.default_language = langs[-1]
+         self.language = langs[0]
+diff --git a/plone/i18n/tests/base.py b/plone/i18n/tests/base.py
+index a7dabbd..bf586f6 100644
+--- a/plone/i18n/tests/base.py
++++ b/plone/i18n/tests/base.py
+@@ -1,17 +1,22 @@
+ from plone.app.testing import bbb
+ from plone.app import testing
+ from plone.testing import z2
++from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
++from plone.app.testing import PloneSandboxLayer
+ 
+ 
+-class PloneTestCaseFixture(bbb.PloneTestCaseFixture):
++class PloneI18nLayer(PloneSandboxLayer):
+ 
+-    defaultBases = (bbb.PTC_FIXTURE, )
++    defaultBases = (PLONE_APP_CONTENTTYPES_FIXTURE, )
+ 
+     def setUpZope(self, app, configurationContext):
+         import plone.i18n
++        # Needed to have ILanguage adapter for dx
++        import plone.app.multilingual
+         self.loadZCML(package=plone.i18n)
++        self.loadZCML(package=plone.app.multilingual)
+ 
+-PLT_FIXTURE = PloneTestCaseFixture()
++PLT_FIXTURE = PloneI18nLayer()
+ PLT_FUNCTIONAL_TESTING = testing.FunctionalTesting(
+     bases=(PLT_FIXTURE, ), name='Plonei18nTestCase:Functional')
+ 
+diff --git a/plone/i18n/tests/test_languageutility.py b/plone/i18n/tests/test_languageutility.py
+index 8cf4457..f1ed6ee 100644
+--- a/plone/i18n/tests/test_languageutility.py
++++ b/plone/i18n/tests/test_languageutility.py
+@@ -70,17 +70,18 @@ def testGetContentLanguage(self):
+         self.settings.available_languages = supportedLanguages
+         self.ltool.setDefaultLanguage(defaultLanguage)
+         request = self.layer['request']
+-        request.path = ['Members', ]
+-        content = self.portal.Members
++        request.path = ['doc', ]
++        self.layer['portal'].invokeFactory('Document', 'doc')
++        content = self.layer['portal']['doc']
+         content.setLanguage('de')
+         alsoProvides(content, IDublinCore)
+         self.ltool.getContentLanguage(request)
+         self.failUnless(self.ltool.getContentLanguage(request) == 'de')
+-        request.path = ['view', 'foo.jpg', 'Members', ]
++        request.path = ['view', 'foo.jpg', 'doc', ]
+         self.failUnless(self.ltool.getContentLanguage(request) == 'de')
+-        request.path = ['foo.jpg', 'Members', ]
++        request.path = ['foo.jpg', 'doc', ]
+         self.failUnless(self.ltool.getContentLanguage(request) == None)
+-        request.path = ['foo', 'portal_javascript', ]
++        request.path = ['foo', 'portal_catalog', ]
+         self.failUnless(self.ltool.getContentLanguage(request) == None)
+ 
+     def testRegisterInterface(self):
+diff --git a/plone/i18n/tests/test_negotiation.py b/plone/i18n/tests/test_negotiation.py
+index 049adfe..b130df2 100644
+--- a/plone/i18n/tests/test_negotiation.py
++++ b/plone/i18n/tests/test_negotiation.py
+@@ -111,8 +111,8 @@ def afterSetUp(self):
+         registry['plone.resources.development'] = True
+ 
+     def testContentObject(self):
+-        self.folder.invokeFactory('Document', 'doc')
+-        doc = self.folder.doc
++        self.layer['portal'].invokeFactory('Document', 'doc')
++        doc = self.layer['portal'].doc
+         ILanguage(doc).set_language('nl')
+         self.failUnlessEqual(doc.Language(), 'nl')
+         docpath = '/'.join(doc.getPhysicalPath())
+@@ -125,8 +125,8 @@ def testContentObjectVHMPortal(self):
+         adding.manage_addVirtualHostMonster('VHM')
+         vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/" % self.portal.getId()
+ 
+-        self.folder.invokeFactory('Folder', 'sub')
+-        sub = self.folder['sub']
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
+         sub.setLanguage('nl')
+         sub.invokeFactory('Document', 'doc')
+         doc = sub.doc
+@@ -141,8 +141,8 @@ def testContentObjectVHMPortalVHSubpath(self):
+         adding.manage_addVirtualHostMonster('VHM')
+         vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/_vh_one/_vh_two/" % self.portal.getId()
+ 
+-        self.folder.invokeFactory('Folder', 'sub')
+-        sub = self.folder['sub']
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
+         sub.setLanguage('nl')
+         sub.invokeFactory('Document', 'doc')
+         doc = sub.doc
+@@ -156,11 +156,10 @@ def testContentObjectVHMFolder(self):
+         adding = self.app.manage_addProduct['SiteAccess']
+         adding.manage_addVirtualHostMonster('VHM')
+ 
+-        folder_path = '/'.join(self.folder.getPhysicalPath())
++        folder_path = '/'.join(self.layer['portal'].getPhysicalPath())
+         vhmBasePath = "/VirtualHostBase/http/example.org:80%s/VirtualHostRoot/" % folder_path
+-
+-        self.folder.invokeFactory('Folder', 'sub')
+-        sub = self.folder['sub']
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
+         sub.setLanguage('nl')
+         sub.invokeFactory('Document', 'doc')
+         doc = sub.doc
+
+
+Repository: plone.i18n
+Branch: refs/heads/master
+Date: 2015-03-25T21:37:12+01:00
+Author: Ramon Navarro Bosch (bloodbare) <ramon.nb@gmail.com>
+Commit: https://github.com/plone/plone.i18n/commit/35d0a1747be3c13873d55cf16b911971d5fd5120
+
+Merge pull request #10 from plone/plip-13091
+
+Plip 13091
+
+Files changed:
+A plone/i18n/interfaces.py
+A plone/i18n/negotiate/__init__.py
+A plone/i18n/negotiate/negotiate.py
+A plone/i18n/tests/__init__.py
+A plone/i18n/tests/base.py
+A plone/i18n/tests/test_languageutility.py
+A plone/i18n/tests/test_negotiation.py
+A plone/i18n/utility.py
+M CHANGES.txt
+M plone/i18n/__init__.py
+M plone/i18n/configure.zcml
+
+diff --git a/CHANGES.txt b/CHANGES.txt
+index f111cd0..6bbe524 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,7 @@ Changelog
+ 2.0.10 (unreleased)
+ -------------------
+ 
+-- Nothing changed yet.
++- Added the Products.PloneLanguageTool on this package [bloodbare]
+ 
+ 
+ 2.0.9 (2013-08-13)
+diff --git a/plone/i18n/__init__.py b/plone/i18n/__init__.py
+index e69de29..55e10df 100644
+--- a/plone/i18n/__init__.py
++++ b/plone/i18n/__init__.py
+@@ -0,0 +1,5 @@
++from Products.CMFCore.utils import registerToolInterface
++from plone.i18n.interfaces import ILanguageUtility
++
++
++registerToolInterface('portal_languages', ILanguageUtility)
+diff --git a/plone/i18n/configure.zcml b/plone/i18n/configure.zcml
+index f7de816..5e67140 100644
+--- a/plone/i18n/configure.zcml
++++ b/plone/i18n/configure.zcml
+@@ -1,7 +1,18 @@
+ <configure
+     xmlns="http://namespaces.zope.org/zope">
+ 
++    <include package="plone.registry" />
++
+     <include package=".locales" />
+     <include package=".normalizer" />
++    
++    <utility factory=".utility.LanguageUtility"/>
++    <adapter for="* *" factory=".negotiate.negotiate.NegotiateLanguage"/>
++
++    <subscriber
++       for="Products.CMFCore.interfaces.ISiteRoot
++            zope.traversing.interfaces.IBeforeTraverseEvent"
++       handler=".utility.onRequest"
++       />
+ 
+ </configure>
+diff --git a/plone/i18n/interfaces.py b/plone/i18n/interfaces.py
+new file mode 100644
+index 0000000..1054c57
+--- /dev/null
++++ b/plone/i18n/interfaces.py
+@@ -0,0 +1,14 @@
++from zope.interface import Interface, Attribute
++
++
++class ILanguageUtility(Interface):
++    """Marker interface for the portal_languages tool.
++    """
++
++
++class INegotiateLanguage(Interface):
++    """Result of language negotiation
++    """
++    language = Attribute('Language to use')
++    default_language = Attribute('Default language')
++    language_list = Attribute('List of language preferences in order')
+diff --git a/plone/i18n/negotiate/__init__.py b/plone/i18n/negotiate/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/plone/i18n/negotiate/negotiate.py b/plone/i18n/negotiate/negotiate.py
+new file mode 100644
+index 0000000..c2d9e7d
+--- /dev/null
++++ b/plone/i18n/negotiate/negotiate.py
+@@ -0,0 +1,69 @@
++from zope.interface import implements
++from plone.i18n.interfaces import INegotiateLanguage
++from zope.component import getUtility
++from plone.i18n.interfaces import ILanguageUtility
++
++
++class NegotiateLanguage(object):
++    """Perform default language negotiation"""
++    implements(INegotiateLanguage)
++
++    def __init__(self, site, request):
++        """Setup the current language stuff."""
++        tool = getUtility(ILanguageUtility)
++        langs = []
++        useContent = tool.settings.use_content_negotiation
++        useCcTLD = tool.settings.use_cctld_negotiation
++        useSubdomain = tool.settings.use_subdomain_negotiation
++        usePath = tool.settings.use_path_negotiation
++        useCookie = tool.settings.use_cookie_negotiation
++        setCookieEverywhere = tool.settings.set_cookie_always
++        authOnly = tool.settings.authenticated_users_only
++        useRequest = tool.settings.use_request_negotiation
++        useDefault = 1 # This should never be disabled
++        langsCookie = None
++        if usePath:
++            # This one is set if there is an allowed language in the current path
++            langs.append(tool.getPathLanguage(request))
++
++        if useContent:
++            langs.append(tool.getContentLanguage(request))
++
++        if useCookie and not (authOnly and tool.isAnonymousUser()):
++            # If we are using the cookie stuff we provide the setter here
++            set_language = request.get('set_language', None)
++            if set_language:
++                langsCookie = tool.setLanguageCookie(set_language, request=request)
++            else:
++                # Get from cookie
++                langsCookie = tool.getLanguageCookie(request)
++            langs.append(langsCookie)
++
++        if useSubdomain:
++            langs.extend(tool.getSubdomainLanguages(request))
++
++        if useCcTLD:
++            langs.extend(tool.getCcTLDLanguages(request))
++
++        # Get langs from request
++        if useRequest:
++            langs.extend(tool.getRequestLanguages(request))
++
++        # Get default
++        if useDefault:
++            langs.append(tool.getDefaultLanguage())
++
++        # Filter None languages
++        langs = [lang for lang in langs if lang is not None]
++
++        # Set cookie language to language
++        if setCookieEverywhere  and langs[0] != langsCookie:
++            # We need to make sure its not a subrequest otherwise we are going
++            # To change the language of the main request
++            from plone.subrequest import ISubRequest
++            if not ISubRequest.providedBy(request):
++                tool.setLanguageCookie(langs[0], noredir=True, request=request)
++
++        self.default_language = langs[-1]
++        self.language = langs[0]
++        self.language_list = langs[1:-1]
+\ No newline at end of file
+diff --git a/plone/i18n/tests/__init__.py b/plone/i18n/tests/__init__.py
+new file mode 100644
+index 0000000..4287ca8
+--- /dev/null
++++ b/plone/i18n/tests/__init__.py
+@@ -0,0 +1 @@
++#
+\ No newline at end of file
+diff --git a/plone/i18n/tests/base.py b/plone/i18n/tests/base.py
+new file mode 100644
+index 0000000..bf586f6
+--- /dev/null
++++ b/plone/i18n/tests/base.py
+@@ -0,0 +1,32 @@
++from plone.app.testing import bbb
++from plone.app import testing
++from plone.testing import z2
++from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
++from plone.app.testing import PloneSandboxLayer
++
++
++class PloneI18nLayer(PloneSandboxLayer):
++
++    defaultBases = (PLONE_APP_CONTENTTYPES_FIXTURE, )
++
++    def setUpZope(self, app, configurationContext):
++        import plone.i18n
++        # Needed to have ILanguage adapter for dx
++        import plone.app.multilingual
++        self.loadZCML(package=plone.i18n)
++        self.loadZCML(package=plone.app.multilingual)
++
++PLT_FIXTURE = PloneI18nLayer()
++PLT_FUNCTIONAL_TESTING = testing.FunctionalTesting(
++    bases=(PLT_FIXTURE, ), name='Plonei18nTestCase:Functional')
++
++
++class TestCase(bbb.PloneTestCase):
++    """Simple test case
++    """
++    layer = PLT_FUNCTIONAL_TESTING
++
++
++class FunctionalTestCase(TestCase):
++    """Simple test case for functional tests
++    """
+\ No newline at end of file
+diff --git a/plone/i18n/tests/test_languageutility.py b/plone/i18n/tests/test_languageutility.py
+new file mode 100644
+index 0000000..f1ed6ee
+--- /dev/null
++++ b/plone/i18n/tests/test_languageutility.py
+@@ -0,0 +1,89 @@
++from zope.interface import alsoProvides
++from Products.CMFCore.interfaces import IDublinCore
++from Products.CMFCore.utils import getToolInterface, getToolByName
++from plone.registry.interfaces import IRegistry
++from zope.component import getUtility
++from Products.CMFPlone.interfaces import ILanguageSchema
++from plone.i18n.interfaces import ILanguageUtility
++
++from plone.i18n.tests import base
++
++
++class TestLanguageTool(base.TestCase):
++
++    def afterSetUp(self):
++        self.ltool = getToolByName(self.portal, 'portal_languages')
++        self.settings = getUtility(IRegistry).forInterface(
++            ILanguageSchema,
++            prefix='plone')
++
++    def testLanguageSettings(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.default_language = defaultLanguage
++        self.settings.available_languages = supportedLanguages
++        self.settings.use_combined_language_codes = False
++        self.failUnless(self.ltool.getDefaultLanguage() == defaultLanguage)
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++    def testSupportedLanguages(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.settings.default_language = defaultLanguage
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++        self.ltool.removeSupportedLanguages(supportedLanguages)
++        self.failUnless(self.ltool.getSupportedLanguages() == [])
++
++        for lang in supportedLanguages:
++            self.ltool.addSupportedLanguage(lang)
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++
++    def testDefaultLanguage(self):
++        supportedLanguages = ['de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage('no')
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++        self.failUnless(self.ltool.getDefaultLanguage() == 'no')
++
++        # default not in supported languages, should set to first supported
++        self.ltool.setDefaultLanguage('nl')
++
++        self.failUnless(self.ltool.getSupportedLanguages() == supportedLanguages)
++        self.failUnless(self.ltool.getDefaultLanguage() == 'de')
++
++    def testAvailableLanguage(self):
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage(defaultLanguage)
++        availableLanguages = self.ltool.getAvailableLanguageInformation()
++        for lang in availableLanguages:
++            if lang in supportedLanguages:
++                self.failUnless(availableLanguages[lang]['selected'] == True)
++
++    def testGetContentLanguage(self):
++        # tests for issue #11263
++        defaultLanguage = 'de'
++        supportedLanguages = ['en', 'de', 'no']
++        self.settings.available_languages = supportedLanguages
++        self.ltool.setDefaultLanguage(defaultLanguage)
++        request = self.layer['request']
++        request.path = ['doc', ]
++        self.layer['portal'].invokeFactory('Document', 'doc')
++        content = self.layer['portal']['doc']
++        content.setLanguage('de')
++        alsoProvides(content, IDublinCore)
++        self.ltool.getContentLanguage(request)
++        self.failUnless(self.ltool.getContentLanguage(request) == 'de')
++        request.path = ['view', 'foo.jpg', 'doc', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == 'de')
++        request.path = ['foo.jpg', 'doc', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == None)
++        request.path = ['foo', 'portal_catalog', ]
++        self.failUnless(self.ltool.getContentLanguage(request) == None)
++
++    def testRegisterInterface(self):
++        iface = getToolInterface('portal_languages')
++        self.assertEqual(iface, ILanguageUtility)
+\ No newline at end of file
+diff --git a/plone/i18n/tests/test_negotiation.py b/plone/i18n/tests/test_negotiation.py
+new file mode 100644
+index 0000000..b130df2
+--- /dev/null
++++ b/plone/i18n/tests/test_negotiation.py
+@@ -0,0 +1,263 @@
++from plone.i18n.tests import base
++
++from plone.app.testing import TEST_USER_PASSWORD
++from plone.app.testing import TEST_USER_NAME
++
++from plone.registry.interfaces import IRegistry
++from zope.component import getUtility
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import ILanguageSchema
++from Products.CMFPlone.interfaces import ILanguage
++
++
++class LanguageNegotiationTestCase(base.FunctionalTestCase):
++
++    def afterSetUp(self):
++        self.basic_auth = '%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD)
++        self.portal_path = self.portal.absolute_url(1)
++        self.tool = getToolByName(self.portal, 'portal_languages')
++        self.settings = getUtility(IRegistry).forInterface(
++            ILanguageSchema,
++            prefix='plone')
++        self.settings.always_show_selector = 1
++        self.settings.set_cookie_always = 1
++
++    def checkLanguage(self, response, language):
++        self.assertEquals(response.getStatus(), 200)
++        cookie = response.getCookie('I18N_LANGUAGE')['value']
++        self.assertEquals(cookie, language)
++
++
++class TestDefaultLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def testLanguageNegotiation(self):
++        # Once PLT is installed only English is allowed as a language
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "en")
++
++
++class TestNoCombinedLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        # set some allowed languages and make sure we don't use combined
++        # language codes
++        self.settings.available_languages = ['en', 'pt', 'de']
++        self.settings.use_request_negotiation = 1
++        self.settings.use_combined_language_codes = 0
++        self.settings.display_flags = 0
++
++    def testLanguageNegotiation(self):
++
++        # Test simple supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "pt")
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de'})
++        self.checkLanguage(response, "de")
++
++        # Test combined unsupported codes, should fall back
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt-br'})
++        self.checkLanguage(response, "pt")
++
++
++class TestCombinedLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        # set some allowed languages and make sure we don't use combined
++        # language codes
++        self.settings.use_combined_language_codes = True
++        self.settings.available_languages = ['en', 'pt', 'de', 'pt-br']
++        self.settings.use_request_negotiation = True
++        self.settings.display_flags = 0
++
++    def testLanguageNegotiation(self):
++
++        # Test simple supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt'})
++        self.checkLanguage(response, "pt")
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de'})
++        self.checkLanguage(response, "de")
++
++        # Test combined supported codes
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'pt-br'})
++        self.checkLanguage(response, "pt-br")
++
++        # Test combined unsupported codes, should fall back
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_ACCEPT_LANGUAGE': 'de-de'})
++        self.checkLanguage(response, "de")
++
++
++class TestContentLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_content_negotiation = 1
++        self.settings.display_flags = 0
++        registry = getUtility(IRegistry)
++        # disable cooking of assets because this gives unwanted
++        # sideeffects in the request handling
++        registry['plone.resources.development'] = True
++
++    def testContentObject(self):
++        self.layer['portal'].invokeFactory('Document', 'doc')
++        doc = self.layer['portal'].doc
++        ILanguage(doc).set_language('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(doc.getPhysicalPath())
++        response = self.publish(docpath, self.basic_auth,
++                                env={'PATH_INFO': docpath})
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMPortal(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++        vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/" % self.portal.getId()
++
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(self.portal.portal_url.getRelativeContentPath(doc))
++        response = self.publish(vhmBasePath + docpath, self.basic_auth)
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMPortalVHSubpath(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++        vhmBasePath = "/VirtualHostBase/http/example.org:80/%s/VirtualHostRoot/_vh_one/_vh_two/" % self.portal.getId()
++
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(self.portal.portal_url.getRelativeContentPath(doc))
++        response = self.publish(vhmBasePath + docpath, self.basic_auth)
++        self.checkLanguage(response, "nl")
++
++    def testContentObjectVHMFolder(self):
++        adding = self.app.manage_addProduct['SiteAccess']
++        adding.manage_addVirtualHostMonster('VHM')
++
++        folder_path = '/'.join(self.layer['portal'].getPhysicalPath())
++        vhmBasePath = "/VirtualHostBase/http/example.org:80%s/VirtualHostRoot/" % folder_path
++        self.layer['portal'].invokeFactory('Folder', 'sub')
++        sub = self.layer['portal']['sub']
++        sub.setLanguage('nl')
++        sub.invokeFactory('Document', 'doc')
++        doc = sub.doc
++        doc.setLanguage('nl')
++        self.failUnlessEqual(doc.Language(), 'nl')
++        docpath = '/'.join(doc.getPhysicalPath())
++        docpath = docpath[len(folder_path) + 1:]
++
++        response = self.publish(vhmBasePath + docpath, self.basic_auth,
++                                env={'diazo.off': "1"})
++        self.checkLanguage(response, "nl")
++
++
++class TestCcTLDLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_cctld_negotiation = 1
++        self.settings.display_flags = 0
++
++    def testSimpleHostname(self):
++        # For a simple hostname without ccTLD the canonical language is used
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'localhost'})
++        self.checkLanguage(response, "en")
++
++    def testIPAddress(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': '127.0.0.1'})
++        self.checkLanguage(response, "en")
++
++    def testDutchDomain(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.nl'})
++        self.checkLanguage(response, "nl")
++
++    def testAcceptedLanguages(self):
++        # Brazil uses Portugese, which is not in the accepted languages list
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.br'})
++        self.checkLanguage(response, "en")
++
++    def testMultiLingualCountries(self):
++        # Some countries refuse to pick a single language. Belgium
++        # uses both Dutch and French, with a preference for Dutch.
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.be'})
++        self.checkLanguage(response, "nl")
++
++        # If we stop allowing Dutch we should now fall back to French
++        self.settings.available_languages = ['en', 'fr']
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'plone.be'})
++        self.checkLanguage(response, "fr")
++
++
++class TestSubdomainLanguageNegotiation(LanguageNegotiationTestCase):
++
++    def afterSetUp(self):
++        LanguageNegotiationTestCase.afterSetUp(self)
++        self.settings.available_languages = ['en', 'nl', 'fr']
++        self.settings.use_subdomain_negotiation = 1
++        self.settings.display_flags = 0
++
++    def testSimpleHostname(self):
++        # For a simple hostname without ccTLD the canonical language is used
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'localhost'})
++        self.checkLanguage(response, "en")
++
++    def testIPAddress(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': '127.0.0.1'})
++        self.checkLanguage(response, "en")
++
++    def testDutchDomain(self):
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'nl.plone.org'})
++        self.checkLanguage(response, "nl")
++
++    def testAcceptedLanguages(self):
++        # Brazil uses Portugese, which is not in the accepted languages list
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'br.plone.org'})
++        self.checkLanguage(response, "en")
++
++    def testMultiLingualCountries(self):
++        # Some countries refuse to pick a single language. Belgium
++        # uses both Dutch and French, with a preference for Dutch.
++
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'be.plone.org'})
++        self.checkLanguage(response, "nl")
++
++        # If we stop allowing Dutch we should now fall back to French
++        self.settings.available_languages = ['en', 'fr']
++        response = self.publish(self.portal_path, self.basic_auth,
++                                env={'HTTP_HOST': 'be.plone.org'})
++        self.checkLanguage(response, "fr")
+\ No newline at end of file
+diff --git a/plone/i18n/utility.py b/plone/i18n/utility.py
+new file mode 100644
+index 0000000..cedb07f
+--- /dev/null
++++ b/plone/i18n/utility.py
+@@ -0,0 +1,456 @@
++from zope.interface import implements
++from plone.i18n.interfaces import ILanguageUtility, INegotiateLanguage
++from zope.component import queryUtility
++from plone.i18n.locales.interfaces import ICountryAvailability
++from plone.i18n.locales.interfaces import IContentLanguageAvailability
++from plone.i18n.locales.interfaces import ICcTLDInformation
++from Products.SiteAccess.VirtualHostMonster import VirtualHostMonster
++from ZODB.POSException import ConflictError
++from AccessControl import ClassSecurityInfo
++from zope.component.hooks import getSite
++from zope.component import getMultiAdapter
++from zope.component import getUtility
++from Products.CMFCore.interfaces import IDublinCore
++from zope.component.hooks import getSite
++
++from plone.registry.interfaces import IRegistry
++from Products.CMFPlone.interfaces import ILanguageSchema
++
++
++class LanguageBinding:
++    """Helper which holding language infos in request."""
++    security = ClassSecurityInfo()
++    __allow_access_to_unprotected_subobjects__ = 1
++
++    DEFAULT_LANGUAGE = None
++    LANGUAGE = None
++    LANGUAGE_LIST = []
++
++    security.declarePublic('getLanguageBindings')
++
++    def getLanguageBindings(self):
++        """Returns the bound languages.
++
++        (language, default_language, languages_list)
++        """
++        return (self.LANGUAGE, self.DEFAULT_LANGUAGE, self.LANGUAGE_LIST)
++
++
++def setLanguageBinding(request):
++    binding = request.get('LANGUAGE_TOOL', None)
++    settings = getMultiAdapter((getSite(), request), INegotiateLanguage)
++
++    if not isinstance(binding, LanguageBinding):
++        # Create new binding instance
++        binding = LanguageBinding()
++        # Set bindings instance to request here to avoid infinite recursion
++        request['LANGUAGE_TOOL'] = binding
++    # Bind languages
++    binding.LANGUAGE = lang = settings.language
++    binding.DEFAULT_LANGUAGE = settings.default_language
++    binding.LANGUAGE_LIST = list(settings.language_list)
++    # Set LANGUAGE to request
++    request['LANGUAGE'] = lang
++    return lang
++
++
++def onRequest(object, event):
++    """Set Language headers in the request.
++    """
++    request = event.request
++
++    return setLanguageBinding(request)
++
++
++class LanguageUtility(object):
++    implements(ILanguageUtility)
++
++    # resources that must not use language specific URLs
++    exclude_paths = frozenset((
++        'portal_css',
++        'portal_javascripts',
++        'portal_kss',
++        'portal_factory'
++    ))
++
++    exclude_exts = frozenset((
++        'css',
++        'js',
++        'kss',
++        'xml',
++        'gif',
++        'jpg',
++        'png',
++        'jpeg'
++    ))
++
++    @property
++    def settings(self):
++        registry = getUtility(IRegistry)
++        return registry.forInterface(
++            ILanguageSchema,
++            prefix='plone',
++        )
++
++    # BBB propouses
++    @property
++    def use_combined_language_codes(self):
++        return self.settings.use_combined_language_codes
++
++    @property
++    def supported_langs(self):
++        return self.settings.available_languages
++
++    @property
++    def showFlags(self):
++        return self.settings.display_flags
++
++    def getSupportedLanguages(self):
++        """Returns a list of supported language codes."""
++        return self.settings.available_languages
++
++    def listSupportedLanguages(self):
++        """Returns a list of supported language names."""
++        r = []
++        available = self.getAvailableLanguages()
++        for i in self.supported_langs:
++            if available.get(i):
++                r.append((i, available[i][u'name']))
++        return r
++
++    def getAvailableLanguages(self):
++        """Returns the dictionary of available languages.
++        """
++        util = queryUtility(IContentLanguageAvailability)
++        if self.settings.use_combined_language_codes:
++            languages = util.getLanguages(combined=True)
++        else:
++            languages = util.getLanguages()
++        return languages
++
++    def getCcTLDInformation(self):
++        util = queryUtility(ICcTLDInformation)
++        return util.getTLDs()
++
++    def listAvailableLanguages(self):
++        """Returns sorted list of available languages (code, name)."""
++        util = queryUtility(IContentLanguageAvailability)
++        if self.use_combined_language_codes:
++            languages = util.getLanguageListing(combined=True)
++        else:
++            languages = util.getLanguageListing()
++        languages.sort(lambda x, y: cmp(x[1], y[1]))
++        return languages
++
++    def listAvailableLanguageInformation(self):
++        """Returns list of available languages."""
++        langs = self.getAvailableLanguageInformation()
++        new_langs = []
++        for lang in langs:
++            # add language-code to dict
++            langs[lang][u'code'] = lang
++            # flatten outer dict to list to make it sortable
++            new_langs.append(langs[lang])
++        new_langs.sort(lambda x, y: cmp(x.get(u'native', x.get(u'name')), y.get(u'native', y.get(u'name'))))
++        return new_langs
++
++    def getAvailableLanguageInformation(self):
++        """Returns the dictionary of available languages."""
++        util = queryUtility(IContentLanguageAvailability)
++        if self.use_combined_language_codes:
++            languages = util.getLanguages(combined=True)
++        else:
++            languages = util.getLanguages()
++
++        for lang in languages:
++            languages[lang]['code'] = lang
++            if lang in self.supported_langs:
++                languages[lang]['selected'] = True
++            else:
++                languages[lang]['selected'] = False
++        return languages
++
++    def getDefaultLanguage(self):
++        """Returns the default language. D"""
++        return self.settings.default_language
++
++    def setDefaultLanguage(self, langCode):
++        """Sets the default language. D"""
++        if langCode not in self.settings.available_languages:
++            # If its not in supported langs
++            if len(self.settings.available_languages) > 0:
++                self.settings.default_language = self.settings.available_languages[0]
++            return
++        self.settings.default_language = langCode
++
++    def getNameForLanguageCode(self, langCode):
++        """Returns the name for a language code."""
++        info = self.getAvailableLanguageInformation().get(langCode, None)
++        if info is not None:
++            return info.get(u'name', None)
++        return None
++
++    def getFlagForLanguageCode(self, langCode):
++        """Returns the name of the flag for a language code."""
++        info = self.getAvailableLanguageInformation().get(langCode, None)
++        if info is not None:
++            return info.get(u'flag', None)
++        return None
++
++    def addSupportedLanguage(self, langCode):
++        """Registers a language code as supported."""
++        alist = self.settings.available_languages[:]
++        if (langCode in self.getAvailableLanguages().keys()) and not langCode in alist:
++            alist.append(langCode)
++            self.settings.available_languages = alist
++
++    def removeSupportedLanguages(self, langCodes):
++        """Unregisters language codes from supported."""
++        alist = self.settings.available_languages[:]
++        for i in langCodes:
++            alist.remove(i)
++        self.settings.available_languages = alist
++
++    def setLanguageCookie(self, lang=None, request=None, noredir=None):
++        """Sets a cookie for overriding language negotiation."""
++        res = None
++        if lang and lang in self.getSupportedLanguages():
++            if lang != self.getLanguageCookie(request):
++                request.RESPONSE.setCookie('I18N_LANGUAGE', lang, path='/')
++            res = lang
++        return res
++
++    def getLanguageCookie(self, request):
++        """Gets the preferred cookie language."""
++        if not request:
++            return None
++        langCookie = request.cookies.get('I18N_LANGUAGE')
++        if langCookie in self.getSupportedLanguages():
++            return langCookie
++        return None
++
++    def getPreferredLanguage(self, request):
++        """Gets the preferred site language."""
++        l = self.getLanguageBindings(request)
++        if l[0]:
++            if not self.settings.use_combined_language_codes:
++                return l[0].split('-')[0]
++            else:
++                return l[0]
++            return l[0]
++        # this is the default language
++        return l[1]
++
++    def getPathLanguage(self, request):
++        """Checks if a language is part of the current path."""
++        if not request:
++            return []
++        items = request.get('TraversalRequestNameStack')
++        # XXX Why this try/except?
++        try:
++            for item in items:
++                if item in self.getSupportedLanguages():
++                    return item
++        except (ConflictError, KeyboardInterrupt):
++            raise
++        except:
++            pass
++        return None
++
++    def getContentLanguage(self, request):
++        """Checks the language of the current content if not folderish."""
++        if not request:
++            return []
++        try: # This will actually work nicely with browserdefault as we get attribute error...
++            contentpath = request.path[:]
++
++            # Now check if we need to exclude from using language specific path
++            # See https://dev.plone.org/ticket/11263
++            if (bool([1 for p in self.exclude_paths if p in contentpath]) or
++                bool([1 for p in self.exclude_exts if contentpath[0].endswith(p)])
++                ):
++                return None
++
++            obj = getSite()
++            traversed = []
++            while contentpath:
++                name = contentpath.pop()
++                if name[0] in '@+':
++                    break
++                next = obj.unrestrictedTraverse(name, None)
++                if next is None:
++                    break
++                if isinstance(next, VirtualHostMonster):
++                    # next element is the VH subpath
++                    contentpath.pop()
++                    continue
++                obj = next
++                traversed.append(obj)
++            for obj in reversed(traversed):
++                if IDublinCore.providedBy(obj):
++                    lang = obj.Language()
++                    if not lang:
++                        continue
++                    if lang in self.getSupportedLanguages():
++                        return lang
++                    else:
++                        return None
++        except ConflictError:
++            raise
++        except:
++            pass
++        return None
++
++    def getCcTLDLanguages(self, request):
++        if not request:
++            return None
++        if "HTTP_HOST" not in request:
++            return None
++        host = request["HTTP_HOST"].split(":")[0].lower()
++        tld = host.split(".")[-1]
++        wanted = self.getCcTLDInformation().get(tld, [])
++        allowed = self.getSupportedLanguages()
++        return [lang for lang in wanted if lang in allowed]
++
++    def getSubdomainLanguages(self, request):
++        if not request:
++            return None
++        if "HTTP_HOST" not in request:
++            return None
++        host = request["HTTP_HOST"].split(":")[0].lower()
++        tld = host.split(".")[0]
++        wanted = self.getCcTLDInformation().get(tld, [])
++        allowed = self.getSupportedLanguages()
++        return [lang for lang in wanted if lang in allowed]
++
++    def getRequestLanguages(self, request):
++        """Parses the request and return language list."""
++
++        if not request:
++            return None
++
++        # Get browser accept languages
++        browser_pref_langs = request.get('HTTP_ACCEPT_LANGUAGE', '')
++        browser_pref_langs = browser_pref_langs.split(',')
++
++        i = 0
++        langs = []
++        length = len(browser_pref_langs)
++
++        # Parse quality strings and build a tuple like
++        # ((float(quality), lang), (float(quality), lang))
++        # which is sorted afterwards
++        # If no quality string is given then the list order
++        # is used as quality indicator
++        for lang in browser_pref_langs:
++            lang = lang.strip().lower().replace('_', '-')
++            if lang:
++                l = lang.split(';', 2)
++                quality = []
++
++                if len(l) == 2:
++                    try:
++                        q = l[1]
++                        if q.startswith('q='):
++                            q = q.split('=', 2)[1]
++                            quality = float(q)
++                    except:
++                        pass
++
++                if quality == []:
++                    quality = float(length-i)
++
++                language = l[0]
++                if (self.use_combined_language_codes and
++                        language in self.getSupportedLanguages()):
++                    # If allowed add the language
++                    langs.append((quality, language))
++                else:
++                    # if we only use simply language codes, we should recognize
++                    # combined codes as their base code. So 'de-de' is treated
++                    # as 'de'.
++                    baselanguage = language.split('-')[0]
++                    if baselanguage in self.getSupportedLanguages():
++                        langs.append((quality, baselanguage))
++                i = i + 1
++
++        # Sort and reverse it
++        langs.sort()
++        langs.reverse()
++
++        # Filter quality string
++        langs = map(lambda x: x[1], langs)
++
++        return langs
++
++    def getLanguageBindings(self, request):
++        """Returns the bound languages.
++
++        (language, default_language, languages_list)
++        """
++        if not request:
++            # Can't do anything
++            return (None, self.getDefaultLanguage(), [])
++        binding = request.get('LANGUAGE_TOOL', None)
++        if not isinstance(binding, LanguageBinding):
++            # Not bound -> bind
++            setLanguageBinding(request)
++            binding = request.get('LANGUAGE_TOOL')
++        return binding.getLanguageBindings()
++
++    def getAvailableCountries(self):
++        """Returns the dictionary of available countries."""
++        util = queryUtility(ICountryAvailability)
++        return util.getCountries()
++
++    def listAvailableCountries(self):
++        """Returns the sorted list of available countries (code, name)."""
++        util = queryUtility(ICountryAvailability)
++        countries = util.getCountryListing()
++        countries.sort(lambda x, y: cmp(x[1], y[1]))
++        return countries
++
++    def getNameForCountryCode(self, countryCode):
++        """Returns the name for a country code."""
++        return self.getAvailableCountries().get(countryCode, countryCode)
++
++    def isAnonymousUser(self):
++        from AccessControl import getSecurityManager
++        user = getSecurityManager().getUser()
++        return not user.has_role('Authenticated')
++
++    def showSelector(self):
++        """Returns True if the selector viewlet should be shown."""
++        if self.settings.always_show_selector:
++            return True
++        if (self.settings.use_cookie_negotiation and
++            not (self.settings.authenticated_users_only and self.isAnonymousUser())):
++            return True
++        return False
++
++try:
++    from Products.PlacelessTranslationService.Negotiator import registerLangPrefsMethod
++    _hasPTS = 1
++except ImportError:
++    _hasPTS = 0
++
++
++class PrefsForPTS:
++    """A preference to hook into PTS."""
++    def __init__(self, context):
++        self._env = context
++        self.languages = []
++        binding = context.get('LANGUAGE_TOOL')
++        if not isinstance(binding, LanguageBinding):
++            return None
++        self.pref = binding.getLanguageBindings()
++        self.languages = [self.pref[0]] + self.pref[2] + [self.pref[1]]
++        return None
++
++    def getPreferredLanguages(self):
++        """Returns the list of the bound languages."""
++        return self.languages
++
++
++if _hasPTS:
++    registerLangPrefsMethod({'klass':PrefsForPTS, 'priority':100 })
 
 
