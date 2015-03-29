@@ -7,7 +7,9 @@ Collection of best practices that would help the overall community to work with 
 
 Basics
 ======
-Some introductory definitions and concepts.
+Some introductory definitions and concepts,
+if you are already familiar enough with git,
+head to next section: :ref:`general-guidelines-label`.
 
 Working model
 -------------
@@ -213,3 +215,365 @@ reflog
 
    Extremely useful once a bad interactive rebase has happened.
 
+.. _general-guidelines-label:
+
+General guidelines
+==================
+
+Pulling code
+------------
+Let's compare this two histories::
+
+    *   3333333 (HEAD, master) Merge branch 'feature-branch' into master
+    |\
+    | * 2222222 (feature-branch) Last changes on feature-branch
+    | *   1111111 Merge branch 'master' into feature-branch
+    | |\
+    | * | 0000000 More changes on feature branch
+    | * |   fffffff Merge branch 'master' into feature-branch
+    | |\ \
+    * | | | eeeeeee master keeps rocking
+    | |_|/
+    |/| |
+    * | | ddddddd master goes and goes
+    | |/
+    |/|
+    * | ccccccc master evolves
+    | * bbbbbbb First commit on feature-branch
+    |/
+    * aaaaaaa commit on master  # this is where feature-branch was created
+
+
+With::
+
+   * 3333333 (HEAD, master) Merge branch 'feature-branch' into master
+   |\
+   | * 2222221 (feature-branch) Last changes on feature-branch
+   | * 0000001 More changes on feature branch
+   | * bbbbbb1 First commit on feature-branch
+   |/
+   * eeeeeee master keeps rocking
+   * ddddddd master goes and goes
+   * ccccccc master evolves
+   * aaaaaaa commit on master
+
+What do we see above?
+Actually and contrary to what it seems,
+exactly the same **result**
+(as how the files and its content look like on commit ``333333``).
+
+The second version is far more easy to understand what happened and removes two superfluous commits
+(the two partial merges with master (``fffffff`` and ``1111111``).
+
+This happens if you have not properly configured ``git pull``.
+By default it does a ``merge`` meaning that an extra commit is always added,
+tangling the history and making this more complex when looking back for what happened there.
+
+How to solve it?
+^^^^^^^^^^^^^^^^
+*ALWAYS* do a :command:`git pull --rebase` when fetching new code,
+configure git to do always so with::
+
+    git config branch.autosetuprebase always # add the --global switch to make it default everywhere
+
+This way you do not introduce new extra commits and the git history is kept as simple as possible.
+
+This is especially important when trying to understand why some changes were made,
+or who did actually change that line,
+etc.
+
+A couple of further explanations:
+http://stevenharman.net/git-pull-with-automatic-rebase
+
+http://www.slideshare.net/michalczyzcs3b/git-merge-vs-rebase-miksturait-4
+
+Just search for ``git merge vs rebase``,
+you will find plenty of literature.
+
+Reviewing your changes
+----------------------
+After hacking for some minutes/hours/days you are finished and about to commit your changes,
+great!
+
+*BUT*,
+please,
+do so with :command:`git add --patch`.
+
+The ``--patch`` (also ``-p``) switch allows you to select which hunks you want to add on a commit.
+
+This is not only great to split changes into different commits,
+but is also the time when you actually **review** your code before anyone else sees it.
+
+This is the time when you spot typos,
+pep8 errors,
+misaligned code,
+lack of docstrings in methods,
+that a permission is not defined on Generic Setup,
+that an upgrade should be needed...
+
+Remember that the first code review is the one you do on your own.
+Some inspiration/better phrasing:
+http://ada.mbecker.cc/2012/11/22/be-your-own-code-review/
+
+And please,
+do remember the gold metric about reviewing code:
+http://www.osnews.com/story/19266/WTFs_m
+
+One commit does one thing
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Repeat with me:
+*One commit does one thing*.
+Period.
+
+When someone else needs to review your code,
+most probably she will give up or just skim over your code if there are too many (unrelated) changes.
+
+Reviewing commits with +20 files doing all sorts of changes on them
+(maybe even unrelated)
+is no fun and adds complexity and `cognitive load <http://en.wikipedia.org/wiki/Cognitive_load>`_.
+
+Something that should mostly be a verification of a checklist like:
+
+- the browser view is registered on ZCML?
+- is there an interface for that form?
+- the pt and py are there?
+- ...
+
+Turns instead into a list of questions:
+
+- why is this interface renamed here if it has nothing to do with this adapter?
+- all this removal of deprecated code while adding new features just mixes the diff,
+  am I missing something?
+- *others*
+
+If you can not express what has been changed within 50 characters
+(suggested length of a commit message subject),
+or you say it like "it does XXX and YYY",
+you most probably need to split that commit into,
+at least,
+two or more commits.
+
+That doesn't mean that a +20 files or +100 lines of code changes are bad per se,
+you may be doing a simple refactoring across lots of files,
+that's fine and good actually.
+
+As long as a commit is just and only about a specific purpose,
+and not a mixed selection of the following:
+
+- refactoring code
+- moving things around
+- fixing some bugs while at it
+- adding some docs
+- a new cool feature
+- fixing typos on documentation
+- pep8 fixes
+
+It is absolutely fine to refactor.
+
+And this is actually to help both your present self and your +5 years from now that will have to refactor that code of yours,
+and maybe is struggling to understand what was going on there.
+
+Following this advice will:
+
+- keep things simple where there's no gain in adding complexity
+- make your changes easy to be reviewed
+- make later on lookups on those changes easy to follow
+
+Making commits
+--------------
+For commit messages see:
+`plone API guidelines <http://docs.plone.org/external/plone.api/docs/contribute/conventions.html#git-commit-message-style>`_.
+
+Adding references to issues
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Always add the full URL to the issue/pull request you are fixing/referring to.
+
+Maybe within the git repository it makes sense,
+but as soon as you are outside of it,
+it will not.
+
+Take into account mr.roboto automatic commits to buildout.coredev for example,
+if your commit message goes like *Fix for #33*,
+which issue/pull request is that fixing?
+The one in buildout.coredev itself?
+On another issue tracker?
+Somewhere else?
+
+It would be far better if the commit goes instead like::
+
+    Brief description
+
+    Further explanation.
+
+    Fixes: https://github.com/plone/plone.app.discussion/issue/999
+
+Bad examples
+^^^^^^^^^^^^
+Some bad examples of commit messages:
+https://github.com/plone/plone.app.content/commit/0f3a6c65b2018e0ecc65d0ad1581e345f17e531b
+
+Commit messages goes like *"Make note about how this interface is now for BBB only"*.
+
+Question:
+if it's BBB only,
+where is the new place to look for that interface now?
+
+The problem is that,
+in this case Martin,
+wrote that in 2009,
+so most probably once a refactor of that package is done later on 2015,
+Martin is no longer around,
+and if he was,
+most probably he would not remember something from +6 years ago.
+
+Ask yourself a question:
+if someone comes to you asking details about a random commit done by you +5 years ago,
+what will you reply?
+
+Try that,
+get one project that you worked 5 years ago,
+get a random commit and:
+
+See if,
+just by reading the commit message,
+you are given enough information of what changes have been made,
+when comparing the commit message and the actual code.
+Does the commit message match the code changed?
+
+Before pushing commits
+----------------------
+Code is reviewed,
+spread into nice isolated commits,
+descriptive enough commit messages are written,
+so,
+*what's left?*
+
+A final overview of what you are about to push!
+
+To do so,
+you can get an idea with the following git alias
+(to be added on your ``~/.gitconfig``)::
+
+    [alias]
+        fulllog = log --graph --decorate --pretty=oneline --abbrev-commit --all
+
+Now run :command:`git fulllog` on your git repository,
+you will see a nice graph showing you the current situation.
+
+Maybe it makes you realize that commits need to be reordered,
+commit messages could get some improvements,
+that you forgot to add a reference to an issue,
+etc.
+
+Pull requests
+=============
+Some specific tips and best practices for pull requests.
+
+Always rebase
+-------------
+Always rebase on top of the branch you want your changes to be merged before sending a pull request,
+and as your pull request is still pending to be merged and the master branch evolves,
+keep rebasing it.
+
+To do so::
+
+    git checkout <your branch>
+    git rebase master # or the branch you are targeting to integrate your changes to
+    # done!
+    # or if there are conflicts,
+    # fix them and follow instructions from git itself
+
+The principle here is:
+if you do merges with master,
+you are actually spreading your pull request into more commits,
+and at the end making it more difficult to track what was changed.
+
+On top of that,
+the commit history is more complex to follow.
+
+See the history example above: :ref:`general-guidelines-label`.
+
+Unfortunately the flat view from GitHub prevents us from seeing that,
+which is a shame.
+
+One line one commit
+-------------------
+On a series of commits make sure the same code line is not changed twice,
+the worst thing you can do to the one reviewing your changes,
+is to make him/her spend time reviewing some code changes that one the next commit are changed again to do something else.
+
+It will not only make your commits smaller,
+but it will also make it easy to do atomic commits.
+
+No cleanup commits please
+-------------------------
+*On the context of a pull request*
+
+Ask yourself: What relation does a cleanup commit,
+say pep8 fixes or other code analysis fixes,
+have with your pull request?
+
+Couldn't that pep8 fixes commit or small refactoring go straight into master branch?
+
+Or even if you send a pull request for it,
+chances are that it will be merged right away.
+As long as it is a cleanup commit,
+there's not much to argue with it.
+
+The same goes with commits that improve or actually fix previous commits
+(within the same pull request).
+A series of commits like this::
+
+    * 11ba28c Last fix, finally
+    * 11ba28c Fix tests, again
+    * 11ba28c Fix tests
+    * 11ba28c Do something fancy
+    * 11ba28c Failing test, we are doing TDD right?
+
+Only tells you that the author did not take care at all about the one who will review it,
+and specially about the person that in +5 years will try to understand that test.
+Specially because now the test is not only spread between 4 commits,
+but most probably during those 5 years it has already been refactored,
+so maybe a :command:`git blame` will report that within that test method,
+there are +5 related current commits to check,
+not nice right?
+
+interactive
+^^^^^^^^^^^
+To fix the previous example,
+run the following command::
+
+    git rebase ---interactive <base> # which mostly is usually master
+
+This allows you to rewrite the story of your branch.
+See a more `elaborate description with examples <https://www.atlassian.com/git/tutorials/rewriting-history/git-rebase-i/>`_.
+
+.. note::
+   Be careful on not to run that on master itself!
+   Please take your time to really understand it.
+
+   It's a really powerful tool,
+   and as `Stan Lee says <http://en.wikiquote.org/wiki/Stan_Lee>`_,
+   it comes with great responsibility.
+
+To actually make it easier you can do commits like this::
+
+    git commit --fixup HASH
+
+Where ``HASH`` is the commit hash you want the changes you are about to commit be merged with.
+
+This way,
+when running :command:`git rebase --interactive`,
+git will already reorder the commits as you already want.
+
+
+No side changes
+---------------
+That's an extension to the previous point.
+
+Keeping pull requests simple and to the point,
+without changes not related to the pull request itself,
+will make your changes easier to understand and easier to follow.
+
+Again this applies:
+http://www.osnews.com/story/19266/WTFs_m
