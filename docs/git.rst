@@ -577,3 +577,40 @@ will make your changes easier to understand and easier to follow.
 
 Again this applies:
 http://www.osnews.com/story/19266/WTFs_m
+
+Recipes
+=======
+Assorted list of tips and tricks.
+
+Change branches with uncommitted changes
+----------------------------------------
+**Situation:** you are working on a pull request and while working on it founds that some cleanups are needed,
+how to proceed forward?
+
+**Solution:** ``git stash`` or ``git commit --amend -m"TMP"``.
+
+The basic idea here is: store your current changes safely
+(either on a git stash commit or directly on a commit on the branch,
+whichever you prefer),
+move to the canonical branch (``master`` usually),
+do the fixes/cleanups/refactorings there,
+commit those changes,
+rebase your branch on top of the changes you made,
+hack away.
+
+Command line version::
+
+    git stash # or git commit --amend -m"TMP"
+    git checkout master # or whatever happens to be the canonical branch name (i.e. 5.0 on buildout.coredev)
+    # do the cleanups && push them
+    git checkout your-branch # get back to your branch
+    git rebase master # again the canonical branch where you made the changes
+    git stash pop # or git reset HEAD^ if you did a git commit --amend -m"TMP"
+    # if needed, fix the conflicts, with patience and practise that's a piece of cake once you are used to
+
+git visual applications
+-----------------------
+Not everyone is a fan of the command line,
+for them there is a list of GUI clients on the official git website:
+
+http://git-scm.com/downloads/guis
