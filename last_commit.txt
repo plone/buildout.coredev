@@ -1,84 +1,314 @@
 Repository: Products.CMFPlone
 Branch: refs/heads/master
-Date: 2015-04-08T12:58:45+02:00
-Author: Cédric Messiant (cedricmessiant) <cedricmessiant@ecreall.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/be1e0c01148feee114812ee765968af96aa126d9
+Date: 2015-04-08T08:27:06-04:00
+Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/3a019e1fbf50ca678bed1a773d4614f5f164917f
 
-Fix broken 'Installing a third party add-on' link
+Implement resource blacklist to avoid importing known bad legacy resources.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+M Products/CMFPlone/resources/exportimport/jsregistry.py
+M Products/CMFPlone/resources/exportimport/resourceregistry.py
+M Products/CMFPlone/tests/testResourceRegistries.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8838012..25b456d 100644
+index 25b456d..927540d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -8,6 +8,9 @@ Changelog
+@@ -8,6 +8,11 @@ Changelog
  5.0b2 (unreleased)
  ------------------
  
-+- Fix broken "Installing a third party add-on" link
-+  [cedricmessiant]
++- Add `resource_blacklist` attribute to resource registry importer, to
++  allow filtering of known bad legacy resource imports.  Filter js from
++  plone.app.jquery.
++  [alecm]
 +
- - Fix folder contents button disappeared act
+ - Fix broken "Installing a third party add-on" link
+   [cedricmessiant]
+ 
+@@ -17,7 +22,6 @@ Changelog
+ - Fix resource registry javascript build
    [vangheem]
  
-diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-index cc40cc8..83e70d3 100644
---- a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-+++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-@@ -26,7 +26,7 @@
-           configuration, run buildout, and restart the server process.
-           For detailed instructions see
-           <span i18n:name="third_party_product">
--          <a i18n:translate="" href="http://plone.org/documentation/tutorial/buildout/installing-a-third-party-product">
-+          <a i18n:translate="" href="http://docs.plone.org/old-reference-manuals/buildout/thirdparty.html">
-             Installing a third party add-on
-           </a>
-           </span>.
+-
+ - Move `plone.htmlhead.links` viewlet manager after `plone.scripts`,
+   because the former is sometimes used to include scripts that depend on
+   the latter.
+diff --git a/Products/CMFPlone/resources/exportimport/jsregistry.py b/Products/CMFPlone/resources/exportimport/jsregistry.py
+index 0b04fbc..bb3d11d 100644
+--- a/Products/CMFPlone/resources/exportimport/jsregistry.py
++++ b/Products/CMFPlone/resources/exportimport/jsregistry.py
+@@ -22,3 +22,8 @@ class JSRegistryNodeAdapter(ResourceRegistryNodeAdapter):
+     resource_type = 'javascript'
+     register_method = 'registerScript'
+     update_method = 'updateScript'
++
++    # We already have jQuery, blacklist legacy installs of plone.app.jquery js
++    resource_blacklist = set((
++        "++resource++/plone.app.jquery.js",
++    ))
+diff --git a/Products/CMFPlone/resources/exportimport/resourceregistry.py b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+index 3baf877..9170e00 100644
+--- a/Products/CMFPlone/resources/exportimport/resourceregistry.py
++++ b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+@@ -36,6 +36,8 @@ def importResRegistry(context, reg_id, reg_title, filename):
+ 
+ class ResourceRegistryNodeAdapter(XMLAdapterBase):
+ 
++    resource_blacklist = set()
++
+     def _importNode(self, node):
+         """Import the object from the DOM node.
+         """
+@@ -83,6 +85,10 @@ def _importNode(self, node):
+                     position = ('',)
+                     continue
+                 if key == 'id':
++                    if value in self.resource_blacklist:
++                        add = False
++                        data.clear()
++                        break
+                     res_id = queryUtility(IIDNormalizer).normalize(str(value))
+                     data['url'] = str(value)
+                 elif value.lower() == 'false':
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index c3348dc..acfebb8 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -1,11 +1,15 @@
++from xml.dom.minidom import parseString
+ from Products.CMFPlone.tests import PloneTestCase
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from zope.component import getUtility
+ from plone.registry.interfaces import IRegistry
++from Products.CMFCore.utils import getToolByName
++from Products.GenericSetup.context import SetupEnviron
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from plone.subrequest import subrequest
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME
++from Products.CMFPlone.resources.exportimport.resourceregistry import ResourceRegistryNodeAdapter
+ from plone.resource.interfaces import IResourceDirectory
+ 
+ 
+@@ -89,3 +93,46 @@ def test_error(self):
+             '%s/++plone++static/foobar-compiled.js' % self.portal.absolute_url())
+ 
+         self.assertTrue('error cooking' in resp.getBody())
++
++
++class TestResourceNodeImporter(PloneTestCase.PloneTestCase):
++    """Test features of registry node importer"""
++    _setup_fixture = 0  # No default fixture
++
++    def test_resource_blacklist(self):
++        # Ensure that blacklisted resources aren't imported
++        reg = getToolByName(self.portal, 'portal_javascripts')
++        importer = ResourceRegistryNodeAdapter(reg, SetupEnviron())
++        importer.resource_type = 'javascript'
++        importer.registry = getUtility(IRegistry)
++        importer.resource_blacklist = set(('++resource++/bad_resource.js',))
++        dom = parseString("""
++            <object>
++                <javascript id="++resource++/bad_resource.js" enabled="true" />
++            </object>
++            """)
++        importer._importNode(dom.documentElement)
++        resources = importer.registry.collectionOfInterface(
++            IResourceRegistry, prefix="plone.resources"
++        )
++        js_files = [x.js for x in resources.values()]
++        self.assertTrue("++resource++/bad_resource.js" not in js_files)
++
++    def test_resource_no_blacklist(self):
++        # Ensure that blacklisted resources aren't imported
++        reg = getToolByName(self.portal, 'portal_javascripts')
++        importer = ResourceRegistryNodeAdapter(reg, SetupEnviron())
++        importer.resource_type = 'javascript'
++        importer.registry = getUtility(IRegistry)
++        importer.resource_blacklist = set()
++        dom = parseString("""
++            <object>
++                <javascript id="++resource++/bad_resource.js" enabled="true" />
++            </object>
++            """)
++        importer._importNode(dom.documentElement)
++        resources = importer.registry.collectionOfInterface(
++            IResourceRegistry, prefix="plone.resources"
++        )
++        js_files = [x.js for x in resources.values()]
++        self.assertTrue("++resource++/bad_resource.js" in js_files)
 
 
 Repository: Products.CMFPlone
 Branch: refs/heads/master
-Date: 2015-04-08T13:33:22+02:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/bcc882a97edc1f14d2a91facd5318ed874262bce
+Date: 2015-04-08T08:27:06-04:00
+Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/111a8ed5f1d0bd7b715263ff1134ef809838b034
 
-Merge pull request #418 from plone/fix_third_party_link
+Fix blacklisted resource name.
 
-Fix broken 'Installing a third party add-on' link
+Files changed:
+M Products/CMFPlone/resources/exportimport/jsregistry.py
+
+diff --git a/Products/CMFPlone/resources/exportimport/jsregistry.py b/Products/CMFPlone/resources/exportimport/jsregistry.py
+index bb3d11d..8aae390 100644
+--- a/Products/CMFPlone/resources/exportimport/jsregistry.py
++++ b/Products/CMFPlone/resources/exportimport/jsregistry.py
+@@ -25,5 +25,5 @@ class JSRegistryNodeAdapter(ResourceRegistryNodeAdapter):
+ 
+     # We already have jQuery, blacklist legacy installs of plone.app.jquery js
+     resource_blacklist = set((
+-        "++resource++/plone.app.jquery.js",
++        "++resource++plone.app.jquery.js",
+     ))
+
+
+Repository: Products.CMFPlone
+Branch: refs/heads/master
+Date: 2015-04-08T08:28:12-04:00
+Author: David Glick (davisagli) <david.glick@plone.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/a76c97a101975b2f389f2e5f2e0e9b43009373f0
+
+Merge pull request #416 from plone/alecm-resource-blacklist
+
+Implement resource blacklist to avoid importing known bad legacy resources.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+M Products/CMFPlone/resources/exportimport/jsregistry.py
+M Products/CMFPlone/resources/exportimport/resourceregistry.py
+M Products/CMFPlone/tests/testResourceRegistries.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8838012..25b456d 100644
+index 25b456d..927540d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -8,6 +8,9 @@ Changelog
+@@ -8,6 +8,11 @@ Changelog
  5.0b2 (unreleased)
  ------------------
  
-+- Fix broken "Installing a third party add-on" link
-+  [cedricmessiant]
++- Add `resource_blacklist` attribute to resource registry importer, to
++  allow filtering of known bad legacy resource imports.  Filter js from
++  plone.app.jquery.
++  [alecm]
 +
- - Fix folder contents button disappeared act
+ - Fix broken "Installing a third party add-on" link
+   [cedricmessiant]
+ 
+@@ -17,7 +22,6 @@ Changelog
+ - Fix resource registry javascript build
    [vangheem]
  
-diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-index cc40cc8..83e70d3 100644
---- a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-+++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
-@@ -26,7 +26,7 @@
-           configuration, run buildout, and restart the server process.
-           For detailed instructions see
-           <span i18n:name="third_party_product">
--          <a i18n:translate="" href="http://plone.org/documentation/tutorial/buildout/installing-a-third-party-product">
-+          <a i18n:translate="" href="http://docs.plone.org/old-reference-manuals/buildout/thirdparty.html">
-             Installing a third party add-on
-           </a>
-           </span>.
+-
+ - Move `plone.htmlhead.links` viewlet manager after `plone.scripts`,
+   because the former is sometimes used to include scripts that depend on
+   the latter.
+diff --git a/Products/CMFPlone/resources/exportimport/jsregistry.py b/Products/CMFPlone/resources/exportimport/jsregistry.py
+index 0b04fbc..8aae390 100644
+--- a/Products/CMFPlone/resources/exportimport/jsregistry.py
++++ b/Products/CMFPlone/resources/exportimport/jsregistry.py
+@@ -22,3 +22,8 @@ class JSRegistryNodeAdapter(ResourceRegistryNodeAdapter):
+     resource_type = 'javascript'
+     register_method = 'registerScript'
+     update_method = 'updateScript'
++
++    # We already have jQuery, blacklist legacy installs of plone.app.jquery js
++    resource_blacklist = set((
++        "++resource++plone.app.jquery.js",
++    ))
+diff --git a/Products/CMFPlone/resources/exportimport/resourceregistry.py b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+index 3baf877..9170e00 100644
+--- a/Products/CMFPlone/resources/exportimport/resourceregistry.py
++++ b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+@@ -36,6 +36,8 @@ def importResRegistry(context, reg_id, reg_title, filename):
+ 
+ class ResourceRegistryNodeAdapter(XMLAdapterBase):
+ 
++    resource_blacklist = set()
++
+     def _importNode(self, node):
+         """Import the object from the DOM node.
+         """
+@@ -83,6 +85,10 @@ def _importNode(self, node):
+                     position = ('',)
+                     continue
+                 if key == 'id':
++                    if value in self.resource_blacklist:
++                        add = False
++                        data.clear()
++                        break
+                     res_id = queryUtility(IIDNormalizer).normalize(str(value))
+                     data['url'] = str(value)
+                 elif value.lower() == 'false':
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index c3348dc..acfebb8 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -1,11 +1,15 @@
++from xml.dom.minidom import parseString
+ from Products.CMFPlone.tests import PloneTestCase
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from zope.component import getUtility
+ from plone.registry.interfaces import IRegistry
++from Products.CMFCore.utils import getToolByName
++from Products.GenericSetup.context import SetupEnviron
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from plone.subrequest import subrequest
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME
++from Products.CMFPlone.resources.exportimport.resourceregistry import ResourceRegistryNodeAdapter
+ from plone.resource.interfaces import IResourceDirectory
+ 
+ 
+@@ -89,3 +93,46 @@ def test_error(self):
+             '%s/++plone++static/foobar-compiled.js' % self.portal.absolute_url())
+ 
+         self.assertTrue('error cooking' in resp.getBody())
++
++
++class TestResourceNodeImporter(PloneTestCase.PloneTestCase):
++    """Test features of registry node importer"""
++    _setup_fixture = 0  # No default fixture
++
++    def test_resource_blacklist(self):
++        # Ensure that blacklisted resources aren't imported
++        reg = getToolByName(self.portal, 'portal_javascripts')
++        importer = ResourceRegistryNodeAdapter(reg, SetupEnviron())
++        importer.resource_type = 'javascript'
++        importer.registry = getUtility(IRegistry)
++        importer.resource_blacklist = set(('++resource++/bad_resource.js',))
++        dom = parseString("""
++            <object>
++                <javascript id="++resource++/bad_resource.js" enabled="true" />
++            </object>
++            """)
++        importer._importNode(dom.documentElement)
++        resources = importer.registry.collectionOfInterface(
++            IResourceRegistry, prefix="plone.resources"
++        )
++        js_files = [x.js for x in resources.values()]
++        self.assertTrue("++resource++/bad_resource.js" not in js_files)
++
++    def test_resource_no_blacklist(self):
++        # Ensure that blacklisted resources aren't imported
++        reg = getToolByName(self.portal, 'portal_javascripts')
++        importer = ResourceRegistryNodeAdapter(reg, SetupEnviron())
++        importer.resource_type = 'javascript'
++        importer.registry = getUtility(IRegistry)
++        importer.resource_blacklist = set()
++        dom = parseString("""
++            <object>
++                <javascript id="++resource++/bad_resource.js" enabled="true" />
++            </object>
++            """)
++        importer._importNode(dom.documentElement)
++        resources = importer.registry.collectionOfInterface(
++            IResourceRegistry, prefix="plone.resources"
++        )
++        js_files = [x.js for x in resources.values()]
++        self.assertTrue("++resource++/bad_resource.js" in js_files)
 
 
