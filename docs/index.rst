@@ -35,6 +35,7 @@ Table of Awesome
    issues
    release
    updateme
+   git
 
 Others
 ------
