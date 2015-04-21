@@ -1,39 +1,264 @@
-Repository: plone.theme
+Repository: Products.PortalTransforms
 Branch: refs/heads/master
-Date: 2015-04-20T23:44:40+02:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.theme/commit/081c7851d15b6e4744d16b33bd04511356f61772
+Date: 2015-03-31T15:36:07+02:00
+Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
+Commit: https://github.com/plone/Products.PortalTransforms/commit/aef5df6e1bf462533c0669916dceb1ca3c4e936d
 
-Fix more txt -&gt; rst
+Do not escape &lt;, &gt;, and &amp; inside script tag
+
+when it is not suppressed.
 
 Files changed:
-M plone/theme/tests/interfaces.py
-M plone/theme/tests/test_doctest.py
+M CHANGES.rst
+M Products/PortalTransforms/tests/test_transforms.py
+M Products/PortalTransforms/transforms/safe_html.py
 
-diff --git a/plone/theme/tests/interfaces.py b/plone/theme/tests/interfaces.py
-index 98751be..74abe3b 100644
---- a/plone/theme/tests/interfaces.py
-+++ b/plone/theme/tests/interfaces.py
-@@ -1,6 +1,6 @@
- # A browser layer - you should make one of these for your own skin
- # and register it with a name corresponding to a skin in portal_skins.
--# See tests.zcml and README.txt for more.
-+# See tests.zcml and README.rst for more.
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 44dbd47..65919c9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.6 (unreleased)
+ ------------------
  
- from plone.theme.interfaces import IDefaultPloneLayer
+-- Nothing changed yet.
++- Do not escape <, >, and & inside script tag when it is not suppressed.
++  [gotcha]
  
-diff --git a/plone/theme/tests/test_doctest.py b/plone/theme/tests/test_doctest.py
-index 5e69718..a3c6411 100644
---- a/plone/theme/tests/test_doctest.py
-+++ b/plone/theme/tests/test_doctest.py
-@@ -8,7 +8,7 @@
  
- def test_suite():
-     return unittest.TestSuite(
--        [layered(doctest.DocFileSuite('README.txt', package='plone.theme',
-+        [layered(doctest.DocFileSuite('README.rst', package='plone.theme',
-          optionflags=doctest.ELLIPSIS | doctest.REPORT_ONLY_FIRST_FAILURE),
-          layer=PLONETHEME_FUNCTIONAL_TESTING)]
-     )
+ 2.1.5 (2015-03-13)
+diff --git a/Products/PortalTransforms/tests/test_transforms.py b/Products/PortalTransforms/tests/test_transforms.py
+index b11aeec..1dce9ef 100644
+--- a/Products/PortalTransforms/tests/test_transforms.py
++++ b/Products/PortalTransforms/tests/test_transforms.py
+@@ -1,4 +1,5 @@
+ import os
++import copy
+ import logging
+ import unittest
+ from Products.Archetypes.tests.atsitetestcase import ATSiteTestCase
+@@ -21,6 +22,8 @@
+ from Products.PortalTransforms.transforms.word_to_html import word_to_html
+ 
+ from Products.PortalTransforms.transforms.safe_html  import SafeHTML
++from Products.PortalTransforms.transforms.safe_html  import VALID_TAGS
++from Products.PortalTransforms.transforms.safe_html  import NASTY_TAGS
+ 
+ from Products.PortalTransforms.transforms.textile_to_html import HAS_TEXTILE
+ from Products.PortalTransforms.transforms.markdown_to_html import HAS_MARKDOWN
+@@ -190,6 +193,32 @@ def test_charref_data(self):
+         data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
+         self.assertEqual(data.getData(), orig)
+ 
++class SafeHtmlTransformsWithScriptTest(ATSiteTestCase):
++
++    def afterSetUp(self):
++        ATSiteTestCase.afterSetUp(self)
++        self.pt = self.portal.portal_transforms
++        valid_tags = copy.deepcopy(VALID_TAGS)
++        valid_tags['script'] = 1
++        nasty_tags = copy.deepcopy(NASTY_TAGS)
++        del nasty_tags['script']
++        self.pt.unregisterTransform('safe_html')
++        self.pt.registerTransform(SafeHTML(nasty_tags=nasty_tags,
++            valid_tags=valid_tags))
++
++    def beforeTearDown(self):
++        self.pt.unregisterTransform('safe_html')
++
++    def test_script(self):
++        orig = '<script type="text/javascript">$("h1 > ul").hide();</script>'
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), orig)
++
++    def test_entities(self):
++        orig = "<code>a > 0 && b < 1</code>"
++        escaped = "<code>a &gt; 0 &amp;&amp; b &lt; 1</code>"
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), escaped)
+ 
+ class WordTransformsTest(ATSiteTestCase):
+ 
+@@ -353,6 +382,7 @@ class TransformTestSubclass(TransformTest):
+ 
+     tests.append(PILTransformsTest)
+     tests.append(SafeHtmlTransformsTest)
++    tests.append(SafeHtmlTransformsWithScriptTest)
+     tests.append(WordTransformsTest)
+     tests.append(ParsersTestCase)
+     return tests
+diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py
+index 33d7aa2..255a878 100644
+--- a/Products/PortalTransforms/transforms/safe_html.py
++++ b/Products/PortalTransforms/transforms/safe_html.py
+@@ -2400,6 +2400,7 @@ def __init__(self, valid, nasty, remove_javascript, raise_error):
+         self.remove_javascript = remove_javascript
+         self.raise_error = raise_error
+         self.suppress = False
++        self.inside_script = False
+ 
+     def handle_data(self, data):
+         if self.suppress:
+@@ -2421,7 +2422,10 @@ def handle_decl(self, data):
+     def handle_entityref(self, name):
+         if self.suppress:
+             return
+-        self.result.append(self.convert_entityref(name))
++        if self.inside_script:
++            self.result.append(self.entitydefs.get(name, ''))
++        else:
++            self.result.append(self.convert_entityref(name))
+ 
+     def convert_entityref(self, name):
+         if name + ';' in self.entitydefs:
+@@ -2442,6 +2446,8 @@ def unknown_starttag(self, tag, attrs):
+             return
+ 
+         if tag in self.valid:
++            if tag == "script":
++                self.inside_script = True
+             self.result.append('<' + tag)
+ 
+             remove_script = getattr(self, 'remove_javascript', True)
+@@ -2476,6 +2482,7 @@ def unknown_starttag(self, tag, attrs):
+     def unknown_endtag(self, tag):
+         if tag in self.nasty and not tag in self.valid:
+             self.suppress = False
++            self.inside_script = False
+         if self.suppress:
+             return
+         if safeToInt(self.valid.get(tag)):
+
+
+Repository: Products.PortalTransforms
+Branch: refs/heads/master
+Date: 2015-04-21T07:29:14+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.PortalTransforms/commit/74cae7d86946ac2f6bdd59fd5743497c15f4c4d6
+
+Merge pull request #5 from plone/entities_in_script
+
+Do not escape &lt;, &gt;, and &amp; inside script tag
+
+Files changed:
+M CHANGES.rst
+M Products/PortalTransforms/tests/test_transforms.py
+M Products/PortalTransforms/transforms/safe_html.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 44dbd47..65919c9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.6 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- Do not escape <, >, and & inside script tag when it is not suppressed.
++  [gotcha]
+ 
+ 
+ 2.1.5 (2015-03-13)
+diff --git a/Products/PortalTransforms/tests/test_transforms.py b/Products/PortalTransforms/tests/test_transforms.py
+index b11aeec..1dce9ef 100644
+--- a/Products/PortalTransforms/tests/test_transforms.py
++++ b/Products/PortalTransforms/tests/test_transforms.py
+@@ -1,4 +1,5 @@
+ import os
++import copy
+ import logging
+ import unittest
+ from Products.Archetypes.tests.atsitetestcase import ATSiteTestCase
+@@ -21,6 +22,8 @@
+ from Products.PortalTransforms.transforms.word_to_html import word_to_html
+ 
+ from Products.PortalTransforms.transforms.safe_html  import SafeHTML
++from Products.PortalTransforms.transforms.safe_html  import VALID_TAGS
++from Products.PortalTransforms.transforms.safe_html  import NASTY_TAGS
+ 
+ from Products.PortalTransforms.transforms.textile_to_html import HAS_TEXTILE
+ from Products.PortalTransforms.transforms.markdown_to_html import HAS_MARKDOWN
+@@ -190,6 +193,32 @@ def test_charref_data(self):
+         data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
+         self.assertEqual(data.getData(), orig)
+ 
++class SafeHtmlTransformsWithScriptTest(ATSiteTestCase):
++
++    def afterSetUp(self):
++        ATSiteTestCase.afterSetUp(self)
++        self.pt = self.portal.portal_transforms
++        valid_tags = copy.deepcopy(VALID_TAGS)
++        valid_tags['script'] = 1
++        nasty_tags = copy.deepcopy(NASTY_TAGS)
++        del nasty_tags['script']
++        self.pt.unregisterTransform('safe_html')
++        self.pt.registerTransform(SafeHTML(nasty_tags=nasty_tags,
++            valid_tags=valid_tags))
++
++    def beforeTearDown(self):
++        self.pt.unregisterTransform('safe_html')
++
++    def test_script(self):
++        orig = '<script type="text/javascript">$("h1 > ul").hide();</script>'
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), orig)
++
++    def test_entities(self):
++        orig = "<code>a > 0 && b < 1</code>"
++        escaped = "<code>a &gt; 0 &amp;&amp; b &lt; 1</code>"
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), escaped)
+ 
+ class WordTransformsTest(ATSiteTestCase):
+ 
+@@ -353,6 +382,7 @@ class TransformTestSubclass(TransformTest):
+ 
+     tests.append(PILTransformsTest)
+     tests.append(SafeHtmlTransformsTest)
++    tests.append(SafeHtmlTransformsWithScriptTest)
+     tests.append(WordTransformsTest)
+     tests.append(ParsersTestCase)
+     return tests
+diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py
+index 33d7aa2..255a878 100644
+--- a/Products/PortalTransforms/transforms/safe_html.py
++++ b/Products/PortalTransforms/transforms/safe_html.py
+@@ -2400,6 +2400,7 @@ def __init__(self, valid, nasty, remove_javascript, raise_error):
+         self.remove_javascript = remove_javascript
+         self.raise_error = raise_error
+         self.suppress = False
++        self.inside_script = False
+ 
+     def handle_data(self, data):
+         if self.suppress:
+@@ -2421,7 +2422,10 @@ def handle_decl(self, data):
+     def handle_entityref(self, name):
+         if self.suppress:
+             return
+-        self.result.append(self.convert_entityref(name))
++        if self.inside_script:
++            self.result.append(self.entitydefs.get(name, ''))
++        else:
++            self.result.append(self.convert_entityref(name))
+ 
+     def convert_entityref(self, name):
+         if name + ';' in self.entitydefs:
+@@ -2442,6 +2446,8 @@ def unknown_starttag(self, tag, attrs):
+             return
+ 
+         if tag in self.valid:
++            if tag == "script":
++                self.inside_script = True
+             self.result.append('<' + tag)
+ 
+             remove_script = getattr(self, 'remove_javascript', True)
+@@ -2476,6 +2482,7 @@ def unknown_starttag(self, tag, attrs):
+     def unknown_endtag(self, tag):
+         if tag in self.nasty and not tag in self.valid:
+             self.suppress = False
++            self.inside_script = False
+         if self.suppress:
+             return
+         if safeToInt(self.valid.get(tag)):
 
 
