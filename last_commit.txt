@@ -1,110 +1,264 @@
-Repository: plone.app.users
+Repository: Products.PortalTransforms
 Branch: refs/heads/master
-Date: 2015-04-20T21:09:27+02:00
-Author: Tom Gross (tomgross) <itconsense@gmail.com>
-Commit: https://github.com/plone/plone.app.users/commit/3511e15de87b6207ca31dc8c7c468863d887d61d
+Date: 2015-03-31T15:36:07+02:00
+Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
+Commit: https://github.com/plone/Products.PortalTransforms/commit/aef5df6e1bf462533c0669916dceb1ca3c4e936d
 
-remove CMFDefault dependency
+Do not escape &lt;, &gt;, and &amp; inside script tag
+
+when it is not suppressed.
 
 Files changed:
 M CHANGES.rst
-M plone/app/users/schema.py
-M setup.py
+M Products/PortalTransforms/tests/test_transforms.py
+M Products/PortalTransforms/transforms/safe_html.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8b2e997..e18aa91 100644
+index 44dbd47..65919c9 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ CHANGES
- 2.2.1 (unreleased)
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.6 (unreleased)
  ------------------
  
 -- Nothing changed yet.
-+- Removed CMFDefault dependency
-+  [tomgross]
++- Do not escape <, >, and & inside script tag when it is not suppressed.
++  [gotcha]
  
  
- 2.2 (2015-03-13)
-diff --git a/plone/app/users/schema.py b/plone/app/users/schema.py
-index 4b1a3c3..c8c6ce2 100644
---- a/plone/app/users/schema.py
-+++ b/plone/app/users/schema.py
-@@ -1,7 +1,7 @@
- # -*- coding: utf-8 -*-
- from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFCore.utils import getToolByName
--from Products.CMFDefault.exceptions import EmailAddressInvalid
-+from Products.CMFPlone.RegistrationTool import EmailAddressInvalid
- from Products.CMFPlone import PloneMessageFactory as _
- from ZTUtils import make_query
- from plone.autoform import directives as form
-diff --git a/setup.py b/setup.py
-index e6a75c7..f7a3fe8 100644
---- a/setup.py
-+++ b/setup.py
-@@ -47,7 +47,6 @@
-         'AccessControl',
-         'Acquisition',
-         'Products.CMFCore',
--        'Products.CMFDefault',
-         'Products.CMFPlone',
-         'Products.PlonePAS',
-         'Products.statusmessages',
+ 2.1.5 (2015-03-13)
+diff --git a/Products/PortalTransforms/tests/test_transforms.py b/Products/PortalTransforms/tests/test_transforms.py
+index b11aeec..1dce9ef 100644
+--- a/Products/PortalTransforms/tests/test_transforms.py
++++ b/Products/PortalTransforms/tests/test_transforms.py
+@@ -1,4 +1,5 @@
+ import os
++import copy
+ import logging
+ import unittest
+ from Products.Archetypes.tests.atsitetestcase import ATSiteTestCase
+@@ -21,6 +22,8 @@
+ from Products.PortalTransforms.transforms.word_to_html import word_to_html
+ 
+ from Products.PortalTransforms.transforms.safe_html  import SafeHTML
++from Products.PortalTransforms.transforms.safe_html  import VALID_TAGS
++from Products.PortalTransforms.transforms.safe_html  import NASTY_TAGS
+ 
+ from Products.PortalTransforms.transforms.textile_to_html import HAS_TEXTILE
+ from Products.PortalTransforms.transforms.markdown_to_html import HAS_MARKDOWN
+@@ -190,6 +193,32 @@ def test_charref_data(self):
+         data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
+         self.assertEqual(data.getData(), orig)
+ 
++class SafeHtmlTransformsWithScriptTest(ATSiteTestCase):
++
++    def afterSetUp(self):
++        ATSiteTestCase.afterSetUp(self)
++        self.pt = self.portal.portal_transforms
++        valid_tags = copy.deepcopy(VALID_TAGS)
++        valid_tags['script'] = 1
++        nasty_tags = copy.deepcopy(NASTY_TAGS)
++        del nasty_tags['script']
++        self.pt.unregisterTransform('safe_html')
++        self.pt.registerTransform(SafeHTML(nasty_tags=nasty_tags,
++            valid_tags=valid_tags))
++
++    def beforeTearDown(self):
++        self.pt.unregisterTransform('safe_html')
++
++    def test_script(self):
++        orig = '<script type="text/javascript">$("h1 > ul").hide();</script>'
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), orig)
++
++    def test_entities(self):
++        orig = "<code>a > 0 && b < 1</code>"
++        escaped = "<code>a &gt; 0 &amp;&amp; b &lt; 1</code>"
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), escaped)
+ 
+ class WordTransformsTest(ATSiteTestCase):
+ 
+@@ -353,6 +382,7 @@ class TransformTestSubclass(TransformTest):
+ 
+     tests.append(PILTransformsTest)
+     tests.append(SafeHtmlTransformsTest)
++    tests.append(SafeHtmlTransformsWithScriptTest)
+     tests.append(WordTransformsTest)
+     tests.append(ParsersTestCase)
+     return tests
+diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py
+index 33d7aa2..255a878 100644
+--- a/Products/PortalTransforms/transforms/safe_html.py
++++ b/Products/PortalTransforms/transforms/safe_html.py
+@@ -2400,6 +2400,7 @@ def __init__(self, valid, nasty, remove_javascript, raise_error):
+         self.remove_javascript = remove_javascript
+         self.raise_error = raise_error
+         self.suppress = False
++        self.inside_script = False
+ 
+     def handle_data(self, data):
+         if self.suppress:
+@@ -2421,7 +2422,10 @@ def handle_decl(self, data):
+     def handle_entityref(self, name):
+         if self.suppress:
+             return
+-        self.result.append(self.convert_entityref(name))
++        if self.inside_script:
++            self.result.append(self.entitydefs.get(name, ''))
++        else:
++            self.result.append(self.convert_entityref(name))
+ 
+     def convert_entityref(self, name):
+         if name + ';' in self.entitydefs:
+@@ -2442,6 +2446,8 @@ def unknown_starttag(self, tag, attrs):
+             return
+ 
+         if tag in self.valid:
++            if tag == "script":
++                self.inside_script = True
+             self.result.append('<' + tag)
+ 
+             remove_script = getattr(self, 'remove_javascript', True)
+@@ -2476,6 +2482,7 @@ def unknown_starttag(self, tag, attrs):
+     def unknown_endtag(self, tag):
+         if tag in self.nasty and not tag in self.valid:
+             self.suppress = False
++            self.inside_script = False
+         if self.suppress:
+             return
+         if safeToInt(self.valid.get(tag)):
 
 
-Repository: plone.app.users
+Repository: Products.PortalTransforms
 Branch: refs/heads/master
-Date: 2015-04-21T01:27:04+02:00
-Author: Gil Forcada Codinachs (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.app.users/commit/43666f8a76cde92e52bfd4c335de5593f2c8b2ed
+Date: 2015-04-21T07:29:14+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.PortalTransforms/commit/74cae7d86946ac2f6bdd59fd5743497c15f4c4d6
 
-Merge pull request #34 from plone/tomgross-nocmfdefault
+Merge pull request #5 from plone/entities_in_script
 
-remove CMFDefault dependency
+Do not escape &lt;, &gt;, and &amp; inside script tag
 
 Files changed:
 M CHANGES.rst
-M plone/app/users/schema.py
-M setup.py
+M Products/PortalTransforms/tests/test_transforms.py
+M Products/PortalTransforms/transforms/safe_html.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8b2e997..e18aa91 100644
+index 44dbd47..65919c9 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ CHANGES
- 2.2.1 (unreleased)
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.6 (unreleased)
  ------------------
  
 -- Nothing changed yet.
-+- Removed CMFDefault dependency
-+  [tomgross]
++- Do not escape <, >, and & inside script tag when it is not suppressed.
++  [gotcha]
  
  
- 2.2 (2015-03-13)
-diff --git a/plone/app/users/schema.py b/plone/app/users/schema.py
-index 4b1a3c3..c8c6ce2 100644
---- a/plone/app/users/schema.py
-+++ b/plone/app/users/schema.py
-@@ -1,7 +1,7 @@
- # -*- coding: utf-8 -*-
- from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFCore.utils import getToolByName
--from Products.CMFDefault.exceptions import EmailAddressInvalid
-+from Products.CMFPlone.RegistrationTool import EmailAddressInvalid
- from Products.CMFPlone import PloneMessageFactory as _
- from ZTUtils import make_query
- from plone.autoform import directives as form
-diff --git a/setup.py b/setup.py
-index e6a75c7..f7a3fe8 100644
---- a/setup.py
-+++ b/setup.py
-@@ -47,7 +47,6 @@
-         'AccessControl',
-         'Acquisition',
-         'Products.CMFCore',
--        'Products.CMFDefault',
-         'Products.CMFPlone',
-         'Products.PlonePAS',
-         'Products.statusmessages',
+ 2.1.5 (2015-03-13)
+diff --git a/Products/PortalTransforms/tests/test_transforms.py b/Products/PortalTransforms/tests/test_transforms.py
+index b11aeec..1dce9ef 100644
+--- a/Products/PortalTransforms/tests/test_transforms.py
++++ b/Products/PortalTransforms/tests/test_transforms.py
+@@ -1,4 +1,5 @@
+ import os
++import copy
+ import logging
+ import unittest
+ from Products.Archetypes.tests.atsitetestcase import ATSiteTestCase
+@@ -21,6 +22,8 @@
+ from Products.PortalTransforms.transforms.word_to_html import word_to_html
+ 
+ from Products.PortalTransforms.transforms.safe_html  import SafeHTML
++from Products.PortalTransforms.transforms.safe_html  import VALID_TAGS
++from Products.PortalTransforms.transforms.safe_html  import NASTY_TAGS
+ 
+ from Products.PortalTransforms.transforms.textile_to_html import HAS_TEXTILE
+ from Products.PortalTransforms.transforms.markdown_to_html import HAS_MARKDOWN
+@@ -190,6 +193,32 @@ def test_charref_data(self):
+         data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
+         self.assertEqual(data.getData(), orig)
+ 
++class SafeHtmlTransformsWithScriptTest(ATSiteTestCase):
++
++    def afterSetUp(self):
++        ATSiteTestCase.afterSetUp(self)
++        self.pt = self.portal.portal_transforms
++        valid_tags = copy.deepcopy(VALID_TAGS)
++        valid_tags['script'] = 1
++        nasty_tags = copy.deepcopy(NASTY_TAGS)
++        del nasty_tags['script']
++        self.pt.unregisterTransform('safe_html')
++        self.pt.registerTransform(SafeHTML(nasty_tags=nasty_tags,
++            valid_tags=valid_tags))
++
++    def beforeTearDown(self):
++        self.pt.unregisterTransform('safe_html')
++
++    def test_script(self):
++        orig = '<script type="text/javascript">$("h1 > ul").hide();</script>'
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), orig)
++
++    def test_entities(self):
++        orig = "<code>a > 0 && b < 1</code>"
++        escaped = "<code>a &gt; 0 &amp;&amp; b &lt; 1</code>"
++        data = self.pt.convertTo(target_mimetype='text/x-html-safe', orig=orig)
++        self.assertEqual(data.getData(), escaped)
+ 
+ class WordTransformsTest(ATSiteTestCase):
+ 
+@@ -353,6 +382,7 @@ class TransformTestSubclass(TransformTest):
+ 
+     tests.append(PILTransformsTest)
+     tests.append(SafeHtmlTransformsTest)
++    tests.append(SafeHtmlTransformsWithScriptTest)
+     tests.append(WordTransformsTest)
+     tests.append(ParsersTestCase)
+     return tests
+diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py
+index 33d7aa2..255a878 100644
+--- a/Products/PortalTransforms/transforms/safe_html.py
++++ b/Products/PortalTransforms/transforms/safe_html.py
+@@ -2400,6 +2400,7 @@ def __init__(self, valid, nasty, remove_javascript, raise_error):
+         self.remove_javascript = remove_javascript
+         self.raise_error = raise_error
+         self.suppress = False
++        self.inside_script = False
+ 
+     def handle_data(self, data):
+         if self.suppress:
+@@ -2421,7 +2422,10 @@ def handle_decl(self, data):
+     def handle_entityref(self, name):
+         if self.suppress:
+             return
+-        self.result.append(self.convert_entityref(name))
++        if self.inside_script:
++            self.result.append(self.entitydefs.get(name, ''))
++        else:
++            self.result.append(self.convert_entityref(name))
+ 
+     def convert_entityref(self, name):
+         if name + ';' in self.entitydefs:
+@@ -2442,6 +2446,8 @@ def unknown_starttag(self, tag, attrs):
+             return
+ 
+         if tag in self.valid:
++            if tag == "script":
++                self.inside_script = True
+             self.result.append('<' + tag)
+ 
+             remove_script = getattr(self, 'remove_javascript', True)
+@@ -2476,6 +2482,7 @@ def unknown_starttag(self, tag, attrs):
+     def unknown_endtag(self, tag):
+         if tag in self.nasty and not tag in self.valid:
+             self.suppress = False
++            self.inside_script = False
+         if self.suppress:
+             return
+         if safeToInt(self.valid.get(tag)):
 
 
