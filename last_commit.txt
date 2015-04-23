@@ -1,124 +1,34 @@
-Repository: Products.CMFPlone
+Repository: Products.ResourceRegistries
 Branch: refs/heads/master
-Date: 2015-04-23T11:54:46+02:00
+Date: 2015-04-23T12:00:29+02:00
 Author: Ramon Navarro Bosch () <ramon@iMac-de-Ramon.local>
-Commit: https://github.com/plone/Products.CMFPlone/commit/dc8158c7ee5eeaf31400ff87c73ade71b352252d
+Commit: https://github.com/plone/Products.ResourceRegistries/commit/694df726bb8a46ec382bd28b605029d319442d39
 
-Optimization to not get manifest for each request
+Comment out views from old resource registry so it does not render them on plone 5 meanwhile we don't remove the product. Its planned to be removed on plone 5.1
 
 Files changed:
-M Products/CMFPlone/patterns/__init__.py
-M Products/CMFPlone/resources/__init__.py
-M Products/CMFPlone/resources/browser/resource.py
+M Products/ResourceRegistries/browser/configure.zcml
 
-diff --git a/Products/CMFPlone/patterns/__init__.py b/Products/CMFPlone/patterns/__init__.py
-index 99a5a8d..962bea2 100644
---- a/Products/CMFPlone/patterns/__init__.py
-+++ b/Products/CMFPlone/patterns/__init__.py
-@@ -4,6 +4,7 @@
- from plone.registry.interfaces import IRegistry
- from zope.component import getUtility
- import json
-+from zope import component
- from Products.CMFPlone.patterns.utils import format_pattern_settings
- from Products.CMFPlone.patterns.utils import get_portal_url
- from Products.CMFCore.interfaces._content import IFolderish
-@@ -13,6 +14,9 @@
- from plone.app.theming.utils import getCurrentTheme
- from plone.app.theming.utils import getTheme
- from Products.CMFCore.utils import getToolByName
-+from zope.ramcache.interfaces import ram
-+from plone.app.theming.utils import isThemeEnabled
-+from zope.component import queryMultiAdapter
+diff --git a/Products/ResourceRegistries/browser/configure.zcml b/Products/ResourceRegistries/browser/configure.zcml
+index edeea80..77205ec 100644
+--- a/Products/ResourceRegistries/browser/configure.zcml
++++ b/Products/ResourceRegistries/browser/configure.zcml
+@@ -2,7 +2,7 @@
+            xmlns:browser="http://namespaces.zope.org/browser"
+            xmlns:five="http://namespaces.zope.org/five">
  
+-    <browser:viewlet  
++<!--     <browser:viewlet  
+         name="plone.resourceregistries" 
+         manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
+         template="resourceregistries.pt"
+@@ -52,6 +52,6 @@
+         class=".kss.KSSView"
+         permission="zope.Public"
+         allowed_interface=".interfaces.IKSSView"
+-        />
++        /> -->
  
- class PloneSettingsAdapter(object):
-@@ -80,12 +84,34 @@ def tinymce(self):
-         current_path = folder.absolute_url()[len(config['portal_url']):]
- 
-         # Check if theme has a custom content css
--        theme = getCurrentTheme()
--        themeObj = getTheme(theme)
--        if (themeObj and hasattr(themeObj, 'tinymce_content_css') and
--                themeObj.tinymce_content_css):
--            content_css = config['portal_url'] + themeObj.tinymce_content_css
-+        portal_state = queryMultiAdapter((self.context, self.request), name=u"plone_portal_state")
-+        portal = portal_state.portal()
-+        # Volatile attribute to cache the current theme
-+        if hasattr(portal, '_v_currentTheme'):
-+            themeObj = portal._v_currentTheme
-         else:
-+            theme = getCurrentTheme()
-+            themeObj = getTheme(theme)
-+            portal._v_currentTheme = themeObj
-+        cache = component.queryUtility(ram.IRAMCache)
-+        content_css = None
-+        if isThemeEnabled(self.request):
-+            themeObj = cache.query(
-+                'plone.currentTheme',
-+                key=dict(prefix='theme'),
-+                default=None)
-+            if themeObj is None:
-+                theme = getCurrentTheme()
-+                themeObj = getTheme(theme)
-+                cache.set(
-+                    themeObj,
-+                    'plone.currentTheme',
-+                    key=dict(prefix='theme'))
-+            if (themeObj and hasattr(themeObj, 'tinymce_content_css') and
-+                    themeObj.tinymce_content_css):
-+                content_css = config['portal_url'] + themeObj.tinymce_content_css
-+
-+        if content_css is None:
-             content_css = settings.content_css
- 
-         configuration = {
-diff --git a/Products/CMFPlone/resources/__init__.py b/Products/CMFPlone/resources/__init__.py
-index 41e2e36..e7a9f7a 100644
---- a/Products/CMFPlone/resources/__init__.py
-+++ b/Products/CMFPlone/resources/__init__.py
-@@ -1,6 +1,7 @@
- from zope.component import adapter
- from plone.app.theming.interfaces import IThemeAppliedEvent
- import os
-+from zope.component.hooks import getSite
- 
- 
- RESOURCE_DEVELOPMENT_MODE = False
-@@ -10,10 +11,10 @@
- 
- @adapter(IThemeAppliedEvent)
- def onThemeApplied(event):
--    # check for bundles to enable or disable
-+    # change current theme on the _v_ variable
-     theme = event.theme
--    # theme.enabled_bundles
--    # theme.disabled_bundles
-+    portal = getSite()
-+    portal._v_currentTheme = theme
- 
- 
- def add_resource_on_request(request, resource):
-diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py
-index af9b570..f66d700 100644
---- a/Products/CMFPlone/resources/browser/resource.py
-+++ b/Products/CMFPlone/resources/browser/resource.py
-@@ -101,8 +101,14 @@ def get_cooked_bundles(self):
-         bundles = self.get_bundles()
-         # Check if its Diazo enabled
-         if isThemeEnabled(self.request):
--            theme = getCurrentTheme()
--            themeObj = getTheme(theme)
-+            portal = self.portal_state.portal()
-+            # Volatile attribute to cache the current theme
-+            if hasattr(portal, '_v_currentTheme'):
-+                themeObj = portal._v_currentTheme
-+            else:
-+                theme = getCurrentTheme()
-+                themeObj = getTheme(theme)
-+                portal._v_currentTheme = themeObj
-             enabled_diazo_bundles = themeObj.enabled_bundles
-             disabled_diazo_bundles = themeObj.disabled_bundles
-             if hasattr(themeObj, 'production_css'):
+ </configure>
 
 
