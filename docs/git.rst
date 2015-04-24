@@ -614,3 +614,14 @@ Not everyone is a fan of the command line,
 for them there is a list of GUI clients on the official git website:
 
 http://git-scm.com/downloads/guis
+
+Learn more
+==========
+What's here is just the tip of the iceberg,
+there's plenty of git knowledge on the web.
+
+A few good further resources are listed here
+(contributions welcome):
+
+- official online git book: `Pro Git <http://git-scm.com/book/en/v2>`_
+- PyCon 2015 talk: `Advanced git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_
