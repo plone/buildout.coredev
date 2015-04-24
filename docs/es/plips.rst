@@ -54,7 +54,7 @@ Información general del proceso
 #. El PLIP es aprobada para fusionarse. En raras circunstancias, un PLIP sera rechazado. Esto es usualmente a que el resultado del trabajo hecho por el desarrollador no responde al comentario o abandono del proceso.  ¡Aguante ahí!
 #. Después de que todos los otros PLIPS son fusionado, una publicación se corta. Esperar por los nuevos fallos!
 
-.. _how_submit_plip:
+.. _how_submit_plip_es:
 
 Como presentar a PLIP
 ---------------------
@@ -68,7 +68,7 @@ Si el cambio es menor entonces un ticket en el sistema de seguimiento debe ser s
 
 Después que su plip es escrita, solicite un comentario de sus ideas en la lista de correo plone-developers. En este proceso de evaluación, usted quiere asegurarse de que el cambio no afectará negativamente a otras personas en un accidente. Otros pueden ser capaces de señalar puntos de riegos o incluso ofrecer una mejor o soluciones existentes. 
 
-Cuándo este feliz con el comentario, :ref:`presente un PLIP <how_submit_plip>`. Por favor, use la plantilla proveída (XXX: put the template here? Can we just have a custom ticket type?). Por favor, note un par de cosas. Es muy rara ves que la sección de “Risks” estará vacío o nula. Si usted busca esto es el caso y su PLIP no tiene más nada que un cambio trivial, quizás con algo más investigación debería estar listo. 
+Cuándo este feliz con el comentario, :ref:`presente un PLIP <how_submit_plip_es>`. Por favor, use la plantilla proveída (XXX: put the template here? Can we just have a custom ticket type?). Por favor, note un par de cosas. Es muy rara ves que la sección de “Risks” estará vacío o nula. Si usted busca esto es el caso y su PLIP no tiene más nada que un cambio trivial, quizás con algo más investigación debería estar listo.
 
 El campo seconder es REQUERIDO. Nosotros enviaremos el PLIP de regreso a usted si ese campo no es llenado. En la actualidad, sólo alguien más que piensa que su PLIP es una buena idea, un +1. En el futuro cercano, vamos a empezar a preguntar al secunde que es un socio de la codificación, o alguien que esté dispuesto y sea capaz de terminar el PLIP si algo le ocurriera al implementador.
 
