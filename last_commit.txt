@@ -1,54 +1,183 @@
-Repository: plone.app.dexterity
+Repository: plone.tiles
 Branch: refs/heads/master
-Date: 2015-04-30T16:42:23+02:00
-Author: Maik Derstappen (MrTango) <md@derico.de>
-Commit: https://github.com/plone/plone.app.dexterity/commit/1ce001dfbaa060f0951d8be92efb2562ea525a33
+Date: 2015-04-30T18:17:06+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/35c20a55741ef2f8bac0395515a3b24e8f2a3191
 
-fixed import of NamedBlobImage
+Fix issue where encoding did not support dictionary fields
 
 Files changed:
-M docs/advanced/files-and-images.rst
+M plone/tiles/configure.zcml
+M plone/tiles/data.py
+M plone/tiles/data.rst
+M plone/tiles/fieldtypeconverters.py
 
-diff --git a/docs/advanced/files-and-images.rst b/docs/advanced/files-and-images.rst
-index c406813..cec7869 100644
---- a/docs/advanced/files-and-images.rst
-+++ b/docs/advanced/files-and-images.rst
-@@ -50,7 +50,7 @@ will actually import directly from ``plone.namedfile``:
- For the sake of illustration, we will add an image of the
- speaker to the ``Presenter`` type. In ``presenter.py``, we add::
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index 6634fb5..3adb5f7 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -119,4 +119,8 @@
+              factory="plone.tiles.fieldtypeconverters.ListConverter"
+              />
  
--    from plone.namedfile.field import NamedImage
-+    from plone.namedfile.field import NamedBlobImage
++    <adapter for="zope.schema.interfaces.IDict"
++             factory="plone.tiles.fieldtypeconverters.DictConverter"
++             />
++
+ </configure>
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index db940c8..eaeac98 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -115,6 +115,46 @@ def defaultTileDataContext(context, request, tile):
+ # Encoding
  
-     class IPresenter(model.Schema):
-         ...
+ 
++def map_to_pairs(encoded_name, value):
++    """Given an encoded basename, e.g. "foo:record" or "foo:record:list" and
++    a dictionary value, yields (encoded_name, value) pairs to be included
++    in the final encode.
++    """
++    prefix, postfix = encoded_name.split(':', 1)
++    postfix = postfix.replace('record:list', 'records')
++
++    def guess_type(v):
++        if isinstance(v, str):
++            return ''
++        if isinstance(v, bool):
++            return ':boolean'
++        if isinstance(v, int):
++            return ':int'
++        if isinstance(v, float):
++            return ':float'
++        return ''
++
++    for item_name, item_value in value.items():
++        if isinstance(item_value, unicode):
++            item_value = item_value.encode('utf-8')
++
++        if isinstance(item_value, list) or isinstance(item_value, tuple):
++            for item_subvalue in item_value:
++                marshall_type = guess_type(item_subvalue)
++                if isinstance(item_subvalue, bool):
++                    item_subvalue = item_subvalue and '1' or ''
++                encoded_name = "%s.%s%s:list:%s" % (
++                    prefix, item_name, marshall_type, postfix)
++                yield encoded_name, item_subvalue
++        else:
++            marshall_type = guess_type(item_value)
++            if isinstance(item_value, bool):
++                item_value = item_value and '1' or ''
++            encoded_name = "%s.%s%s:%s" % (
++                prefix, item_name, marshall_type, postfix)
++            yield encoded_name, item_value
++
++
+ def encode(data, schema, ignore=()):
+     """Given a data dictionary with key/value pairs and schema, return an
+     encoded query string. This is similar to urllib.urlencode(), but field
+@@ -163,7 +203,11 @@ def encode(data, schema, ignore=()):
+                 if isinstance(item, bool):
+                     item = item and '1' or ''
+ 
+-                encode.append((encoded_name, item,))
++                if isinstance(item, dict):
++                    for encoded_name, item in map_to_pairs(encoded_name, item):
++                        encode.append((encoded_name, item,))
++                else:
++                    encode.append((encoded_name, item,))
+ 
+         else:
+             # The :bool converter just does bool() value, but urlencode() does
+@@ -171,7 +215,11 @@ def encode(data, schema, ignore=()):
+             if isinstance(value, bool):
+                 value = value and '1' or ''
+ 
+-            encode.append((encoded_name, value))
++            if isinstance(value, dict):
++                for encoded_name, value in map_to_pairs(encoded_name, value):
++                    encode.append((encoded_name, value,))
++            else:
++                encode.append((encoded_name, value))
+ 
+     return urllib.urlencode(encode)
+ 
+diff --git a/plone/tiles/data.rst b/plone/tiles/data.rst
+index 93981b5..01d160a 100644
+--- a/plone/tiles/data.rst
++++ b/plone/tiles/data.rst
+@@ -68,6 +68,16 @@ Lists and tuples may also be encoded. The value type will be encoded as well.
+     >>> encode(data, ISequences)
+     'list%3Alist=a&list%3Alist=b&tuple%3Along%3Atuple=1&tuple%3Along%3Atuple=2&tuple%3Along%3Atuple=3'
+ 
++Even dictionaries may be encoded. And the value type will be encoded as well.
++
++    >>> class IRecords(Interface):
++    ...     record = schema.Dict(title=u"Record")
++    ...     records = schema.List(title=u"Records", value_type=schema.Dict())
++
++    >>> data = dict(record={'a': 'b', 'c': True}, records=[{'a': 'b', 'c': True}])
++    >>> encode(data, IRecords)
++    'record.a%3Arecord=b&record.c%3Aboolean%3Arecord=1&records.a%3Arecords=b&records.c%3Aboolean%3Arecords=1'
++
+ Unsupported fields will raise a ComponentLookupError. This also
+ applies to the value_type of a list or tuple:
+ 
+diff --git a/plone/tiles/fieldtypeconverters.py b/plone/tiles/fieldtypeconverters.py
+index 4446f7a..379f1cf 100644
+--- a/plone/tiles/fieldtypeconverters.py
++++ b/plone/tiles/fieldtypeconverters.py
+@@ -35,3 +35,7 @@ class TupleConverter(NoConverter):
+ 
+ class ListConverter(NoConverter):
+     token = 'list'
++
++
++class DictConverter(NoConverter):
++    token = 'record'
 
 
-Repository: plone.app.dexterity
+Repository: plone.tiles
 Branch: refs/heads/master
-Date: 2015-04-30T17:02:34+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/bfd203b961a2a4931325422d28c9a077d4e939d1
+Date: 2015-04-30T18:17:53+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/1c02f02781e0d39b09b052f651c3b3fbd40fe979
 
-Merge pull request #161 from plone/MrTango-patch-file-and-images
-
-fixed import of NamedBlobImage
+Update changelog and developed version
 
 Files changed:
-M docs/advanced/files-and-images.rst
+M CHANGELOG.rst
+M setup.py
 
-diff --git a/docs/advanced/files-and-images.rst b/docs/advanced/files-and-images.rst
-index c406813..cec7869 100644
---- a/docs/advanced/files-and-images.rst
-+++ b/docs/advanced/files-and-images.rst
-@@ -50,7 +50,7 @@ will actually import directly from ``plone.namedfile``:
- For the sake of illustration, we will add an image of the
- speaker to the ``Presenter`` type. In ``presenter.py``, we add::
+diff --git a/CHANGELOG.rst b/CHANGELOG.rst
+index 51eff62..83cafc0 100644
+--- a/CHANGELOG.rst
++++ b/CHANGELOG.rst
+@@ -1,9 +1,11 @@
+ Changelog
+ =========
  
--    from plone.namedfile.field import NamedImage
-+    from plone.namedfile.field import NamedBlobImage
+-1.3.1 (unreleased)
++1.4.0 (unreleased)
+ ------------------
  
-     class IPresenter(model.Schema):
-         ...
++- Fix issue where encoding did not support dictionary fields
++  [datakurre]
+ - Fix issue where non-ascii characters in tiledata raised UnicodeEncode/DecodeErrors
+   [datakurre]
+ 
+diff --git a/setup.py b/setup.py
+index 03b8f47..8ae3771 100644
+--- a/setup.py
++++ b/setup.py
+@@ -2,7 +2,7 @@
+ from setuptools import setup
+ from setuptools import find_packages
+ 
+-version = '1.3.1.dev0'
++version = '1.4.0.dev0'
+ 
+ setup(
+     name='plone.tiles',
 
 
