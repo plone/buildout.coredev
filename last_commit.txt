@@ -1,77 +1,166 @@
-Repository: mockup
+Repository: plone.tiles
 Branch: refs/heads/master
-Date: 2015-04-30T11:54:37-05:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/mockup/commit/791cde54ce03c72f5a105879e4dc76576692d6af
+Date: 2015-05-01T03:24:09+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/e1daee426edd2d0f18d29e0bfa7a07db36e9ed10
 
-Be able to provide default scale selection so users do not select
-  original scale as often
+Fix issue where dictionary encoding had side-effects
 
 Files changed:
-M CHANGES.rst
-M mockup/patterns/tinymce/js/links.js
-M mockup/patterns/tinymce/pattern.js
-M mockup/patterns/tinymce/templates/image.xml
+M plone/tiles/data.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b27e6b3..1c98447 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,6 +4,10 @@ Changelog
- 2.0.3 (unreleased)
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index eaeac98..f27a218 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -204,8 +204,7 @@ def encode(data, schema, ignore=()):
+                     item = item and '1' or ''
+ 
+                 if isinstance(item, dict):
+-                    for encoded_name, item in map_to_pairs(encoded_name, item):
+-                        encode.append((encoded_name, item,))
++                    encode.extend(map_to_pairs(encoded_name, item))
+                 else:
+                     encode.append((encoded_name, item,))
+ 
+@@ -216,8 +215,7 @@ def encode(data, schema, ignore=()):
+                 value = value and '1' or ''
+ 
+             if isinstance(value, dict):
+-                for encoded_name, value in map_to_pairs(encoded_name, value):
+-                    encode.append((encoded_name, value,))
++                encode.extend(map_to_pairs(encoded_name, value))
+             else:
+                 encode.append((encoded_name, value))
+ 
+
+
+Repository: plone.tiles
+Branch: refs/heads/master
+Date: 2015-05-01T03:24:42+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/f868d04920f495c3744d3a2a69cddcb02826fc51
+
+Fix issue where saving or deleting transient tile data mutated the current request
+
+Files changed:
+M plone/tiles/data.py
+M plone/tiles/tiles.rst
+
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index f27a218..18cd719 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -43,34 +43,46 @@ class TransientTileDataManager(object):
+     def __init__(self, tile):
+         self.tile = tile
+         self.tileType = queryUtility(ITileType, name=tile.__name__)
++        self.annotations = IAnnotations(self.tile.request,
++                                        self.tile.request.form)
++        self.key = "%s.%s" % (ANNOTATIONS_KEY_PREFIX, tile.id,)
+ 
+-        # try to use a '_tiledata' parameter in the request, falling
+-        # back to the request.form object itself if not found
+-        request = self.tile.request
++    def get(self):
++        # use explicitly set data (saved as annotation on the request)
++        if self.key in self.annotations:
++            data = dict(self.annotations[self.key])
+ 
+-        if '_tiledata' in request.form:
+-            self.data = json.loads(request.form['_tiledata'])
+-        else:
+-            self.data = request.form
++            if self.tileType is not None and self.tileType.schema is not None:
++                for name, field in getFields(self.tileType.schema).items():
++                    if name not in data:
++                        data[name] = field.missing_value
+ 
+-    def get(self):
+-        # If we don't have a schema, just take the request
+-        if self.tileType is None or self.tileType.schema is None:
+-            return self.data.copy()
++        # try to use a '_tiledata' parameter in the request
++        elif '_tiledata' in self.tile.request.form:
++            data = json.loads(self.tile.request.form['_tiledata'])
+ 
+-        # Try to decode the form data properly if we can
+-        try:
+-            return decode(self.data, self.tileType.schema, missing=True)
+-        except (ValueError, UnicodeDecodeError,):
+-            LOGGER.exception(u"Could not convert form data to schema")
+-            return self.data.copy()
++        # fall back to the copy of request.form object itself
++        else:
++            # If we don't have a schema, just take the request
++            if self.tileType is None or self.tileType.schema is None:
++                data = self.tile.request.form.copy()
++            else:
++                # Try to decode the form data properly if we can
++                try:
++                    data = decode(self.tile.request.form,
++                                  self.tileType.schema, missing=True)
++                except (ValueError, UnicodeDecodeError,):
++                    LOGGER.exception(u"Could not convert form data to schema")
++                    return self.data.copy()
++
++        return data
+ 
+     def set(self, data):
+-        self.data.clear()
+-        self.data.update(data)
++        self.annotations[self.key] = data
+ 
+     def delete(self):
+-        self.data.clear()
++        if self.key in self.annotations:
++            self.annotations[self.key] = {}
+ 
+ 
+ class PersistentTileDataManager(object):
+diff --git a/plone/tiles/tiles.rst b/plone/tiles/tiles.rst
+index 74cbeac..95918ad 100644
+--- a/plone/tiles/tiles.rst
++++ b/plone/tiles/tiles.rst
+@@ -294,7 +294,7 @@ the request, this one will be used instead::
+     >>> tile = tile['tile1']
+ 
+     >>> sorted(tile.data.items())
+-    [('count', 6), ('cssClass', 'bar'), ('title', u'Your title')]
++    [(u'count', 6), (u'cssClass', u'bar'), (u'title', u'Your title')]
+ 
+ This way we can use transient tiles safely in contexts where the tile
+ data can be confused with raw data coming from a form, e.g. in an edit form.
+
+
+Repository: plone.tiles
+Branch: refs/heads/master
+Date: 2015-05-01T03:25:41+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/3d152ac35e5927d4014b91b40c39f2b99eb9b922
+
+Update changelog
+
+Files changed:
+M CHANGELOG.rst
+
+diff --git a/CHANGELOG.rst b/CHANGELOG.rst
+index 83cafc0..3091c82 100644
+--- a/CHANGELOG.rst
++++ b/CHANGELOG.rst
+@@ -4,9 +4,11 @@ Changelog
+ 1.4.0 (unreleased)
  ------------------
  
-+- Be able to provide default scale selection so users do not select
-+  original scale as often
-+  [vangheem]
-+
- - TinyMCE: bugfix, where a link had to be guessed because of missing data-
-   attributes, use set instead of setRaw. Add tests.
-   [frapell]
-diff --git a/mockup/patterns/tinymce/js/links.js b/mockup/patterns/tinymce/js/links.js
-index 3171e33..80cadd5 100644
---- a/mockup/patterns/tinymce/js/links.js
-+++ b/mockup/patterns/tinymce/js/links.js
-@@ -376,6 +376,7 @@ define([
+-- Fix issue where encoding did not support dictionary fields
++- Add support for encoding dictionary fields into tile URL
+   [datakurre]
+-- Fix issue where non-ascii characters in tiledata raised UnicodeEncode/DecodeErrors
++- Fix issue where saving or deleting transient tile data mutated the current request
++  [datakurre]
++- Fix issue where non-ascii characters in tile data raised UnicodeEncode/DecodeErrors
+   [datakurre]
  
-     generateModalHtml: function() {
-       return this.template({
-+        options: this.options,
-         upload: this.options.upload,
-         text: this.options.text,
-         insertHeading: this.options.text.insertHeading,
-diff --git a/mockup/patterns/tinymce/pattern.js b/mockup/patterns/tinymce/pattern.js
-index f8356c0..a438d24 100644
---- a/mockup/patterns/tinymce/pattern.js
-+++ b/mockup/patterns/tinymce/pattern.js
-@@ -16,6 +16,7 @@ toolbar: "undo redo | styleselect | bold italic | alignleft aligncenter alignrig
-  *    prependToScalePart(string): Text to prepend to generated image scale url part. ('/imagescale/')
-  *    appendToScalePart(string): Text to append to generated image scale url part. ('')
-  *    linkAttribute(string): Ajax response data attribute to use for url. ('path')
-+ *    defaultScale(string): Scale name to default to. ('Original')
-  *
-  * Documentation:
-  *    # Default
-@@ -150,6 +151,7 @@ define([
-       prependToScalePart: '/imagescale/', // some value here is required to be able to parse scales back
-       appendToScalePart: '',
-       appendToOriginalScalePart: '',
-+      defaultScale: 'large',
-       scales: _t('Listing (16x16):listing,Icon (32x32):icon,Tile (64x64):tile,' +
-               'Thumb (128x128):thumb,Mini (200x200):mini,Preview (400x400):preview,' +
-               'Large (768x768):large'),
-diff --git a/mockup/patterns/tinymce/templates/image.xml b/mockup/patterns/tinymce/templates/image.xml
-index be5a307..7a0f3d1 100644
---- a/mockup/patterns/tinymce/templates/image.xml
-+++ b/mockup/patterns/tinymce/templates/image.xml
-@@ -19,7 +19,7 @@
-             <select name="scale">
-               <option value="">Original</option>
-                 <% _.each(scales, function(scale){ %>
--                  <option value="<%- scale.part %>">
-+                  <option value="<%- scale.part %>" <% if(scale.name === options.defaultScale){ %>selected<% } %> >
-                     <%- scale.label %>
-                   </option>
-                 <% }); %>
+ 1.3.0 (2015-04-21)
 
 
