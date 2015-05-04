@@ -7,7 +7,7 @@ Writing documentation
 Documentation of Plone
 ======================
 
-The comprehensive ressource for Plone documentation is http://docs.plone.org/. The following sections among 
+The comprehensive resource for Plone documentation is http://docs.plone.org/. The following sections among 
 others are included: 
 
 * `User Manual <http://docs.plone.org/working-with-content/index.html>`_
