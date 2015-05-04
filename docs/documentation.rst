@@ -7,27 +7,16 @@ Writing documentation
 Documentation of Plone
 ======================
 
-As a community,
-Plone maintains several types of documentation:
+The comprehensive ressource for Plone documentation is http://docs.plone.org/. The following sections among 
+others are included: 
 
-* *Curated* documents.
-  This is a limited set of documentation that is intended to be carefully managed and regularly updated.
+* `User Manual <http://docs.plone.org/working-with-content/index.html>`_
+* `Installing Plone <http://docs.plone.org/manage/installing/index.html>`_
+* `Theme Reference <http://docs.plone.org/adapt-and-extend/theming/index.html>`_
+* `Developer Manual <http://docs.plone.org/develop/index.html>`_
 
-  * `User Manual <http://plone.org/documentation/manual/plone-4-user-manual>`_
-  * `Installing Plone <http://plone.org/documentation/manual/installing-plone>`_
-  * `Theme Reference <http://developer.plone.org/#theme-development>`_
-  * `Developer Manual <http://developer.plone.org/>`_
-
-  Improvements to the curated documents can be discussed on the `plone-docs mailing list <https://lists.sourceforge.net/lists/listinfo/plone-docs>`_.
-
-* *Community-edited* documents.
-  These are open for contributions by anyone.
-  This leads to a wealth of information that is of more widely ranging quality.
-
-  * `Knowledgebase on plone.org <http://plone.org/documentation/kb>`_.
-    Anyone with a plone.org account is free to edit.
-  * `Collective Plone developer documentation <http://developer.plone.org/index.html>`_.
-    Anyone may `contribute <http://collective-docs.readthedocs.org/en/latest/introduction/developermanual.html>`_.
+The documentation is hosted on `github <https://github.com/plone/documentation>`_ and information how to 
+contribute can be found `here <http://docs.plone.org/about/contributing.html>`_
 
 Documenting a package
 =====================
