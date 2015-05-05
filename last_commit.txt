@@ -1,1016 +1,420 @@
-Repository: plone.app.event
+Repository: plone.recipe.zeoserver
 Branch: refs/heads/master
-Date: 2015-05-05T22:58:47+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/95a79065ad0eac61ea8dd2a9466614f75e8235b7
+Date: 2015-05-05T23:30:58+02:00
+Author: Gil Forcada Codinachs (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/plone.recipe.zeoserver/commit/ffcd10c6e02884dff656eb872daba313a34c9d52
 
-Extend Collection support on event_listing for content items providing ISyndicatableCollection.
+Rename CHANGES.txt to CHANGES.rst
 
 Files changed:
-M CHANGES.rst
-M plone/app/event/browser/event_listing.py
+A CHANGES.rst
+D CHANGES.txt
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 0f48837..50c76e9 100644
---- a/CHANGES.rst
+new file mode 100644
+index 0000000..3d7b4b5
+--- /dev/null
 +++ b/CHANGES.rst
-@@ -10,6 +10,10 @@ Changelog
- 2.0a9 (2015-05-04)
- ------------------
- 
-+- Extend Collection support on ``event_listing`` for content items providing
-+  ``ISyndicatableCollection``.
-+  [thet]
+@@ -0,0 +1,197 @@
++Changelog
++=========
 +
- - Support for ``contentFilter`` on request for ``event_listing``.
-   [thet]
- 
-diff --git a/plone/app/event/browser/event_listing.py b/plone/app/event/browser/event_listing.py
-index cdf334a..d6c647f 100644
---- a/plone/app/event/browser/event_listing.py
-+++ b/plone/app/event/browser/event_listing.py
-@@ -23,7 +23,7 @@
- from zope.contentprovider.interfaces import IContentProvider
- 
- try:
--    from plone.app.contenttypes.interfaces import ICollection
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
- except ImportError:
-     ICollection = None
- 
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T22:58:47+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/9cbdafcf057359b33c4e797d4c1dc8cdbdd5ee9e
-
-Add support for Collections as data source for calendar and event portlets.
-
-Files changed:
-M CHANGES.rst
-M plone/app/event/portlets/portlet_calendar.py
-M plone/app/event/portlets/portlet_events.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 50c76e9..b1bd895 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,6 +10,9 @@ Changelog
- 2.0a9 (2015-05-04)
- ------------------
- 
-+- Add support for Collections as data source for calendar and event portlets.
-+  [thet]
-+
- - Extend Collection support on ``event_listing`` for content items providing
-   ``ISyndicatableCollection``.
-   [thet]
-diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py
-index 4dda7bb..cd193f6 100644
---- a/plone/app/event/portlets/portlet_calendar.py
-+++ b/plone/app/event/portlets/portlet_calendar.py
-@@ -2,14 +2,20 @@
- from ComputedAttribute import ComputedAttribute
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection
-+from plone.app.contenttypes.interfaces import IFolder
- from plone.app.event.base import RET_MODE_OBJECTS
-+from plone.app.event.base import _prepare_range
-+from plone.app.event.base import expand_events
- from plone.app.event.base import first_weekday
- from plone.app.event.base import get_events, construct_calendar
- from plone.app.event.base import localized_today
-+from plone.app.event.base import start_end_query
- from plone.app.event.base import wkday_to_mon1
- from plone.app.event.portlets import get_calendar_url
- from plone.app.portlets import PloneMessageFactory as _
- from plone.app.portlets.portlets import base
-+from plone.app.querystring import queryparser
- from plone.app.uuid.utils import uuidToObject
- from plone.app.vocabularies.catalog import CatalogSource
- from plone.event.interfaces import IEventAccessor
-@@ -19,10 +25,13 @@
- from zope.component.hooks import getSite
- from zope.i18nmessageid import MessageFactory
- from zope.interface import implementer
--
- import calendar
- import json
- 
-+try:
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
-+except ImportError:
-+    ICollection = None
- 
- PLMF = MessageFactory('plonelocales')
- 
-@@ -44,13 +53,20 @@ class ICalendarPortlet(IPortletDataProvider):
-         title=_(u'portlet_label_search_base', default=u'Search base'),
-         description=_(
-             u'portlet_help_search_base',
--            default=u'Select search base folder to search for events. This '
--                    u'folder will also be used to link to in calendar '
--                    u'searches. If empty, the whole site will be searched and '
--                    u'the event listing view will be called on the site root.'
-+            default=u'Select search base Folder or Collection to search for '
-+                    u'events. The URL to to this item will also be used to '
-+                    u'link to in calendar searches. If empty, the whole site '
-+                    u'will be searched and the event listing view will be '
-+                    u'called on the site root.'
-         ),
-         required=False,
--        source=CatalogSource(is_folderish=True),
-+        source=CatalogSource(object_provides={
-+            'query': [
-+                ISyndicatableCollection.__identifier__,
-+                IFolder.__identifier__
-+            ],
-+            'operator': 'or'
-+        }),
-     )
- 
- 
-@@ -83,8 +99,17 @@ def _uid(self):
- class Renderer(base.Renderer):
-     render = ViewPageTemplateFile('portlet_calendar.pt')
- 
-+    _search_base = None
-+
-+    @property
-+    def search_base(self):
-+        if not self._search_base:
-+            self._search_base = uuidToObject(self.data.search_base_uid)
-+        return self._search_base
-+
-+    @property
-     def search_base_path(self):
--        search_base = uuidToObject(self.data.search_base_uid)
-+        search_base = self.search_base
-         if search_base is not None:
-             search_base = '/'.join(search_base.getPhysicalPath())
-         return search_base
-@@ -92,7 +117,7 @@ def search_base_path(self):
-     def update(self):
-         context = aq_inner(self.context)
- 
--        self.calendar_url = get_calendar_url(context, self.search_base_path())
-+        self.calendar_url = get_calendar_url(context, self.search_base_path)
- 
-         self.year, self.month = year, month = self.year_month_display()
-         self.prev_year, self.prev_month = prev_year, prev_month = (
-@@ -171,21 +196,43 @@ def cal_data(self):
-         year, month = self.year_month_display()
-         monthdates = [dat for dat in self.cal.itermonthdates(year, month)]
- 
-+        start = monthdates[0]
-+        end = monthdates[-1]
-+
-         data = self.data
-         query_kw = {}
--
--        search_base_path = self.search_base_path()
--        if search_base_path:
--            query_kw['path'] = {'query': search_base_path}
--
-         if data.state:
-             query_kw['review_state'] = data.state
- 
--        start = monthdates[0]
--        end = monthdates[-1]
--        events = get_events(context, start=start, end=end,
--                            ret_mode=RET_MODE_OBJECTS,
--                            expand=True, **query_kw)
-+        events = []
-+        query_kw.update(self.request.get('contentFilter', {}))
-+        search_base = self.search_base
-+        if ICollection.providedBy(search_base):
-+            query = queryparser.parseFormquery(search_base, search_base.query)
-+
-+            # restrict start/end with those from query, if given.
-+            if 'start' in query and query['start'] > start:
-+                start = query['start']
-+            if 'end' in query and query['end'] < end:
-+                end = query['end']
-+
-+            start, end = _prepare_range(search_base, start, end)
-+            query_kw.update(start_end_query(start, end))
-+            events = search_base.results(
-+                batch=False, brains=True, custom_query=query_kw
-+            )
-+            events = expand_events(
-+                events, ret_mode=RET_MODE_OBJECTS,
-+                sort='start', start=start, end=end
-+            )
-+        else:
-+            search_base_path = self.search_base_path
-+            if search_base_path:
-+                query_kw['path'] = {'query': search_base_path}
-+            events = get_events(context, start=start, end=end,
-+                                ret_mode=RET_MODE_OBJECTS,
-+                                expand=True, **query_kw)
-+
-         cal_dict = construct_calendar(events, start=start, end=end)
- 
-         # [[day1week1, day2week1, ... day7week1], [day1week2, ...]]
-diff --git a/plone/app/event/portlets/portlet_events.py b/plone/app/event/portlets/portlet_events.py
-index a29d9ea..263e77d 100644
---- a/plone/app/event/portlets/portlet_events.py
-+++ b/plone/app/event/portlets/portlet_events.py
-@@ -1,6 +1,13 @@
- from Acquisition import aq_inner
- from ComputedAttribute import ComputedAttribute
-+from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection
-+from plone.app.contenttypes.interfaces import IFolder
-+from plone.app.event.base import expand_events
-+from plone.app.event.base import _prepare_range
-+from plone.app.event.base import start_end_query
-+
- from plone.app.event.base import RET_MODE_ACCESSORS
- from plone.app.event.base import get_events
- from plone.app.event.base import localized_now
-@@ -12,12 +19,17 @@
- from plone.memoize.compress import xhtml_compress
- from plone.memoize.instance import memoize
- from plone.portlets.interfaces import IPortletDataProvider
--from Products.CMFCore.utils import getToolByName
- from zExceptions import NotFound
- from zope import schema
- from zope.component import getMultiAdapter
- from zope.contentprovider.interfaces import IContentProvider
- from zope.interface import implementer
-+from plone.app.querystring import queryparser
-+
-+try:
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
-+except ImportError:
-+    ICollection = None
- 
- 
- class IEventsPortlet(IPortletDataProvider):
-@@ -43,13 +55,20 @@ class IEventsPortlet(IPortletDataProvider):
-         title=_(u'portlet_label_search_base', default=u'Search base'),
-         description=_(
-             u'portlet_help_search_base',
--            default=u'Select search base folder to search for events. This '
--                    u'folder will also be used to link to in calendar '
--                    u'searches. If empty, the whole site will be searched and '
--                    u'the event listing view will be called on the site root.'
-+            default=u'Select search base Folder or Collection to search for '
-+                    u'events. The URL to to this item will also be used to '
-+                    u'link to in calendar searches. If empty, the whole site '
-+                    u'will be searched and the event listing view will be '
-+                    u'called on the site root.'
-         ),
-         required=False,
--        source=CatalogSource(is_folderish=True),
-+        source=CatalogSource(object_provides={
-+            'query': [
-+                ISyndicatableCollection.__identifier__,
-+                IFolder.__identifier__
-+            ],
-+            'operator': 'or'
-+        }),
-     )
- 
- 
-@@ -86,8 +105,17 @@ class Renderer(base.Renderer):
- 
-     _template = ViewPageTemplateFile('portlet_events.pt')
- 
-+    _search_base = None
-+
-+    @property
-+    def search_base(self):
-+        if not self._search_base:
-+            self._search_base = uuidToObject(self.data.search_base_uid)
-+        return self._search_base
-+
-+    @property
-     def search_base_path(self):
--        search_base = uuidToObject(self.data.search_base_uid)
-+        search_base = self.search_base
-         if search_base is not None:
-             search_base = '/'.join(search_base.getPhysicalPath())
-         return search_base
-@@ -97,7 +125,7 @@ def __init__(self, *args):
- 
-         context = aq_inner(self.context)
- 
--        calendar_url = get_calendar_url(context, self.search_base_path())
-+        calendar_url = get_calendar_url(context, self.search_base_path)
- 
-         self.next_url = '%s?mode=future' % calendar_url
-         self.prev_url = '%s?mode=past' % calendar_url
-@@ -121,16 +149,45 @@ def events(self):
-         context = aq_inner(self.context)
-         data = self.data
- 
--        kw = {}
--        search_base_path = self.search_base_path()
--        if search_base_path:
--            kw['path'] = {'query': search_base_path}
-+        query_kw = {}
-         if data.state:
--            kw['review_state'] = data.state
--
--        return get_events(context, start=localized_now(context),
--                          ret_mode=RET_MODE_ACCESSORS,
--                          expand=True, limit=data.count, **kw)
-+            query_kw['review_state'] = data.state
-+
-+        events = []
-+        query_kw.update(self.request.get('contentFilter', {}))
-+        search_base = self.search_base
-+        if ICollection.providedBy(search_base):
-+            query = queryparser.parseFormquery(search_base, search_base.query)
-+
-+            start = None
-+            if 'start' in query:
-+                start = query['start']
-+            else:
-+                start = localized_now(context)
-+
-+            end = None
-+            if 'end' in query:
-+                end = query['end']
-+
-+            start, end = _prepare_range(search_base, start, end)
-+            query_kw.update(start_end_query(start, end))
-+            events = search_base.results(
-+                batch=False, brains=True, custom_query=query_kw
-+            )
-+            events = expand_events(
-+                events, ret_mode=RET_MODE_ACCESSORS,
-+                sort='start', start=start, end=end
-+            )
-+        else:
-+            search_base_path = self.search_base_path
-+            if search_base_path:
-+                query_kw['path'] = {'query': search_base_path}
-+            events = get_events(
-+                context, start=localized_now(context),
-+                ret_mode=RET_MODE_ACCESSORS,
-+                expand=True, limit=data.count, **query_kw
-+            )
-+        return events
- 
-     def formatted_date(self, event):
-         provider = getMultiAdapter(
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T22:58:47+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/ced434449888952ec1b46418256573ba1ecf7da5
-
-limit expanded events
-
-Files changed:
-M plone/app/event/portlets/portlet_events.py
-
-diff --git a/plone/app/event/portlets/portlet_events.py b/plone/app/event/portlets/portlet_events.py
-index 263e77d..4f68da3 100644
---- a/plone/app/event/portlets/portlet_events.py
-+++ b/plone/app/event/portlets/portlet_events.py
-@@ -172,12 +172,14 @@ def events(self):
-             start, end = _prepare_range(search_base, start, end)
-             query_kw.update(start_end_query(start, end))
-             events = search_base.results(
--                batch=False, brains=True, custom_query=query_kw
-+                batch=False, brains=True, custom_query=query_kw,
-+                limit=data.count
-             )
-             events = expand_events(
-                 events, ret_mode=RET_MODE_ACCESSORS,
-                 sort='start', start=start, end=end
-             )
-+            events = events[:data.count]  # limit expanded
-         else:
-             search_base_path = self.search_base_path
-             if search_base_path:
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T22:58:47+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/c2cc30353d7dcfbee2d1bf74557db5aab79eb8c1
-
-Fix query in Collections and use fixed sorting
-
-Files changed:
-M plone/app/event/portlets/portlet_calendar.py
-M plone/app/event/portlets/portlet_events.py
-
-diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py
-index cd193f6..dff9a2e 100644
---- a/plone/app/event/portlets/portlet_calendar.py
-+++ b/plone/app/event/portlets/portlet_calendar.py
-@@ -200,15 +200,19 @@ def cal_data(self):
-         end = monthdates[-1]
- 
-         data = self.data
--        query_kw = {}
-+        query = {}
-         if data.state:
--            query_kw['review_state'] = data.state
-+            query['review_state'] = data.state
- 
-         events = []
--        query_kw.update(self.request.get('contentFilter', {}))
-+        query.update(self.request.get('contentFilter', {}))
-         search_base = self.search_base
-         if ICollection.providedBy(search_base):
--            query = queryparser.parseFormquery(search_base, search_base.query)
-+            # Whatever sorting is defined, we're overriding it.
-+            query = queryparser.parseFormquery(
-+                search_base, search_base.query,
-+                sort_on='start', sort_order=None
-+            )
- 
-             # restrict start/end with those from query, if given.
-             if 'start' in query and query['start'] > start:
-@@ -217,21 +221,22 @@ def cal_data(self):
-                 end = query['end']
- 
-             start, end = _prepare_range(search_base, start, end)
--            query_kw.update(start_end_query(start, end))
-+            query.update(start_end_query(start, end))
-             events = search_base.results(
--                batch=False, brains=True, custom_query=query_kw
-+                batch=False, brains=True, custom_query=query
-             )
-             events = expand_events(
-                 events, ret_mode=RET_MODE_OBJECTS,
--                sort='start', start=start, end=end
-+                start=start, end=end,
-+                sort='start', sort_reverse=False
-             )
-         else:
-             search_base_path = self.search_base_path
-             if search_base_path:
--                query_kw['path'] = {'query': search_base_path}
-+                query['path'] = {'query': search_base_path}
-             events = get_events(context, start=start, end=end,
-                                 ret_mode=RET_MODE_OBJECTS,
--                                expand=True, **query_kw)
-+                                expand=True, **query)
- 
-         cal_dict = construct_calendar(events, start=start, end=end)
- 
-diff --git a/plone/app/event/portlets/portlet_events.py b/plone/app/event/portlets/portlet_events.py
-index 4f68da3..f620e78 100644
---- a/plone/app/event/portlets/portlet_events.py
-+++ b/plone/app/event/portlets/portlet_events.py
-@@ -149,15 +149,19 @@ def events(self):
-         context = aq_inner(self.context)
-         data = self.data
- 
--        query_kw = {}
-+        query = {}
-         if data.state:
--            query_kw['review_state'] = data.state
-+            query['review_state'] = data.state
- 
-         events = []
--        query_kw.update(self.request.get('contentFilter', {}))
-+        query.update(self.request.get('contentFilter', {}))
-         search_base = self.search_base
-         if ICollection.providedBy(search_base):
--            query = queryparser.parseFormquery(search_base, search_base.query)
-+            # Whatever sorting is defined, we're overriding it.
-+            query = queryparser.parseFormquery(
-+                search_base, search_base.query,
-+                sort_on='start', sort_order=None
-+            )
- 
-             start = None
-             if 'start' in query:
-@@ -170,24 +174,25 @@ def events(self):
-                 end = query['end']
- 
-             start, end = _prepare_range(search_base, start, end)
--            query_kw.update(start_end_query(start, end))
-+            query.update(start_end_query(start, end))
-             events = search_base.results(
--                batch=False, brains=True, custom_query=query_kw,
-+                batch=False, brains=True, custom_query=query,
-                 limit=data.count
-             )
-             events = expand_events(
-                 events, ret_mode=RET_MODE_ACCESSORS,
--                sort='start', start=start, end=end
-+                start=start, end=end,
-+                sort='start', sort_reverse=False
-             )
-             events = events[:data.count]  # limit expanded
-         else:
-             search_base_path = self.search_base_path
-             if search_base_path:
--                query_kw['path'] = {'query': search_base_path}
-+                query['path'] = {'query': search_base_path}
-             events = get_events(
-                 context, start=localized_now(context),
-                 ret_mode=RET_MODE_ACCESSORS,
--                expand=True, limit=data.count, **query_kw
-+                expand=True, limit=data.count, **query
-             )
-         return events
- 
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T22:58:47+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/239c60ef47ac8e9183ce677f0f45ba6cfee72a6f
-
-For event_listing on Collections, ignore the Collection's sorting and use what the event listing's mode defines for sorting.
-
-Files changed:
-M CHANGES.rst
-M plone/app/event/browser/event_listing.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b1bd895..6e20950 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,6 +10,10 @@ Changelog
- 2.0a9 (2015-05-04)
- ------------------
- 
-+- For ``event_listing`` on Collections, ignore the Collection's sorting and use
-+  what the event listing's mode defines for sorting.
-+  [thet]
-+
- - Add support for Collections as data source for calendar and event portlets.
-   [thet]
- 
-diff --git a/plone/app/event/browser/event_listing.py b/plone/app/event/browser/event_listing.py
-index d6c647f..9eb1ee0 100644
---- a/plone/app/event/browser/event_listing.py
-+++ b/plone/app/event/browser/event_listing.py
-@@ -138,7 +138,14 @@ def events(self, ret_mode=RET_MODE_ACCESSORS, expand=True, batch=True):
-         res = []
-         if self.is_collection:
-             ctx = self.default_context
--            query = queryparser.parseFormquery(ctx, ctx.query)
-+            # Whatever sorting is defined, we're overriding it.
-+            sort_on = 'start'
-+            sort_order = None
-+            if self.mode in ('past', 'all'):
-+                sort_order = 'reverse'
-+            query = queryparser.parseFormquery(
-+                ctx, ctx.query, sort_on=sort_on, sort_order=sort_order
-+            )
-             custom_query = self.request.get('contentFilter', {})
-             if 'start' not in query or 'end' not in query:
-                 # ... else don't show the navigation bar
-@@ -156,7 +163,9 @@ def events(self, ret_mode=RET_MODE_ACCESSORS, expand=True, batch=True):
-                     query.get('end') or custom_query.get('end')
-                 )
-                 res = expand_events(
--                    res, ret_mode, sort='start', start=start, end=end
-+                    res, ret_mode,
-+                    start=start, end=end,
-+                    sort=sort_on, sort_reverse=True if sort_order else False
-                 )
-         else:
-             res = self._get_events(ret_mode, expand=expand)
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T23:00:51+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/cbfd2c425bb96ed071acda9a1ba8346a4ca8be20
-
-move changelog after rebase
-
-Files changed:
-M CHANGES.rst
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 6e20950..7e80538 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,12 +4,6 @@ Changelog
- 2.0a10 (unreleased)
- -------------------
- 
--- Nothing changed yet.
--
--
--2.0a9 (2015-05-04)
--------------------
--
- - For ``event_listing`` on Collections, ignore the Collection's sorting and use
-   what the event listing's mode defines for sorting.
-   [thet]
-@@ -21,6 +15,10 @@ Changelog
-   ``ISyndicatableCollection``.
-   [thet]
- 
-+
-+2.0a9 (2015-05-04)
++1.2.9 (unreleased)
 +------------------
 +
- - Support for ``contentFilter`` on request for ``event_listing``.
-   [thet]
- 
-
-
-Repository: plone.app.event
-Branch: refs/heads/master
-Date: 2015-05-05T23:03:33+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.app.event/commit/8cece9a1a73b5a7b358737be363341aeafd1f463
-
-Merge pull request #183 from plone/thet-portletcollections
-
-more collection improvements
-
-Files changed:
-M CHANGES.rst
-M plone/app/event/browser/event_listing.py
-M plone/app/event/portlets/portlet_calendar.py
-M plone/app/event/portlets/portlet_events.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 0f48837..7e80538 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,16 @@ Changelog
- 2.0a10 (unreleased)
- -------------------
- 
++- Nothing changed yet.
++
++
++1.2.8 (2015-04-18)
++------------------
++
++- Add default storage number in zeopack script
++  [mamico]
++
++
++1.2.7 (2015-01-05)
++------------------
++
++- Postpone computation of working set until recipe is ran
++  [gotcha]
++
++- Add support for initialization in main script.
++  [mamico]
++
++- Add support for Pip-installed Buildout
++  [aclark]
++
++- Add "-D" argument to zopepack options to allow override of pack days.
++  [smcmahon]
++
++
++1.2.6 (2013-06-04)
++------------------
++
++- add support for setting zeoserver as read only
++  [vangheem]
++
++- Add integration with ZRS
++  [vangheem]
++
++
++1.2.5 (2013-05-23)
++------------------
++
++- Nothing changed yet.
++
++
++1.2.4 (2013-04-06)
++------------------
++
++- Adding ability to control output script name for repozo. Use the
++  ``repozo-script-name`` option to change the script name.
++  [do3cc]
++
++
++1.2.3 (2012-10-03)
++------------------
++
++- Adding ability to control output script name for zeopack. Use the
++  ``zeopack-script-name`` option to change the script name.
++  [davidjb]
++
++- Fix zeopack connection handling. The previous fix to abort after a failed
++  connection attempt only worked by chance and caused zeopack to exit before
++  the packing finished. Now failed connections are correctly detected and
++  zeopack waits until the packing is finished.
++  [gaudenz]
++
++1.2.2 (2011-11-24)
++------------------
++
++- Fix custom zeo.conf support under windows.
++  [rossp]
++
++
++1.2.1 - 2011-09-12
++------------------
++
++- When the zeoserver is not running, the zeopack script cannot do
++  anything.  So when zeopack cannot connect, it now quits with an
++  error message.  Formerly it would wait forever.
++  [maurits]
++
++- Added 'var' option like it is in plone.recipe.zope2instance.
++  [garbas]
++
++1.2.0 - 2010-10-18
++------------------
++
++- Only require a ``nt_svcutils`` distribution on Windows.
++  [hannosch]
++
++1.1.1 - 2010-07-20
++------------------
++
++- Fixed -B option being required for along with the -S option.
++  [vangheem]
++
++- Added documentation for using the zeopack script with mount points.
++  [vangheem]
++
++1.1 - 2010-07-18
++----------------
++
++- No changes.
++
++1.1b1 - 2010-07-02
++------------------
++
++- Implemented Windows support and support for running ZEO as a Windows service.
++  We depend on the new nt_svcutils distribution to provide this support.
++  [baijum, hannosch]
++
++- The FileStorage component of ZODB 3.9 now supports blobs natively,
++  so no need to use BlobStorage proxy for it anymore.
++  [baijum, hannosch]
++
++- Added ``extra-paths`` option to add additional modules paths.
++  [baijum]
++
++- Fixed ZEO packing of mounted storage.
++  [vangheem]
++
++- Added -B option to the ``zeopack`` script to specify the location of the
++  blob storage.
++  [vangheem]
++
++1.1a2 - 2010-05-10
++------------------
++
++- Added support for the ``pack-keep-old`` option introduced in ZODB 3.9.
++  [hannosch]
++
++1.1a1 - 2010-04-27
++------------------
++
++- Added support for the ``pack-gc`` option introduced in ZODB 3.9.
++  [hannosch]
++
++- Always create a blob-storage by default.
++  [hannosch]
++
++- Require at least ZODB 3.8 and simplify the ``zeopack`` script.
++  [hannosch]
++
++- Various documentation updates.
++  [hannosch]
++
++- Use the new ``zope.mkzeoinstance`` package, which makes the recipe compatible
++  with ZODB 3.9.5+.
++  [hannosch]
++
++- Removed unmaintained win32 specific tests and old zope2 test mockups.
++  [hannosch]
++
++- Removed testing dependency on ``zope.testing`` and refactored testing setup.
++  [hannosch]
++
++1.0 - 2010-04-05
++----------------
++
++- Depend on and always include ZopeUndo. While it's only needed for Zope 2, the
++  distribution is so tiny, it doesn't hurt for non-Zope 2 ZEO servers.
++  [hannosch]
++
++1.0b1 - 2010-03-19
++------------------
++
++- Fixed issue with egg paths for the zeopack script.
++  [davisagli]
++
++- Added support for setting ZEO log level.
++  [baijum]
++
++1.0a2 - 2009-12-03
++------------------
++
++* Set up logging configuration that is needed by ZODB.blob.
++  [davisagli]
++
++* Set shared_blob_dir to True when initializing the ClientStorage used
++  by the pack script, since it will be using the same blob directory
++  as the ZEO server.
++  [davisagli]
++
++1.0a1 - 2009-12-03
++------------------
++
++* Updated and cleaned up after renaming.
++  [hannosch]
++
++* Added compatibility with eggified Zopes (Zope >= 2.12).
++  [davisagli]
++
++* Initial implementation based on plone.recipe.zope2zeoserver.
++  [plone]
+diff --git a/CHANGES.txt b/CHANGES.txt
+deleted file mode 100644
+index 3d7b4b5..0000000
+--- a/CHANGES.txt
++++ /dev/null
+@@ -1,197 +0,0 @@
+-Changelog
+-=========
+-
+-1.2.9 (unreleased)
+-------------------
+-
 -- Nothing changed yet.
-+- For ``event_listing`` on Collections, ignore the Collection's sorting and use
-+  what the event listing's mode defines for sorting.
-+  [thet]
-+
-+- Add support for Collections as data source for calendar and event portlets.
-+  [thet]
-+
-+- Extend Collection support on ``event_listing`` for content items providing
-+  ``ISyndicatableCollection``.
-+  [thet]
- 
- 
- 2.0a9 (2015-05-04)
-diff --git a/plone/app/event/browser/event_listing.py b/plone/app/event/browser/event_listing.py
-index cdf334a..9eb1ee0 100644
---- a/plone/app/event/browser/event_listing.py
-+++ b/plone/app/event/browser/event_listing.py
-@@ -23,7 +23,7 @@
- from zope.contentprovider.interfaces import IContentProvider
- 
- try:
--    from plone.app.contenttypes.interfaces import ICollection
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
- except ImportError:
-     ICollection = None
- 
-@@ -138,7 +138,14 @@ def events(self, ret_mode=RET_MODE_ACCESSORS, expand=True, batch=True):
-         res = []
-         if self.is_collection:
-             ctx = self.default_context
--            query = queryparser.parseFormquery(ctx, ctx.query)
-+            # Whatever sorting is defined, we're overriding it.
-+            sort_on = 'start'
-+            sort_order = None
-+            if self.mode in ('past', 'all'):
-+                sort_order = 'reverse'
-+            query = queryparser.parseFormquery(
-+                ctx, ctx.query, sort_on=sort_on, sort_order=sort_order
-+            )
-             custom_query = self.request.get('contentFilter', {})
-             if 'start' not in query or 'end' not in query:
-                 # ... else don't show the navigation bar
-@@ -156,7 +163,9 @@ def events(self, ret_mode=RET_MODE_ACCESSORS, expand=True, batch=True):
-                     query.get('end') or custom_query.get('end')
-                 )
-                 res = expand_events(
--                    res, ret_mode, sort='start', start=start, end=end
-+                    res, ret_mode,
-+                    start=start, end=end,
-+                    sort=sort_on, sort_reverse=True if sort_order else False
-                 )
-         else:
-             res = self._get_events(ret_mode, expand=expand)
-diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py
-index 4dda7bb..dff9a2e 100644
---- a/plone/app/event/portlets/portlet_calendar.py
-+++ b/plone/app/event/portlets/portlet_calendar.py
-@@ -2,14 +2,20 @@
- from ComputedAttribute import ComputedAttribute
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection
-+from plone.app.contenttypes.interfaces import IFolder
- from plone.app.event.base import RET_MODE_OBJECTS
-+from plone.app.event.base import _prepare_range
-+from plone.app.event.base import expand_events
- from plone.app.event.base import first_weekday
- from plone.app.event.base import get_events, construct_calendar
- from plone.app.event.base import localized_today
-+from plone.app.event.base import start_end_query
- from plone.app.event.base import wkday_to_mon1
- from plone.app.event.portlets import get_calendar_url
- from plone.app.portlets import PloneMessageFactory as _
- from plone.app.portlets.portlets import base
-+from plone.app.querystring import queryparser
- from plone.app.uuid.utils import uuidToObject
- from plone.app.vocabularies.catalog import CatalogSource
- from plone.event.interfaces import IEventAccessor
-@@ -19,10 +25,13 @@
- from zope.component.hooks import getSite
- from zope.i18nmessageid import MessageFactory
- from zope.interface import implementer
 -
- import calendar
- import json
- 
-+try:
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
-+except ImportError:
-+    ICollection = None
- 
- PLMF = MessageFactory('plonelocales')
- 
-@@ -44,13 +53,20 @@ class ICalendarPortlet(IPortletDataProvider):
-         title=_(u'portlet_label_search_base', default=u'Search base'),
-         description=_(
-             u'portlet_help_search_base',
--            default=u'Select search base folder to search for events. This '
--                    u'folder will also be used to link to in calendar '
--                    u'searches. If empty, the whole site will be searched and '
--                    u'the event listing view will be called on the site root.'
-+            default=u'Select search base Folder or Collection to search for '
-+                    u'events. The URL to to this item will also be used to '
-+                    u'link to in calendar searches. If empty, the whole site '
-+                    u'will be searched and the event listing view will be '
-+                    u'called on the site root.'
-         ),
-         required=False,
--        source=CatalogSource(is_folderish=True),
-+        source=CatalogSource(object_provides={
-+            'query': [
-+                ISyndicatableCollection.__identifier__,
-+                IFolder.__identifier__
-+            ],
-+            'operator': 'or'
-+        }),
-     )
- 
- 
-@@ -83,8 +99,17 @@ def _uid(self):
- class Renderer(base.Renderer):
-     render = ViewPageTemplateFile('portlet_calendar.pt')
- 
-+    _search_base = None
-+
-+    @property
-+    def search_base(self):
-+        if not self._search_base:
-+            self._search_base = uuidToObject(self.data.search_base_uid)
-+        return self._search_base
-+
-+    @property
-     def search_base_path(self):
--        search_base = uuidToObject(self.data.search_base_uid)
-+        search_base = self.search_base
-         if search_base is not None:
-             search_base = '/'.join(search_base.getPhysicalPath())
-         return search_base
-@@ -92,7 +117,7 @@ def search_base_path(self):
-     def update(self):
-         context = aq_inner(self.context)
- 
--        self.calendar_url = get_calendar_url(context, self.search_base_path())
-+        self.calendar_url = get_calendar_url(context, self.search_base_path)
- 
-         self.year, self.month = year, month = self.year_month_display()
-         self.prev_year, self.prev_month = prev_year, prev_month = (
-@@ -171,21 +196,48 @@ def cal_data(self):
-         year, month = self.year_month_display()
-         monthdates = [dat for dat in self.cal.itermonthdates(year, month)]
- 
--        data = self.data
--        query_kw = {}
 -
--        search_base_path = self.search_base_path()
--        if search_base_path:
--            query_kw['path'] = {'query': search_base_path}
-+        start = monthdates[0]
-+        end = monthdates[-1]
- 
-+        data = self.data
-+        query = {}
-         if data.state:
--            query_kw['review_state'] = data.state
-+            query['review_state'] = data.state
-+
-+        events = []
-+        query.update(self.request.get('contentFilter', {}))
-+        search_base = self.search_base
-+        if ICollection.providedBy(search_base):
-+            # Whatever sorting is defined, we're overriding it.
-+            query = queryparser.parseFormquery(
-+                search_base, search_base.query,
-+                sort_on='start', sort_order=None
-+            )
-+
-+            # restrict start/end with those from query, if given.
-+            if 'start' in query and query['start'] > start:
-+                start = query['start']
-+            if 'end' in query and query['end'] < end:
-+                end = query['end']
-+
-+            start, end = _prepare_range(search_base, start, end)
-+            query.update(start_end_query(start, end))
-+            events = search_base.results(
-+                batch=False, brains=True, custom_query=query
-+            )
-+            events = expand_events(
-+                events, ret_mode=RET_MODE_OBJECTS,
-+                start=start, end=end,
-+                sort='start', sort_reverse=False
-+            )
-+        else:
-+            search_base_path = self.search_base_path
-+            if search_base_path:
-+                query['path'] = {'query': search_base_path}
-+            events = get_events(context, start=start, end=end,
-+                                ret_mode=RET_MODE_OBJECTS,
-+                                expand=True, **query)
- 
--        start = monthdates[0]
--        end = monthdates[-1]
--        events = get_events(context, start=start, end=end,
--                            ret_mode=RET_MODE_OBJECTS,
--                            expand=True, **query_kw)
-         cal_dict = construct_calendar(events, start=start, end=end)
- 
-         # [[day1week1, day2week1, ... day7week1], [day1week2, ...]]
-diff --git a/plone/app/event/portlets/portlet_events.py b/plone/app/event/portlets/portlet_events.py
-index a29d9ea..f620e78 100644
---- a/plone/app/event/portlets/portlet_events.py
-+++ b/plone/app/event/portlets/portlet_events.py
-@@ -1,6 +1,13 @@
- from Acquisition import aq_inner
- from ComputedAttribute import ComputedAttribute
-+from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection
-+from plone.app.contenttypes.interfaces import IFolder
-+from plone.app.event.base import expand_events
-+from plone.app.event.base import _prepare_range
-+from plone.app.event.base import start_end_query
-+
- from plone.app.event.base import RET_MODE_ACCESSORS
- from plone.app.event.base import get_events
- from plone.app.event.base import localized_now
-@@ -12,12 +19,17 @@
- from plone.memoize.compress import xhtml_compress
- from plone.memoize.instance import memoize
- from plone.portlets.interfaces import IPortletDataProvider
--from Products.CMFCore.utils import getToolByName
- from zExceptions import NotFound
- from zope import schema
- from zope.component import getMultiAdapter
- from zope.contentprovider.interfaces import IContentProvider
- from zope.interface import implementer
-+from plone.app.querystring import queryparser
-+
-+try:
-+    from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection as ICollection  # noqa
-+except ImportError:
-+    ICollection = None
- 
- 
- class IEventsPortlet(IPortletDataProvider):
-@@ -43,13 +55,20 @@ class IEventsPortlet(IPortletDataProvider):
-         title=_(u'portlet_label_search_base', default=u'Search base'),
-         description=_(
-             u'portlet_help_search_base',
--            default=u'Select search base folder to search for events. This '
--                    u'folder will also be used to link to in calendar '
--                    u'searches. If empty, the whole site will be searched and '
--                    u'the event listing view will be called on the site root.'
-+            default=u'Select search base Folder or Collection to search for '
-+                    u'events. The URL to to this item will also be used to '
-+                    u'link to in calendar searches. If empty, the whole site '
-+                    u'will be searched and the event listing view will be '
-+                    u'called on the site root.'
-         ),
-         required=False,
--        source=CatalogSource(is_folderish=True),
-+        source=CatalogSource(object_provides={
-+            'query': [
-+                ISyndicatableCollection.__identifier__,
-+                IFolder.__identifier__
-+            ],
-+            'operator': 'or'
-+        }),
-     )
- 
- 
-@@ -86,8 +105,17 @@ class Renderer(base.Renderer):
- 
-     _template = ViewPageTemplateFile('portlet_events.pt')
- 
-+    _search_base = None
-+
-+    @property
-+    def search_base(self):
-+        if not self._search_base:
-+            self._search_base = uuidToObject(self.data.search_base_uid)
-+        return self._search_base
-+
-+    @property
-     def search_base_path(self):
--        search_base = uuidToObject(self.data.search_base_uid)
-+        search_base = self.search_base
-         if search_base is not None:
-             search_base = '/'.join(search_base.getPhysicalPath())
-         return search_base
-@@ -97,7 +125,7 @@ def __init__(self, *args):
- 
-         context = aq_inner(self.context)
- 
--        calendar_url = get_calendar_url(context, self.search_base_path())
-+        calendar_url = get_calendar_url(context, self.search_base_path)
- 
-         self.next_url = '%s?mode=future' % calendar_url
-         self.prev_url = '%s?mode=past' % calendar_url
-@@ -121,16 +149,52 @@ def events(self):
-         context = aq_inner(self.context)
-         data = self.data
- 
--        kw = {}
--        search_base_path = self.search_base_path()
--        if search_base_path:
--            kw['path'] = {'query': search_base_path}
-+        query = {}
-         if data.state:
--            kw['review_state'] = data.state
+-1.2.8 (2015-04-18)
+-------------------
 -
--        return get_events(context, start=localized_now(context),
--                          ret_mode=RET_MODE_ACCESSORS,
--                          expand=True, limit=data.count, **kw)
-+            query['review_state'] = data.state
-+
-+        events = []
-+        query.update(self.request.get('contentFilter', {}))
-+        search_base = self.search_base
-+        if ICollection.providedBy(search_base):
-+            # Whatever sorting is defined, we're overriding it.
-+            query = queryparser.parseFormquery(
-+                search_base, search_base.query,
-+                sort_on='start', sort_order=None
-+            )
-+
-+            start = None
-+            if 'start' in query:
-+                start = query['start']
-+            else:
-+                start = localized_now(context)
-+
-+            end = None
-+            if 'end' in query:
-+                end = query['end']
-+
-+            start, end = _prepare_range(search_base, start, end)
-+            query.update(start_end_query(start, end))
-+            events = search_base.results(
-+                batch=False, brains=True, custom_query=query,
-+                limit=data.count
-+            )
-+            events = expand_events(
-+                events, ret_mode=RET_MODE_ACCESSORS,
-+                start=start, end=end,
-+                sort='start', sort_reverse=False
-+            )
-+            events = events[:data.count]  # limit expanded
-+        else:
-+            search_base_path = self.search_base_path
-+            if search_base_path:
-+                query['path'] = {'query': search_base_path}
-+            events = get_events(
-+                context, start=localized_now(context),
-+                ret_mode=RET_MODE_ACCESSORS,
-+                expand=True, limit=data.count, **query
-+            )
-+        return events
- 
-     def formatted_date(self, event):
-         provider = getMultiAdapter(
+-- Add default storage number in zeopack script
+-  [mamico]
+-
+-
+-1.2.7 (2015-01-05)
+-------------------
+-
+-- Postpone computation of working set until recipe is ran
+-  [gotcha]
+-
+-- Add support for initialization in main script.
+-  [mamico]
+-
+-- Add support for Pip-installed Buildout
+-  [aclark]
+-
+-- Add "-D" argument to zopepack options to allow override of pack days.
+-  [smcmahon]
+-
+-
+-1.2.6 (2013-06-04)
+-------------------
+-
+-- add support for setting zeoserver as read only
+-  [vangheem]
+-
+-- Add integration with ZRS
+-  [vangheem]
+-
+-
+-1.2.5 (2013-05-23)
+-------------------
+-
+-- Nothing changed yet.
+-
+-
+-1.2.4 (2013-04-06)
+-------------------
+-
+-- Adding ability to control output script name for repozo. Use the
+-  ``repozo-script-name`` option to change the script name.
+-  [do3cc]
+-
+-
+-1.2.3 (2012-10-03)
+-------------------
+-
+-- Adding ability to control output script name for zeopack. Use the
+-  ``zeopack-script-name`` option to change the script name.
+-  [davidjb]
+-
+-- Fix zeopack connection handling. The previous fix to abort after a failed
+-  connection attempt only worked by chance and caused zeopack to exit before
+-  the packing finished. Now failed connections are correctly detected and
+-  zeopack waits until the packing is finished.
+-  [gaudenz]
+-
+-1.2.2 (2011-11-24)
+-------------------
+-
+-- Fix custom zeo.conf support under windows.
+-  [rossp]
+-
+-
+-1.2.1 - 2011-09-12
+-------------------
+-
+-- When the zeoserver is not running, the zeopack script cannot do
+-  anything.  So when zeopack cannot connect, it now quits with an
+-  error message.  Formerly it would wait forever.
+-  [maurits]
+-
+-- Added 'var' option like it is in plone.recipe.zope2instance.
+-  [garbas]
+-
+-1.2.0 - 2010-10-18
+-------------------
+-
+-- Only require a ``nt_svcutils`` distribution on Windows.
+-  [hannosch]
+-
+-1.1.1 - 2010-07-20
+-------------------
+-
+-- Fixed -B option being required for along with the -S option.
+-  [vangheem]
+-
+-- Added documentation for using the zeopack script with mount points.
+-  [vangheem]
+-
+-1.1 - 2010-07-18
+-----------------
+-
+-- No changes.
+-
+-1.1b1 - 2010-07-02
+-------------------
+-
+-- Implemented Windows support and support for running ZEO as a Windows service.
+-  We depend on the new nt_svcutils distribution to provide this support.
+-  [baijum, hannosch]
+-
+-- The FileStorage component of ZODB 3.9 now supports blobs natively,
+-  so no need to use BlobStorage proxy for it anymore.
+-  [baijum, hannosch]
+-
+-- Added ``extra-paths`` option to add additional modules paths.
+-  [baijum]
+-
+-- Fixed ZEO packing of mounted storage.
+-  [vangheem]
+-
+-- Added -B option to the ``zeopack`` script to specify the location of the
+-  blob storage.
+-  [vangheem]
+-
+-1.1a2 - 2010-05-10
+-------------------
+-
+-- Added support for the ``pack-keep-old`` option introduced in ZODB 3.9.
+-  [hannosch]
+-
+-1.1a1 - 2010-04-27
+-------------------
+-
+-- Added support for the ``pack-gc`` option introduced in ZODB 3.9.
+-  [hannosch]
+-
+-- Always create a blob-storage by default.
+-  [hannosch]
+-
+-- Require at least ZODB 3.8 and simplify the ``zeopack`` script.
+-  [hannosch]
+-
+-- Various documentation updates.
+-  [hannosch]
+-
+-- Use the new ``zope.mkzeoinstance`` package, which makes the recipe compatible
+-  with ZODB 3.9.5+.
+-  [hannosch]
+-
+-- Removed unmaintained win32 specific tests and old zope2 test mockups.
+-  [hannosch]
+-
+-- Removed testing dependency on ``zope.testing`` and refactored testing setup.
+-  [hannosch]
+-
+-1.0 - 2010-04-05
+-----------------
+-
+-- Depend on and always include ZopeUndo. While it's only needed for Zope 2, the
+-  distribution is so tiny, it doesn't hurt for non-Zope 2 ZEO servers.
+-  [hannosch]
+-
+-1.0b1 - 2010-03-19
+-------------------
+-
+-- Fixed issue with egg paths for the zeopack script.
+-  [davisagli]
+-
+-- Added support for setting ZEO log level.
+-  [baijum]
+-
+-1.0a2 - 2009-12-03
+-------------------
+-
+-* Set up logging configuration that is needed by ZODB.blob.
+-  [davisagli]
+-
+-* Set shared_blob_dir to True when initializing the ClientStorage used
+-  by the pack script, since it will be using the same blob directory
+-  as the ZEO server.
+-  [davisagli]
+-
+-1.0a1 - 2009-12-03
+-------------------
+-
+-* Updated and cleaned up after renaming.
+-  [hannosch]
+-
+-* Added compatibility with eggified Zopes (Zope >= 2.12).
+-  [davisagli]
+-
+-* Initial implementation based on plone.recipe.zope2zeoserver.
+-  [plone]
 
 
