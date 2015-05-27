@@ -1,154 +1,592 @@
-Repository: plone.app.textfield
+Repository: plone.schemaeditor
 Branch: refs/heads/master
-Date: 2015-05-26T18:11:39+02:00
-Author: Jonas Baumann (jone) <jone@jone.ch>
-Commit: https://github.com/plone/plone.app.textfield/commit/5ae60fb9b24fcaa6518eaf9fadf9c886c14f0989
+Date: 2015-05-26T11:37:55+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/8d7affbb7a5216f2faccba94cfc1cf66ac8f1f58
 
-Fix negative equality bug RawValueHolder and RichTextValue introduced in 1.2.5.
-
-The problem is that the __ne__ implementation was wrong when the compared objects
-were not of the same type.
-
-When __eq__ is called with another type (e.g. None), the implementation
-returned NotImplemented.
-
-When __ne__ was called with another type, this lead to not NotImplemented, which is False
-althought the result should be true in this case.
-
-The fix is to change __ne__ to also return NotImplemented when the type is different, so
-that python can solve the problem.
+Add support for non-destructive editing of i18nmessageids
 
 Files changed:
-M docs/HISTORY.rst
-M plone/app/textfield/field.rst
-M plone/app/textfield/value.py
+M plone/schemaeditor/browser/field/configure.zcml
+M plone/schemaeditor/browser/field/edit.py
 
-diff --git a/docs/HISTORY.rst b/docs/HISTORY.rst
-index 42fcf38..5662b7c 100644
---- a/docs/HISTORY.rst
-+++ b/docs/HISTORY.rst
-@@ -4,7 +4,8 @@ Changelog
- 1.2.6 (unreleased)
- ------------------
+diff --git a/plone/schemaeditor/browser/field/configure.zcml b/plone/schemaeditor/browser/field/configure.zcml
+index f20e193..5af0eec 100644
+--- a/plone/schemaeditor/browser/field/configure.zcml
++++ b/plone/schemaeditor/browser/field/configure.zcml
+@@ -12,6 +12,8 @@
  
--- Nothing changed yet.
-+- Fix negative equality bug RawValueHolder and RichTextValue introduced in 1.2.5.
-+  [jone]
+     <adapter
+         factory=".edit.FieldTitleAdapter" />
++    <adapter
++        factory=".edit.FieldDataManager" />
+ 
+     <browser:page
+         name="order"
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index f6e411c..08c51ec 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -1,14 +1,17 @@
+ from Acquisition import aq_parent, aq_inner
+ 
+-from zope.interface import implements, Interface
++from zope.interface import implements, Interface, declarations
+ from zope.cachedescriptors.property import Lazy as lazy_property
+ from zope.component import adapts, getAdapters
+ from zope.event import notify
+ from zope.schema.interfaces import IField
+ from zope import schema
++from zope.i18nmessageid import Message
+ from zope.i18nmessageid import MessageFactory
+ 
+ from z3c.form import form, field, button
++from z3c.form.interfaces import IDataManager
++from z3c.form.datamanager import AttributeField
+ from plone.z3cform import layout
+ from plone.autoform.form import AutoExtensibleForm
+ 
+@@ -47,13 +50,56 @@ def _write_title(self, value):
+     title = property(_read_title, _write_title)
  
  
- 1.2.5 (2015-03-26)
-diff --git a/plone/app/textfield/field.rst b/plone/app/textfield/field.rst
-index aca6d51..4c24ada 100644
---- a/plone/app/textfield/field.rst
-+++ b/plone/app/textfield/field.rst
-@@ -127,6 +127,11 @@ and `encoding`:
-     >>> value != value2
-     False
- 
-+    >>> value == None
-+    False
-+    >>> value != None
-+    True
++class IFieldProxy(Interface):
++    """Marker interface for field being edited by schemaeditor"""
 +
++
++class FieldProxy(object):
++    implements(IFieldProxy)
++
++    def __init__(self, context):
++        self.__class__ = type(context.__class__.__name__,
++                              (self.__class__, context.__class__), {})
++        self.__dict__ = context.__dict__
++
++    @property
++    def __provides__(self):
++        return declarations.Provides(self.__class__)
++
++    __providedBy__ = __provides__
++
++
++class FieldDataManager(AttributeField):
++    implements(IDataManager)
++    adapts(IFieldProxy, IField)
++
++    def get(self):
++        value = super(FieldDataManager, self).get()
++        if isinstance(value, Message) and value.default:
++            return value.default
++        return value
++
++    def set(self, value):
++        old_value = super(FieldDataManager, self).get()
++        if isinstance(old_value, Message) and old_value.default:
++            value = Message(unicode(old_value),
++                            domain=old_value.domain,
++                            default=value,
++                            mapping=old_value.mapping)
++        elif isinstance(old_value, Message):
++            value = Message(value,
++                            domain=old_value.domain,
++                            mapping=old_value.mapping)
++        super(FieldDataManager, self).set(value)
++
++
+ class FieldEditForm(AutoExtensibleForm, form.EditForm):
+     implements(IFieldEditForm)
+     id = 'edit-field-form'
  
- Converting a value from unicode
- -------------------------------
-diff --git a/plone/app/textfield/value.py b/plone/app/textfield/value.py
-index 7a1ca70..0bf06bb 100644
---- a/plone/app/textfield/value.py
-+++ b/plone/app/textfield/value.py
-@@ -25,7 +25,10 @@ def __eq__(self, other):
-         return self.value == other.value
+     def __init__(self, context, request):
+         super(form.EditForm, self).__init__(context, request)
+-        self.field = context.field
++        self.field = FieldProxy(context.field)
  
-     def __ne__(self, other):
--        return not self.__eq__(other)
-+        equal = self.__eq__(other)
-+        if equal is NotImplemented:
-+            return NotImplemented
-+        return not equal
- 
- 
- class RichTextValue(object):
-@@ -113,4 +116,7 @@ def __eq__(self, other):
-         return vars(self) == vars(other)
- 
-     def __ne__(self, other):
--        return not self.__eq__(other)
-+        equal = self.__eq__(other)
-+        if equal is NotImplemented:
-+            return NotImplemented
-+        return not equal
+     def getContent(self):
+         return self.field
 
 
-Repository: plone.app.textfield
+Repository: plone.schemaeditor
 Branch: refs/heads/master
-Date: 2015-05-26T09:20:40-07:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/plone.app.textfield/commit/8a2ef4c34bb3f48fd49d55266b2b32a92a80b1eb
+Date: 2015-05-26T11:37:55+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/d926203b9b494be3aa7ebb3e9d4d05a71d1b8544
 
-Merge pull request #16 from plone/jone-value-equal
-
-Fix negative equality bug RawValueHolder and RichTextValue introduced in 1.2.5
+Fix to get the old value with query
 
 Files changed:
-M docs/HISTORY.rst
-M plone/app/textfield/field.rst
-M plone/app/textfield/value.py
+M plone/schemaeditor/browser/field/edit.py
 
-diff --git a/docs/HISTORY.rst b/docs/HISTORY.rst
-index 42fcf38..5662b7c 100644
---- a/docs/HISTORY.rst
-+++ b/docs/HISTORY.rst
-@@ -4,7 +4,8 @@ Changelog
- 1.2.6 (unreleased)
- ------------------
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index 08c51ec..a1546fa 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -80,7 +80,7 @@ def get(self):
+         return value
  
--- Nothing changed yet.
-+- Fix negative equality bug RawValueHolder and RichTextValue introduced in 1.2.5.
-+  [jone]
+     def set(self, value):
+-        old_value = super(FieldDataManager, self).get()
++        old_value = super(FieldDataManager, self).query()
+         if isinstance(old_value, Message) and old_value.default:
+             value = Message(unicode(old_value),
+                             domain=old_value.domain,
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:37:56+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/6c103596fe101bc52264544cf1862d9ae30c937f
+
+Fix to get the old value using parent class' get
+
+Files changed:
+M plone/schemaeditor/browser/field/edit.py
+
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index a1546fa..1782d4d 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -5,6 +5,7 @@
+ from zope.component import adapts, getAdapters
+ from zope.event import notify
+ from zope.schema.interfaces import IField
++from zope.security.interfaces import ForbiddenAttribute
+ from zope import schema
+ from zope.i18nmessageid import Message
+ from zope.i18nmessageid import MessageFactory
+@@ -80,7 +81,10 @@ def get(self):
+         return value
+ 
+     def set(self, value):
+-        old_value = super(FieldDataManager, self).query()
++        try:
++            old_value = super(FieldDataManager, self).get()
++        except (AttributeError, ForbiddenAttribute):
++            old_value = None
+         if isinstance(old_value, Message) and old_value.default:
+             value = Message(unicode(old_value),
+                             domain=old_value.domain,
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:37:56+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/47dd14f88192d04f10da158b3e16c5201c0e59e7
+
+Fix editor to always set only the default value on a Message value
+
+Files changed:
+M plone/schemaeditor/browser/field/edit.py
+
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index 1782d4d..b6687a4 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -85,15 +85,11 @@ def set(self, value):
+             old_value = super(FieldDataManager, self).get()
+         except (AttributeError, ForbiddenAttribute):
+             old_value = None
+-        if isinstance(old_value, Message) and old_value.default:
++        if isinstance(old_value, Message):
+             value = Message(unicode(old_value),
+                             domain=old_value.domain,
+                             default=value,
+                             mapping=old_value.mapping)
+-        elif isinstance(old_value, Message):
+-            value = Message(value,
+-                            domain=old_value.domain,
+-                            mapping=old_value.mapping)
+         super(FieldDataManager, self).set(value)
  
  
- 1.2.5 (2015-03-26)
-diff --git a/plone/app/textfield/field.rst b/plone/app/textfield/field.rst
-index aca6d51..4c24ada 100644
---- a/plone/app/textfield/field.rst
-+++ b/plone/app/textfield/field.rst
-@@ -127,6 +127,11 @@ and `encoding`:
-     >>> value != value2
-     False
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:37:56+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/bae8f9934db0e9eeef0f17fb72347ce0fe279dcd
+
+Add test
+
+Files changed:
+M plone/schemaeditor/tests/editing.txt
+
+diff --git a/plone/schemaeditor/tests/editing.txt b/plone/schemaeditor/tests/editing.txt
+index 1fad5a5..5d58dc2 100644
+--- a/plone/schemaeditor/tests/editing.txt
++++ b/plone/schemaeditor/tests/editing.txt
+@@ -98,6 +98,41 @@ Let's confirm that the new default value was correctly saved to the actual schem
+     >>> IDummySchema['favorite_color'].description
+     u'Enter your favorite color.'
  
-+    >>> value == None
-+    False
-+    >>> value != None
++If the schema is edited to have internationalized attributes::
++
++    >>> from zope.i18nmessageid import Message
++    >>> IDummySchema['favorite_color'].description = Message(
++    ...    'favorite_color', domain='plone.schemaeditor')
++
++Then editing the schema will preserve those values and only update their
++default values::
++
++    >>> browser.getLink(url='favorite_color').click()
++    >>> browser.url
++    'http://nohost/@@schemaeditor/favorite_color'
++    >>> "Edit Field 'favorite_color'" in browser.contents
 +    True
++    >>> browser.getControl('Description').value
++    'favorite_color'
++    >>> browser.getControl('Description').value = 'Enter your favorite color.'
++    >>> browser.getControl('Save').click()
++    [event: ObjectModifiedEvent on TextLine]
++    [event: SchemaModifiedEvent on DummySchemaContext]
++    >>> browser.url
++    'http://nohost/@@schemaeditor'
++
++Let's confirm that the message value was preserved and only its default
++value was set::
++
++    >>> type(IDummySchema['favorite_color'].description)
++    <type 'zope.i18nmessageid.message.Message'>
++    >>> IDummySchema['favorite_color'].description
++    u'favorite_color'
++    >>> IDummySchema['favorite_color'].description.domain
++    'plone.schemaeditor'
++    >>> IDummySchema['favorite_color'].description.default
++    u'Enter your favorite color.'
++
+ Let's go back and try to make an invalid change.  The form won't let us::
+ 
+     >>> browser.getLink(url='favorite_color').click()
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:38:15+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/173cbcbd679308617b017baed05269d7be45a7f6
+
+Update changelog
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b9611a3..9ea2de9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+   mockup jquery.event.(drag|drop).
+   [vangheem]
+ 
++- Add support for non-destructive editing of attributes with i18n
++  Message values
++  [datakurre]
 +
  
- Converting a value from unicode
- -------------------------------
-diff --git a/plone/app/textfield/value.py b/plone/app/textfield/value.py
-index 7a1ca70..0bf06bb 100644
---- a/plone/app/textfield/value.py
-+++ b/plone/app/textfield/value.py
-@@ -25,7 +25,10 @@ def __eq__(self, other):
-         return self.value == other.value
+ 2.0.4 (2015-05-13)
+ ------------------
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:38:15+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/6928f708c0cbd134e333afe4b2af41fe04e8efac
+
+Add test that IProxyField used on field edit form is not provided outside the edit form
+
+Files changed:
+M plone/schemaeditor/tests/editing.txt
+
+diff --git a/plone/schemaeditor/tests/editing.txt b/plone/schemaeditor/tests/editing.txt
+index 5d58dc2..e9e1870 100644
+--- a/plone/schemaeditor/tests/editing.txt
++++ b/plone/schemaeditor/tests/editing.txt
+@@ -133,6 +133,13 @@ value was set::
+     >>> IDummySchema['favorite_color'].description.default
+     u'Enter your favorite color.'
  
-     def __ne__(self, other):
--        return not self.__eq__(other)
-+        equal = self.__eq__(other)
-+        if equal is NotImplemented:
-+            return NotImplemented
-+        return not equal
++Let's also check that the the support for editing i18n Message values does not
++persist its marker interface::
++
++    >>> from plone.schemaeditor.browser.field.edit import IFieldProxy
++    >>> IFieldProxy.providedBy(IDummySchema['favorite_color'])
++    False
++
+ Let's go back and try to make an invalid change.  The form won't let us::
+ 
+     >>> browser.getLink(url='favorite_color').click()
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:38:15+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/602a498a35b51c50e1bccec7c536183519dbead0
+
+Fix language
+
+Files changed:
+M plone/schemaeditor/tests/editing.txt
+
+diff --git a/plone/schemaeditor/tests/editing.txt b/plone/schemaeditor/tests/editing.txt
+index e9e1870..e5931c7 100644
+--- a/plone/schemaeditor/tests/editing.txt
++++ b/plone/schemaeditor/tests/editing.txt
+@@ -133,7 +133,7 @@ value was set::
+     >>> IDummySchema['favorite_color'].description.default
+     u'Enter your favorite color.'
+ 
+-Let's also check that the the support for editing i18n Message values does not
++Let's also check that the support for editing i18n Message values does not
+ persist its marker interface::
+ 
+     >>> from plone.schemaeditor.browser.field.edit import IFieldProxy
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-26T11:38:15+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.schemaeditor/commit/e9ff6f6ff8a4191e0ac746cea2c429bf407df49e
+
+Fix issue where field's specification was not proxied properly
+
+Files changed:
+M plone/schemaeditor/browser/field/edit.py
+
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index b6687a4..c51914e 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -1,6 +1,8 @@
+ from Acquisition import aq_parent, aq_inner
+ 
+-from zope.interface import implements, Interface, declarations
++from zope.interface import implements, Interface
++from zope.interface.declarations import ObjectSpecificationDescriptor
++from zope.interface.declarations import getObjectSpecification
+ from zope.cachedescriptors.property import Lazy as lazy_property
+ from zope.component import adapts, getAdapters
+ from zope.event import notify
+@@ -55,20 +57,24 @@ class IFieldProxy(Interface):
+     """Marker interface for field being edited by schemaeditor"""
  
  
- class RichTextValue(object):
-@@ -113,4 +116,7 @@ def __eq__(self, other):
-         return vars(self) == vars(other)
++class FieldProxySpecification(ObjectSpecificationDescriptor):
++    def __get__(self, inst, cls=None):
++        if inst is None:
++            return getObjectSpecification(cls)
++        else:
++            return inst.__provides__
++
++
+ class FieldProxy(object):
+     implements(IFieldProxy)
  
-     def __ne__(self, other):
--        return not self.__eq__(other)
-+        equal = self.__eq__(other)
-+        if equal is NotImplemented:
-+            return NotImplemented
-+        return not equal
++    __providedBy__ = FieldProxySpecification()
++
+     def __init__(self, context):
+         self.__class__ = type(context.__class__.__name__,
+                               (self.__class__, context.__class__), {})
+         self.__dict__ = context.__dict__
+ 
+-    @property
+-    def __provides__(self):
+-        return declarations.Provides(self.__class__)
+-
+-    __providedBy__ = __provides__
+-
+ 
+ class FieldDataManager(AttributeField):
+     implements(IDataManager)
+
+
+Repository: plone.schemaeditor
+Branch: refs/heads/master
+Date: 2015-05-27T13:09:45+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.schemaeditor/commit/f37c14ca69fb86837b0dbbf8134cbd56de66a0f1
+
+Merge pull request #19 from plone/datakurre-messageid-support-master
+
+Fix schmaeditor to preserve i18n Message values
+
+Files changed:
+M CHANGES.rst
+M plone/schemaeditor/browser/field/configure.zcml
+M plone/schemaeditor/browser/field/edit.py
+M plone/schemaeditor/tests/editing.txt
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b9611a3..9ea2de9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+   mockup jquery.event.(drag|drop).
+   [vangheem]
+ 
++- Add support for non-destructive editing of attributes with i18n
++  Message values
++  [datakurre]
++
+ 
+ 2.0.4 (2015-05-13)
+ ------------------
+diff --git a/plone/schemaeditor/browser/field/configure.zcml b/plone/schemaeditor/browser/field/configure.zcml
+index f20e193..5af0eec 100644
+--- a/plone/schemaeditor/browser/field/configure.zcml
++++ b/plone/schemaeditor/browser/field/configure.zcml
+@@ -12,6 +12,8 @@
+ 
+     <adapter
+         factory=".edit.FieldTitleAdapter" />
++    <adapter
++        factory=".edit.FieldDataManager" />
+ 
+     <browser:page
+         name="order"
+diff --git a/plone/schemaeditor/browser/field/edit.py b/plone/schemaeditor/browser/field/edit.py
+index f6e411c..c51914e 100644
+--- a/plone/schemaeditor/browser/field/edit.py
++++ b/plone/schemaeditor/browser/field/edit.py
+@@ -1,14 +1,20 @@
+ from Acquisition import aq_parent, aq_inner
+ 
+ from zope.interface import implements, Interface
++from zope.interface.declarations import ObjectSpecificationDescriptor
++from zope.interface.declarations import getObjectSpecification
+ from zope.cachedescriptors.property import Lazy as lazy_property
+ from zope.component import adapts, getAdapters
+ from zope.event import notify
+ from zope.schema.interfaces import IField
++from zope.security.interfaces import ForbiddenAttribute
+ from zope import schema
++from zope.i18nmessageid import Message
+ from zope.i18nmessageid import MessageFactory
+ 
+ from z3c.form import form, field, button
++from z3c.form.interfaces import IDataManager
++from z3c.form.datamanager import AttributeField
+ from plone.z3cform import layout
+ from plone.autoform.form import AutoExtensibleForm
+ 
+@@ -47,13 +53,59 @@ def _write_title(self, value):
+     title = property(_read_title, _write_title)
+ 
+ 
++class IFieldProxy(Interface):
++    """Marker interface for field being edited by schemaeditor"""
++
++
++class FieldProxySpecification(ObjectSpecificationDescriptor):
++    def __get__(self, inst, cls=None):
++        if inst is None:
++            return getObjectSpecification(cls)
++        else:
++            return inst.__provides__
++
++
++class FieldProxy(object):
++    implements(IFieldProxy)
++
++    __providedBy__ = FieldProxySpecification()
++
++    def __init__(self, context):
++        self.__class__ = type(context.__class__.__name__,
++                              (self.__class__, context.__class__), {})
++        self.__dict__ = context.__dict__
++
++
++class FieldDataManager(AttributeField):
++    implements(IDataManager)
++    adapts(IFieldProxy, IField)
++
++    def get(self):
++        value = super(FieldDataManager, self).get()
++        if isinstance(value, Message) and value.default:
++            return value.default
++        return value
++
++    def set(self, value):
++        try:
++            old_value = super(FieldDataManager, self).get()
++        except (AttributeError, ForbiddenAttribute):
++            old_value = None
++        if isinstance(old_value, Message):
++            value = Message(unicode(old_value),
++                            domain=old_value.domain,
++                            default=value,
++                            mapping=old_value.mapping)
++        super(FieldDataManager, self).set(value)
++
++
+ class FieldEditForm(AutoExtensibleForm, form.EditForm):
+     implements(IFieldEditForm)
+     id = 'edit-field-form'
+ 
+     def __init__(self, context, request):
+         super(form.EditForm, self).__init__(context, request)
+-        self.field = context.field
++        self.field = FieldProxy(context.field)
+ 
+     def getContent(self):
+         return self.field
+diff --git a/plone/schemaeditor/tests/editing.txt b/plone/schemaeditor/tests/editing.txt
+index 1fad5a5..e5931c7 100644
+--- a/plone/schemaeditor/tests/editing.txt
++++ b/plone/schemaeditor/tests/editing.txt
+@@ -98,6 +98,48 @@ Let's confirm that the new default value was correctly saved to the actual schem
+     >>> IDummySchema['favorite_color'].description
+     u'Enter your favorite color.'
+ 
++If the schema is edited to have internationalized attributes::
++
++    >>> from zope.i18nmessageid import Message
++    >>> IDummySchema['favorite_color'].description = Message(
++    ...    'favorite_color', domain='plone.schemaeditor')
++
++Then editing the schema will preserve those values and only update their
++default values::
++
++    >>> browser.getLink(url='favorite_color').click()
++    >>> browser.url
++    'http://nohost/@@schemaeditor/favorite_color'
++    >>> "Edit Field 'favorite_color'" in browser.contents
++    True
++    >>> browser.getControl('Description').value
++    'favorite_color'
++    >>> browser.getControl('Description').value = 'Enter your favorite color.'
++    >>> browser.getControl('Save').click()
++    [event: ObjectModifiedEvent on TextLine]
++    [event: SchemaModifiedEvent on DummySchemaContext]
++    >>> browser.url
++    'http://nohost/@@schemaeditor'
++
++Let's confirm that the message value was preserved and only its default
++value was set::
++
++    >>> type(IDummySchema['favorite_color'].description)
++    <type 'zope.i18nmessageid.message.Message'>
++    >>> IDummySchema['favorite_color'].description
++    u'favorite_color'
++    >>> IDummySchema['favorite_color'].description.domain
++    'plone.schemaeditor'
++    >>> IDummySchema['favorite_color'].description.default
++    u'Enter your favorite color.'
++
++Let's also check that the support for editing i18n Message values does not
++persist its marker interface::
++
++    >>> from plone.schemaeditor.browser.field.edit import IFieldProxy
++    >>> IFieldProxy.providedBy(IDummySchema['favorite_color'])
++    False
++
+ Let's go back and try to make an invalid change.  The form won't let us::
+ 
+     >>> browser.getLink(url='favorite_color').click()
 
 
