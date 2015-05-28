@@ -1,120 +1,431 @@
-Repository: Products.CMFPlone
+Repository: plone.app.theming
 Branch: refs/heads/master
-Date: 2015-05-28T13:35:50-05:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/99d5952f4329504cc60120562f746f37b045880b
+Date: 2015-05-28T14:13:33-05:00
+Author: Sam Schwartz (obct537) <obct537@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/ff48546cdcaaef72adf92b0b8260547486d5b1c5
 
-fix bug where bundles would not get built properly with
-  compile-plone-resources script when multiple resources
-  were defined for a bundle
+Filesystem themes are now correctly overridden. TTW themes can no longer be overriden
+
+Files changed:
+M src/plone/app/theming/browser/controlpanel.pt
+M src/plone/app/theming/browser/controlpanel.py
+M src/plone/app/theming/browser/resources/controlpanel.css
+M src/plone/app/theming/utils.py
+
+diff --git a/src/plone/app/theming/browser/controlpanel.pt b/src/plone/app/theming/browser/controlpanel.pt
+index f9b8f12..7da2314 100644
+--- a/src/plone/app/theming/browser/controlpanel.pt
++++ b/src/plone/app/theming/browser/controlpanel.pt
+@@ -144,6 +144,7 @@
+ 
+                     <span class="themeEntryTitle">
+                         <span tal:replace="theme/title">Title</span>
++                        <span class="warning" tal:condition="theme/override">(this theme overrides a filesystem theme)</span>
+                         <span
+                             tal:condition="theme/selected"
+                             class="themeActive"
+diff --git a/src/plone/app/theming/browser/controlpanel.py b/src/plone/app/theming/browser/controlpanel.py
+index 75796cf..6546558 100644
+--- a/src/plone/app/theming/browser/controlpanel.py
++++ b/src/plone/app/theming/browser/controlpanel.py
+@@ -356,6 +356,17 @@ def update(self):
+                 return True
+ 
+             else:
++
++                if any(x.__name__ == title for x in getZODBThemes()):
++                    self.errors['title'] = _(u"Duplicate title")
++
++                    IStatusMessage(self.request).add(
++                        _(u"This title is already in use"),
++                        'error'
++                    )
++
++                    return True
++
+                 name = createThemeFromTemplate(title, description, baseOn)
+                 self._setup()
+ 
+@@ -408,10 +419,24 @@ def themeList(self):
+ 
+         portalUrl = getToolByName(self.context, 'portal_url')()
+ 
++        complete = [];
++
+         for theme in self.availableThemes:
+             if theme.__name__ == TEMPLATE_THEME:
+                 continue
+ 
++            #We've overwritten this theme, skip it
++            if complete.__contains__(theme.__name__):
++                continue
++
++            override = False
++
++            #Is there more than one theme with the same name?
++            if len( filter(lambda x: x.__name__ == theme.__name__, self.availableThemes) ) > 1:
++                #Then we make sure we're using the TTW version, not the filesystem version.
++                theme = filter(lambda x: x.__name__ == theme.__name__, self.zodbThemes)[0]
++                override = True
++
+             previewUrl = "++resource++plone.app.theming/defaultPreview.png"
+             if theme.preview:
+                 previewUrl = "++theme++{0:s}/{1:s}".format(
+@@ -423,11 +448,14 @@ def themeList(self):
+                 'name': theme.__name__,
+                 'title': theme.title,
+                 'description': theme.description,
++                'override': override,
+                 'editable': theme.__name__ in zodbNames,
+                 'preview': "{0}/{1}".format(portalUrl, previewUrl),
+                 'selected': theme.__name__ == self.selectedTheme,
+             })
+ 
++            complete.append(theme.__name__)
++
+         themes.sort(key=lambda x: x['title'])
+ 
+         return themes
+diff --git a/src/plone/app/theming/browser/resources/controlpanel.css b/src/plone/app/theming/browser/resources/controlpanel.css
+index 5c23aff..bf45d00 100644
+--- a/src/plone/app/theming/browser/resources/controlpanel.css
++++ b/src/plone/app/theming/browser/resources/controlpanel.css
+@@ -103,6 +103,12 @@ a.plone-btn {
+     font-weight: normal;
+ }
+ 
++.warning {
++    color: red;
++    display: block;
++    font-size: smaller;
++}
++
+ .plone-btn-group {
+     margin: 10px;
+ }
+diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
+index 4aae0d6..28d1acb 100644
+--- a/src/plone/app/theming/utils.py
++++ b/src/plone/app/theming/utils.py
+@@ -21,10 +21,10 @@
+ from plone.resource.interfaces import IResourceDirectory
+ from plone.resource.manifest import MANIFEST_FILENAME
+ from plone.resource.manifest import extractManifestFromZipFile
+-from plone.resource.manifest import getAllResources
+ from plone.resource.manifest import getManifest
+ from plone.resource.manifest import getZODBResources
+ from plone.resource.utils import cloneResourceDirectory
++from plone.resource.utils import iterDirectoriesOfType
+ from plone.resource.utils import queryResourceDirectory
+ from plone.subrequest import subrequest
+ from urlparse import urlsplit
+@@ -332,12 +332,37 @@ def getAvailableThemes():
+     """
+     resources = getAllResources(MANIFEST_FORMAT, filter=isValidThemeDirectory)
+     themes = []
+-    for name, manifest in resources.items():
+-        themes.append(getTheme(name, manifest))
++    for theme in resources:
++        themes.append(getTheme(theme['name'], theme))
+ 
+     themes.sort(key=lambda x: safe_unicode(x.title))
+     return themes
+ 
++def getAllResources(format, defaults=None, filter=None, manifestFilename=MANIFEST_FILENAME):
++
++    resources = []
++
++    for directory in iterDirectoriesOfType(format.resourceType, filter_duplicates=False):
++
++        if filter is not None and not filter(directory):
++            continue
++
++        name = directory.__name__
++
++        if directory.isFile(manifestFilename):
++
++            manifest = directory.openFile(manifestFilename)
++            try:
++                theme = getManifest(manifest, format, defaults)
++                theme['name'] = name
++                resources.append(theme)
++            except:
++                LOGGER.exception("Unable to read manifest for theme directory %s", name)
++            finally:
++                manifest.close()
++
++    return resources
++
+ 
+ def getThemeFromResourceDirectory(resourceDirectory):
+     """Return a Theme object from a resource directory
+@@ -506,9 +531,9 @@ def createThemeFromTemplate(title, description, baseOn='template'):
+     resources = getOrCreatePersistentResourceDirectory()
+     if themeName in resources:
+         idx = 1
+-        while '-'.join((themeName, idx)) in resources:
++        while '-'.join((themeName, str(idx))) in resources:
+             idx += 1
+-        themeName = '-'.join((themeName, idx))
++        themeName = '-'.join((themeName, str(idx)))
+ 
+     resources.makeDirectory(themeName)
+     target = resources[themeName]
+
+
+Repository: plone.app.theming
+Branch: refs/heads/master
+Date: 2015-05-28T14:26:19-05:00
+Author: Sam Schwartz (obct537) <obct537@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/19ee29f85e2461d1e0269881d817f0c831ab325e
+
+removed irrelevant theme renaming code
+
+Files changed:
+M src/plone/app/theming/utils.py
+
+diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
+index 28d1acb..ca5ca00 100644
+--- a/src/plone/app/theming/utils.py
++++ b/src/plone/app/theming/utils.py
+@@ -529,11 +529,6 @@ def createThemeFromTemplate(title, description, baseOn='template'):
+         themeName = themeName.encode('utf-8')
+ 
+     resources = getOrCreatePersistentResourceDirectory()
+-    if themeName in resources:
+-        idx = 1
+-        while '-'.join((themeName, str(idx))) in resources:
+-            idx += 1
+-        themeName = '-'.join((themeName, str(idx)))
+ 
+     resources.makeDirectory(themeName)
+     target = resources[themeName]
+
+
+Repository: plone.app.theming
+Branch: refs/heads/master
+Date: 2015-05-28T14:47:22-05:00
+Author: Sam Schwartz (obct537) <obct537@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/8e3c4bf2e66cf66cd8873f021c5441c713c2ab36
+
+changelog update
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/_scripts/_generate_gruntfile.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a751424..e6956ec 100644
+index dfff853..9a35e5c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -8,6 +8,11 @@ Changelog
- 5.0b3 (unreleased)
+@@ -1,6 +1,13 @@
+ Changelog
+ =========
+ 
++1.2.7 (2015-05-28)
++------------------
++
++- Now shows a warning when a built-in theme is being overriden.
++  TTW themes can no longer be overriden
++  [obct537]
++
+ 1.2.6 (unreleased)
  ------------------
  
-+- fix bug where bundles would not get built properly with
-+  compile-plone-resources script when multiple resources
-+  were defined for a bundle
-+  [vangheem]
+
+
+Repository: plone.app.theming
+Branch: refs/heads/master
+Date: 2015-05-28T14:50:05-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/e9d1b239178c5dc7d8ec51120dc166d72ef10e5a
+
+Merge pull request #54 from plone/overrides
+
+Fixed theme overrides
+
+Files changed:
+M CHANGES.rst
+M src/plone/app/theming/browser/controlpanel.pt
+M src/plone/app/theming/browser/controlpanel.py
+M src/plone/app/theming/browser/resources/controlpanel.css
+M src/plone/app/theming/utils.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index dfff853..9a35e5c 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -1,6 +1,13 @@
+ Changelog
+ =========
+ 
++1.2.7 (2015-05-28)
++------------------
 +
- - do not require css to be defined for non-compilable bundles
-   [vangheem]
- 
-diff --git a/Products/CMFPlone/_scripts/_generate_gruntfile.py b/Products/CMFPlone/_scripts/_generate_gruntfile.py
-index 1741f88..e9950e2 100644
---- a/Products/CMFPlone/_scripts/_generate_gruntfile.py
-+++ b/Products/CMFPlone/_scripts/_generate_gruntfile.py
-@@ -96,11 +96,11 @@
-         "{bkey}": {{
-           options: {{
-             sourceMap: true,
--            sourceMapName: '{src}.min.js.map',
-+            sourceMapName: '{destination}.map',
-             sourceMapIncludeSources: false
-           }},
-           files: {{
--            '{src}.min.js': ['{src}.js']
-+            '{destination}': {files}
-           }}
-         }},
- """
-@@ -315,35 +315,28 @@ def resource_to_dir(resource, file_type='.js'):
- 
- for bkey, bundle in bundles.items():
-     if bundle.compile:
-+        less_files = []
-+        js_files = []
-+        js_resources = []
-         for resource in bundle.resources:
-             res_obj = resources[resource]
--            less_files = []
-             if res_obj.js:
-                 js_object = portal.unrestrictedTraverse(res_obj.js, None)
-                 if js_object:
-                     main_js_path = resource_to_dir(js_object)
--                    target_dir = '/'.join(bundle.jscompilation.split('/')[:-1])
--                    target_name = bundle.jscompilation.split('/')[-1]
--                    if '.min.js' in target_name:
--                        # minified version in new resource registry
--                        target_name = target_name.rpartition('.min.js')[0]
--                    else:
--                        target_name = target_name.rpartition('.js')[0]
--                    target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))  # noqa
-+                    target_path = resource_to_dir(portal.unrestrictedTraverse(res_obj.js))
-+                    target_path = '/'.join(target_path.split('/')[:-1])
-                     watch_files.append(main_js_path)
-                     rc = requirejs_config.format(
-                         bkey=resource,
-                         paths=json.dumps(paths),
-                         shims=json.dumps(shims),
-                         name=main_js_path,
--                        out=target_path + '/' + target_name + '.js'
-+                        out=target_path + '/' + resource + '-compiled.js'
-                     )
-                     require_configs += rc
--                    uc = uglify_config.format(
--                        bkey=resource,
--                        src=target_path + '/' + target_name  # noqa
--                    )
--                    uglify_configs += uc
-+                    js_files.append(target_path + '/' + resource + '-compiled.js')
-+                    js_resources.append(resource)
- 
-             if res_obj.css:
-                 for css_file in res_obj.css:
-@@ -388,10 +381,23 @@ def resource_to_dir(resource, file_type='.js'):
-             less_paths=json.dumps(less_paths),
-             sourcemap_url=sourceMap_url,
-             base_path=os.getcwd()))
-+        target_dir = '/'.join(bundle.jscompilation.split('/')[:-1])
-+        target_name = bundle.jscompilation.split('/')[-1]
-+        target_path = resource_to_dir(portal.unrestrictedTraverse(target_dir))
-+        uc = uglify_config.format(
-+            bkey=bkey,
-+            destination=target_path + '/' + target_name,
-+            files=json.dumps(js_files)
-+        )
-+        uglify_configs += uc
++- Now shows a warning when a built-in theme is being overriden.
++  TTW themes can no longer be overriden
++  [obct537]
 +
-+        requirejs_tasks = ''
-+        if js_resources:
-+            requirejs_tasks = ','.join(['"requirejs:' + r + '"' for r in js_resources]) + ','
-         bundle_grunt_tasks += (
-             "\ngrunt.registerTask('compile-%s',"
--            "['requirejs:%s', 'less:%s', 'sed', 'uglify:%s']);"
--        ) % (bkey, bkey, bkey, bkey)
-+            "[%s 'less:%s', 'sed', 'uglify:%s']);"
-+        ) % (bkey, requirejs_tasks, bkey, bkey)
+ 1.2.6 (unreleased)
+ ------------------
  
+diff --git a/src/plone/app/theming/browser/controlpanel.pt b/src/plone/app/theming/browser/controlpanel.pt
+index f9b8f12..7da2314 100644
+--- a/src/plone/app/theming/browser/controlpanel.pt
++++ b/src/plone/app/theming/browser/controlpanel.pt
+@@ -144,6 +144,7 @@
  
- gruntfile = open('Gruntfile.js', 'w')
+                     <span class="themeEntryTitle">
+                         <span tal:replace="theme/title">Title</span>
++                        <span class="warning" tal:condition="theme/override">(this theme overrides a filesystem theme)</span>
+                         <span
+                             tal:condition="theme/selected"
+                             class="themeActive"
+diff --git a/src/plone/app/theming/browser/controlpanel.py b/src/plone/app/theming/browser/controlpanel.py
+index 75796cf..6546558 100644
+--- a/src/plone/app/theming/browser/controlpanel.py
++++ b/src/plone/app/theming/browser/controlpanel.py
+@@ -356,6 +356,17 @@ def update(self):
+                 return True
+ 
+             else:
++
++                if any(x.__name__ == title for x in getZODBThemes()):
++                    self.errors['title'] = _(u"Duplicate title")
++
++                    IStatusMessage(self.request).add(
++                        _(u"This title is already in use"),
++                        'error'
++                    )
++
++                    return True
++
+                 name = createThemeFromTemplate(title, description, baseOn)
+                 self._setup()
+ 
+@@ -408,10 +419,24 @@ def themeList(self):
+ 
+         portalUrl = getToolByName(self.context, 'portal_url')()
+ 
++        complete = [];
++
+         for theme in self.availableThemes:
+             if theme.__name__ == TEMPLATE_THEME:
+                 continue
+ 
++            #We've overwritten this theme, skip it
++            if complete.__contains__(theme.__name__):
++                continue
++
++            override = False
++
++            #Is there more than one theme with the same name?
++            if len( filter(lambda x: x.__name__ == theme.__name__, self.availableThemes) ) > 1:
++                #Then we make sure we're using the TTW version, not the filesystem version.
++                theme = filter(lambda x: x.__name__ == theme.__name__, self.zodbThemes)[0]
++                override = True
++
+             previewUrl = "++resource++plone.app.theming/defaultPreview.png"
+             if theme.preview:
+                 previewUrl = "++theme++{0:s}/{1:s}".format(
+@@ -423,11 +448,14 @@ def themeList(self):
+                 'name': theme.__name__,
+                 'title': theme.title,
+                 'description': theme.description,
++                'override': override,
+                 'editable': theme.__name__ in zodbNames,
+                 'preview': "{0}/{1}".format(portalUrl, previewUrl),
+                 'selected': theme.__name__ == self.selectedTheme,
+             })
+ 
++            complete.append(theme.__name__)
++
+         themes.sort(key=lambda x: x['title'])
+ 
+         return themes
+diff --git a/src/plone/app/theming/browser/resources/controlpanel.css b/src/plone/app/theming/browser/resources/controlpanel.css
+index 5c23aff..bf45d00 100644
+--- a/src/plone/app/theming/browser/resources/controlpanel.css
++++ b/src/plone/app/theming/browser/resources/controlpanel.css
+@@ -103,6 +103,12 @@ a.plone-btn {
+     font-weight: normal;
+ }
+ 
++.warning {
++    color: red;
++    display: block;
++    font-size: smaller;
++}
++
+ .plone-btn-group {
+     margin: 10px;
+ }
+diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
+index 4aae0d6..ca5ca00 100644
+--- a/src/plone/app/theming/utils.py
++++ b/src/plone/app/theming/utils.py
+@@ -21,10 +21,10 @@
+ from plone.resource.interfaces import IResourceDirectory
+ from plone.resource.manifest import MANIFEST_FILENAME
+ from plone.resource.manifest import extractManifestFromZipFile
+-from plone.resource.manifest import getAllResources
+ from plone.resource.manifest import getManifest
+ from plone.resource.manifest import getZODBResources
+ from plone.resource.utils import cloneResourceDirectory
++from plone.resource.utils import iterDirectoriesOfType
+ from plone.resource.utils import queryResourceDirectory
+ from plone.subrequest import subrequest
+ from urlparse import urlsplit
+@@ -332,12 +332,37 @@ def getAvailableThemes():
+     """
+     resources = getAllResources(MANIFEST_FORMAT, filter=isValidThemeDirectory)
+     themes = []
+-    for name, manifest in resources.items():
+-        themes.append(getTheme(name, manifest))
++    for theme in resources:
++        themes.append(getTheme(theme['name'], theme))
+ 
+     themes.sort(key=lambda x: safe_unicode(x.title))
+     return themes
+ 
++def getAllResources(format, defaults=None, filter=None, manifestFilename=MANIFEST_FILENAME):
++
++    resources = []
++
++    for directory in iterDirectoriesOfType(format.resourceType, filter_duplicates=False):
++
++        if filter is not None and not filter(directory):
++            continue
++
++        name = directory.__name__
++
++        if directory.isFile(manifestFilename):
++
++            manifest = directory.openFile(manifestFilename)
++            try:
++                theme = getManifest(manifest, format, defaults)
++                theme['name'] = name
++                resources.append(theme)
++            except:
++                LOGGER.exception("Unable to read manifest for theme directory %s", name)
++            finally:
++                manifest.close()
++
++    return resources
++
+ 
+ def getThemeFromResourceDirectory(resourceDirectory):
+     """Return a Theme object from a resource directory
+@@ -504,11 +529,6 @@ def createThemeFromTemplate(title, description, baseOn='template'):
+         themeName = themeName.encode('utf-8')
+ 
+     resources = getOrCreatePersistentResourceDirectory()
+-    if themeName in resources:
+-        idx = 1
+-        while '-'.join((themeName, idx)) in resources:
+-            idx += 1
+-        themeName = '-'.join((themeName, idx))
+ 
+     resources.makeDirectory(themeName)
+     target = resources[themeName]
 
 
