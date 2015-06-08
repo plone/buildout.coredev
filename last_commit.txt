@@ -1,68 +1,150 @@
 Repository: plone.app.layout
 Branch: refs/heads/master
-Date: 2015-06-07T22:18:01-05:00
+Date: 2015-06-07T22:51:45-05:00
 Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/831a505bdcf73d3c54eb23f619437cc25c33fc7a
+Commit: https://github.com/plone/plone.app.layout/commit/5d0b85635ccdb759abc45bb1c0fc36419dd4ce19
 
-reuse getSiteLogo from CMFPlone.utils
+by default, show site logo in social settings
 
 Files changed:
+M CHANGES.rst
 M plone/app/layout/viewlets/common.py
-M setup.py
+M plone/app/layout/viewlets/social.py
+M plone/app/layout/viewlets/tests/test_social.py
 
+diff --git a/CHANGES.rst b/CHANGES.rst
+index d93a68e..f530f9c 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 2.5.8 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- by default, show site logo in social settings
++  [vangheem]
+ 
+ 
+ 2.5.7 (2015-06-05)
 diff --git a/plone/app/layout/viewlets/common.py b/plone/app/layout/viewlets/common.py
-index 0e58d3f..663d321 100644
+index 663d321..bb3b100 100644
 --- a/plone/app/layout/viewlets/common.py
 +++ b/plone/app/layout/viewlets/common.py
-@@ -18,15 +18,13 @@
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import ISiteSchema
- from Products.CMFPlone.interfaces import ISearchSchema
--from Products.CMFPlone.utils import safe_unicode
-+from Products.CMFPlone.utils import safe_unicode, getSiteLogo
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
- from plone.app.layout.globals.interfaces import IViewView
- from plone.protect.utils import addTokenToUrl
--from plone.formwidget.namedfile.converter import b64decode_file
--from plone.namedfile.file import NamedImage
- 
- 
- class ViewletBase(BrowserView):
-@@ -193,18 +191,7 @@ def update(self):
+@@ -191,6 +191,9 @@ def update(self):
          # TODO: should this be changed to settings.site_title?
          self.navigation_root_title = self.portal_state.navigation_root_title()
  
--        registry = getUtility(IRegistry)
--        settings = registry.forInterface(ISiteSchema, prefix="plone")
--        self.logo_title = settings.site_title
++        registry = getUtility(IRegistry)
++        settings = registry.forInterface(ISiteSchema, prefix="plone")
++        self.logo_title = settings.site_title
+         self.img_src = getSiteLogo(self.portal_state.portal())
+ 
+ 
+diff --git a/plone/app/layout/viewlets/social.py b/plone/app/layout/viewlets/social.py
+index ea0ebcf..60f1b01 100644
+--- a/plone/app/layout/viewlets/social.py
++++ b/plone/app/layout/viewlets/social.py
+@@ -1,11 +1,15 @@
+-from Products.CMFPlone.browser.syndication.adapters import FolderFeed
+-from zope.component import queryMultiAdapter
+ from Products.CMFPlone.interfaces import ISocialMediaSchema
+ from Products.CMFPlone.interfaces.syndication import IFeedItem
+-from plone.app.layout.viewlets.common import TitleViewlet
++from Products.CMFPlone.utils import getSiteLogo
++from Products.CMFPlone.browser.syndication.adapters import FolderFeed, BaseItem
++
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-from zope.component import getUtility
++
++from plone.app.layout.viewlets.common import TitleViewlet
+ from plone.registry.interfaces import IRegistry
++
++from zope.component import queryMultiAdapter
++from zope.component import getUtility
+ from zope.component.hooks import getSite
+ 
+ 
+@@ -43,11 +47,11 @@ def update(self):
+ 
+         # reuse syndication since that packages the data
+         # the way we'd prefer likely
+-        item = queryMultiAdapter((self.context, FolderFeed(getSite())),
+-                                 IFeedItem, default=None)
++        site = getSite()
++        feed = FolderFeed(site)
++        item = queryMultiAdapter((self.context, feed), IFeedItem, default=None)
+         if item is None:
+-            # this should not happen but we can be careful
+-            return
++            item = BaseItem(self.context, feed)
+ 
+         self.tags.extend([
+             dict(name="twitter:description", content=item.description),
+@@ -57,8 +61,10 @@ def update(self):
+             dict(property="og:url", content=item.link),
+         ])
+ 
++        found_image = False
+         if item.has_enclosure and item.file_length > 0:
+             if item.file_type.startswith('image'):
++                found_image = True
+                 self.tags.extend([
+                     dict(name="twitter:image", content=item.file_url),
+                     dict(property="og:image", content=item.file_url),
+@@ -76,3 +82,12 @@ def update(self):
+                     dict(property="og:audio", content=item.file_url),
+                     dict(property="og:audio:type", content=item.file_type)
+                 ])
++
++        if not found_image:
++            url = getSiteLogo()
++            self.tags.extend([
++                dict(name="twitter:image", content=url),
++                dict(property="og:image", content=url),
++                dict(itemprop="image", content=url),
++                dict(property="og:image:type", content=url)
++            ])
+\ No newline at end of file
+diff --git a/plone/app/layout/viewlets/tests/test_social.py b/plone/app/layout/viewlets/tests/test_social.py
+index 1e2ef9a..5fb9254 100644
+--- a/plone/app/layout/viewlets/tests/test_social.py
++++ b/plone/app/layout/viewlets/tests/test_social.py
+@@ -5,14 +5,6 @@
+ from plone.registry.interfaces import IRegistry
+ from zope.component import getUtility
+ 
+-from plone.namedfile import NamedBlobFile
 -
--        if getattr(settings, 'site_logo', False):
--            filename, data = b64decode_file(settings.site_logo)
--            data = NamedImage(data=data, filename=filename)
--            self.img_src = '{}/@@site-logo/{}'.format(
--                self.navigation_root_url, filename)
--        else:
--            self.img_src = '%s/logo.png' % (
--                self.navigation_root_url)
-+        self.img_src = getSiteLogo(self.portal_state.portal())
+-
+-# Red pixel with filename pixel.png
+-IMAGE_BASE64 = 'filenameb64:cGl4ZWwucG5n;datab64:iVBORw0KGgoAAAANSUhEUgAA'\
+-               'AAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAMBAQAY3Y2wAAAAA'\
+-               'ElFTkSuQmCC'
+-
  
+ class TestSocialViewlet(ViewletsTestCase):
+     """Test the content views viewlet.
+@@ -23,9 +15,6 @@ def afterSetUp(self):
+         self.folder.invokeFactory('News Item', 'news-item',
+                                   title='News Item')
+         self.news = self.folder['news-item']
+-        self.news.lead = NamedBlobFile(
+-            data=IMAGE_BASE64, contentType='image/png',
+-            filename=u'test.png')
  
- class GlobalSectionsViewlet(ViewletBase):
-diff --git a/setup.py b/setup.py
-index cafc4d4..c75db11 100644
---- a/setup.py
-+++ b/setup.py
-@@ -39,7 +39,7 @@
-           'Products.CMFCore',
-           'Products.CMFDynamicViewFTI',
-           'Products.CMFEditions >=1.2.2',
--          'Products.CMFPlone >=4.3',  # XXX: should be 5.0
-+          'Products.CMFPlone >=5.0b3.dev0',
-           'setuptools',
-           'zope.component',
-           'zope.deprecation',
+     def tagFound(self, viewlet, attr, name, value):
+         for meta in viewlet.tags:
+@@ -73,3 +62,10 @@ def testIncludeSocialSettings(self):
+         self.assertTrue(
+             self.tagFound(viewlet, 'property',
+                           'og:article:publisher', 'https://www.facebook.com/foobar'))
++
++    def testLogo(self):
++        viewlet = SocialTagsViewlet(self.news, self.app.REQUEST, None)
++        viewlet.update()
++        self.assertTrue(
++            self.tagFound(viewlet, 'property',
++                          'og:image:type', 'http://nohost/plone/logo.png'))
+\ No newline at end of file
 
 
