@@ -1,44 +1,231 @@
-Repository: plone.app.upgrade
+Repository: plone.cachepurging
 Branch: refs/heads/master
-Date: 2015-06-08T00:32:16-05:00
+Date: 2015-06-09T09:30:13-05:00
 Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/bd704bf7388fcb29a3183f5d7e4d97b0b3a4bcb7
+Commit: https://github.com/plone/plone.cachepurging/commit/0d6c7f8aad4323b7dd6d477b847329a0bb2263c8
 
-add social media control panel upgrade
+correctly be able to purge empty path(root of site). Previously, /
+  was always appended to url so one potential path of the resource
+  in varnish would never get purged--sometimes the most important, the homepage.
 
 Files changed:
-A plone/app/upgrade/v50/profiles/to_beta3/controlpanel.xml
-M CHANGES.rst
+M CHANGES.txt
+M plone/cachepurging/rewrite.py
+M plone/cachepurging/tests/test_rewrite.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 7e4f18b..c30a7c9 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,6 +4,9 @@ Changelog
- 1.3.11 (unreleased)
- -------------------
+diff --git a/CHANGES.txt b/CHANGES.txt
+index ffb9aab..f6b5475 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,10 @@ Changelog
+ 1.0.8 (unreleased)
+ ------------------
  
-+- add social media control panel upgrade
+-- Nothing changed yet.
++- correctly be able to purge empty path(root of site). Previously, /
++  was always appended to url so one potential path of the resource
++  in varnish would never get purged--sometimes the most important, the homepage.
 +  [vangheem]
-+
- - upgrades for plone 5 tinymce configuration and social tags config
-   [vangheem]
  
-diff --git a/plone/app/upgrade/v50/profiles/to_beta3/controlpanel.xml b/plone/app/upgrade/v50/profiles/to_beta3/controlpanel.xml
-new file mode 100644
-index 0000000..540ff7d
---- /dev/null
-+++ b/plone/app/upgrade/v50/profiles/to_beta3/controlpanel.xml
-@@ -0,0 +1,10 @@
-+<?xml version="1.0"?>
-+<object name="portal_controlpanel" meta_type="Plone Control Panel Tool"
-+  i18n:domain="plone" xmlns:i18n="http://xml.zope.org/namespaces/i18n">
-+ <configlet title="Social Media" action_id="socialmedia" appId="Plone"
-+    category="Plone" condition_expr=""
-+    url_expr="string:${portal_url}/@@social-controlpanel" visible="True"
-+    i18n:attributes="title">
-+  <permission>Plone Site Setup: Site</permission>
-+ </configlet>
-+</object>
+ 
+ 1.0.7 (2014-09-11)
+diff --git a/plone/cachepurging/rewrite.py b/plone/cachepurging/rewrite.py
+index e138b0b..f2360bc 100644
+--- a/plone/cachepurging/rewrite.py
++++ b/plone/cachepurging/rewrite.py
+@@ -44,12 +44,11 @@ def __call__(self, path):
+ 
+         # Make sure request is compliant
+         if (not virtualUrlParts
+-         or not virtualRootPhysicalPath
+-         or not isinstance(virtualUrlParts, (list,tuple,))
+-         or not isinstance(virtualRootPhysicalPath, (list,tuple,))
+-         or len(virtualUrlParts) < 2
+-         or len(virtualUrlParts) > 3
+-        ):
++                or not virtualRootPhysicalPath
++                or not isinstance(virtualUrlParts, (list, tuple,))
++                or not isinstance(virtualRootPhysicalPath, (list, tuple,))
++                or len(virtualUrlParts) < 2
++                or len(virtualUrlParts) > 3):
+             return [path]
+ 
+         domains = settings.domains
+@@ -67,19 +66,18 @@ def __call__(self, path):
+             pathPrefix = '/' + '/'.join(['_vh_%s' % p for p in pathPrefix.split('/')])
+ 
+         # Path, e.g. /front-page
+-        if not path.startswith('/'):
++        if len(path) > 0 and not path.startswith('/'):
+             path = '/' + path
+ 
+         paths = []
+         for domain in domains:
+             scheme, host = urlparse.urlparse(domain)[:2]
+             paths.append(
+-                '/VirtualHostBase/%(scheme)s/%(host)s%(root)s/VirtualHostRoot%(prefix)s%(path)s' %
+-                    {'scheme':  scheme,
+-                     'host':    host,
+-                     'root':    virtualRoot,
+-                     'prefix':  pathPrefix,
+-                     'path':    path,
+-                    }
++                '/VirtualHostBase/%(scheme)s/%(host)s%(root)s/VirtualHostRoot%(prefix)s%(path)s' % {
++                    'scheme':  scheme,
++                    'host':    host,
++                    'root':    virtualRoot,
++                    'prefix':  pathPrefix,
++                    'path':    path}
+                 )
+         return paths
+diff --git a/plone/cachepurging/tests/test_rewrite.py b/plone/cachepurging/tests/test_rewrite.py
+index 57682be..1dff885 100644
+--- a/plone/cachepurging/tests/test_rewrite.py
++++ b/plone/cachepurging/tests/test_rewrite.py
+@@ -25,17 +25,20 @@ def setUp(self):
+     def tearDown(self):
+         zope.component.testing.tearDown()
+ 
+-    def _prepareVHMRequest(self, path, domain='example.com', root='/plone', prefix='', protocol='http'):
++    def _prepareVHMRequest(self, path, domain='example.com', root='/plone', prefix='',
++                           protocol='http'):
+         translatedPrefix = '/'.join(['_vh_%s' % p for p in prefix.split('/')])
+ 
+         self.request['URL'] = '%s://%s%s%s' % (protocol, domain, prefix, path,)
+         self.request['ACTUAL_URL'] = '%s://%s%s%s' % (protocol, domain, prefix, path,)
+         self.request['SERVER_URL'] = '%s://%s' % (protocol, domain,)
+-        self.request['PATH_INFO'] = '/VirtualHostBase/%s/%s:80%s/VirtualHostRoot%s%s' % (protocol, domain, root, translatedPrefix, path,)
++        self.request['PATH_INFO'] = '/VirtualHostBase/%s/%s:80%s/VirtualHostRoot%s%s' % (
++            protocol, domain, root, translatedPrefix, path,)
+         self.request['VIRTUAL_URL'] = '%s://%s%s' % (protocol, domain, path)
+ 
+         if prefix:
+-            self.request['VIRTUAL_URL_PARTS'] = ('%s://%s' % (protocol, domain,), prefix[1:], path[1:])
++            self.request['VIRTUAL_URL_PARTS'] = (
++                '%s://%s' % (protocol, domain,), prefix[1:], path[1:])
+         else:
+             self.request['VIRTUAL_URL_PARTS'] = ('%s://%s' % (protocol, domain,), path[1:])
+ 
+@@ -134,7 +137,7 @@ def test_standard_vhm(self):
+ 
+         self._prepareVHMRequest('/foo')
+         self.assertEqual(['/VirtualHostBase/http/example.com/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                         self.rewriter('/foo'))
+ 
+     def test_virtual_root_is_app_root(self):
+         registry = Registry()
+@@ -146,7 +149,7 @@ def test_virtual_root_is_app_root(self):
+         self._prepareVHMRequest('/foo', root='/')
+ 
+         self.assertEqual(['/VirtualHostBase/http/example.com/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                         self.rewriter('/foo'))
+ 
+     def test_virtual_root_is_deep(self):
+         registry = Registry()
+@@ -158,7 +161,7 @@ def test_virtual_root_is_deep(self):
+         self._prepareVHMRequest('/foo', root='/bar/plone')
+ 
+         self.assertEqual(['/VirtualHostBase/http/example.com/bar/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                         self.rewriter('/foo'))
+ 
+     def test_inside_out_hosting(self):
+         registry = Registry()
+@@ -169,8 +172,22 @@ def test_inside_out_hosting(self):
+ 
+         self._prepareVHMRequest('/foo', root='/bar/plone', prefix='/foo/bar')
+ 
+-        self.assertEqual(['/VirtualHostBase/http/example.com/bar/plone/VirtualHostRoot/_vh_foo/_vh_bar/foo'],
+-                          self.rewriter('/foo'))
++        self.assertEqual(
++            ['/VirtualHostBase/http/example.com/bar/plone/VirtualHostRoot/_vh_foo/_vh_bar/foo'],
++            self.rewriter('/foo'))
++
++    def test_inside_out_hosting_root_empty_path(self):
++        registry = Registry()
++        provideUtility(registry, IRegistry)
++        registry.registerInterface(ICachePurgingSettings)
++        settings = registry.forInterface(ICachePurgingSettings)
++        settings.virtualHosting = True
++
++        self._prepareVHMRequest('/', root='/plone', prefix='/plone')
++
++        self.assertEqual(
++            ['/VirtualHostBase/http/example.com/plone/VirtualHostRoot/_vh_plone'],
++            self.rewriter(''))
+ 
+     def test_virtual_path_is_root(self):
+         registry = Registry()
+@@ -182,7 +199,7 @@ def test_virtual_path_is_root(self):
+         self._prepareVHMRequest('/', root='/plone')
+ 
+         self.assertEqual(['/VirtualHostBase/http/example.com/plone/VirtualHostRoot/'],
+-                          self.rewriter('/'))
++                         self.rewriter('/'))
+ 
+     def test_virtual_path_is_empty(self):
+         registry = Registry()
+@@ -193,8 +210,8 @@ def test_virtual_path_is_empty(self):
+ 
+         self._prepareVHMRequest('', root='/plone')
+ 
+-        self.assertEqual(['/VirtualHostBase/http/example.com/plone/VirtualHostRoot/'],
+-                          self.rewriter(''))
++        self.assertEqual(['/VirtualHostBase/http/example.com/plone/VirtualHostRoot'],
++                         self.rewriter(''))
+ 
+     def test_virtual_path_is_deep(self):
+         registry = Registry()
+@@ -206,7 +223,7 @@ def test_virtual_path_is_deep(self):
+         self._prepareVHMRequest('/foo/bar', root='/plone')
+ 
+         self.assertEqual(['/VirtualHostBase/http/example.com/plone/VirtualHostRoot/foo/bar'],
+-                          self.rewriter('/foo/bar'))
++                         self.rewriter('/foo/bar'))
+ 
+     def test_nonstandard_port(self):
+         registry = Registry()
+@@ -217,7 +234,7 @@ def test_nonstandard_port(self):
+ 
+         self._prepareVHMRequest('/foo', domain='example.com:81')
+         self.assertEqual(['/VirtualHostBase/http/example.com:81/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                         self.rewriter('/foo'))
+ 
+     def test_https(self):
+         registry = Registry()
+@@ -228,7 +245,7 @@ def test_https(self):
+ 
+         self._prepareVHMRequest('/foo', domain='example.com:81', protocol='https')
+         self.assertEqual(['/VirtualHostBase/https/example.com:81/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                         self.rewriter('/foo'))
+ 
+     def test_domains(self):
+         registry = Registry()
+@@ -240,8 +257,8 @@ def test_domains(self):
+ 
+         self._prepareVHMRequest('/foo', domain='example.com:81', protocol='https')
+         self.assertEqual(['/VirtualHostBase/http/example.org:81/plone/VirtualHostRoot/foo',
+-                           '/VirtualHostBase/https/example.com:82/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                          '/VirtualHostBase/https/example.com:82/plone/VirtualHostRoot/foo'],
++                         self.rewriter('/foo'))
+ 
+     def test_domains_w_different_path_in_request(self):
+         registry = Registry()
+@@ -253,8 +270,8 @@ def test_domains_w_different_path_in_request(self):
+ 
+         self._prepareVHMRequest('/bar', domain='example.com:81', protocol='https')
+         self.assertEqual(['/VirtualHostBase/http/example.org:81/plone/VirtualHostRoot/foo',
+-                           '/VirtualHostBase/https/example.com:82/plone/VirtualHostRoot/foo'],
+-                          self.rewriter('/foo'))
++                          '/VirtualHostBase/https/example.com:82/plone/VirtualHostRoot/foo'],
++                         self.rewriter('/foo'))
+ 
+ def test_suite():
+     return unittest.defaultTestLoader.loadTestsFromName(__name__)
 
 
