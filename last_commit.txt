@@ -1,39 +1,1566 @@
-Repository: plone.namedfile
+Repository: plone.app.caching
 Branch: refs/heads/master
-Date: 2015-06-11T18:25:08+02:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.namedfile/commit/217470c2f5e865904cdcecbf6a666c2818021ca8
+Date: 2015-06-11T09:40:38-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/9d008b81a544c8f20325b52801ceb5462facef44
 
-Don't fail, when accessing the tag method of the @@images view, if scale returns None.
+remove gzip option
 
 Files changed:
 M CHANGES.rst
-M plone/namedfile/scaling.py
+M docs/etags.rst
+M plone/app/caching/browser/controlpanel.pt
+M plone/app/caching/browser/controlpanel.py
+M plone/app/caching/configure.zcml
+M plone/app/caching/interfaces.py
+M plone/app/caching/operations/configure.zcml
+M plone/app/caching/operations/etags.py
+M plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+M plone/app/caching/profiles/with-caching-proxy/registry.xml
+M plone/app/caching/profiles/without-caching-proxy/registry.xml
+M plone/app/caching/tests/test_etags.py
+M plone/app/caching/tests/test_integration.py
+M plone/app/caching/tests/test_profile_with_caching_proxy.py
+M plone/app/caching/tests/test_profile_without_caching_proxy.py
+D plone/app/caching/gzip.py
+D plone/app/caching/tests/test_gzip.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index d3893c4..3dc88c1 100644
+index 83f8825..ce7859a 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,9 @@ Changelog
- 3.0.3 (unreleased)
+@@ -4,7 +4,8 @@ Changelog
+ 1.2.6 (unreleased)
  ------------------
  
 -- Nothing changed yet.
-+- Don't fail, when accessing the ``tag`` method of the ``@@images`` view, if
-+  ``scale`` returns ``None``.
-+  [thet]
++- remove gzip option, silly to be done at this layer
++  [vangheem]
  
  
- 3.0.2 (2015-03-13)
-diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
-index bcf55f2..63d2b59 100644
---- a/plone/namedfile/scaling.py
-+++ b/plone/namedfile/scaling.py
-@@ -326,4 +326,4 @@ def tag(self,
-             direction='thumbnail',
-             **kwargs):
-         scale = self.scale(fieldname, scale, height, width, direction)
--        return scale.tag(**kwargs)
-+        return scale.tag(**kwargs) if scale else None
+ 1.2.5 (2015-06-09)
+diff --git a/docs/etags.rst b/docs/etags.rst
+index b997ca9..2799581 100644
+--- a/docs/etags.rst
++++ b/docs/etags.rst
+@@ -29,9 +29,6 @@ The ETag names tokens supported by default are:
+ * userLanguage
+     The current user's preferred language
+ 
+-* gzip
+-    Whether or not the content is going to be served compressed
+-
+ * lastModified
+     A timestamp indicating the last-modified date of the given context
+ 
+diff --git a/plone/app/caching/browser/controlpanel.pt b/plone/app/caching/browser/controlpanel.pt
+index 0c09732..7d5a649 100644
+--- a/plone/app/caching/browser/controlpanel.pt
++++ b/plone/app/caching/browser/controlpanel.pt
+@@ -118,26 +118,6 @@
+ 
+                         </div>
+ 
+-                        <div
+-                            class="field"
+-                            tal:define="selected python:request.get('enableCompression', view.ploneSettings.enableCompression)">
+-
+-                            <input type="hidden" value="" name="enableCompression:boolean:default" />
+-                            <input type="checkbox" value="1" name="enableCompression:boolean" id="enableCompression"
+-                                tal:attributes="checked python:'checked' if selected else None"
+-                                />
+-                            <label for="enableCompression" i18n:translate="label_compression_enabled">Enable GZip compression</label>
+-                            <div class="formHelp" i18n:translate="help_compression_enabled">
+-                                Enable this to compress content before sending it to the
+-                                client, if supported. (Almost all modern web browsers
+-                                support GZip compression.) Compression places marginally
+-                                more load on the server, but can make the site appear
+-                                faster to end users by reducing the amount of data that
+-                                has to be sent over the network.
+-                            </div>
+-
+-                        </div>
+-
+                     </fieldset>
+ 
+                     <!-- Field set: caching proxies -->
+diff --git a/plone/app/caching/browser/controlpanel.py b/plone/app/caching/browser/controlpanel.py
+index 4e72de8..8db5281 100644
+--- a/plone/app/caching/browser/controlpanel.py
++++ b/plone/app/caching/browser/controlpanel.py
+@@ -164,7 +164,6 @@ def processSave(self):
+ 
+         # Form data
+         enabled = form.get('enabled', False)
+-        enableCompression = form.get('enableCompression', False)
+         contentTypesMap = form.get('contenttypes', {})
+         templatesMap = form.get('templates', {})
+         operations = form.get('operations', {})
+@@ -302,7 +301,6 @@ def processSave(self):
+         self.settings.enabled = enabled
+         self.settings.operationMapping = operationMapping
+ 
+-        self.ploneSettings.enableCompression = enableCompression
+         self.ploneSettings.templateRulesetMapping = templateRulesetMapping
+         self.ploneSettings.contentTypeRulesetMapping = contentTypeRulesetMapping
+         self.ploneSettings.purgedContentTypes = purgedContentTypes
+diff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml
+index daeeaec..c8709a1 100644
+--- a/plone/app/caching/configure.zcml
++++ b/plone/app/caching/configure.zcml
+@@ -48,9 +48,6 @@
+         factory=".lookup.ContentItemLookup"
+         />
+ 
+-    <!-- Add GZip compression: plone.transformchain order 10000 -->
+-    <adapter factory=".gzip.GZipTransform" name="plone.app.caching.gzip" />
+-
+     <!-- Purging -->
+     <subscriber handler=".purge.purgeOnModified" />
+     <subscriber handler=".purge.purgeOnMovedOrRemoved" />
+diff --git a/plone/app/caching/gzip.py b/plone/app/caching/gzip.py
+deleted file mode 100644
+index 558b1fd..0000000
+--- a/plone/app/caching/gzip.py
++++ /dev/null
+@@ -1,69 +0,0 @@
+-from zope.interface import implements
+-from zope.interface import Interface
+-
+-from zope.component import adapts
+-from zope.component import queryUtility
+-
+-from plone.registry.interfaces import IRegistry
+-from plone.transformchain.interfaces import ITransform
+-
+-from plone.app.caching.interfaces import IPloneCacheSettings
+-
+-class GZipTransform(object):
+-    """Transformation using plone.transformchain.
+-
+-    This is registered at order 10000, i.e. "late", but before the caching
+-    operation hook. A typical transform chain order may include:
+-
+-    * lxml transforms (e.g. plone.app.blocks, collectivexdv) => 8000-8999
+-    * gzip => 10000
+-    * caching => 12000
+-
+-    This transformer is uncommon in that it doesn't actually change the
+-    response body. Instead, we set a flag on the response to enable
+-    compression. This flag will take effect when plone.transformchain
+-    completes and sets the body back on the object.
+-    """
+-
+-    implements(ITransform)
+-    adapts(Interface, Interface)
+-
+-    order = 10000
+-
+-    def __init__(self, published, request):
+-        self.published = published
+-        self.request = request
+-
+-    def transformUnicode(self, result, encoding):
+-        if self.setGzip():
+-            # ensure that we modify the response so that it's re-set; the
+-            # real work happens in setBody, but if this returns None and
+-            # nothing else transform the request, nothing is returned.
+-            return unicode(result)
+-        return None
+-
+-    def transformBytes(self, result, encoding):
+-        if self.setGzip():
+-            # Same as above - here we are cheeky and change the type of
+-            # transform, to avoid copying the entire body if we can
+-            return [result]
+-        return None
+-
+-    def transformIterable(self, result, encoding):
+-        if self.setGzip():
+-            # Same as above
+-            return iter(result)
+-        return None
+-
+-    def setGzip(self):
+-
+-        registry = queryUtility(IRegistry)
+-        if registry is None:
+-            return False
+-
+-        settings = registry.forInterface(IPloneCacheSettings, check=False)
+-        if settings.enableCompression:
+-            self.request.response.enableHTTPCompression(self.request)
+-            return True
+-
+-        return False
+diff --git a/plone/app/caching/interfaces.py b/plone/app/caching/interfaces.py
+index b85fb68..71552a9 100644
+--- a/plone/app/caching/interfaces.py
++++ b/plone/app/caching/interfaces.py
+@@ -33,14 +33,6 @@ class IPloneCacheSettings(Interface):
+     Plone-specific settings.
+     """
+ 
+-    enableCompression = schema.Bool(
+-            title=_(u"Enable GZip compression"),
+-            description=_(u"Determine whether GZip compression should be "
+-                          u"enabled for standard responses"),
+-            default=False,
+-            required=True,
+-        )
+-
+     templateRulesetMapping = schema.Dict(
+             title=_(u"Page template/ruleset mapping"),
+             description=_(u"Maps skin layer page template names to ruleset names"),
+diff --git a/plone/app/caching/operations/configure.zcml b/plone/app/caching/operations/configure.zcml
+index 86ab1e5..71251ab 100644
+--- a/plone/app/caching/operations/configure.zcml
++++ b/plone/app/caching/operations/configure.zcml
+@@ -41,7 +41,6 @@
+     <adapter factory=".etags.Roles"                     name="roles" />
+     <adapter factory=".etags.Language"                  name="language" />
+     <adapter factory=".etags.UserLanguage"              name="userLanguage" />
+-    <adapter factory=".etags.GZip"                      name="gzip" />
+     <adapter factory=".etags.LastModified"              name="lastModified" />
+     <adapter factory=".etags.CatalogCounter"            name="catalogCounter" />
+     <adapter factory=".etags.ObjectLocked"              name="locked" />
+diff --git a/plone/app/caching/operations/etags.py b/plone/app/caching/operations/etags.py
+index 92cf850..ffee390 100644
+--- a/plone/app/caching/operations/etags.py
++++ b/plone/app/caching/operations/etags.py
+@@ -103,26 +103,6 @@ def __call__(self):
+ 
+         return portal_state.language()
+ 
+-class GZip(object):
+-    """The ``gzip`` etag component, returning 1 or 0 depending on whether
+-    GZip compression is enabled
+-    """
+-
+-    implements(IETagValue)
+-    adapts(Interface, Interface)
+-
+-    def __init__(self, published, request):
+-        self.published = published
+-        self.request = request
+-
+-    def __call__(self):
+-        registry = queryUtility(IRegistry)
+-        if registry is not None:
+-            settings = registry.forInterface(IPloneCacheSettings, check=False)
+-            gzip_capable = self.request.get('HTTP_ACCEPT_ENCODING', '').find('gzip') != -1
+-            return str(int(settings.enableCompression and gzip_capable))
+-        return '0'
+-
+ class LastModified(object):
+     """The ``lastModified`` etag component, returning the last modification
+     timestamp
+diff --git a/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml b/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+index 04039f7..22943d7 100644
+--- a/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
++++ b/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -47,7 +46,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -79,7 +77,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/profiles/with-caching-proxy/registry.xml b/plone/app/caching/profiles/with-caching-proxy/registry.xml
+index 31096c9..a7aff2e 100644
+--- a/plone/app/caching/profiles/with-caching-proxy/registry.xml
++++ b/plone/app/caching/profiles/with-caching-proxy/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -38,7 +37,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -62,7 +60,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/profiles/without-caching-proxy/registry.xml b/plone/app/caching/profiles/without-caching-proxy/registry.xml
+index 4f7a2d5..bdbe9b4 100644
+--- a/plone/app/caching/profiles/without-caching-proxy/registry.xml
++++ b/plone/app/caching/profiles/without-caching-proxy/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -38,7 +37,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -58,7 +56,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/tests/test_etags.py b/plone/app/caching/tests/test_etags.py
+index 6d32f7c..6738a35 100644
+--- a/plone/app/caching/tests/test_etags.py
++++ b/plone/app/caching/tests/test_etags.py
+@@ -214,85 +214,6 @@ def language(self):
+ 
+         self.assertEqual('en', etag())
+ 
+-
+-    # GZip
+-
+-    def test_GZip_no_registry(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_disabled(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = False
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'gzip; deflate'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_not_accepted(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'deflate'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_enabled(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'deflate; gzip'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('1', etag())
+-
+-
+     # LastModified
+ 
+     def test_LastModified_no_adapter(self):
+diff --git a/plone/app/caching/tests/test_gzip.py b/plone/app/caching/tests/test_gzip.py
+deleted file mode 100644
+index 701faf0..0000000
+--- a/plone/app/caching/tests/test_gzip.py
++++ /dev/null
+@@ -1,86 +0,0 @@
+-import unittest2 as unittest
+-from plone.testing.zca import UNIT_TESTING
+-
+-from StringIO import StringIO
+-
+-from zope.component import provideUtility, provideAdapter, getUtility
+-
+-from plone.registry.interfaces import IRegistry
+-
+-from plone.registry import Registry
+-from plone.registry.fieldfactory import persistentFieldAdapter
+-
+-from plone.app.caching.interfaces import IPloneCacheSettings
+-
+-from plone.app.caching.gzip import GZipTransform
+-
+-from ZPublisher.HTTPRequest import HTTPRequest
+-from ZPublisher.HTTPResponse import HTTPResponse
+-
+-class DummyPublished(object):
+-    pass
+-
+-class TestGZip(unittest.TestCase):
+-
+-    layer = UNIT_TESTING
+-
+-    def setUp(self):
+-        provideAdapter(persistentFieldAdapter)
+-
+-    def test_no_registry(self):
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_disabled(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_enabled_not_accepted(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_enabled_accepted(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80', 'HTTP_ACCEPT_ENCODING': 'gzip'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(1, response.enableHTTPCompression(query=True))
+diff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py
+index 4890ea2..3db6b25 100644
+--- a/plone/app/caching/tests/test_integration.py
++++ b/plone/app/caching/tests/test_integration.py
+@@ -163,82 +163,6 @@ def test_disabled(self):
+         # Set by resources themselves, but irrelevant to this test:
+         # self.assertTrue('Cache-Control' in browser.headers)
+ 
+-    def test_gzip_setting(self):
+-        self.cacheSettings.enabled = True
+-
+-        setRoles(self.portal, TEST_USER_ID, ('Manager',))
+-
+-        # Folder content
+-        self.portal.invokeFactory('Folder', 'f1')
+-        self.portal['f1'].title = u"Folder one"
+-        self.portal['f1'].description = u"Folder one description"
+-        self.portal['f1'].reindexObject()
+-
+-        # Non-folder content
+-        self.portal['f1'].invokeFactory('Document', 'd1')
+-        self.portal['f1']['d1'].title = u"Document one"
+-        self.portal['f1']['d1'].description = u"Document one description"
+-        self.portal['f1']['d1'].text = RichTextValue(
+-            u"<p>Body one</p>",
+-            'text/plain',
+-            'text/html'
+-        )
+-        self.portal['f1']['d1'].reindexObject()
+-
+-        # GZip disabled, not accepted
+-
+-        self.ploneCacheSettings.enableCompression = False
+-
+-        import transaction
+-        transaction.commit()
+-        browser = Browser(self.app)
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip disabled, accepted
+-
+-        self.ploneCacheSettings.enableCompression = False
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip enabled, not accepted
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip enabled, accepted
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertTrue('Accept-Encoding' in browser.headers['Vary'])
+-        self.assertEqual('gzip', browser.headers['Content-Encoding'])
+-
+-        # Test as logged in (should not make any difference)
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.addHeader('Authorization', 'Basic %s:%s' % (
+-            TEST_USER_NAME, TEST_USER_PASSWORD,))
+-
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertTrue('Accept-Encoding' in browser.headers['Vary'])
+-        self.assertEqual('gzip', browser.headers['Content-Encoding'])
+-
+     def test_auto_purge_content_types(self):
+ 
+         setRoles(self.portal, TEST_USER_ID, ('Manager',))
+diff --git a/plone/app/caching/tests/test_profile_with_caching_proxy.py b/plone/app/caching/tests/test_profile_with_caching_proxy.py
+index 47452b4..168cd2b 100644
+--- a/plone/app/caching/tests/test_profile_with_caching_proxy.py
++++ b/plone/app/caching/tests/test_profile_with_caching_proxy.py
+@@ -141,7 +141,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Set the copy/cut cookie and then request the folder view again
+@@ -151,7 +151,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.content.folderView', browser.headers['X-Cache-Rule'])
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|1' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|1' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+ 
+         # Request the authenticated page
+         now = stable_now()
+@@ -163,7 +163,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated page again -- to test RAM cache.
+@@ -194,7 +194,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page
+@@ -206,7 +206,7 @@ def test_composite_views(self):
+         self.assertTrue(testText in browser.contents)
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- to test RAM cache.
+@@ -220,7 +220,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertTrue(testText in browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- with an INM header to test 304.
+@@ -278,7 +278,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.moderateCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInProxy
+         self.assertEqual('max-age=0, s-maxage=86400, must-revalidate', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- to test RAM cache
+@@ -292,7 +292,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertEqual(rssText, browser.contents)
+         self.assertEqual('max-age=0, s-maxage=86400, must-revalidate', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- with an INM header to test 304.
+@@ -316,7 +316,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.moderateCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"|test_user_1_|%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated rss feed again -- to test RAM cache
+diff --git a/plone/app/caching/tests/test_profile_without_caching_proxy.py b/plone/app/caching/tests/test_profile_without_caching_proxy.py
+index d24c4b9..f827ff1 100644
+--- a/plone/app/caching/tests/test_profile_without_caching_proxy.py
++++ b/plone/app/caching/tests/test_profile_without_caching_proxy.py
+@@ -134,7 +134,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Set the copy/cut cookie and then request the folder view again
+@@ -144,7 +144,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.content.folderView', browser.headers['X-Cache-Rule'])
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|1' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|1' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+ 
+         # Request the authenticated page
+         now = stable_now()
+@@ -156,7 +156,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated page again -- to test RAM cache.
+@@ -187,7 +187,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0|0'  % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0|0'  % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page
+@@ -199,7 +199,7 @@ def test_composite_views(self):
+         self.assertTrue(testText in browser.contents)
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- to test RAM cache.
+@@ -213,7 +213,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertTrue(testText in browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0'% (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0'% (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- with an INM header to test 304.
+@@ -271,7 +271,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- to test RAM cache
+@@ -285,7 +285,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertEqual(rssText, browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- with an INM header to test 304.
+@@ -309,7 +309,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"|test_user_1_|%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated rss feed again -- to test RAM cache
+
+
+Repository: plone.app.caching
+Branch: refs/heads/master
+Date: 2015-06-11T12:47:34-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/8e9a833abf4ac8250fde415b88f686eae01de255
+
+Merge pull request #16 from plone/remove-gzip
+
+remove gzip option
+
+Files changed:
+M CHANGES.rst
+M docs/etags.rst
+M plone/app/caching/browser/controlpanel.pt
+M plone/app/caching/browser/controlpanel.py
+M plone/app/caching/configure.zcml
+M plone/app/caching/interfaces.py
+M plone/app/caching/operations/configure.zcml
+M plone/app/caching/operations/etags.py
+M plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+M plone/app/caching/profiles/with-caching-proxy/registry.xml
+M plone/app/caching/profiles/without-caching-proxy/registry.xml
+M plone/app/caching/tests/test_etags.py
+M plone/app/caching/tests/test_integration.py
+M plone/app/caching/tests/test_profile_with_caching_proxy.py
+M plone/app/caching/tests/test_profile_without_caching_proxy.py
+D plone/app/caching/gzip.py
+D plone/app/caching/tests/test_gzip.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 83f8825..ce7859a 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 1.2.6 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- remove gzip option, silly to be done at this layer
++  [vangheem]
+ 
+ 
+ 1.2.5 (2015-06-09)
+diff --git a/docs/etags.rst b/docs/etags.rst
+index b997ca9..2799581 100644
+--- a/docs/etags.rst
++++ b/docs/etags.rst
+@@ -29,9 +29,6 @@ The ETag names tokens supported by default are:
+ * userLanguage
+     The current user's preferred language
+ 
+-* gzip
+-    Whether or not the content is going to be served compressed
+-
+ * lastModified
+     A timestamp indicating the last-modified date of the given context
+ 
+diff --git a/plone/app/caching/browser/controlpanel.pt b/plone/app/caching/browser/controlpanel.pt
+index 0c09732..7d5a649 100644
+--- a/plone/app/caching/browser/controlpanel.pt
++++ b/plone/app/caching/browser/controlpanel.pt
+@@ -118,26 +118,6 @@
+ 
+                         </div>
+ 
+-                        <div
+-                            class="field"
+-                            tal:define="selected python:request.get('enableCompression', view.ploneSettings.enableCompression)">
+-
+-                            <input type="hidden" value="" name="enableCompression:boolean:default" />
+-                            <input type="checkbox" value="1" name="enableCompression:boolean" id="enableCompression"
+-                                tal:attributes="checked python:'checked' if selected else None"
+-                                />
+-                            <label for="enableCompression" i18n:translate="label_compression_enabled">Enable GZip compression</label>
+-                            <div class="formHelp" i18n:translate="help_compression_enabled">
+-                                Enable this to compress content before sending it to the
+-                                client, if supported. (Almost all modern web browsers
+-                                support GZip compression.) Compression places marginally
+-                                more load on the server, but can make the site appear
+-                                faster to end users by reducing the amount of data that
+-                                has to be sent over the network.
+-                            </div>
+-
+-                        </div>
+-
+                     </fieldset>
+ 
+                     <!-- Field set: caching proxies -->
+diff --git a/plone/app/caching/browser/controlpanel.py b/plone/app/caching/browser/controlpanel.py
+index 4e72de8..8db5281 100644
+--- a/plone/app/caching/browser/controlpanel.py
++++ b/plone/app/caching/browser/controlpanel.py
+@@ -164,7 +164,6 @@ def processSave(self):
+ 
+         # Form data
+         enabled = form.get('enabled', False)
+-        enableCompression = form.get('enableCompression', False)
+         contentTypesMap = form.get('contenttypes', {})
+         templatesMap = form.get('templates', {})
+         operations = form.get('operations', {})
+@@ -302,7 +301,6 @@ def processSave(self):
+         self.settings.enabled = enabled
+         self.settings.operationMapping = operationMapping
+ 
+-        self.ploneSettings.enableCompression = enableCompression
+         self.ploneSettings.templateRulesetMapping = templateRulesetMapping
+         self.ploneSettings.contentTypeRulesetMapping = contentTypeRulesetMapping
+         self.ploneSettings.purgedContentTypes = purgedContentTypes
+diff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml
+index daeeaec..c8709a1 100644
+--- a/plone/app/caching/configure.zcml
++++ b/plone/app/caching/configure.zcml
+@@ -48,9 +48,6 @@
+         factory=".lookup.ContentItemLookup"
+         />
+ 
+-    <!-- Add GZip compression: plone.transformchain order 10000 -->
+-    <adapter factory=".gzip.GZipTransform" name="plone.app.caching.gzip" />
+-
+     <!-- Purging -->
+     <subscriber handler=".purge.purgeOnModified" />
+     <subscriber handler=".purge.purgeOnMovedOrRemoved" />
+diff --git a/plone/app/caching/gzip.py b/plone/app/caching/gzip.py
+deleted file mode 100644
+index 558b1fd..0000000
+--- a/plone/app/caching/gzip.py
++++ /dev/null
+@@ -1,69 +0,0 @@
+-from zope.interface import implements
+-from zope.interface import Interface
+-
+-from zope.component import adapts
+-from zope.component import queryUtility
+-
+-from plone.registry.interfaces import IRegistry
+-from plone.transformchain.interfaces import ITransform
+-
+-from plone.app.caching.interfaces import IPloneCacheSettings
+-
+-class GZipTransform(object):
+-    """Transformation using plone.transformchain.
+-
+-    This is registered at order 10000, i.e. "late", but before the caching
+-    operation hook. A typical transform chain order may include:
+-
+-    * lxml transforms (e.g. plone.app.blocks, collectivexdv) => 8000-8999
+-    * gzip => 10000
+-    * caching => 12000
+-
+-    This transformer is uncommon in that it doesn't actually change the
+-    response body. Instead, we set a flag on the response to enable
+-    compression. This flag will take effect when plone.transformchain
+-    completes and sets the body back on the object.
+-    """
+-
+-    implements(ITransform)
+-    adapts(Interface, Interface)
+-
+-    order = 10000
+-
+-    def __init__(self, published, request):
+-        self.published = published
+-        self.request = request
+-
+-    def transformUnicode(self, result, encoding):
+-        if self.setGzip():
+-            # ensure that we modify the response so that it's re-set; the
+-            # real work happens in setBody, but if this returns None and
+-            # nothing else transform the request, nothing is returned.
+-            return unicode(result)
+-        return None
+-
+-    def transformBytes(self, result, encoding):
+-        if self.setGzip():
+-            # Same as above - here we are cheeky and change the type of
+-            # transform, to avoid copying the entire body if we can
+-            return [result]
+-        return None
+-
+-    def transformIterable(self, result, encoding):
+-        if self.setGzip():
+-            # Same as above
+-            return iter(result)
+-        return None
+-
+-    def setGzip(self):
+-
+-        registry = queryUtility(IRegistry)
+-        if registry is None:
+-            return False
+-
+-        settings = registry.forInterface(IPloneCacheSettings, check=False)
+-        if settings.enableCompression:
+-            self.request.response.enableHTTPCompression(self.request)
+-            return True
+-
+-        return False
+diff --git a/plone/app/caching/interfaces.py b/plone/app/caching/interfaces.py
+index b85fb68..71552a9 100644
+--- a/plone/app/caching/interfaces.py
++++ b/plone/app/caching/interfaces.py
+@@ -33,14 +33,6 @@ class IPloneCacheSettings(Interface):
+     Plone-specific settings.
+     """
+ 
+-    enableCompression = schema.Bool(
+-            title=_(u"Enable GZip compression"),
+-            description=_(u"Determine whether GZip compression should be "
+-                          u"enabled for standard responses"),
+-            default=False,
+-            required=True,
+-        )
+-
+     templateRulesetMapping = schema.Dict(
+             title=_(u"Page template/ruleset mapping"),
+             description=_(u"Maps skin layer page template names to ruleset names"),
+diff --git a/plone/app/caching/operations/configure.zcml b/plone/app/caching/operations/configure.zcml
+index 86ab1e5..71251ab 100644
+--- a/plone/app/caching/operations/configure.zcml
++++ b/plone/app/caching/operations/configure.zcml
+@@ -41,7 +41,6 @@
+     <adapter factory=".etags.Roles"                     name="roles" />
+     <adapter factory=".etags.Language"                  name="language" />
+     <adapter factory=".etags.UserLanguage"              name="userLanguage" />
+-    <adapter factory=".etags.GZip"                      name="gzip" />
+     <adapter factory=".etags.LastModified"              name="lastModified" />
+     <adapter factory=".etags.CatalogCounter"            name="catalogCounter" />
+     <adapter factory=".etags.ObjectLocked"              name="locked" />
+diff --git a/plone/app/caching/operations/etags.py b/plone/app/caching/operations/etags.py
+index 92cf850..ffee390 100644
+--- a/plone/app/caching/operations/etags.py
++++ b/plone/app/caching/operations/etags.py
+@@ -103,26 +103,6 @@ def __call__(self):
+ 
+         return portal_state.language()
+ 
+-class GZip(object):
+-    """The ``gzip`` etag component, returning 1 or 0 depending on whether
+-    GZip compression is enabled
+-    """
+-
+-    implements(IETagValue)
+-    adapts(Interface, Interface)
+-
+-    def __init__(self, published, request):
+-        self.published = published
+-        self.request = request
+-
+-    def __call__(self):
+-        registry = queryUtility(IRegistry)
+-        if registry is not None:
+-            settings = registry.forInterface(IPloneCacheSettings, check=False)
+-            gzip_capable = self.request.get('HTTP_ACCEPT_ENCODING', '').find('gzip') != -1
+-            return str(int(settings.enableCompression and gzip_capable))
+-        return '0'
+-
+ class LastModified(object):
+     """The ``lastModified`` etag component, returning the last modification
+     timestamp
+diff --git a/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml b/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+index 04039f7..22943d7 100644
+--- a/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
++++ b/plone/app/caching/profiles/with-caching-proxy-splitviews/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -47,7 +46,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -79,7 +77,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/profiles/with-caching-proxy/registry.xml b/plone/app/caching/profiles/with-caching-proxy/registry.xml
+index 31096c9..a7aff2e 100644
+--- a/plone/app/caching/profiles/with-caching-proxy/registry.xml
++++ b/plone/app/caching/profiles/with-caching-proxy/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -38,7 +37,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -62,7 +60,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/profiles/without-caching-proxy/registry.xml b/plone/app/caching/profiles/without-caching-proxy/registry.xml
+index 4f7a2d5..bdbe9b4 100644
+--- a/plone/app/caching/profiles/without-caching-proxy/registry.xml
++++ b/plone/app/caching/profiles/without-caching-proxy/registry.xml
+@@ -19,7 +19,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>resourceRegistries</element>
+@@ -38,7 +37,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+           <element>locked</element>
+           <element>copy</element>
+@@ -58,7 +56,6 @@
+           <element>userid</element>
+           <element>catalogCounter</element>
+           <element>userLanguage</element>
+-          <element>gzip</element>
+           <element>skin</element>
+       </value>
+   </record>
+diff --git a/plone/app/caching/tests/test_etags.py b/plone/app/caching/tests/test_etags.py
+index 6d32f7c..6738a35 100644
+--- a/plone/app/caching/tests/test_etags.py
++++ b/plone/app/caching/tests/test_etags.py
+@@ -214,85 +214,6 @@ def language(self):
+ 
+         self.assertEqual('en', etag())
+ 
+-
+-    # GZip
+-
+-    def test_GZip_no_registry(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_disabled(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = False
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'gzip; deflate'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_not_accepted(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'deflate'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('0', etag())
+-
+-    def test_GZip_enabled(self):
+-        from plone.app.caching.operations.etags import GZip
+-
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-        published = DummyPublished(DummyContext())
+-
+-        request.environ['HTTP_ACCEPT_ENCODING'] = 'deflate; gzip'
+-
+-        etag = GZip(published, request)
+-
+-        self.assertEqual('1', etag())
+-
+-
+     # LastModified
+ 
+     def test_LastModified_no_adapter(self):
+diff --git a/plone/app/caching/tests/test_gzip.py b/plone/app/caching/tests/test_gzip.py
+deleted file mode 100644
+index 701faf0..0000000
+--- a/plone/app/caching/tests/test_gzip.py
++++ /dev/null
+@@ -1,86 +0,0 @@
+-import unittest2 as unittest
+-from plone.testing.zca import UNIT_TESTING
+-
+-from StringIO import StringIO
+-
+-from zope.component import provideUtility, provideAdapter, getUtility
+-
+-from plone.registry.interfaces import IRegistry
+-
+-from plone.registry import Registry
+-from plone.registry.fieldfactory import persistentFieldAdapter
+-
+-from plone.app.caching.interfaces import IPloneCacheSettings
+-
+-from plone.app.caching.gzip import GZipTransform
+-
+-from ZPublisher.HTTPRequest import HTTPRequest
+-from ZPublisher.HTTPResponse import HTTPResponse
+-
+-class DummyPublished(object):
+-    pass
+-
+-class TestGZip(unittest.TestCase):
+-
+-    layer = UNIT_TESTING
+-
+-    def setUp(self):
+-        provideAdapter(persistentFieldAdapter)
+-
+-    def test_no_registry(self):
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_disabled(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_enabled_not_accepted(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(0, response.enableHTTPCompression(query=True))
+-
+-    def test_enabled_accepted(self):
+-        provideUtility(Registry(), IRegistry)
+-        registry = getUtility(IRegistry)
+-        registry.registerInterface(IPloneCacheSettings)
+-
+-        ploneSettings = registry.forInterface(IPloneCacheSettings)
+-        ploneSettings.enableCompression = True
+-
+-        environ = {'SERVER_NAME': 'example.com', 'SERVER_PORT': '80', 'HTTP_ACCEPT_ENCODING': 'gzip'}
+-        response = HTTPResponse()
+-        request = HTTPRequest(StringIO(), environ, response)
+-
+-        published = DummyPublished()
+-        GZipTransform(published, request).transformUnicode(u"", "utf-8")
+-
+-        self.assertEqual(1, response.enableHTTPCompression(query=True))
+diff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py
+index 4890ea2..3db6b25 100644
+--- a/plone/app/caching/tests/test_integration.py
++++ b/plone/app/caching/tests/test_integration.py
+@@ -163,82 +163,6 @@ def test_disabled(self):
+         # Set by resources themselves, but irrelevant to this test:
+         # self.assertTrue('Cache-Control' in browser.headers)
+ 
+-    def test_gzip_setting(self):
+-        self.cacheSettings.enabled = True
+-
+-        setRoles(self.portal, TEST_USER_ID, ('Manager',))
+-
+-        # Folder content
+-        self.portal.invokeFactory('Folder', 'f1')
+-        self.portal['f1'].title = u"Folder one"
+-        self.portal['f1'].description = u"Folder one description"
+-        self.portal['f1'].reindexObject()
+-
+-        # Non-folder content
+-        self.portal['f1'].invokeFactory('Document', 'd1')
+-        self.portal['f1']['d1'].title = u"Document one"
+-        self.portal['f1']['d1'].description = u"Document one description"
+-        self.portal['f1']['d1'].text = RichTextValue(
+-            u"<p>Body one</p>",
+-            'text/plain',
+-            'text/html'
+-        )
+-        self.portal['f1']['d1'].reindexObject()
+-
+-        # GZip disabled, not accepted
+-
+-        self.ploneCacheSettings.enableCompression = False
+-
+-        import transaction
+-        transaction.commit()
+-        browser = Browser(self.app)
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip disabled, accepted
+-
+-        self.ploneCacheSettings.enableCompression = False
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip enabled, not accepted
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertFalse('Vary' in browser.headers)
+-        self.assertFalse('gzip' in browser.headers.get('Content-Encoding', ''))
+-
+-        # GZip enabled, accepted
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertTrue('Accept-Encoding' in browser.headers['Vary'])
+-        self.assertEqual('gzip', browser.headers['Content-Encoding'])
+-
+-        # Test as logged in (should not make any difference)
+-        self.ploneCacheSettings.enableCompression = True
+-        transaction.commit()
+-
+-        browser = Browser(self.app)
+-        browser.addHeader('Accept-Encoding', 'gzip')
+-        browser.addHeader('Authorization', 'Basic %s:%s' % (
+-            TEST_USER_NAME, TEST_USER_PASSWORD,))
+-
+-        browser.open(self.portal['f1']['d1'].absolute_url())
+-        self.assertTrue('Accept-Encoding' in browser.headers['Vary'])
+-        self.assertEqual('gzip', browser.headers['Content-Encoding'])
+-
+     def test_auto_purge_content_types(self):
+ 
+         setRoles(self.portal, TEST_USER_ID, ('Manager',))
+diff --git a/plone/app/caching/tests/test_profile_with_caching_proxy.py b/plone/app/caching/tests/test_profile_with_caching_proxy.py
+index 47452b4..168cd2b 100644
+--- a/plone/app/caching/tests/test_profile_with_caching_proxy.py
++++ b/plone/app/caching/tests/test_profile_with_caching_proxy.py
+@@ -141,7 +141,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Set the copy/cut cookie and then request the folder view again
+@@ -151,7 +151,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.content.folderView', browser.headers['X-Cache-Rule'])
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|1' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|1' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+ 
+         # Request the authenticated page
+         now = stable_now()
+@@ -163,7 +163,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated page again -- to test RAM cache.
+@@ -194,7 +194,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page
+@@ -206,7 +206,7 @@ def test_composite_views(self):
+         self.assertTrue(testText in browser.contents)
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- to test RAM cache.
+@@ -220,7 +220,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertTrue(testText in browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), skins_tool.default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- with an INM header to test 304.
+@@ -278,7 +278,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.moderateCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInProxy
+         self.assertEqual('max-age=0, s-maxage=86400, must-revalidate', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- to test RAM cache
+@@ -292,7 +292,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertEqual(rssText, browser.contents)
+         self.assertEqual('max-age=0, s-maxage=86400, must-revalidate', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- with an INM header to test 304.
+@@ -316,7 +316,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.moderateCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
++        self.assertEqual('"|test_user_1_|%d|en|%s"' % (catalog.getCounter(), skins_tool.default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated rss feed again -- to test RAM cache
+diff --git a/plone/app/caching/tests/test_profile_without_caching_proxy.py b/plone/app/caching/tests/test_profile_without_caching_proxy.py
+index d24c4b9..f827ff1 100644
+--- a/plone/app/caching/tests/test_profile_without_caching_proxy.py
++++ b/plone/app/caching/tests/test_profile_without_caching_proxy.py
+@@ -134,7 +134,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Set the copy/cut cookie and then request the folder view again
+@@ -144,7 +144,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.content.folderView', browser.headers['X-Cache-Rule'])
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0|1' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0|1' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+ 
+         # Request the authenticated page
+         now = stable_now()
+@@ -156,7 +156,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"|test_user_1_|%d|en|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated page again -- to test RAM cache.
+@@ -187,7 +187,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0|0'  % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0|0'  % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page
+@@ -199,7 +199,7 @@ def test_composite_views(self):
+         self.assertTrue(testText in browser.contents)
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0' % (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- to test RAM cache.
+@@ -213,7 +213,7 @@ def test_composite_views(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertTrue(testText in browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s|0'% (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
++        self.assertEqual('"||%d|en|%s|0'% (catalog.getCounter(), default_skin), _normalize_etag(browser.headers['ETag']))
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the anonymous page again -- with an INM header to test 304.
+@@ -271,7 +271,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- to test RAM cache
+@@ -285,7 +285,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.operations.ramcache', browser.headers['X-RAMCache'])
+         self.assertEqual(rssText, browser.contents)
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"||%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"||%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the rss feed again -- with an INM header to test 304.
+@@ -309,7 +309,7 @@ def test_content_feeds(self):
+         self.assertEqual('plone.app.caching.weakCaching', browser.headers['X-Cache-Operation'])
+         # This should use cacheInBrowser
+         self.assertEqual('max-age=0, must-revalidate, private', browser.headers['Cache-Control'])
+-        self.assertEqual('"|test_user_1_|%d|en|0|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
++        self.assertEqual('"|test_user_1_|%d|en|%s"' % (catalog.getCounter(), default_skin), browser.headers['ETag'])
+         self.assertTrue(now > dateutil.parser.parse(browser.headers['Expires']))
+ 
+         # Request the authenticated rss feed again -- to test RAM cache
 
 
