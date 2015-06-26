@@ -1,107 +1,90 @@
-Repository: mockup
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-06-26T12:48:06-03:00
+Date: 2015-06-26T12:53:06-03:00
 Author: Franco Pellegrini (frapell) <frapell@gmail.com>
-Commit: https://github.com/plone/mockup/commit/2b843802149986b7bb09e25abf1ed3e63f17e3e0
+Commit: https://github.com/plone/plone.app.content/commit/43d76bdb9ca1f0df489919db9f1e4f79580d42a9
 
-Improve the upload pattern so it shows useful messages in case of errors
+Make the @@fileUpload to not be guarded by the AddPortalContent permission, and instead do that check in code, so we can return better error message
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/upload/pattern.js
+M plone/app/content/browser/configure.zcml
+M plone/app/content/browser/file.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f96ac94..82fb41b 100644
+index 7fca280..b37ff1c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,6 +4,9 @@ Changelog
- 2.0.5 (unreleased)
+@@ -4,6 +4,11 @@ Changelog
+ 3.0.7 (unreleased)
  ------------------
  
-+- Improve the upload pattern so it shows useful messages in case of errors
++- Make the ``@@fileUpload`` to not be guarded by the AddPortalContent
++  permission, and instead do that check in code, so we can return better
++  error message
 +  [frapell]
 +
- - When refreshing the upload path for the upload pattern in tinymce, clear its
-   value first
-   [frapell]
-diff --git a/mockup/patterns/upload/pattern.js b/mockup/patterns/upload/pattern.js
-index 30e0fef..3e73d08 100644
---- a/mockup/patterns/upload/pattern.js
-+++ b/mockup/patterns/upload/pattern.js
-@@ -181,6 +181,10 @@ define([
-       self.dropzone.on('removedfile', function() {
-         if (self.dropzone.files.length < 1) {
-           self.hideControls();
-+        } else {
-+          // Clear the "you can not upload any more files" message
-+          var file = self.dropzone.files[0];
-+          $(".dz-error-message span", file.previewElement).html("");
-         }
-       });
+ - Let ``@@getVocabulary`` return the vocabulary's value instead of the token
+   for the id in the result set. The token is binary encoded and leads to
+   encoding errors when selecting a value with non-ASCII data from vocabulary
+diff --git a/plone/app/content/browser/configure.zcml b/plone/app/content/browser/configure.zcml
+index 637bf6c..9e8f64d 100644
+--- a/plone/app/content/browser/configure.zcml
++++ b/plone/app/content/browser/configure.zcml
+@@ -163,7 +163,7 @@
+         name="fileUpload"
+         for="Products.CMFCore.interfaces._content.IFolderish"
+         class=".file.FileUploadView"
+-        permission="cmf.AddPortalContent"
++        permission="zope2.View"
+         />
  
-@@ -196,18 +200,27 @@ define([
+     <browser:page
+diff --git a/plone/app/content/browser/file.py b/plone/app/content/browser/file.py
+index 0d579c2..707e27f 100644
+--- a/plone/app/content/browser/file.py
++++ b/plone/app/content/browser/file.py
+@@ -1,5 +1,7 @@
+ # -*- coding: utf-8 -*-
++from AccessControl import getSecurityManager
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.permissions import AddPortalContent
+ from Products.Five.browser import BrowserView
+ from plone.app.dexterity.interfaces import IDXFileFactory
+ from plone.dexterity.interfaces import IDexterityFTI
+@@ -89,6 +91,13 @@ def __getitem__(self, uid):
+             raise KeyError
  
-       if (self.options.autoCleanResults) {
-         self.dropzone.on('complete', function(file) {
--          setTimeout(function() {
--            $(file.previewElement).fadeOut();
--          }, 3000);
-+          if (file.status === Dropzone.SUCCESS){
-+            setTimeout(function() {
-+              $(file.previewElement).fadeOut();
-+            }, 3000);
-+          }
-         });
-       }
+     def __call__(self):
++        # Check if user has permission to add content here
++        sm = getSecurityManager()
++        if not sm.checkPermission(AddPortalContent, self.context):
++            response = self.request.RESPONSE
++            response.setStatus(403)
++            return "You are not authorized to add content to this folder."
++
+         req = self.request
+         tusrequest = False
+         if TUS_ENABLED:
+@@ -123,6 +132,17 @@ def __call__(self):
+         ctr = getToolByName(self.context, 'content_type_registry')
+         type_ = ctr.findTypeName(filename.lower(), '', '') or 'File'
  
-       self.dropzone.on('complete', function(file) {
--        if (self.dropzone.files.length < 1) {
-+        if (file.status === Dropzone.SUCCESS && self.dropzone.files.length < 1) {
-           self.hideControls();
-         }
-       });
- 
-+      self.dropzone.on('error', function(file, response, xmlhr) {
-+        if (typeof xmlhr !== "undefined" && xmlhr.status !== 403){
-+          // If error other than 403, just print a generic message
-+          $(".dz-error-message span", file.previewElement).html("The file transfer failed");
-+        }
-+      });
++        # Now check that the object is not restricted to be added in the
++        # current context
++        allowed_ids = [fti.getId() for fti in self.context.allowedContentTypes()]
++        if type_ not in allowed_ids:
++            response = self.request.RESPONSE
++            response.setStatus(403)
++            if type_ == 'File':
++                return "You cannot add a File to this folder, try another one"
++            if type_ == 'Image':
++                return "You cannot add an Image to this folder, try another one"
 +
-       self.dropzone.on('totaluploadprogress', function(pct) {
-         // need to caclulate total pct here in reality since we're manually
-         // processing each file one at a time.
-@@ -343,14 +356,27 @@ define([
-         processing = true;
-         if (self.dropzone.files.length === 0) {
-           processing = false;
-+        }
-+
-+        if (processing){
-+          var file = self.dropzone.files[0];
-+
-+          if (file.status === Dropzone.ERROR){
-+            // Put the file back as "queued" for retrying
-+            file.status = Dropzone.QUEUED;
-+            processing = false;
-+          }
-+        }
-+
-+        if (!processing){
-           self.$el.removeClass(fileaddedClassName);
-           if (finished !== undefined && typeof(finished) === 'function'){
-             finished();
-           }
-           return;
-         }
--        var file = self.dropzone.files[0];
--        if ([Dropzone.SUCCESS, Dropzone.ERROR, Dropzone.CANCELED]
-+
-+        if ([Dropzone.SUCCESS, Dropzone.CANCELED]
-             .indexOf(file.status) !== -1) {
-           // remove it
-           self.dropzone.removeFile(file);
+         dx_based = False
+         pt = getToolByName(self.context, 'portal_types')
+         if IDexterityFTI.providedBy(getattr(pt, type_)):
 
 
