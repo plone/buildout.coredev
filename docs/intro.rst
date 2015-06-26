@@ -87,7 +87,7 @@ The line with a * by it will indicate which branch you are currently working on.
    otherwise you will get some weird behavior!
 
 For more information on buildout,
-please see the `collective developer manual documentation on buildout <http://developer.plone.org/reference_manuals/old/buildout/index.html>`_.
+please see the `collective developer manual documentation on buildout <http://docs.plone.org/old-reference-manuals/buildout/index.html>`_.
 
 
 Jenkins / mr.roboto
