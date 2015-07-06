@@ -1,88 +1,282 @@
-Repository: Products.MimetypesRegistry
+Repository: plone.cachepurging
 
 
 Branch: refs/heads/master
-Date: 2015-06-29T15:35:54+02:00
+Date: 2015-07-06T12:00:34+02:00
 Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/Products.MimetypesRegistry/commit/610bcc973a1ae8405c6e505645e5cf3b69c2a241
+Commit: https://github.com/plone/plone.cachepurging/commit/ab09e4dcd21f4eeab6dadd9409c002cc2ebdfce8
 
-Preparing release 2.0.8
+add buildout
+
+to make it easier to run tests
 
 Files changed:
-M CHANGES.rst
-M setup.py
+A bootstrap.py
+A buildout.cfg
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 7c033cf..47bd8da 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--2.0.8 (unreleased)
-+2.0.8 (2015-06-29)
- ------------------
- 
- - Use doc icon for docx, xls for xlsx, ppt for pptx
-diff --git a/setup.py b/setup.py
-index d35e7bc..71ddb81 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,7 +1,7 @@
- from setuptools import find_packages
- from setuptools import setup
- 
--version = '2.0.8.dev0'
-+version = '2.0.8'
- 
- setup(
-     name='Products.MimetypesRegistry',
+diff --git a/bootstrap.py b/bootstrap.py
+new file mode 100644
+index 0000000..a629566
+--- /dev/null
++++ b/bootstrap.py
+@@ -0,0 +1,189 @@
++##############################################################################
++#
++# Copyright (c) 2006 Zope Foundation and Contributors.
++# All Rights Reserved.
++#
++# This software is subject to the provisions of the Zope Public License,
++# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
++# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
++# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
++# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
++# FOR A PARTICULAR PURPOSE.
++#
++##############################################################################
++"""Bootstrap a buildout-based project
++
++Simply run this script in a directory containing a buildout.cfg.
++The script accepts buildout command-line options, so you can
++use the -c option to specify an alternate configuration file.
++"""
++
++import os
++import shutil
++import sys
++import tempfile
++
++from optparse import OptionParser
++
++tmpeggs = tempfile.mkdtemp()
++
++usage = '''\
++[DESIRED PYTHON FOR BUILDOUT] bootstrap.py [options]
++
++Bootstraps a buildout-based project.
++
++Simply run this script in a directory containing a buildout.cfg, using the
++Python that you want bin/buildout to use.
++
++Note that by using --find-links to point to local resources, you can keep
++this script from going over the network.
++'''
++
++parser = OptionParser(usage=usage)
++parser.add_option("-v", "--version", help="use a specific zc.buildout version")
++
++parser.add_option("-t", "--accept-buildout-test-releases",
++                  dest='accept_buildout_test_releases',
++                  action="store_true", default=False,
++                  help=("Normally, if you do not specify a --version, the "
++                        "bootstrap script and buildout gets the newest "
++                        "*final* versions of zc.buildout and its recipes and "
++                        "extensions for you.  If you use this flag, "
++                        "bootstrap and buildout will get the newest releases "
++                        "even if they are alphas or betas."))
++parser.add_option("-c", "--config-file",
++                  help=("Specify the path to the buildout configuration "
++                        "file to be used."))
++parser.add_option("-f", "--find-links",
++                  help=("Specify a URL to search for buildout releases"))
++parser.add_option("--allow-site-packages",
++                  action="store_true", default=False,
++                  help=("Let bootstrap.py use existing site packages"))
++parser.add_option("--setuptools-version",
++                  help="use a specific setuptools version")
++
++
++options, args = parser.parse_args()
++
++######################################################################
++# load/install setuptools
++
++try:
++    if options.allow_site_packages:
++        import setuptools
++        import pkg_resources
++    from urllib.request import urlopen
++except ImportError:
++    from urllib2 import urlopen
++
++ez = {}
++exec(urlopen('https://bootstrap.pypa.io/ez_setup.py').read(), ez)
++
++if not options.allow_site_packages:
++    # ez_setup imports site, which adds site packages
++    # this will remove them from the path to ensure that incompatible versions
++    # of setuptools are not in the path
++    import site
++    # inside a virtualenv, there is no 'getsitepackages'.
++    # We can't remove these reliably
++    if hasattr(site, 'getsitepackages'):
++        for sitepackage_path in site.getsitepackages():
++            sys.path[:] = [x for x in sys.path if sitepackage_path not in x]
++
++setup_args = dict(to_dir=tmpeggs, download_delay=0)
++
++if options.setuptools_version is not None:
++    setup_args['version'] = options.setuptools_version
++
++ez['use_setuptools'](**setup_args)
++import setuptools
++import pkg_resources
++
++# This does not (always?) update the default working set.  We will
++# do it.
++for path in sys.path:
++    if path not in pkg_resources.working_set.entries:
++        pkg_resources.working_set.add_entry(path)
++
++######################################################################
++# Install buildout
++
++ws = pkg_resources.working_set
++
++cmd = [sys.executable, '-c',
++       'from setuptools.command.easy_install import main; main()',
++       '-mZqNxd', tmpeggs]
++
++find_links = os.environ.get(
++    'bootstrap-testing-find-links',
++    options.find_links or
++    ('http://downloads.buildout.org/'
++     if options.accept_buildout_test_releases else None)
++    )
++if find_links:
++    cmd.extend(['-f', find_links])
++
++setuptools_path = ws.find(
++    pkg_resources.Requirement.parse('setuptools')).location
++
++requirement = 'zc.buildout'
++version = options.version
++if version is None and not options.accept_buildout_test_releases:
++    # Figure out the most recent final version of zc.buildout.
++    import setuptools.package_index
++    _final_parts = '*final-', '*final'
++
++    def _final_version(parsed_version):
++        try:
++            return not parsed_version.is_prerelease
++        except AttributeError:
++            # Older setuptools
++            for part in parsed_version:
++                if (part[:1] == '*') and (part not in _final_parts):
++                    return False
++            return True
++
++    index = setuptools.package_index.PackageIndex(
++        search_path=[setuptools_path])
++    if find_links:
++        index.add_find_links((find_links,))
++    req = pkg_resources.Requirement.parse(requirement)
++    if index.obtain(req) is not None:
++        best = []
++        bestv = None
++        for dist in index[req.project_name]:
++            distv = dist.parsed_version
++            if _final_version(distv):
++                if bestv is None or distv > bestv:
++                    best = [dist]
++                    bestv = distv
++                elif distv == bestv:
++                    best.append(dist)
++        if best:
++            best.sort()
++            version = best[-1].version
++if version:
++    requirement = '=='.join((requirement, version))
++cmd.append(requirement)
++
++import subprocess
++if subprocess.call(cmd, env=dict(os.environ, PYTHONPATH=setuptools_path)) != 0:
++    raise Exception(
++        "Failed to execute command:\n%s" % repr(cmd)[1:-1])
++
++######################################################################
++# Import and run buildout
++
++ws.add_entry(tmpeggs)
++ws.require(requirement)
++import zc.buildout.buildout
++
++if not [a for a in args if '=' not in a]:
++    args.append('bootstrap')
++
++# if -c was provided, we push it back into args for buildout' main function
++if options.config_file is not None:
++    args[0:0] = ['-c', options.config_file]
++
++zc.buildout.buildout.main(args)
++shutil.rmtree(tmpeggs)
+diff --git a/buildout.cfg b/buildout.cfg
+new file mode 100644
+index 0000000..e7133b1
+--- /dev/null
++++ b/buildout.cfg
+@@ -0,0 +1,18 @@
++[buildout]
++parts = test
++        omelette
++versions = versions
++
++extends = http://dist.plone.org/release/4.3.6/versions.cfg
++develop = .
++
++[versions]
++plone.cachepurging = 
++
++[test]
++recipe = zc.recipe.testrunner
++eggs = plone.cachepurging [test]
++
++[omelette]
++recipe = collective.recipe.omelette
++eggs = ${test:eggs}
 
 
-Repository: Products.MimetypesRegistry
+Repository: plone.cachepurging
 
 
 Branch: refs/heads/master
-Date: 2015-06-29T15:36:17+02:00
+Date: 2015-07-06T12:01:04+02:00
 Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/Products.MimetypesRegistry/commit/5f0fa6be80e3bf8a84b505e291e51e12631aee7a
+Commit: https://github.com/plone/plone.cachepurging/commit/33a83c7e8851d42d88f1446bdb1777243ef261a1
 
-Back to development: 2.0.9
+do not iterate on settings.cachingProxies when there are no.
 
 Files changed:
-M CHANGES.rst
-M setup.py
+M CHANGES.txt
+M plone/cachepurging/hooks.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 47bd8da..1828d90 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,6 +1,12 @@
- Changelog
- =========
- 
-+2.0.9 (unreleased)
-+------------------
-+
-+- Nothing changed yet.
-+
-+
- 2.0.8 (2015-06-29)
+diff --git a/CHANGES.txt b/CHANGES.txt
+index 10abcf4..0768449 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,8 @@ Changelog
+ 1.0.9 (unreleased)
  ------------------
  
-diff --git a/setup.py b/setup.py
-index 71ddb81..3c0fec9 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,7 +1,7 @@
- from setuptools import find_packages
- from setuptools import setup
+-- Nothing changed yet.
++- do not iterate on settings.cachingProxies when there are no.
++  [gotcha]
  
--version = '2.0.8'
-+version = '2.0.9.dev0'
  
- setup(
-     name='Products.MimetypesRegistry',
+ 1.0.8 (2015-06-09)
+diff --git a/plone/cachepurging/hooks.py b/plone/cachepurging/hooks.py
+index f6ed902..9a7f879 100644
+--- a/plone/cachepurging/hooks.py
++++ b/plone/cachepurging/hooks.py
+@@ -64,6 +64,7 @@ def purge(event):
+         return
+ 
+     settings = registry.forInterface(ICachePurgingSettings, check=False)
+-    for path in paths:
+-        for url in getURLsToPurge(path, settings.cachingProxies):
+-            purger.purgeAsync(url)
++    if settings.cachingProxies:
++        for path in paths:
++            for url in getURLsToPurge(path, settings.cachingProxies):
++                purger.purgeAsync(url)
 
 
