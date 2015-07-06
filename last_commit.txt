@@ -1,58 +1,2408 @@
-Repository: plone.protect
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-07-03T16:14:56+01:00
-Author: Adam Forsythe-Cheasley (adamcheasley) <adam@netsight.co.uk>
-Commit: https://github.com/plone/plone.protect/commit/f00ff964291d0a8fb6e0fb6fc70abb52c9ac3946
+Date: 2015-07-06T00:53:08-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.content/commit/336a39447cda97fe78c3cf6f60861ea7631b60f7
 
-Update README.rst
-
-Files changed:
-M README.rst
-
-diff --git a/README.rst b/README.rst
-index 4b0a771..662019d 100644
---- a/README.rst
-+++ b/README.rst
-@@ -21,7 +21,7 @@ checker::
-   def manage_doSomething(self, param, REQUEST=None):
-       pass
- 
--This checker only operators on HTTP requests; other types of requests
-+This checker only operates on HTTP requests; other types of requests
- are not checked.
- 
- b) Passing request to a function validator
-
-
-Repository: plone.protect
-
-
-Branch: refs/heads/master
-Date: 2015-07-04T14:40:57+02:00
-Author: Gil Forcada Codinachs (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.protect/commit/ac2cf370d7e9491788974e7bbb70491572a87aca
-
-Merge pull request #11 from plone/docs-patch-1
-
-Correct grammar in readme
+Update folder contents integration to be able to work in a way where
+  button actions can be provided by add-on products
 
 Files changed:
-M README.rst
+A plone/app/content/browser/contents/__init__.py
+A plone/app/content/browser/contents/configure.zcml
+A plone/app/content/browser/contents/copy.py
+A plone/app/content/browser/contents/cut.py
+A plone/app/content/browser/contents/delete.py
+A plone/app/content/browser/contents/paste.py
+A plone/app/content/browser/contents/properties.py
+A plone/app/content/browser/contents/rename.py
+A plone/app/content/browser/contents/tags.py
+A plone/app/content/browser/contents/templates/delete.pt
+A plone/app/content/browser/contents/templates/folder_contents.pt
+A plone/app/content/browser/contents/templates/properties.pt
+A plone/app/content/browser/contents/templates/rename.pt
+A plone/app/content/browser/contents/templates/tags.pt
+A plone/app/content/browser/contents/templates/workflow.pt
+A plone/app/content/browser/contents/workflow.py
+M CHANGES.rst
+M plone/app/content/browser/configure.zcml
+M plone/app/content/browser/vocabulary.py
+M plone/app/content/interfaces.py
+M plone/app/content/tests/test_folder.py
+D plone/app/content/browser/folder.py
+D plone/app/content/browser/foldercontents.zcml
+D plone/app/content/browser/templates/folder_contents.pt
 
-diff --git a/README.rst b/README.rst
-index 4b0a771..662019d 100644
---- a/README.rst
-+++ b/README.rst
-@@ -21,7 +21,7 @@ checker::
-   def manage_doSomething(self, param, REQUEST=None):
-       pass
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b37ff1c..f66ec13 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,10 @@ Changelog
+ 3.0.7 (unreleased)
+ ------------------
  
--This checker only operators on HTTP requests; other types of requests
-+This checker only operates on HTTP requests; other types of requests
- are not checked.
++- Update folder contents integration to be able to work in a way where
++  button actions can be provided by add-on products
++  [vangheem]
++
+ - Make the ``@@fileUpload`` to not be guarded by the AddPortalContent
+   permission, and instead do that check in code, so we can return better
+   error message
+diff --git a/plone/app/content/browser/configure.zcml b/plone/app/content/browser/configure.zcml
+index 9e8f64d..8082f9d 100644
+--- a/plone/app/content/browser/configure.zcml
++++ b/plone/app/content/browser/configure.zcml
+@@ -12,7 +12,7 @@
+         />
  
- b) Passing request to a function validator
+     <!-- Folder contents -->
+-    <include file="foldercontents.zcml" />
++    <include package=".contents" />
+ 
+     <!-- Review list -->
+     <browser:page
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+new file mode 100644
+index 0000000..10f0578
+--- /dev/null
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -0,0 +1,327 @@
++from AccessControl import Unauthorized
++from Acquisition import aq_inner
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone import utils
++from Products.CMFPlone.interfaces import IPloneSiteRoot
++from Products.Five import BrowserView
++from plone.app.content.browser.interfaces import IFolderContentsView
++from plone.app.content.interfaces import IStructureAction
++from plone.app.content.utils import json_dumps
++from plone.app.content.utils import json_loads
++from plone.folder.interfaces import IExplicitOrdering
++from plone.protect.postonly import check as checkpost
++from plone.uuid.interfaces import IUUID
++from zope.browsermenu.interfaces import IBrowserMenu
++from zope.component import getMultiAdapter
++from zope.component import getUtilitiesFor
++from zope.component import getUtility
++from zope.component.hooks import getSite
++from zope.i18n import translate
++from zope.interface import implementer
++
++
++try:
++    from plone.app.content.browser.file import TUS_ENABLED
++except ImportError:
++    TUS_ENABLED = False
++
++
++class ContentsBaseAction(BrowserView):
++
++    success_msg = _('Success')
++    failure_msg = _('Failure')
++    required_obj_permission = None
++
++    def objectTitle(self, obj):
++        context = aq_inner(obj)
++        title = utils.pretty_title_or_id(context, context)
++        return utils.safe_unicode(title)
++
++    def protect(self):
++        authenticator = getMultiAdapter((self.context, self.request),
++                                        name='authenticator')
++        if not authenticator.verify():
++            raise Unauthorized
++        checkpost(self.request)
++
++    def json(self, data):
++        self.request.response.setHeader("Content-Type", "application/json")
++        return json_dumps(data)
++
++    def get_selection(self):
++        selection = self.request.form.get('selection', '[]')
++        return json_loads(selection)
++
++    def action(self, obj):
++        """
++        fill in this method to do action against each item in the selection
++        """
++        pass
++
++    def finish(self):
++        pass
++
++    def __call__(self):
++        self.protect()
++        self.errors = []
++        site = getSite()
++        context = aq_inner(self.context)
++        selection = self.get_selection()
++
++        self.dest = site.restrictedTraverse(
++            str(self.request.form['folder'].lstrip('/')))
++
++        self.catalog = getToolByName(context, 'portal_catalog')
++        self.mtool = getToolByName(self.context, 'portal_membership')
++
++        for brain in self.catalog(UID=selection):
++            # remove everyone so we know if we missed any
++            selection.remove(brain.UID)
++            obj = brain.getObject()
++            if self.required_obj_permission:
++                if not self.mtool.checkPermission(self.required_obj_permission,
++                                                  obj):
++                    self.errors.append(_('Permission denied for "${title}"',
++                                         mapping={
++                                             'title': self.objectTitle(obj)
++                                         }))
++                    continue
++            self.action(obj)
++
++        self.finish()
++        return self.message(selection)
++
++    def message(self, missing=[]):
++        if len(missing) > 0:
++            self.errors.append(_('${items} could not be found', mapping={
++                'items': str(len(missing))}))
++        if not self.errors:
++            msg = self.success_msg
++        else:
++            msg = self.failure_msg
++
++        translated_msg = translate(msg, context=self.request)
++        if self.errors:
++            translated_errors = [translate(error, context=self.request)
++                                 for error in self.errors]
++            translated_msg = '%s: %s' % (translated_msg, '\n'.join(translated_errors))
++
++        return self.json({
++            'status': 'success',
++            'msg': translated_msg
++        })
++
++
++@implementer(IFolderContentsView)
++class FolderContentsView(BrowserView):
++
++    def get_actions(self):
++        actions = []
++        for name, Utility in getUtilitiesFor(IStructureAction):
++            utility = Utility(self.context, self.request)
++            actions.append(utility)
++        actions.sort(key=lambda a: a.order)
++        return [a.get_options() for a in actions]
++
++    def __call__(self):
++        site = getSite()
++        base_url = site.absolute_url()
++        base_vocabulary = '%s/@@getVocabulary?name=' % base_url
++        site_path = site.getPhysicalPath()
++        context_path = self.context.getPhysicalPath()
++        options = {
++            'vocabularyUrl': '%splone.app.vocabularies.Catalog' % (
++                base_vocabulary),
++            'urlStructure': {
++                'base': base_url,
++                'appended': '/folder_contents'
++            },
++            'moveUrl': '%s{path}/fc-itemOrder' % base_url,
++            'indexOptionsUrl': '%s/@@qsOptions' % base_url,
++            'contextInfoUrl': '%s{path}/@@fc-contextInfo' % base_url,
++            'setDefaultPageUrl': '%s{path}/@@fc-setDefaultPage' % base_url,
++            'availableColumns': {
++                'id': translate(_('ID'), context=self.request),
++                'Title': translate(_('Title'), context=self.request),
++                'ModificationDate': translate(_('Last modified'), context=self.request),
++                'EffectiveDate': translate(_('Publication date'), context=self.request),
++                'CreationDate': translate(_('Created on'), context=self.request),
++                'review_state': translate(_('Review state'), context=self.request),
++                'Subject': translate(_('Tags'), context=self.request),
++                'Type': translate(_('Type'), context=self.request),
++                'is_folderish': translate(_('Folder'), context=self.request),
++                'exclude_from_nav': translate(_('Excluded from nav'), context=self.request),
++                'getObjSize': translate(_('Object Size'), context=self.request),
++                'last_comment_date': translate(_('Last comment date'), context=self.request),
++                'total_comments': translate(_('Total comments'), context=self.request),
++            },
++            'buttons': self.get_actions(),
++            'rearrange': {
++                'properties': {
++                    'id': translate(_('Id'), context=self.request),
++                    'sortable_title': translate(_('Title'), context=self.request),
++                    'modified': translate(_('Last modified'), context=self.request),
++                    'created': translate(_('Created on'), context=self.request),
++                    'effective': translate(_('Publication date'), context=self.request),
++                    'Type': translate(_('Type'), context=self.request)
++                },
++                'url': '%s{path}/@@fc-rearrange' % base_url
++            },
++            'basePath': '/' + '/'.join(context_path[len(site_path):]),
++            'upload': {
++                'relativePath': 'fileUpload',
++                'baseUrl': base_url,
++                'initialFolder': IUUID(self.context, None),
++                'useTus': TUS_ENABLED
++            }
++        }
++        self.options = json_dumps(options)
++        return super(FolderContentsView, self).__call__()
++
++
++class ItemOrder(ContentsBaseAction):
++    success_msg = _('Successfully moved item')
++    failure_msg = _('Error moving item')
++
++    def getOrdering(self):
++        if IPloneSiteRoot.providedBy(self.context):
++            return self.context
++        else:
++            ordering = self.context.getOrdering()
++            if not IExplicitOrdering.providedBy(ordering):
++                return None
++            return ordering
++
++    def __call__(self):
++        self.errors = []
++        self.protect()
++        id = self.request.form.get('id')
++        ordering = self.getOrdering()
++        delta = self.request.form['delta']
++        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
++        if delta == 'top':
++            ordering.moveObjectsToTop([id])
++        elif delta == 'bottom':
++            ordering.moveObjectsToBottom([id])
++        else:
++            delta = int(delta)
++            if subset_ids:
++                position_id = [(ordering.getObjectPosition(i), i)
++                               for i in subset_ids]
++                position_id.sort()
++                if subset_ids != [i for position, i in position_id]:
++                    self.errors.append(_('Client/server ordering mismatch'))
++                    return self.message()
++
++            ordering.moveObjectsByDelta([id], delta)
++        return self.message()
++
++
++class SetDefaultPage(ContentsBaseAction):
++    success_msg = _(u'Default page set successfully')
++    failure_msg = _(u'Failed to set default page')
++
++    def __call__(self):
++        id = self.request.form.get('id')
++        self.errors = []
++
++        if id not in self.context.objectIds():
++            self.errors.append(
++                _(u'There is no object with short name '
++                  u'${name} in this folder.',
++                  mapping={u'name': id}))
++        else:
++            self.context.setDefaultPage(id)
++        return self.message()
++
++
++class ContextInfo(BrowserView):
++
++    attributes = ['UID', 'Title', 'Type', 'path', 'review_state',
++                  'ModificationDate', 'EffectiveDate', 'CreationDate',
++                  'is_folderish', 'Subject', 'getURL', 'id',
++                  'exclude_from_nav', 'getObjSize', 'last_comment_date',
++                  'total_comments']
++
++    def __call__(self):
++        factories_menu = getUtility(
++            IBrowserMenu, name='plone_contentmenu_factory',
++            context=self.context).getMenuItems(self.context, self.request)
++        factories = []
++        for item in factories_menu:
++            if item.get('title') == 'folder_add_settings':
++                continue
++            title = item.get('title', '')
++            factories.append({
++                'id': item.get('id'),
++                'title': title and translate(title, context=self.request) or '',
++                'action': item.get('action')
++                })
++
++        context = aq_inner(self.context)
++        crumbs = []
++        while not IPloneSiteRoot.providedBy(context):
++            crumbs.append({
++                'id': context.getId(),
++                'title': utils.pretty_title_or_id(context, context)
++            })
++            context = utils.parent(context)
++
++        catalog = getToolByName(self.context, 'portal_catalog')
++        try:
++            brains = catalog(UID=IUUID(self.context))
++        except TypeError:
++            brains = []
++        item = None
++        if len(brains) > 0:
++            obj = brains[0]
++            # context here should be site root
++            base_path = '/'.join(context.getPhysicalPath())
++            item = {}
++            for attr in self.attributes:
++                key = attr
++                if key == 'path':
++                    attr = 'getPath'
++                val = getattr(obj, attr, None)
++                if callable(val):
++                    val = val()
++                if key == 'path':
++                    val = val[len(base_path):]
++                item[key] = val
++        return json_dumps({
++            'addButtons': factories,
++            'defaultPage': self.context.getDefaultPage(),
++            'breadcrumbs': [c for c in reversed(crumbs)],
++            'object': item
++        })
++
++
++def getOrdering(context):
++    if IPloneSiteRoot.providedBy(context):
++        return context
++    else:
++        ordering = context.getOrdering()
++        if not IExplicitOrdering.providedBy(ordering):
++            return None
++        return ordering
++
++
++class Rearrange(ContentsBaseAction):
++    def __call__(self):
++        self.protect()
++        self.errors = []
++        ordering = getOrdering(self.context)
++        if ordering:
++            catalog = getToolByName(self.context, 'portal_catalog')
++            brains = catalog(path={
++                'query': '/'.join(self.context.getPhysicalPath()),
++                'depth': 1
++            }, sort_on=self.request.form.get('rearrange_on'))
++            if self.request.form.get('reversed') == 'true':
++                brains = [b for b in reversed(brains)]
++            for idx, brain in enumerate(brains):
++                ordering.moveObjectToPosition(brain.id, idx)
++        else:
++            self.errors.append(_(u'cannot rearrange folder'))
++        return self.message()
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/configure.zcml b/plone/app/content/browser/contents/configure.zcml
+new file mode 100644
+index 0000000..bdffd59
+--- /dev/null
++++ b/plone/app/content/browser/contents/configure.zcml
+@@ -0,0 +1,123 @@
++<configure
++    xmlns="http://namespaces.zope.org/zope"
++    xmlns:browser="http://namespaces.zope.org/browser"
++    xmlns:plone="http://namespaces.plone.org/plone"
++    xmlns:i18n="http://namespaces.zope.org/i18n">
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    class=".FolderContentsView"
++    name="folder_contents"
++    template="templates/folder_contents.pt"
++    permission="cmf.ListFolderContents"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-itemOrder"
++    class=".ItemOrder"
++    permission="cmf.ModifyPortalContent"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-contextInfo"
++    class=".ContextInfo"
++    permission="cmf.ListFolderContents"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-setDefaultPage"
++    class=".SetDefaultPage"
++    permission="cmf.ModifyPortalContent"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-rearrange"
++    class=".Rearrange"
++    permission="cmf.ModifyPortalContent"
++    />
++
++  <!-- buttons -->
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-rename"
++    class=".rename.RenameActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".rename.RenameAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="rename" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-tags"
++    class=".tags.TagsActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".tags.TagsAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="tags" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-delete"
++    class=".delete.DeleteActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".delete.DeleteAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="delete" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-workflow"
++    class=".workflow.WorkflowActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".workflow.WorkflowAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="workflow" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-properties"
++    class=".properties.PropertiesActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".properties.PropertiesAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="properties" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-copy"
++    class=".copy.CopyActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".copy.CopyAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="copy" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-cut"
++    class=".cut.CutActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".cut.CutAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="cut" />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-paste"
++    class=".paste.PasteActionView"
++    permission="cmf.ListFolderContents"
++    />
++  <utility component=".paste.PasteAction"
++           provides="plone.app.content.interfaces.IStructureAction"
++           name="paste" />
++</configure>
+diff --git a/plone/app/content/browser/contents/copy.py b/plone/app/content/browser/contents/copy.py
+new file mode 100644
+index 0000000..e353b1d
+--- /dev/null
++++ b/plone/app/content/browser/contents/copy.py
+@@ -0,0 +1,53 @@
++from OFS.CopySupport import CopyError
++from OFS.CopySupport import _cb_encode
++from OFS.CopySupport import cookie_path
++from OFS.CopySupport import eNotSupported
++from OFS.Moniker import Moniker
++from Products.CMFPlone import PloneMessageFactory as _
++from cgi import escape
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from zope.interface import implements
++
++
++class CopyAction(object):
++    implements(IStructureAction)
++
++    order = 2
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Copy'),
++            'id': 'copy',
++            'icon': 'copy',
++            'url': self.context.absolute_url() + '/@@fc-copy'
++        }
++
++
++class CopyActionView(ContentsBaseAction):
++    success_msg = _('Successly copied items')
++    failure_msg = _('Failed to copy items')
++
++    def action(self, obj):
++        self.oblist.append(obj)
++
++    def finish(self):
++        oblist = []
++        for ob in self.oblist:
++            if not ob.cb_isCopyable():
++                raise CopyError(eNotSupported % escape(id))
++            m = Moniker(ob)
++            oblist.append(m.dump())
++        cp = (0, oblist)
++        cp = _cb_encode(cp)
++        resp = self.request.response
++        resp.setCookie('__cp', cp, path='%s' % cookie_path(self.request))
++        self.request['__cp'] = cp
++
++    def __call__(self):
++        self.oblist = []
++        return super(CopyActionView, self).__call__()
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/cut.py b/plone/app/content/browser/contents/cut.py
+new file mode 100644
+index 0000000..ae86724
+--- /dev/null
++++ b/plone/app/content/browser/contents/cut.py
+@@ -0,0 +1,58 @@
++from OFS.CopySupport import CopyError
++from OFS.CopySupport import _cb_encode
++from OFS.CopySupport import cookie_path
++from OFS.CopySupport import eNotSupported
++from OFS.Moniker import Moniker
++from Products.CMFPlone import PloneMessageFactory as _
++from cgi import escape
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from webdav.Lockable import ResourceLockedError
++from zope.interface import implements
++
++
++class CutAction(object):
++    implements(IStructureAction)
++
++    order = 1
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Cut'),
++            'id': 'cut',
++            'icon': 'scissors',
++            'url': self.context.absolute_url() + '/@@fc-cut'
++        }
++
++
++class CutActionView(ContentsBaseAction):
++    success_msg = _('Successly cut items')
++    failure_msg = _('Failed to cut items')
++
++    def action(self, obj):
++        self.oblist.append(obj)
++
++    def finish(self):
++        oblist = []
++        for ob in self.oblist:
++            if ob.wl_isLocked():
++                raise ResourceLockedError('Object "%s" is locked via WebDAV'
++                                          % ob.getId())
++
++            if not ob.cb_isMoveable():
++                raise CopyError(eNotSupported % escape(id))
++            m = Moniker(ob)
++            oblist.append(m.dump())
++        cp = (1, oblist)
++        cp = _cb_encode(cp)
++        resp = self.request.response
++        resp.setCookie('__cp', cp, path='%s' % cookie_path(self.request))
++        self.request['__cp'] = cp
++
++    def __call__(self):
++        self.oblist = []
++        return super(CutActionView, self).__call__()
+diff --git a/plone/app/content/browser/contents/delete.py b/plone/app/content/browser/contents/delete.py
+new file mode 100644
+index 0000000..d9519fc
+--- /dev/null
++++ b/plone/app/content/browser/contents/delete.py
+@@ -0,0 +1,60 @@
++from AccessControl import Unauthorized
++from AccessControl.Permissions import delete_objects
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from zope.interface import implements
++
++
++class DeleteAction(object):
++    implements(IStructureAction)
++
++    template = ViewPageTemplateFile('templates/delete.pt')
++    order = 4
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Delete'),
++            'id': 'delete',
++            'icon': 'trash',
++            'context': 'danger',
++            'url': self.context.absolute_url() + '/@@fc-delete',
++            'form': {
++                'title': _('Delete selected items'),
++                'submitText': _('Yes'),
++                'submitContext': 'danger',
++                'template': self.template(),
++            }
++        }
++
++
++class DeleteActionView(ContentsBaseAction):
++    required_obj_permission = delete_objects
++    success_msg = _('Successly delete items')
++    failure_msg = _('Failed to delete items')
++
++    def action(self, obj):
++        parent = obj.aq_inner.aq_parent
++        title = self.objectTitle(obj)
++
++        try:
++            lock_info = obj.restrictedTraverse('@@plone_lock_info')
++        except AttributeError:
++            lock_info = None
++
++        if lock_info is not None and lock_info.is_locked():
++            self.errors.append(_(u'${title} is locked and cannot be deleted.',
++                                 mapping={u'title': title}))
++            return
++        else:
++            try:
++                parent.manage_delObjects(obj.getId(), self.request)
++            except Unauthorized:
++                self.errors.append(
++                    _(u'You are not authorized to delete ${title}.',
++                        mapping={u'title': self.objectTitle(self.dest)}))
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+new file mode 100644
+index 0000000..15a42e9
+--- /dev/null
++++ b/plone/app/content/browser/contents/paste.py
+@@ -0,0 +1,59 @@
++from AccessControl import Unauthorized
++from OFS.CopySupport import cookie_path
++from Products.CMFPlone import PloneMessageFactory as _
++from ZODB.POSException import ConflictError
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from zope.component.hooks import getSite
++from zope.interface import implements
++
++
++class PasteAction(object):
++    implements(IStructureAction)
++
++    order = 3
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Paste'),
++            'id': 'paste',
++            'icon': 'paste',
++            'url': self.context.absolute_url() + '/@@fc-paste'
++        }
++
++
++class PasteActionView(ContentsBaseAction):
++    required_obj_permission = 'Copy or Move'
++    success_msg = _('Successly pasted items')
++    failure_msg = _('Failed to paste items')
++
++    def __call__(self):
++        self.protect()
++        self.errors = []
++        site = getSite()
++
++        self.dest = site.restrictedTraverse(
++            str(self.request.form['folder'].lstrip('/')))
++
++        try:
++            self.dest.manage_pasteObjects(self.request['__cp'])
++        except ConflictError:
++            raise
++        except Unauthorized:
++            # avoid this unfriendly exception text:
++            # "You are not allowed to access 'manage_pasteObjects' in this
++            # context"
++            self.errors.append(
++                _(u'You are not authorized to paste ${title} here.',
++                    mapping={u'title': self.objectTitle(self.dest)}))
++
++        resp = self.request.response
++        resp.setCookie('__cp', 'deleted',
++                       path='%s' % cookie_path(self.request),
++                       expires='Wed, 31-Dec-97 23:59:59 GMT')
++        self.request['__cp'] = None
++        return self.message()
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
+new file mode 100644
+index 0000000..037a2b7
+--- /dev/null
++++ b/plone/app/content/browser/contents/properties.py
+@@ -0,0 +1,90 @@
++from DateTime import DateTime
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from plone.dexterity.interfaces import IDexterityContent
++from zope.component.hooks import getSite
++from zope.interface import implements
++
++
++class PropertiesAction(object):
++    implements(IStructureAction)
++
++    template = ViewPageTemplateFile('templates/properties.pt')
++    order = 8
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        site = getSite()
++        base_url = site.absolute_url()
++        base_vocabulary = '%s/@@getVocabulary?name=' % base_url
++        return {
++            'title': _('Properties'),
++            'id': 'properties',
++            'icon': 'edit',
++            'url': self.context.absolute_url() + '/@@fc-properties',
++            'form': {
++                'title': _('Modify properties on items'),
++                'template': self.template(
++                    vocabulary_url='%splone.app.vocabularies.Users' % (
++                        base_vocabulary)
++                    )
++            }
++        }
++
++
++class PropertiesActionView(ContentsBaseAction):
++    success_msg = _(u'Successfully updated metadata')
++    failure_msg = _(u'Failure updating metadata')
++    required_obj_permission = 'Modify portal content'
++
++    def __call__(self):
++        self.effectiveDate = self.request.form.get('effectiveDate')
++        self.expirationDate = self.request.form.get('expirationDate')
++        self.copyright = self.request.form.get('copyright')
++        self.contributors = self.request.form.get('contributors')
++        if self.contributors:
++            self.contributors = self.contributors.split(',')
++        else:
++            self.contributors = []
++        self.creators = self.request.form.get('creators', '')
++        if self.creators:
++            self.creators = self.creators.split(',')
++        self.exclude = self.request.form.get('exclude-from-nav')
++        return super(PropertiesActionView, self).__call__()
++
++    def dx_action(self, obj):
++        if self.effectiveDate and hasattr(obj, 'effective_date'):
++            obj.effective_date = DateTime(self.effectiveDate)
++        if self.expirationDate and hasattr(obj, 'expiration_date'):
++            obj.expiration_date = DateTime(self.expirationDate)
++        if self.copyright and hasattr(obj, 'rights'):
++            obj.rights = self.copyright
++        if self.contributors and hasattr(obj, 'contributors'):
++            obj.contributors = tuple(self.contributors)
++        if self.creators and hasattr(obj, 'creators'):
++            obj.creators = tuple(self.creators)
++        if self.exclude and hasattr(obj, 'exclude_from_nav'):
++            obj.exclude_from_nav = self.exclude == 'yes'
++
++    def action(self, obj):
++        if IDexterityContent.providedBy(obj):
++            self.dx_action(obj)
++        else:
++            if self.effectiveDate:
++                obj.setEffectiveDate(DateTime(self.effectiveDate))
++            if self.expirationDate:
++                obj.setExpirationDate(DateTime(self.expirationDate))
++            if self.copyright:
++                obj.setRights(self.copyright)
++            if self.contributors:
++                obj.setContributors(self.contributors)
++            if self.creators:
++                obj.setCreators(self.creators)
++            if self.exclude:
++                obj.setExcludeFromNav(self.exclude == 'yes')
++        obj.reindexObject()
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/rename.py b/plone/app/content/browser/contents/rename.py
+new file mode 100644
+index 0000000..185587e
+--- /dev/null
++++ b/plone/app/content/browser/contents/rename.py
+@@ -0,0 +1,102 @@
++from AccessControl import getSecurityManager
++from Acquisition import aq_inner
++from Acquisition import aq_parent
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from ZODB.POSException import ConflictError
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++import transaction
++from zope.component import getMultiAdapter
++from zope.container.interfaces import INameChooser
++from zope.event import notify
++from zope.interface import implements
++from zope.lifecycleevent import ObjectModifiedEvent
++
++
++class RenameAction(object):
++    implements(IStructureAction)
++
++    template = ViewPageTemplateFile('templates/rename.pt')
++    order = 5
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Rename'),
++            'id': 'rename',
++            'icon': 'random',
++            'url': self.context.absolute_url() + '/@@fc-rename',
++            'form': {
++                'template': self.template()
++            }
++        }
++
++
++class RenameActionView(ContentsBaseAction):
++    success_msg = _('Items renamed')
++    failure_msg = _('Failed to rename all items')
++
++    def __call__(self):
++        self.errors = []
++        self.protect()
++        context = aq_inner(self.context)
++
++        catalog = getToolByName(context, 'portal_catalog')
++        mtool = getToolByName(context, 'portal_membership')
++
++        missing = []
++        for key in self.request.form.keys():
++            if not key.startswith('UID_'):
++                continue
++            index = key.split('_')[-1]
++            uid = self.request.form[key]
++            brains = catalog(UID=uid)
++            if len(brains) == 0:
++                missing.append(uid)
++                continue
++            obj = brains[0].getObject()
++            title = self.objectTitle(obj)
++            if not mtool.checkPermission('Copy or Move', obj):
++                self.errors(_(u'Permission denied to rename ${title}.',
++                              mapping={u'title': title}))
++                continue
++
++            sp = transaction.savepoint(optimistic=True)
++
++            newid = self.request.form['newid_' + index].encode('utf8')
++            newtitle = self.request.form['newtitle_' + index]
++            try:
++                obid = obj.getId()
++                title = obj.Title()
++                change_title = newtitle and title != newtitle
++                if change_title:
++                    getSecurityManager().validate(obj, obj, 'setTitle',
++                                                  obj.setTitle)
++                    obj.setTitle(newtitle)
++                    notify(ObjectModifiedEvent(obj))
++                if newid and obid != newid:
++                    parent = aq_parent(aq_inner(obj))
++                    # Make sure newid is safe
++                    newid = INameChooser(parent).chooseName(newid, obj)
++                    # Update the default_page on the parent.
++                    context_state = getMultiAdapter(
++                        (obj, self.request), name='plone_context_state')
++                    if context_state.is_default_page():
++                        parent.setDefaultPage(newid)
++                    parent.manage_renameObjects((obid, ), (newid, ))
++                elif change_title:
++                    # the rename will have already triggered a reindex
++                    obj.reindexObject()
++            except ConflictError:
++                raise
++            except Exception:
++                sp.rollback()
++                self.errors.append(_('Error renaming ${title}', mapping={
++                    'title': title}))
++
++        return self.message(missing)
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/tags.py b/plone/app/content/browser/contents/tags.py
+new file mode 100644
+index 0000000..b568cce
+--- /dev/null
++++ b/plone/app/content/browser/contents/tags.py
+@@ -0,0 +1,57 @@
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from zope.component.hooks import getSite
++from zope.interface import implements
++
++
++class TagsAction(object):
++    implements(IStructureAction)
++
++    template = ViewPageTemplateFile('templates/tags.pt')
++    order = 6
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        site = getSite()
++        base_url = site.absolute_url()
++        base_vocabulary = '%s/@@getVocabulary?name=' % base_url
++        return {
++            'title': _('Tags'),
++            'id': 'tags',
++            'icon': 'tags',
++            'url': self.context.absolute_url() + '/@@fc-tags',
++            'form': {
++                'template': self.template(
++                    vocabulary_url='%splone.app.vocabularies.Keywords' % (
++                        base_vocabulary)
++                    )
++            }
++        }
++
++
++class TagsActionView(ContentsBaseAction):
++    required_obj_permission = 'Modify portal content'
++    success_msg = _('Successly updated tags on items')
++    failure_msg = _('Failed to modify tags on items')
++
++    def action(self, obj):
++        toadd = self.request.form.get('toadd')
++        if toadd:
++            toadd = set(toadd.split(','))
++        else:
++            toadd = set([])
++        toremove = self.request.get('toremove')
++        if toremove:
++            toremove = set(toremove.split(','))
++        else:
++            toremove = set([])
++        tags = set(obj.Subject())
++        tags = tags - toremove
++        tags = tags | toadd
++        obj.setSubject(list(tags))
++        obj.reindexObject()
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/templates/delete.pt b/plone/app/content/browser/contents/templates/delete.pt
+new file mode 100644
+index 0000000..7e6a1e3
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/delete.pt
+@@ -0,0 +1,3 @@
++<div i18n:domain="plone">
++  <label i18n:translate="confirm_delete_items">Are you certain you want to delete the selected items</label>
++</div>
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/templates/folder_contents.pt b/plone/app/content/browser/contents/templates/folder_contents.pt
+new file mode 100644
+index 0000000..485eaf0
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/folder_contents.pt
+@@ -0,0 +1,28 @@
++<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
++      xmlns:tal="http://xml.zope.org/namespaces/tal"
++      xmlns:metal="http://xml.zope.org/namespaces/metal"
++      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
++      lang="en"
++      metal:use-macro="context/main_template/macros/master"
++      i18n:domain="plone">
++  <head>
++      <metal:block fill-slot="top_slot">
++        <tal:insert tal:replace="nothing"
++              tal:define="dummy python:request.set('enable_border', 1);
++                          disable_column_one python:request.set('disable_plone.leftcolumn', 1);
++                          disable_column_two python:request.set('disable_plone.rightcolumn', 1);" />
++      </metal:block>
++  </head>
++<body>
++
++<metal:content-core fill-slot="content-core">
++    <metal:content-core define-macro="content-core">
++        <span tal:replace="structure context/@@authenticator/authenticator"/>
++        <div class="pat-structure"
++          tal:attributes="data-pat-structure view/options" />
++    </metal:content-core>
++</metal:content-core>
++
++</body>
++</html>
++
+diff --git a/plone/app/content/browser/contents/templates/properties.pt b/plone/app/content/browser/contents/templates/properties.pt
+new file mode 100644
+index 0000000..5f67d6b
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/properties.pt
+@@ -0,0 +1,41 @@
++<div i18n:domain="plone">
++  <div class="form-group">
++    <label i18n:translate="publiciation_date">Publication Date</label>
++    <input class="form-control pat-pickadate" name="effective" />
++  </div>
++  <div class="form-group">
++    <label i18n:translate="expiration_date">Expiration Date</label>
++    <input class="form-control pat-pickadate" name="expiration" />
++  </div>
++  <div class="form-group">
++    <label i18n:translate="copyright">Copyright</label>
++    <textarea class="form-control" name="copyright"></textarea>
++  </div>
++  <label i18n:translate="creators">Creators</label>
++  <div class="form-group">
++    <input name="creators" style="width: 300px"
++           class="pat-select2"
++           data-pat-select2="multiple: true;
++                             vocabularyUrl: ${python: options['vocabulary_url']}"/>
++  </div>
++  <label i18n:translate="contributors">Contributors</label>
++  <div class="form-group">
++    <input name="contributors" style="width: 300px"
++           class="pat-select2"
++           data-pat-select2="multiple: true;
++                             vocabularyUrl: ${python: options['vocabulary_url']}"/>
++  </div>
++  <label i18n:translate="exclude_from_nav">Exclude from nav</label>
++  <div class="radio">
++    <label>
++      <input type="radio" name="exclude-from-nav" value="yes" />
++      <span i18n:translate="yes">Yes</span>
++    </label>
++  </div>
++  <div class="radio">
++    <label>
++      <input type="radio" name="exclude-from-nav" value="no" />
++      <span i18n:translate="no">No</span>
++    </label>
++  </div>
++</div>
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/templates/rename.pt b/plone/app/content/browser/contents/templates/rename.pt
+new file mode 100644
+index 0000000..1403af7
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/rename.pt
+@@ -0,0 +1,13 @@
++<div class="itemstoremove" i18n:domain="plone">
++<% _.each(items, function(item, index) { %>
++  <div class="item">
++    <div class="form-group">
++      <input name="UID_<%= index %>" type="hidden" value="<%- item.UID %>" />
++      <label i18n:translate="title">Title</label>
++      <input class="form-control" name="newtitle_<%= index %>" value="<%= item.Title %>" />
++      <label i18n:translate="short_name">Short name</label>
++      <input class="form-control" name="newid_<%= index %>" value="<%= item.id %>" />
++    </div>
++  </div>
++<% }) %>
++</div>
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/templates/tags.pt b/plone/app/content/browser/contents/templates/tags.pt
+new file mode 100644
+index 0000000..6c7538e
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/tags.pt
+@@ -0,0 +1,22 @@
++<div i18n:domain="plone">
++  <label i18n:translate="tags_to_remove">Tags to remove</label>
++  <div class="form-group">
++    <select multiple class="toremove pat-select2" name="toremove" style="width: 300px">
++      <% var tags = [];
++      _.each(items, function(item, index) {
++        _.each(item.Subject, function(tag) {
++          if(tags.indexOf(tag) === -1){
++            tags.push(tag);
++            %><option value="<%= tag %>"><%= tag %></option>
++            <%
++          }
++        });
++      }); %>
++    </select>
++  </div>
++  <label i18n:translate="tags_to_add">Tags to add</label>
++  <div class="form-group">
++    <input class="toadd pat-select2" style="width:300px" name="toadd"
++           data-pat-select2="multiple: true; vocabularyUrl: ${python: options['vocabulary_url']}"/>
++  </div>
++</div>
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/templates/workflow.pt b/plone/app/content/browser/contents/templates/workflow.pt
+new file mode 100644
+index 0000000..c942816
+--- /dev/null
++++ b/plone/app/content/browser/contents/templates/workflow.pt
+@@ -0,0 +1,28 @@
++<fieldset i18n:domain="plone">
++  <div class="form-group">
++    <label i18n:translate="comments">Comments</label>
++    <textarea class="form-control" rows="2" name="comments"></textarea>
++    <p class="help-block" i18n:translate="select_transition">Select the transition to be used for modifying the items state.</p>
++  </div>
++  <div class="form-group">
++    <label i18n:translate="change_state">Change State</label>
++    <p class="help-block" i18n:translate="select_transition">Select the transition to be used for modifying the items state.</p>
++    <select class="form-control" name="transition">
++      <% if(data.transitions){
++        _.each(data.transitions, function(transition){
++          %><option value="<%= transition.id %>"><%= transition.title %></option>
++          <%
++        });
++      } %>
++    </select>
++  </div>
++  <div class="checkbox">
++    <label>
++      <input type="checkbox" name="recurse" />
++      <span i18n:translate="include_contained">Include contained items?</span>
++    </label>
++    <p class="help-block" i18n:translate="if_checked_modify_contained">
++    If checked, this will attempt to modify the status of all content in any selected folders and their subfolders.
++    </p>
++  </div>
++</fieldset>
+\ No newline at end of file
+diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py
+new file mode 100644
+index 0000000..bbdc38d
+--- /dev/null
++++ b/plone/app/content/browser/contents/workflow.py
+@@ -0,0 +1,87 @@
++from DateTime import DateTime
++from Products.CMFCore.interfaces._content import IFolderish
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from ZODB.POSException import ConflictError
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
++from zope.interface import implements
++
++
++class WorkflowAction(object):
++    implements(IStructureAction)
++
++    template = ViewPageTemplateFile('templates/workflow.pt')
++    order = 7
++
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
++
++    def get_options(self):
++        return {
++            'title': _('Workflow'),
++            'id': 'workflow',
++            'icon': 'lock',
++            'url': self.context.absolute_url() + '/@@fc-workflow',
++            'form': {
++                'title': _('Change workflow a selected items'),
++                'template': self.template(),
++                'dataUrl': self.context.absolute_url() + '/@@fc-workflow'
++            }
++        }
++
++
++class WorkflowActionView(ContentsBaseAction):
++    required_obj_permission = 'Modify portal content'
++    success_msg = _('Successly modified items')
++    failure_msg = _('Failed to modify items')
++
++    def __call__(self):
++        self.pworkflow = getToolByName(self.context, 'portal_workflow')
++        self.putils = getToolByName(self.context, 'plone_utils')
++        self.transition_id = self.request.form.get('transition', None)
++        self.comments = self.request.form.get('comments', '')
++        self.recurse = self.request.form.get('recurse', 'no') == 'yes'
++        if self.request.form.get('render') == 'yes':
++            # asking for render information
++            selection = self.get_selection()
++            catalog = getToolByName(self.context, 'portal_catalog')
++            brains = catalog(UID=selection)
++            transitions = []
++            for brain in brains:
++                obj = brain.getObject()
++                for transition in self.pworkflow.getTransitionsFor(obj):
++                    tdata = {
++                        'id': transition['id'],
++                        'title': transition['name']
++                    }
++                    if tdata not in transitions:
++                        transitions.append(tdata)
++            return self.json({
++                'transitions': transitions
++            })
++        else:
++            return super(WorkflowActionView, self).__call__()
++
++    def action(self, obj):
++        transitions = self.pworkflow.getTransitionsFor(obj)
++        if self.transition_id in [t['id'] for t in transitions]:
++            try:
++                # set effective date if not already set
++                if obj.EffectiveDate() == 'None':
++                    obj.setEffectiveDate(DateTime())
++
++                self.pworkflow.doActionFor(obj, self.transition_id,
++                                           comment=self.comments)
++                if self.putils.isDefaultPage(obj):
++                    self.action(obj.aq_parent.aq_parent)
++                if self.recurse and IFolderish.providedBy(obj):
++                    for sub in obj.values():
++                        self.action(sub)
++            except ConflictError:
++                raise
++            except Exception:
++                self.errors.append(
++                    _('Could not transition: ${title}', mapping={'title': self.objectTitle(obj)}))
+\ No newline at end of file
+diff --git a/plone/app/content/browser/folder.py b/plone/app/content/browser/folder.py
+deleted file mode 100644
+index 7c9f121..0000000
+--- a/plone/app/content/browser/folder.py
++++ /dev/null
+@@ -1,634 +0,0 @@
+-# -*- coding: utf-8 -*-
+-from AccessControl import Unauthorized
+-from AccessControl import getSecurityManager
+-from Acquisition import aq_inner
+-from Acquisition import aq_parent
+-from DateTime import DateTime
+-from OFS.CopySupport import CopyError
+-from Products.CMFCore.interfaces._content import IFolderish
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.CMFPlone import utils
+-from Products.CMFPlone.interfaces.siteroot import IPloneSiteRoot
+-from Products.Five import BrowserView
+-from ZODB.POSException import ConflictError
+-from plone.app.content.browser.interfaces import IFolderContentsView
+-from plone.app.content.utils import json_dumps
+-from plone.app.content.utils import json_loads
+-from plone.dexterity.interfaces import IDexterityContent
+-from plone.folder.interfaces import IExplicitOrdering
+-from plone.protect.postonly import check as checkpost
+-from plone.uuid.interfaces import IUUID
+-from zope.browsermenu.interfaces import IBrowserMenu
+-from zope.component import getMultiAdapter
+-from zope.component import getUtility
+-from zope.component.hooks import getSite
+-from zope.container.interfaces import INameChooser
+-from zope.event import notify
+-from zope.interface import implementer
+-from zope.i18n import translate
+-from zope.lifecycleevent import ObjectModifiedEvent
+-import transaction
+-
+-try:
+-    from plone.app.content.browser.file import TUS_ENABLED
+-except ImportError:
+-    TUS_ENABLED = False
+-
+-
+-@implementer(IFolderContentsView)
+-class FolderContentsView(BrowserView):
+-
+-    def __call__(self):
+-        site = getSite()
+-        base_url = site.absolute_url()
+-        base_vocabulary = '%s/@@getVocabulary?name=' % base_url
+-        site_path = site.getPhysicalPath()
+-        context_path = self.context.getPhysicalPath()
+-        options = {
+-            'vocabularyUrl': '%splone.app.vocabularies.Catalog' % (
+-                base_vocabulary),
+-            'tagsVocabularyUrl': '%splone.app.vocabularies.Keywords' % (
+-                base_vocabulary),
+-            'usersVocabularyUrl': '%splone.app.vocabularies.Users' % (
+-                base_vocabulary),
+-            'urlStructure': {
+-                'base': base_url,
+-                'appended': '/folder_contents'
+-            },
+-            'moveUrl': '%s{path}/fc-itemOrder' % base_url,
+-            'indexOptionsUrl': '%s/@@qsOptions' % base_url,
+-            'contextInfoUrl': '%s{path}/@@fc-contextInfo' % base_url,
+-            'setDefaultPageUrl': '%s{path}/@@fc-setDefaultPage' % base_url,
+-            'availableColumns': {
+-                'id': translate(_('ID'), context=self.request),
+-                'Title': translate(_('Title'), context=self.request),
+-                'ModificationDate': translate(_('Last modified'),
+-                    context=self.request),
+-                'EffectiveDate': translate(_('Publication date'),
+-                    context=self.request),
+-                'CreationDate': translate(_('Created on'),
+-                    context=self.request),
+-                'review_state': translate(_('Review state'),
+-                    context=self.request),
+-                'Subject': translate(_('Tags'), context=self.request),
+-                'Type': translate(_('Type'), context=self.request),
+-                'is_folderish': translate(_('Folder'), context=self.request),
+-                'exclude_from_nav': translate(_('Excluded from nav'),
+-                    context=self.request),
+-                'getObjSize': translate(_('Object Size'),
+-                    context=self.request),
+-                'last_comment_date': translate(_('Last comment date'),
+-                    context=self.request),
+-                'total_comments': translate(_('Total comments'),
+-                    context=self.request),
+-            },
+-            'buttonGroups': {
+-                'primary': [{
+-                    'id': 'cut',
+-                    'title': translate(_('Cut'), context=self.request),
+-                }, {
+-                    'id': 'copy',
+-                    'title': translate(_('Copy'), context=self.request),
+-                }, {
+-                    'id': 'paste',
+-                    'title': translate(_('Paste'), context=self.request),
+-                    'url': base_url + '/@@fc-paste'
+-                }, {
+-                    'id': 'delete',
+-                    'title': translate(_('Delete'), context=self.request),
+-                    'url': base_url + '/@@fc-delete',
+-                    'context': 'danger',
+-                    'icon': 'trash'
+-                }],
+-                'secondary': [{
+-                    'id': 'workflow',
+-                    'title': translate(_('Workflow'), context=self.request),
+-                    'url': base_url + '/@@fc-workflow'
+-                }, {
+-                    'id': 'tags',
+-                    'title': translate(_('Tags'), context=self.request),
+-                    'url': base_url + '/@@fc-tags'
+-                }, {
+-                    'id': 'properties',
+-                    'title': translate(_('Properties'), context=self.request),
+-                    'url': base_url + '/@@fc-properties'
+-                }, {
+-                    'id': 'rename',
+-                    'title': translate(_('Rename'), context=self.request),
+-                    'url': base_url + '/@@fc-rename'
+-                }]
+-            },
+-            'rearrange': {
+-                'properties': {
+-                    'id': translate(_('Id'), context=self.request),
+-                    'sortable_title': translate(_('Title'),
+-                        context=self.request),
+-                    'modified': translate(_('Last modified'),
+-                        context=self.request),
+-                    'created': translate(_('Created on'),
+-                        context=self.request),
+-                    'effective': translate(_('Publication date'),
+-                        context=self.request),
+-                    'Type': translate(_('Type'), context=self.request)
+-                },
+-                'url': '%s{path}/@@fc-rearrange' % base_url
+-            },
+-            'basePath': '/' + '/'.join(context_path[len(site_path):]),
+-            'upload': {
+-                'relativePath': 'fileUpload',
+-                'baseUrl': base_url,
+-                'initialFolder': IUUID(self.context, None),
+-                'useTus': TUS_ENABLED
+-            }
+-        }
+-        self.options = json_dumps(options)
+-        return super(FolderContentsView, self).__call__()
+-
+-
+-class FolderContentsActionView(BrowserView):
+-
+-    success_msg = _('Success')
+-    failure_msg = _('Failure')
+-    required_obj_permission = None
+-
+-    def objectTitle(self, obj):
+-        context = aq_inner(obj)
+-        title = utils.pretty_title_or_id(context, context)
+-        return utils.safe_unicode(title)
+-
+-    def protect(self):
+-        authenticator = getMultiAdapter((self.context, self.request),
+-                                        name='authenticator')
+-        if not authenticator.verify():
+-            raise Unauthorized
+-        checkpost(self.request)
+-
+-    def json(self, data):
+-        self.request.response.setHeader("Content-Type", "application/json")
+-        return json_dumps(data)
+-
+-    def get_selection(self):
+-        selection = self.request.form.get('selection', '[]')
+-        return json_loads(selection)
+-
+-    def action(self, obj):
+-        """
+-        fill in this method to do action against each item in the selection
+-        """
+-        pass
+-
+-    def __call__(self):
+-        self.protect()
+-        self.errors = []
+-        site = getSite()
+-        context = aq_inner(self.context)
+-        selection = self.get_selection()
+-
+-        self.dest = site.restrictedTraverse(
+-            str(self.request.form['folder'].lstrip('/')))
+-
+-        self.catalog = getToolByName(context, 'portal_catalog')
+-        self.mtool = getToolByName(self.context, 'portal_membership')
+-
+-        for brain in self.catalog(UID=selection):
+-            # remove everyone so we know if we missed any
+-            selection.remove(brain.UID)
+-            obj = brain.getObject()
+-            if self.required_obj_permission:
+-                if not self.mtool.checkPermission(self.required_obj_permission,
+-                                                  obj):
+-                    self.errors.append(_('Permission denied for "${title}"',
+-                                         mapping={
+-                                             'title': self.objectTitle(obj)
+-                                         }))
+-            self.action(obj)
+-
+-        return self.message(selection)
+-
+-    def message(self, missing=[]):
+-        if len(missing) > 0:
+-            self.errors.append(_('${items} could not be found', mapping={
+-                'items': str(len(missing))}))
+-        if not self.errors:
+-            msg = self.success_msg
+-        else:
+-            msg = self.failure_msg
+-
+-        translated_msg = translate(msg, context=self.request)
+-        translated_errors = [translate(error, context=self.request)
+-                             for error in self.errors]
+-
+-        return self.json({
+-            'status': 'success',
+-            'msg': '%s: %s' % (translated_msg, '\n'.join(translated_errors))
+-        })
+-
+-
+-class PasteAction(FolderContentsActionView):
+-    success_msg = _('Successfully pasted all items')
+-    failure_msg = _('Error during paste, some items were not pasted')
+-    required_obj_permission = 'Copy or Move'
+-
+-    def copy(self, obj):
+-        title = self.objectTitle(obj)
+-        parent = obj.aq_inner.aq_parent
+-        try:
+-            parent.manage_copyObjects(obj.getId(), self.request)
+-        except CopyError:
+-            self.errors.append(_(u'${title} is not copyable.',
+-                                 mapping={u'title': title}))
+-
+-    def cut(self, obj):
+-        title = self.objectTitle(obj)
+-
+-        try:
+-            lock_info = obj.restrictedTraverse('@@plone_lock_info')
+-        except AttributeError:
+-            lock_info = None
+-
+-        if lock_info is not None and lock_info.is_locked():
+-            self.errors.append(_(u'${title} is locked and cannot be cut.',
+-                                 mapping={u'title': title}))
+-
+-        parent = obj.aq_inner.aq_parent
+-        try:
+-            parent.manage_cutObjects(obj.getId(), self.request)
+-        except CopyError:
+-            self.errors.append(_(u'${title} is not moveable.',
+-                                 mapping={u'title': title}))
+-
+-    def action(self, obj):
+-        operation = self.request.form['pasteOperation']
+-        if operation == 'copy':
+-            self.copy(obj)
+-        else:  # cut
+-            self.cut(obj)
+-        if self.errors:
+-            return
+-        try:
+-            self.dest.manage_pasteObjects(self.request['__cp'])
+-        except ConflictError:
+-            raise
+-        except Unauthorized:
+-            # avoid this unfriendly exception text:
+-            # "You are not allowed to access 'manage_pasteObjects' in this
+-            # context"
+-            self.errors.append(
+-                _(u'You are not authorized to paste ${title} here.',
+-                    mapping={u'title': self.objectTitle(obj)}))
+-
+-
+-class DeleteAction(FolderContentsActionView):
+-
+-    def action(self, obj):
+-        parent = obj.aq_inner.aq_parent
+-        title = self.objectTitle(obj)
+-
+-        try:
+-            lock_info = obj.restrictedTraverse('@@plone_lock_info')
+-        except AttributeError:
+-            lock_info = None
+-
+-        if lock_info is not None and lock_info.is_locked():
+-            self.errors.append(_(u'${title} is locked and cannot be deleted.',
+-                                 mapping={u'title': title}))
+-            return
+-        else:
+-            parent.manage_delObjects(obj.getId(), self.request)
+-
+-
+-class RenameAction(FolderContentsActionView):
+-    success_msg = _('Items renamed')
+-    failure_msg = _('Failed to rename all items')
+-
+-    def __call__(self):
+-        self.errors = []
+-        self.protect()
+-        context = aq_inner(self.context)
+-
+-        torename = json_loads(self.request.form['torename'])
+-
+-        catalog = getToolByName(context, 'portal_catalog')
+-        mtool = getToolByName(context, 'portal_membership')
+-
+-        missing = []
+-        for data in torename:
+-            uid = data['UID']
+-            brains = catalog(UID=uid)
+-            if len(brains) == 0:
+-                missing.append(uid)
+-                continue
+-            obj = brains[0].getObject()
+-            title = self.objectTitle(obj)
+-            if not mtool.checkPermission('Copy or Move', obj):
+-                self.errors(_(u'Permission denied to rename ${title}.',
+-                              mapping={u'title': title}))
+-                continue
+-
+-            sp = transaction.savepoint(optimistic=True)
+-
+-            newid = data['newid'].encode('utf8')
+-            newtitle = data['newtitle']
+-            try:
+-                obid = obj.getId()
+-                title = obj.Title()
+-                change_title = newtitle and title != newtitle
+-                if change_title:
+-                    getSecurityManager().validate(obj, obj, 'setTitle',
+-                                                  obj.setTitle)
+-                    obj.setTitle(newtitle)
+-                    notify(ObjectModifiedEvent(obj))
+-                if newid and obid != newid:
+-                    parent = aq_parent(aq_inner(obj))
+-                    # Make sure newid is safe
+-                    newid = INameChooser(parent).chooseName(newid, obj)
+-                    # Update the default_page on the parent.
+-                    context_state = getMultiAdapter(
+-                        (obj, self.request), name='plone_context_state')
+-                    if context_state.is_default_page():
+-                        parent.setDefaultPage(newid)
+-                    parent.manage_renameObjects((obid, ), (newid, ))
+-                elif change_title:
+-                    # the rename will have already triggered a reindex
+-                    obj.reindexObject()
+-            except ConflictError:
+-                raise
+-            except Exception:
+-                sp.rollback()
+-                self.errors.append(_('Error renaming ${title}', mapping={
+-                    'title': title}))
+-
+-        return self.message(missing)
+-
+-
+-class TagsAction(FolderContentsActionView):
+-    required_obj_permission = 'Modify portal content'
+-
+-    def __call__(self):
+-        self.remove = set([v.encode('utf8') for v in
+-                           json_loads(self.request.form.get('remove'))])
+-        self.add = set([v.encode('utf8') for v in
+-                        json_loads(self.request.form.get('add'))])
+-        return super(TagsAction, self).__call__()
+-
+-    def action(self, obj):
+-        tags = set(obj.Subject())
+-        tags = tags - self.remove
+-        tags = tags | self.add
+-        obj.setSubject(list(tags))
+-        obj.reindexObject()
+-
+-
+-class WorkflowAction(FolderContentsActionView):
+-    required_obj_permission = 'Modify portal content'
+-
+-    def __call__(self):
+-        self.pworkflow = getToolByName(self.context, 'portal_workflow')
+-        self.putils = getToolByName(self.context, 'plone_utils')
+-        self.transition_id = self.request.form.get('transition', None)
+-        self.comments = self.request.form.get('comments', '')
+-        self.recurse = self.request.form.get('recurse', 'no') == 'yes'
+-        if self.request.REQUEST_METHOD == 'POST':
+-            return super(WorkflowAction, self).__call__()
+-        else:
+-            # for GET, we return available transitions
+-            selection = self.get_selection()
+-            catalog = getToolByName(self.context, 'portal_catalog')
+-            brains = catalog(UID=selection)
+-            transitions = []
+-            for brain in brains:
+-                obj = brain.getObject()
+-                for transition in self.pworkflow.getTransitionsFor(obj):
+-                    tdata = {
+-                        'id': transition['id'],
+-                        'title': transition['name']
+-                    }
+-                    if tdata not in transitions:
+-                        transitions.append(tdata)
+-            return self.json({
+-                'transitions': transitions
+-            })
+-
+-    def action(self, obj):
+-        transitions = self.pworkflow.getTransitionsFor(obj)
+-        if self.transition_id in [t['id'] for t in transitions]:
+-            try:
+-                # set effective date if not already set
+-                if obj.EffectiveDate() == 'None':
+-                    obj.setEffectiveDate(DateTime())
+-
+-                self.pworkflow.doActionFor(obj, self.transition_id,
+-                                           comment=self.comments)
+-                if self.putils.isDefaultPage(obj):
+-                    self.action(obj.aq_parent.aq_parent)
+-                if self.recurse and IFolderish.providedBy(obj):
+-                    for sub in obj.values():
+-                        self.action(sub)
+-            except ConflictError:
+-                raise
+-            except Exception:
+-                self.errors.append(_('Could not transition: ${title}',
+-                    mapping={'title': self.objectTitle(obj)}))
+-
+-
+-class PropertiesAction(FolderContentsActionView):
+-    success_msg = _(u'Successfully updated metadata')
+-    failure_msg = _(u'Failure updating metadata')
+-    required_obj_permission = 'Modify portal content'
+-
+-    def __call__(self):
+-        self.effectiveDate = self.request.form.get('effectiveDate')
+-        effectiveTime = self.request.form.get('effectiveTime')
+-        if self.effectiveDate and effectiveTime:
+-            self.effectiveDate = self.effectiveDate + ' ' + effectiveTime
+-        self.expirationDate = self.request.form.get('expirationDate')
+-        expirationTime = self.request.form.get('expirationTime')
+-        if self.expirationDate and expirationTime:
+-            self.expirationDate = self.expirationDate + ' ' + expirationTime
+-        self.copyright = self.request.form.get('copyright', '')
+-        self.contributors = json_loads(
+-            self.request.form.get('contributors', '[]'))
+-        self.creators = json_loads(self.request.form.get('creators', '[]'))
+-        self.exclude = self.request.form.get('exclude_from_nav', None)
+-        return super(PropertiesAction, self).__call__()
+-
+-    def dx_action(self, obj):
+-        if self.effectiveDate and hasattr(obj, 'effective_date'):
+-            obj.effective_date = DateTime(self.effectiveDate)
+-        if self.expirationDate and hasattr(obj, 'expiration_date'):
+-            obj.expiration_date = DateTime(self.expirationDate)
+-        if self.copyright and hasattr(obj, 'rights'):
+-            obj.rights = self.copyright
+-        if self.contributors and hasattr(obj, 'contributors'):
+-            obj.contributors = tuple([c['id'] for c in self.contributors])
+-        if self.creators and hasattr(obj, 'creators'):
+-            obj.creators = tuple([c['id'] for c in self.creators])
+-        if self.exclude and hasattr(obj, 'exclude_from_nav'):
+-            obj.exclude_from_nav = self.exclude == 'yes'
+-
+-    def action(self, obj):
+-        if IDexterityContent.providedBy(obj):
+-            self.dx_action(obj)
+-        else:
+-            if self.effectiveDate:
+-                obj.setEffectiveDate(DateTime(self.effectiveDate))
+-            if self.expirationDate:
+-                obj.setExpirationDate(DateTime(self.expirationDate))
+-            if self.copyright:
+-                obj.setRights(self.copyright)
+-            if self.contributors:
+-                obj.setContributors([c['id'] for c in self.contributors])
+-            if self.creators:
+-                obj.setCreators([c['id'] for c in self.creators])
+-            if self.exclude:
+-                obj.setExcludeFromNav(self.exclude == 'yes')
+-        obj.reindexObject()
+-
+-
+-class ItemOrder(FolderContentsActionView):
+-    success_msg = _('Successfully moved item')
+-    failure_msg = _('Error moving item')
+-
+-    def getOrdering(self):
+-        if IPloneSiteRoot.providedBy(self.context):
+-            return self.context
+-        else:
+-            ordering = self.context.getOrdering()
+-            if not IExplicitOrdering.providedBy(ordering):
+-                return None
+-            return ordering
+-
+-    def __call__(self):
+-        self.errors = []
+-        self.protect()
+-        id = self.request.form.get('id')
+-        ordering = self.getOrdering()
+-        delta = self.request.form['delta']
+-        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
+-        if delta == 'top':
+-            ordering.moveObjectsToTop([id])
+-        elif delta == 'bottom':
+-            ordering.moveObjectsToBottom([id])
+-        else:
+-            delta = int(delta)
+-            if subset_ids:
+-                position_id = [(ordering.getObjectPosition(i), i)
+-                               for i in subset_ids]
+-                position_id.sort()
+-                if subset_ids != [i for position, i in position_id]:
+-                    self.errors.append(_('Client/server ordering mismatch'))
+-                    return self.message()
+-
+-            ordering.moveObjectsByDelta([id], delta)
+-        return self.message()
+-
+-
+-class SetDefaultPage(FolderContentsActionView):
+-    success_msg = _(u'Default page set successfully')
+-    failure_msg = _(u'Failed to set default page')
+-
+-    def __call__(self):
+-        id = self.request.form.get('id')
+-        self.errors = []
+-
+-        if id not in self.context.objectIds():
+-            self.errors.append(
+-                _(u'There is no object with short name '
+-                  u'${name} in this folder.',
+-                  mapping={u'name': id}))
+-        else:
+-            self.context.setDefaultPage(id)
+-        return self.message()
+-
+-
+-class ContextInfo(BrowserView):
+-
+-    attributes = ['UID', 'Title', 'Type', 'path', 'review_state',
+-                  'ModificationDate', 'EffectiveDate', 'CreationDate',
+-                  'is_folderish', 'Subject', 'getURL', 'id',
+-                  'exclude_from_nav', 'getObjSize', 'last_comment_date',
+-                  'total_comments']
+-
+-    def __call__(self):
+-        factories_menu = getUtility(
+-            IBrowserMenu, name='plone_contentmenu_factory',
+-            context=self.context).getMenuItems(self.context, self.request)
+-        factories = []
+-        for item in factories_menu:
+-            if item.get('title') == 'folder_add_settings':
+-                continue
+-            title = item.get('title', '')
+-            factories.append({
+-                'id': item.get('id'),
+-                'title': title and translate(title,
+-                    context=self.request) or '',
+-                'action': item.get('action')
+-                })
+-
+-        context = aq_inner(self.context)
+-        crumbs = []
+-        while not IPloneSiteRoot.providedBy(context):
+-            crumbs.append({
+-                'id': context.getId(),
+-                'title': utils.pretty_title_or_id(context, context)
+-            })
+-            context = utils.parent(context)
+-
+-        catalog = getToolByName(self.context, 'portal_catalog')
+-        try:
+-            brains = catalog(UID=IUUID(self.context))
+-        except TypeError:
+-            brains = []
+-        item = None
+-        if len(brains) > 0:
+-            obj = brains[0]
+-            # context here should be site root
+-            base_path = '/'.join(context.getPhysicalPath())
+-            item = {}
+-            for attr in self.attributes:
+-                key = attr
+-                if key == 'path':
+-                    attr = 'getPath'
+-                val = getattr(obj, attr, None)
+-                if callable(val):
+-                    val = val()
+-                if key == 'path':
+-                    val = val[len(base_path):]
+-                item[key] = val
+-        return json_dumps({
+-            'addButtons': factories,
+-            'defaultPage': self.context.getDefaultPage(),
+-            'breadcrumbs': [c for c in reversed(crumbs)],
+-            'object': item
+-        })
+-
+-
+-def getOrdering(context):
+-    if IPloneSiteRoot.providedBy(context):
+-        return context
+-    else:
+-        ordering = context.getOrdering()
+-        if not IExplicitOrdering.providedBy(ordering):
+-            return None
+-        return ordering
+-
+-
+-class Rearrange(FolderContentsActionView):
+-    def __call__(self):
+-        self.protect()
+-        self.errors = []
+-        ordering = getOrdering(self.context)
+-        if ordering:
+-            catalog = getToolByName(self.context, 'portal_catalog')
+-            brains = catalog(path={
+-                'query': '/'.join(self.context.getPhysicalPath()),
+-                'depth': 1
+-            }, sort_on=self.request.form.get('rearrange_on'))
+-            if self.request.form.get('reversed') == 'true':
+-                brains = [b for b in reversed(brains)]
+-            for idx, brain in enumerate(brains):
+-                ordering.moveObjectToPosition(brain.id, idx)
+-        else:
+-            self.errors.append(_(u'cannot rearrange folder'))
+-        return self.message()
+diff --git a/plone/app/content/browser/foldercontents.zcml b/plone/app/content/browser/foldercontents.zcml
+deleted file mode 100644
+index 8efbf31..0000000
+--- a/plone/app/content/browser/foldercontents.zcml
++++ /dev/null
+@@ -1,87 +0,0 @@
+-<configure
+-    xmlns="http://namespaces.zope.org/zope"
+-    xmlns:browser="http://namespaces.zope.org/browser"
+-    xmlns:plone="http://namespaces.plone.org/plone"
+-    xmlns:i18n="http://namespaces.zope.org/i18n">
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    class=".folder.FolderContentsView"
+-    name="folder_contents"
+-    template="templates/folder_contents.pt"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-delete"
+-    class=".folder.DeleteAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-paste"
+-    class=".folder.PasteAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-workflow"
+-    class=".folder.WorkflowAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-tags"
+-    class=".folder.TagsAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-properties"
+-    class=".folder.PropertiesAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-rename"
+-    class=".folder.RenameAction"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-itemOrder"
+-    class=".folder.ItemOrder"
+-    permission="cmf.ModifyPortalContent"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-contextInfo"
+-    class=".folder.ContextInfo"
+-    permission="cmf.ListFolderContents"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-setDefaultPage"
+-    class=".folder.SetDefaultPage"
+-    permission="cmf.ModifyPortalContent"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-rearrange"
+-    class=".folder.Rearrange"
+-    permission="cmf.ModifyPortalContent"
+-    />
+-
+-</configure>
+-
+-
+diff --git a/plone/app/content/browser/templates/folder_contents.pt b/plone/app/content/browser/templates/folder_contents.pt
+deleted file mode 100644
+index 485eaf0..0000000
+--- a/plone/app/content/browser/templates/folder_contents.pt
++++ /dev/null
+@@ -1,28 +0,0 @@
+-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+-      xmlns:tal="http://xml.zope.org/namespaces/tal"
+-      xmlns:metal="http://xml.zope.org/namespaces/metal"
+-      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+-      lang="en"
+-      metal:use-macro="context/main_template/macros/master"
+-      i18n:domain="plone">
+-  <head>
+-      <metal:block fill-slot="top_slot">
+-        <tal:insert tal:replace="nothing"
+-              tal:define="dummy python:request.set('enable_border', 1);
+-                          disable_column_one python:request.set('disable_plone.leftcolumn', 1);
+-                          disable_column_two python:request.set('disable_plone.rightcolumn', 1);" />
+-      </metal:block>
+-  </head>
+-<body>
+-
+-<metal:content-core fill-slot="content-core">
+-    <metal:content-core define-macro="content-core">
+-        <span tal:replace="structure context/@@authenticator/authenticator"/>
+-        <div class="pat-structure"
+-          tal:attributes="data-pat-structure view/options" />
+-    </metal:content-core>
+-</metal:content-core>
+-
+-</body>
+-</html>
+-
+diff --git a/plone/app/content/browser/vocabulary.py b/plone/app/content/browser/vocabulary.py
+index 9108a20..14a355e 100644
+--- a/plone/app/content/browser/vocabulary.py
++++ b/plone/app/content/browser/vocabulary.py
+@@ -22,6 +22,7 @@
+ 
+ logger = getLogger(__name__)
+ 
++MAX_BATCH_SIZE = 500  # prevent overloading server
+ 
+ _permissions = {
+     'plone.app.vocabularies.Users': 'Modify portal content',
+@@ -106,9 +107,12 @@ def __call__(self):
+         if batch:
+             # must be slicable for batching support
+             page = int(batch['page'])
++            size = int(batch['size'])
++            if size > MAX_BATCH_SIZE:
++                raise Exception('Max batch size is 500')
+             # page is being passed in is 1-based
+-            start = (max(page - 1, 0)) * int(batch['size'])
+-            end = start + int(batch['size'])
++            start = (max(page - 1, 0)) * size
++            end = start + size
+             # Try __getitem__-based slice, then iterator slice.
+             # The iterator slice has to consume the iterator through
+             # to the desired slice, but that shouldn't be the end
+diff --git a/plone/app/content/interfaces.py b/plone/app/content/interfaces.py
+index b51e45a..cdc8466 100644
+--- a/plone/app/content/interfaces.py
++++ b/plone/app/content/interfaces.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from zope import schema
+-from zope.interface import Interface
++from zope.interface import Interface, Attribute
+ 
+ 
+ class INameFromTitle(Interface):
+@@ -18,3 +18,20 @@ class IReindexOnModify(Interface):
+     """Marker interface which makes sure an object gets reindexed when
+     it's modified.
+     """
++
++
++class IStructureAction(Interface):
++    order = Attribute("Order the action should be listed")
++
++    def get_options():
++        """
++        Return a dict of action widget options.
++
++        Options: {
++            'title': 'Button title', // required
++            'name': 'short name', // required
++            'formTemplate': None, // If action requires form to submit additional options
++            'icon': None, // icon name
++            'button-type': 'danger', //
++        }
++        """
+diff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py
+index 513bc1e..59064e7 100644
+--- a/plone/app/content/tests/test_folder.py
++++ b/plone/app/content/tests/test_folder.py
+@@ -41,11 +41,7 @@ def setUp(self):
+         )
+         self.request.REQUEST_METHOD = 'POST'
+         alsoProvides(self.request, IAttributeAnnotatable)
+-        self.userList = json.dumps([{
+-            'id': 'one'
+-        }, {
+-            'id': 'two'
+-        }])
++        self.userList = 'one,two'
+ 
+ 
+ class DXBaseTest(BaseTest):
+@@ -64,48 +60,46 @@ def setUp(self):
+ class PropertiesDXTest(DXBaseTest):
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['effectiveDate'] = '1999/01/01'
+-        self.request.form['effectiveTime'] = '09:00'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['effectiveDate'] = '1999/01/01 09:00'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.effective_date,
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['expirationDate'] = '1999/01/01'
+-        self.request.form['expirationTime'] = '09:00'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['expirationDate'] = '1999/01/01 09:00'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.expiration_date,
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testSetDexterityExcludeFromNav(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['exclude_from_nav'] = 'yes'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['exclude-from-nav'] = 'yes'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.exclude_from_nav, True)
+ 
+     def testRights(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['copyright'] = 'foobar'
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.rights, 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['contributors'] = self.userList
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.contributors, ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['creators'] = self.userList
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(
+             self.portal.page.creators,
+@@ -117,50 +111,48 @@ class PropertiesArchetypesTest(BaseTest):
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+ 
+     def testExcludeFromNav(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['exclude_from_nav'] = 'yes'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['exclude-from-nav'] = 'yes'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.getExcludeFromNav(), True)
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['effectiveDate'] = '1999/01/01'
+-        self.request.form['effectiveTime'] = '09:00'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['effectiveDate'] = '1999/01/01 09:00'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(
+             DateTime(self.portal.page.EffectiveDate()).toZone('UTC'),
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.folder import PropertiesAction
+-        self.request.form['expirationDate'] = '1999/01/01'
+-        self.request.form['expirationTime'] = '09:00'
+-        view = PropertiesAction(self.portal.page, self.request)
++        from plone.app.content.browser.contents.properties import PropertiesActionView
++        self.request.form['expirationDate'] = '1999/01/01 09:00'
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(
+             DateTime(self.portal.page.ExpirationDate()).toZone('UTC'),
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testRights(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['copyright'] = 'foobar'
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Rights(), 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['contributors'] = self.userList
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Contributors(), ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.folder import PropertiesAction
++        from plone.app.content.browser.contents.properties import PropertiesActionView
+         self.request.form['creators'] = self.userList
+-        view = PropertiesAction(self.portal.page, self.request)
++        view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Creators(), ('one', 'two'))
+ 
+@@ -170,9 +162,9 @@ class WorkflowTest(BaseTest):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+     def testStateChange(self):
+-        from plone.app.content.browser.folder import WorkflowAction
++        from plone.app.content.browser.contents.workflow import WorkflowActionView
+         self.request.form['transition'] = 'publish'
+-        view = WorkflowAction(self.portal.page, self.request)
++        view = WorkflowActionView(self.portal.page, self.request)
+         view()
+         workflowTool = getToolByName(self.portal, "portal_workflow")
+         self.assertEquals(
+@@ -185,29 +177,33 @@ class RenameTest(BaseTest):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+     def test_folder_rename_objects(self):
+-        from plone.app.content.browser.folder import RenameAction
++        from plone.app.content.browser.contents.rename import RenameActionView
+         uid = IUUID(self.portal.page)
+         self.portal.invokeFactory('Document', id='page2', title='2nd page')
+         uid2 = IUUID(self.portal.page2)
+-        items = [
+-            {'UID': uid, 'newid': 'I am UnSafe! ', 'newtitle': 'New!'},
+-            {'UID': uid2, 'newid': '. ,;new id : _! ', 'newtitle': 'Newer!'},
+-        ]
+-        self.request.form['torename'] = json.dumps(items)
+-        view = RenameAction(self.portal, self.request)
++        self.request.form.update({
++            'UID_0': uid,
++            'newid_0': 'I am UnSafe! ',
++            'newtitle_0': 'New!',
++            'UID_1': uid2,
++            'newid_1': '. ,;new id : _! ',
++            'newtitle_1': 'Newer!'
++        })
++        view = RenameActionView(self.portal, self.request)
+         view()
+         self.assertEqual(self.portal['i-am-unsafe'].title, "New!")
+         self.assertEqual(self.portal['new-id-_'].title, "Newer!")
+ 
+     def test_default_page_updated_on_rename_objects(self):
+-        from plone.app.content.browser.folder import RenameAction
++        from plone.app.content.browser.contents.rename import RenameActionView
+         self.portal.setDefaultPage('page')
+         uid = IUUID(self.portal.page)
+-        items = [
+-            {'UID': uid, 'newid': 'page-renamed', 'newtitle': 'Page'},
+-        ]
+-        self.request.form['torename'] = json.dumps(items)
+-        view = RenameAction(self.portal, self.request)
++        self.request.form.update({
++            'UID_0': uid,
++            'newid_0': 'page-renamed',
++            'newtitle_0': 'Page'
++        })
++        view = RenameActionView(self.portal, self.request)
+         view()
+         self.assertEqual(self.portal.default_page, 'page-renamed')
+ 
+@@ -217,7 +213,7 @@ class ContextInfoTest(BaseTest):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+     def testStateChange(self):
+-        from plone.app.content.browser.folder import ContextInfo
++        from plone.app.content.browser.contents import ContextInfo
+         view = ContextInfo(self.portal.page, self.request)
+         result = json.loads(view())
+         self.assertEquals(result['object']['Title'], 'page')
+@@ -254,10 +250,10 @@ def make_request(self):
+         return request
+ 
+     def test_delete_object(self):
+-        from plone.app.content.browser.folder import DeleteAction
++        from plone.app.content.browser.contents.delete import DeleteActionView
+         page_id = self.portal.page.id
+         self.assertTrue(page_id in self.portal)
+-        view = DeleteAction(self.portal, self.request)
++        view = DeleteActionView(self.portal, self.request)
+         view()
+         self.assertTrue(page_id not in self.portal)
+ 
+@@ -274,7 +270,7 @@ def test_delete_wrong_object_by_acquisition(self):
+             self.assertTrue(p1 in location)
+ 
+         # instantiate two different views and delete the same object with each
+-        from plone.app.content.browser.folder import DeleteAction
++        from plone.app.content.browser.contents.delete import DeleteActionView
+         object_uuid = IUUID(self.portal[f1][p1])
+         for req in [self.request, request2]:
+             req.form = {
+@@ -282,7 +278,7 @@ def test_delete_wrong_object_by_acquisition(self):
+                 '_authenticator': createToken(),
+                 'folder': '/{}/'.format(f1)
+             }
+-            view = DeleteAction(self.portal, req)
++            view = DeleteActionView(self.portal, req)
+             view()
+ 
+         # the root page exists, the nested one is gone
+@@ -290,7 +286,6 @@ def test_delete_wrong_object_by_acquisition(self):
+         self.assertFalse(p1 in self.portal[f1])
+ 
+ 
+-
+ class DeleteATTest(DeleteDXTest):
+ 
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
 
 
