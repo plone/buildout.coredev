@@ -2,351 +2,43 @@ Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-07-09T13:47:26Z
-Author: Guido A.J. Stevens (gyst) <guido.stevens@cosent.nl>
-Commit: https://github.com/plone/Products.CMFPlone/commit/7ad106505ade455206471b0b13959cbf0b9b2f66
+Date: 2015-07-13T12:55:49+02:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/e01f05539f5919f9100b1d29eada5e224d884347
 
-let plone.app.theming manage it's own cache
-
-Files changed:
-M Products/CMFPlone/patterns/__init__.py
-M Products/CMFPlone/resources/__init__.py
-M Products/CMFPlone/resources/browser/resource.py
-M Products/CMFPlone/resources/configure.zcml
-
-diff --git a/Products/CMFPlone/patterns/__init__.py b/Products/CMFPlone/patterns/__init__.py
-index 27652aa..399df6f 100644
---- a/Products/CMFPlone/patterns/__init__.py
-+++ b/Products/CMFPlone/patterns/__init__.py
-@@ -4,17 +4,13 @@
- from plone.registry.interfaces import IRegistry
- from zope.component import getUtility
- import json
--from zope import component
- from Products.CMFPlone.patterns.utils import get_portal_url
- from Products.CMFCore.interfaces._content import IFolderish
- from plone.uuid.interfaces import IUUID
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Acquisition import aq_parent
--from plone.app.theming.utils import getCurrentTheme
--from plone.app.theming.utils import getTheme
-+from plone.app.theming.utils import theming_policy
- from Products.CMFCore.utils import getToolByName
--from zope.ramcache.interfaces import ram
--from plone.app.theming.utils import isThemeEnabled
- from zope.component.hooks import getSite
- 
- 
-@@ -25,31 +21,12 @@ def __init__(self, context, request):
-         self.request = request
-         self.portal = getSite()
-         registry = getUtility(IRegistry)
--        self.settings = registry.forInterface(ITinyMCESchema, prefix="plone", check=False)
-+        self.settings = registry.forInterface(
-+            ITinyMCESchema, prefix="plone", check=False)
-         self.portal_url = get_portal_url(self.portal)
- 
-     def get_theme(self):
--        # Volatile attribute to cache the current theme
--        if hasattr(self.portal, '_v_currentTheme'):
--            themeObj = self.portal._v_currentTheme
--        else:
--            theme = getCurrentTheme()
--            themeObj = getTheme(theme)
--            self.portal._v_currentTheme = themeObj
--        cache = component.queryUtility(ram.IRAMCache)
--        if isThemeEnabled(self.request):
--            themeObj = cache.query(
--                'plone.currentTheme',
--                key=dict(prefix='theme'),
--                default=None)
--            if themeObj is None:
--                theme = getCurrentTheme()
--                themeObj = getTheme(theme)
--                cache.set(
--                    themeObj,
--                    'plone.currentTheme',
--                    key=dict(prefix='theme'))
--        return themeObj
-+        return theming_policy().get_theme()
- 
-     def get_content_css(self):
-         files = [
-diff --git a/Products/CMFPlone/resources/__init__.py b/Products/CMFPlone/resources/__init__.py
-index e7a9f7a..3cb9aa2 100644
---- a/Products/CMFPlone/resources/__init__.py
-+++ b/Products/CMFPlone/resources/__init__.py
-@@ -1,7 +1,4 @@
--from zope.component import adapter
--from plone.app.theming.interfaces import IThemeAppliedEvent
- import os
--from zope.component.hooks import getSite
- 
- 
- RESOURCE_DEVELOPMENT_MODE = False
-@@ -9,14 +6,6 @@
-     RESOURCE_DEVELOPMENT_MODE = True
- 
- 
--@adapter(IThemeAppliedEvent)
--def onThemeApplied(event):
--    # change current theme on the _v_ variable
--    theme = event.theme
--    portal = getSite()
--    portal._v_currentTheme = theme
--
--
- def add_resource_on_request(request, resource):
-     """ Adds the resource to the request
-     """
-diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py
-index f66d700..78a40f2 100644
---- a/Products/CMFPlone/resources/browser/resource.py
-+++ b/Products/CMFPlone/resources/browser/resource.py
-@@ -5,9 +5,7 @@
- from Products.CMFPlone.interfaces import IBundleRegistry
- from Products.CMFPlone.interfaces import IResourceRegistry
- from plone.app.layout.viewlets.common import ViewletBase
--from plone.app.theming.utils import getCurrentTheme
--from plone.app.theming.utils import getTheme
--from plone.app.theming.utils import isThemeEnabled
-+from plone.app.theming.utils import theming_policy
- from plone.registry.interfaces import IRegistry
- from zope import component
- from zope.component import getMultiAdapter
-@@ -99,16 +97,10 @@ def get_cooked_bundles(self):
-         """
-         cache = component.queryUtility(ram.IRAMCache)
-         bundles = self.get_bundles()
-+        policy = theming_policy(self.request)
-         # Check if its Diazo enabled
--        if isThemeEnabled(self.request):
--            portal = self.portal_state.portal()
--            # Volatile attribute to cache the current theme
--            if hasattr(portal, '_v_currentTheme'):
--                themeObj = portal._v_currentTheme
--            else:
--                theme = getCurrentTheme()
--                themeObj = getTheme(theme)
--                portal._v_currentTheme = themeObj
-+        if policy.isThemeEnabled():
-+            themeObj = policy.get_theme()
-             enabled_diazo_bundles = themeObj.enabled_bundles
-             disabled_diazo_bundles = themeObj.disabled_bundles
-             if hasattr(themeObj, 'production_css'):
-diff --git a/Products/CMFPlone/resources/configure.zcml b/Products/CMFPlone/resources/configure.zcml
-index df382e7..474e56e 100644
---- a/Products/CMFPlone/resources/configure.zcml
-+++ b/Products/CMFPlone/resources/configure.zcml
-@@ -2,10 +2,6 @@
-     xmlns="http://namespaces.zope.org/zope"
-     i18n_domain="plone.registry">
- 
--    <!-- subscribe to event when theme is applied so we can
--         check for bundles enabled or disabled -->
--    <subscriber handler=".onThemeApplied" />
--
-     <include package=".browser" />
-     <include package=".exportimport" />
- 
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-07-09T13:58:17Z
-Author: Guido A.J. Stevens (gyst) <guido.stevens@cosent.nl>
-Commit: https://github.com/plone/Products.CMFPlone/commit/2b9e0c0f8a492cd26bf1d70b5f7e3341959504e1
-
-update changelog
+remove unused accessibility pattern
 
 Files changed:
-M CHANGES.rst
+M Products/CMFPlone/profiles/dependencies/registry.xml
+M Products/CMFPlone/static/plone.js
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index f9527b4..ab62062 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -8,6 +8,9 @@ Changelog
- 5.0b3 (unreleased)
- ------------------
+diff --git a/Products/CMFPlone/profiles/dependencies/registry.xml b/Products/CMFPlone/profiles/dependencies/registry.xml
+index 03a362d..5431cb8 100644
+--- a/Products/CMFPlone/profiles/dependencies/registry.xml
++++ b/Products/CMFPlone/profiles/dependencies/registry.xml
+@@ -659,11 +659,6 @@
+       </value>
+   </records>
  
-+- Use new plone.app.theming policy API and delegate theme cache to plone.app.theming
-+  [gyst]
-+
- - Fix issue where site root syndication was giving 404s
-   [vangheem]
- 
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-07-13T11:40:38+02:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/7c4952d315acdc2bf7bf1936d1d8b52c9beb74da
-
-Merge pull request #667 from ploneintranet/master
-
-let plone.app.theming manage it's own cache
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/patterns/__init__.py
-M Products/CMFPlone/resources/__init__.py
-M Products/CMFPlone/resources/browser/resource.py
-M Products/CMFPlone/resources/configure.zcml
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index f9527b4..ab62062 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -8,6 +8,9 @@ Changelog
- 5.0b3 (unreleased)
- ------------------
- 
-+- Use new plone.app.theming policy API and delegate theme cache to plone.app.theming
-+  [gyst]
-+
- - Fix issue where site root syndication was giving 404s
-   [vangheem]
- 
-diff --git a/Products/CMFPlone/patterns/__init__.py b/Products/CMFPlone/patterns/__init__.py
-index 27652aa..399df6f 100644
---- a/Products/CMFPlone/patterns/__init__.py
-+++ b/Products/CMFPlone/patterns/__init__.py
-@@ -4,17 +4,13 @@
- from plone.registry.interfaces import IRegistry
- from zope.component import getUtility
- import json
--from zope import component
- from Products.CMFPlone.patterns.utils import get_portal_url
- from Products.CMFCore.interfaces._content import IFolderish
- from plone.uuid.interfaces import IUUID
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Acquisition import aq_parent
--from plone.app.theming.utils import getCurrentTheme
--from plone.app.theming.utils import getTheme
-+from plone.app.theming.utils import theming_policy
- from Products.CMFCore.utils import getToolByName
--from zope.ramcache.interfaces import ram
--from plone.app.theming.utils import isThemeEnabled
- from zope.component.hooks import getSite
- 
- 
-@@ -25,31 +21,12 @@ def __init__(self, context, request):
-         self.request = request
-         self.portal = getSite()
-         registry = getUtility(IRegistry)
--        self.settings = registry.forInterface(ITinyMCESchema, prefix="plone", check=False)
-+        self.settings = registry.forInterface(
-+            ITinyMCESchema, prefix="plone", check=False)
-         self.portal_url = get_portal_url(self.portal)
- 
-     def get_theme(self):
--        # Volatile attribute to cache the current theme
--        if hasattr(self.portal, '_v_currentTheme'):
--            themeObj = self.portal._v_currentTheme
--        else:
--            theme = getCurrentTheme()
--            themeObj = getTheme(theme)
--            self.portal._v_currentTheme = themeObj
--        cache = component.queryUtility(ram.IRAMCache)
--        if isThemeEnabled(self.request):
--            themeObj = cache.query(
--                'plone.currentTheme',
--                key=dict(prefix='theme'),
--                default=None)
--            if themeObj is None:
--                theme = getCurrentTheme()
--                themeObj = getTheme(theme)
--                cache.set(
--                    themeObj,
--                    'plone.currentTheme',
--                    key=dict(prefix='theme'))
--        return themeObj
-+        return theming_policy().get_theme()
- 
-     def get_content_css(self):
-         files = [
-diff --git a/Products/CMFPlone/resources/__init__.py b/Products/CMFPlone/resources/__init__.py
-index e7a9f7a..3cb9aa2 100644
---- a/Products/CMFPlone/resources/__init__.py
-+++ b/Products/CMFPlone/resources/__init__.py
-@@ -1,7 +1,4 @@
--from zope.component import adapter
--from plone.app.theming.interfaces import IThemeAppliedEvent
- import os
--from zope.component.hooks import getSite
- 
- 
- RESOURCE_DEVELOPMENT_MODE = False
-@@ -9,14 +6,6 @@
-     RESOURCE_DEVELOPMENT_MODE = True
- 
- 
--@adapter(IThemeAppliedEvent)
--def onThemeApplied(event):
--    # change current theme on the _v_ variable
--    theme = event.theme
--    portal = getSite()
--    portal._v_currentTheme = theme
+-  <records prefix="plone.resources/mockup-patterns-accessibility"
+-            interface='Products.CMFPlone.interfaces.IResourceRegistry'>
+-      <value key="js">++resource++mockup/accessibility/pattern.js</value>
+-  </records>
 -
--
- def add_resource_on_request(request, resource):
-     """ Adds the resource to the request
-     """
-diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py
-index f66d700..78a40f2 100644
---- a/Products/CMFPlone/resources/browser/resource.py
-+++ b/Products/CMFPlone/resources/browser/resource.py
-@@ -5,9 +5,7 @@
- from Products.CMFPlone.interfaces import IBundleRegistry
- from Products.CMFPlone.interfaces import IResourceRegistry
- from plone.app.layout.viewlets.common import ViewletBase
--from plone.app.theming.utils import getCurrentTheme
--from plone.app.theming.utils import getTheme
--from plone.app.theming.utils import isThemeEnabled
-+from plone.app.theming.utils import theming_policy
- from plone.registry.interfaces import IRegistry
- from zope import component
- from zope.component import getMultiAdapter
-@@ -99,16 +97,10 @@ def get_cooked_bundles(self):
-         """
-         cache = component.queryUtility(ram.IRAMCache)
-         bundles = self.get_bundles()
-+        policy = theming_policy(self.request)
-         # Check if its Diazo enabled
--        if isThemeEnabled(self.request):
--            portal = self.portal_state.portal()
--            # Volatile attribute to cache the current theme
--            if hasattr(portal, '_v_currentTheme'):
--                themeObj = portal._v_currentTheme
--            else:
--                theme = getCurrentTheme()
--                themeObj = getTheme(theme)
--                portal._v_currentTheme = themeObj
-+        if policy.isThemeEnabled():
-+            themeObj = policy.get_theme()
-             enabled_diazo_bundles = themeObj.enabled_bundles
-             disabled_diazo_bundles = themeObj.disabled_bundles
-             if hasattr(themeObj, 'production_css'):
-diff --git a/Products/CMFPlone/resources/configure.zcml b/Products/CMFPlone/resources/configure.zcml
-index df382e7..474e56e 100644
---- a/Products/CMFPlone/resources/configure.zcml
-+++ b/Products/CMFPlone/resources/configure.zcml
-@@ -2,10 +2,6 @@
-     xmlns="http://namespaces.zope.org/zope"
-     i18n_domain="plone.registry">
- 
--    <!-- subscribe to event when theme is applied so we can
--         check for bundles enabled or disabled -->
--    <subscriber handler=".onThemeApplied" />
--
-     <include package=".browser" />
-     <include package=".exportimport" />
- 
+   <records prefix="plone.resources/mockup-patterns-autotoc"
+             interface='Products.CMFPlone.interfaces.IResourceRegistry'>
+       <value key="js">++resource++mockup/autotoc/pattern.js</value>
+diff --git a/Products/CMFPlone/static/plone.js b/Products/CMFPlone/static/plone.js
+index 8e24308..4f7cafb 100644
+--- a/Products/CMFPlone/static/plone.js
++++ b/Products/CMFPlone/static/plone.js
+@@ -29,7 +29,6 @@ require([
+   'mockup-patterns-select2',
+   'mockup-patterns-pickadate',
+   'plone-patterns-toolbar',
+-  'mockup-patterns-accessibility',
+   'mockup-patterns-autotoc',
+   'mockup-patterns-cookietrigger',
+   'mockup-patterns-formunloadalert',
 
 
