@@ -1,56 +1,746 @@
-Repository: plone.app.referenceablebehavior
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-07-12T22:54:59Z
-Author: Fulvio Casali (fulv) <fulviocasali@gmail.com>
-Commit: https://github.com/plone/plone.app.referenceablebehavior/commit/d5e5fcd641578035b8d065f1fc332f35d0149124
+Date: 2015-07-13T09:20:41+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/4de6e6b59e0800238a2ac0322fd2a42073ac7270
 
-Remove superfluous 'for'.
-
-Files changed:
-M plone/app/referenceablebehavior/configure.zcml
-
-diff --git a/plone/app/referenceablebehavior/configure.zcml b/plone/app/referenceablebehavior/configure.zcml
-index f24a2c3..ec1572c 100644
---- a/plone/app/referenceablebehavior/configure.zcml
-+++ b/plone/app/referenceablebehavior/configure.zcml
-@@ -17,7 +17,6 @@
-         title="Referenceable"
-         description="Adds the ability to be referenced by others content elements"
-         provides=".referenceable.IReferenceable"
--        for="plone.dexterity.interfaces.IDexterityContent"
-         />
- 
-     <!-- Install uid_catalog related components -->
-
-
-Repository: plone.app.referenceablebehavior
-
-
-Branch: refs/heads/master
-Date: 2015-07-13T07:31:18+02:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.referenceablebehavior/commit/11bc52bd999911a4910a0bc5e256950b9cf83c06
-
-Merge pull request #5 from plone/fulv-warning-plone-behavior
-
-Fixes plone/Products.CMFPlone#669
+move field_migrators to their own file
+move migration-utils to utils.py
 
 Files changed:
-M plone/app/referenceablebehavior/configure.zcml
+A plone/app/contenttypes/migration/field_migrators.py
+M plone/app/contenttypes/migration/__init__.py
+M plone/app/contenttypes/migration/browser.py
+M plone/app/contenttypes/migration/dxmigration.py
+M plone/app/contenttypes/migration/migration.py
+M plone/app/contenttypes/migration/utils.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_custom.py
 
-diff --git a/plone/app/referenceablebehavior/configure.zcml b/plone/app/referenceablebehavior/configure.zcml
-index f24a2c3..ec1572c 100644
---- a/plone/app/referenceablebehavior/configure.zcml
-+++ b/plone/app/referenceablebehavior/configure.zcml
-@@ -17,7 +17,6 @@
-         title="Referenceable"
-         description="Adds the ability to be referenced by others content elements"
-         provides=".referenceable.IReferenceable"
--        for="plone.dexterity.interfaces.IDexterityContent"
-         />
+diff --git a/plone/app/contenttypes/migration/__init__.py b/plone/app/contenttypes/migration/__init__.py
+index 1ed467b..40a96af 100644
+--- a/plone/app/contenttypes/migration/__init__.py
++++ b/plone/app/contenttypes/migration/__init__.py
+@@ -1,10 +1 @@
+ # -*- coding: utf-8 -*-
+-import pytz
+-
+-
+-def datetime_fixer(dt, zone):
+-    timezone = pytz.timezone(zone)
+-    if dt.tzinfo is None:
+-        return timezone.localize(dt)
+-    else:
+-        return timezone.normalize(dt)
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index 8b7b59e..fbafdd0 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -23,6 +23,7 @@
+ from plone.app.contenttypes.migration.utils import HAS_MULTILINGUAL
+ from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+ from plone.app.contenttypes.migration.utils import isSchemaExtended
++from plone.app.contenttypes.migration.utils import restoreReferences
+ from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
+ from plone.app.contenttypes.utils import DEFAULT_TYPES
+ from plone.browserlayer.interfaces import ILocalBrowserLayerType
+@@ -217,7 +218,7 @@ def __call__(self,
+         catalog.clearFindAndRebuild()
  
-     <!-- Install uid_catalog related components -->
+         # rebuild catalog, restore references and cleanup
+-        migration.restoreReferences(portal, migrate_references, content_types)
++        restoreReferences(portal, migrate_references, content_types)
+ 
+         # switch linkintegrity back to what it was before migrating
+         site_props.manage_changeProperties(
+diff --git a/plone/app/contenttypes/migration/dxmigration.py b/plone/app/contenttypes/migration/dxmigration.py
+index 4af24e4..7a9a057 100644
+--- a/plone/app/contenttypes/migration/dxmigration.py
++++ b/plone/app/contenttypes/migration/dxmigration.py
+@@ -4,8 +4,8 @@
+ from Products.contentmigration.basemigrator.migrator import CMFItemMigrator
+ from Products.contentmigration.basemigrator.walker import CatalogWalker
+ from plone.app.contenttypes.interfaces import IEvent
+-from plone.app.contenttypes.migration import datetime_fixer
+ from plone.app.contenttypes.migration.utils import HAS_MULTILINGUAL
++from plone.app.contenttypes.migration.utils import datetime_fixer
+ from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
+ from plone.event.utils import default_timezone
+diff --git a/plone/app/contenttypes/migration/field_migrators.py b/plone/app/contenttypes/migration/field_migrators.py
+new file mode 100644
+index 0000000..295a6b1
+--- /dev/null
++++ b/plone/app/contenttypes/migration/field_migrators.py
+@@ -0,0 +1,133 @@
++# -*- coding: utf-8 -*-
++from Products.CMFPlone.utils import safe_unicode, safe_hasattr
++from plone.app.contenttypes.migration.utils import datetime_fixer
++from plone.event.utils import default_timezone
++from plone.namedfile.file import NamedBlobFile
++from plone.namedfile.file import NamedBlobImage
++from plone.app.textfield.value import RichTextValue
++import logging
++
++logger = logging.getLogger(__name__)
++
++
++def migrate_simplefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
++    """Migrate a generic simple field.
++
++    Copies the value of a Archetypes-object to a attribute of the same name
++    to the target-object. The only transform is a safe_unicode of the value.
++    """
++    field = src_obj.getField(src_fieldname)
++    if field:
++        at_value = field.get(src_obj)
++    else:
++        at_value = getattr(src_obj, src_fieldname, None)
++        if at_value and hasattr(at_value, '__call__'):
++            at_value = at_value()
++    if isinstance(at_value, tuple):
++        at_value = tuple(safe_unicode(i) for i in at_value)
++    if isinstance(at_value, list):
++        at_value = [safe_unicode(i) for i in at_value]
++    if at_value:
++        setattr(dst_obj, dst_fieldname, safe_unicode(at_value))
++
++
++def migrate_richtextfield(src_obj, dst_obj, src_fieldname, dst_fieldname):
++    """
++    migrate a rich text field.
++    This field needs some extra stuffs like keep the same mimetype.
++    """
++    field = src_obj.getField(src_fieldname)
++    raw_text = ''
++    if field:
++        mime_type = field.getContentType(src_obj)
++        raw_text = safe_unicode(field.getRaw(src_obj))
++    else:
++        at_value = getattr(src_obj, src_fieldname, None)
++        if at_value:
++            mime_type = at_value.mimetype
++            raw_text = safe_unicode(at_value.raw)
++
++    if raw_text.strip() == '':
++            return
++    richtext = RichTextValue(raw=raw_text, mimeType=mime_type,
++                             outputMimeType='text/x-html-safe')
++    setattr(dst_obj, dst_fieldname, richtext)
++
++
++def migrate_imagefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
++    """
++    migrate an image field.
++    This field needs to be migrated with an NamedBlobImage instance.
++    """
++    # get old image data and filename
++    old_image = src_obj.getField(src_fieldname).get(src_obj)
++    if old_image == '':
++        return
++    filename = safe_unicode(old_image.filename)
++    old_image_data = old_image.data
++    if safe_hasattr(old_image_data, 'data'):
++        old_image_data = old_image_data.data
++
++    # create the new image field
++    namedblobimage = NamedBlobImage(data=old_image_data,
++                                    filename=filename)
++
++    # set new field on destination object
++    setattr(dst_obj, dst_fieldname, namedblobimage)
++
++    # handle a possible image caption field
++    # postulate is the old caption field name is ending by 'Caption'
++    # and the new field name is ending by '_caption'
++    # is this postulate correct ?
++    # should this field not be handle by itself because it will appear in the
++    # old field list ?
++    caption_field = src_obj.getField('%sCaption' % src_fieldname, None)
++    if caption_field:
++        setattr(dst_obj,
++                ('%s_caption' % dst_fieldname),
++                safe_unicode(caption_field.get(src_obj)))
++
++    logger.info("Migrating image %s" % filename)
++
++
++def migrate_filefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
++    """
++    migrate a file field.
++    This field needs to be migrated with an NamedBlobFile instance.
++    """
++    old_file = src_obj.getField(src_fieldname).get(src_obj)
++    if old_file == '':
++        return
++    filename = safe_unicode(old_file.filename)
++    old_file_data = old_file.data
++    if safe_hasattr(old_file_data, 'data'):
++        old_file_data = old_file_data.data
++    namedblobfile = NamedBlobFile(data=old_file_data,
++                                  filename=filename)
++    setattr(dst_obj, dst_fieldname, namedblobfile)
++    logger.info("Migrating file %s" % filename)
++
++
++def migrate_datetimefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
++    """Migrate a datefield."""
++    old_value = src_obj.getField(src_fieldname).get(src_obj)
++    if old_value == '':
++        return
++    if src_obj.getField('timezone', None) is not None:
++        old_timezone = src_obj.getField('timezone').get(src_obj)
++    else:
++        old_timezone = default_timezone(fallback='UTC')
++    new_value = datetime_fixer(old_value.asdatetime(), old_timezone)
++    setattr(dst_obj, dst_fieldname, new_value)
++
++
++# This mapping is needed to get the right migration method
++# we use the full field type path as it is retrieved from the target-field
++# (field.getType()), to avoid conflict.
++# TODO In the __future__ we should have a more dynamic way to configure this
++# mapping
++FIELDS_MAPPING = {'RichText': migrate_richtextfield,
++                  'NamedBlobFile': migrate_filefield,
++                  'NamedBlobImage': migrate_imagefield,
++                  'Datetime': migrate_datetimefield,
++                  'Date': migrate_datetimefield}
+diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
+index 84cf63b..eba7c95 100644
+--- a/plone/app/contenttypes/migration/migration.py
++++ b/plone/app/contenttypes/migration/migration.py
+@@ -7,7 +7,6 @@
+ module will only work if Products.contentmigration is installed so make sure
+ you catch ImportErrors
+ '''
+-from Products.ATContentTypes.interfaces.interfaces import IATContentType
+ from Products.Archetypes.config import REFERENCE_CATALOG
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.utils import safe_hasattr
+@@ -16,164 +15,34 @@
+ from Products.contentmigration.basemigrator.migrator import CMFItemMigrator
+ from Products.contentmigration.basemigrator.walker import CatalogWalker
+ from Products.contentmigration.walker import CustomQueryWalker
+-from copy import deepcopy
+ from persistent.list import PersistentList
+ from plone.app.contenttypes.behaviors.collection import ICollection
+-from plone.app.contenttypes.migration import datetime_fixer
+ from plone.app.contenttypes.migration.dxmigration import DXEventMigrator
+ from plone.app.contenttypes.migration.dxmigration import DXOldEventMigrator
+-from plone.app.contenttypes.migration.utils import add_portlet
+ from plone.app.contenttypes.migration.utils import copy_contentrules
++from plone.app.contenttypes.migration.utils import datetime_fixer
+ from plone.app.contenttypes.migration.utils import migrate_leadimage
+ from plone.app.contenttypes.migration.utils import move_comments
+-from plone.app.contenttypes.utils import DEFAULT_TYPES
++from plone.app.contenttypes.migration.utils import migrate_portlets
++from plone.app.contenttypes.migration.field_migrators import migrate_simplefield
++from plone.app.contenttypes.migration.field_migrators import FIELDS_MAPPING
+ from plone.app.textfield.value import RichTextValue
+-from plone.app.uuid.utils import uuidToObject
+ from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
+ from plone.event.utils import default_timezone
+ from plone.namedfile.file import NamedBlobFile
+ from plone.namedfile.file import NamedBlobImage
+-from plone.portlets.constants import CONTEXT_BLACKLIST_STATUS_KEY
+-from plone.portlets.interfaces import IPortletAssignmentMapping
+-from plone.portlets.interfaces import IPortletManager
+-from z3c.relationfield import RelationValue
+-from zope.annotation.interfaces import IAnnotations
+ from zope.component import adapter
+ from zope.component import getAdapters
+ from zope.component import getMultiAdapter
+-from zope.component import getSiteManager
+-from zope.component import getUtility
+ from zope.component.hooks import getSite
+ from zope.interface import Interface
+ from zope.interface import implementer
+-from zope.intid.interfaces import IIntIds
+ import logging
+ import transaction
+ logger = logging.getLogger(__name__)
+ 
+ 
+-def migrate_simplefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+-    """
+-    migrate a generic simple field (like a string field or a date field)
+-    """
+-    field = src_obj.getField(src_fieldname)
+-    if field:
+-        at_value = field.get(src_obj)
+-    else:
+-        at_value = getattr(src_obj, src_fieldname, None)
+-        if at_value and hasattr(at_value, '__call__'):
+-            at_value = at_value()
+-    if isinstance(at_value, tuple):
+-        at_value = tuple(safe_unicode(i) for i in at_value)
+-    if isinstance(at_value, list):
+-        at_value = [safe_unicode(i) for i in at_value]
+-    if at_value:
+-        setattr(dst_obj, dst_fieldname, safe_unicode(at_value))
+-
+-
+-def migrate_richtextfield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+-    """
+-    migrate a rich text field.
+-    This field needs some extra stuffs like keep the same mimetype.
+-    """
+-    field = src_obj.getField(src_fieldname)
+-    raw_text = ''
+-    if field:
+-        mime_type = field.getContentType(src_obj)
+-        raw_text = safe_unicode(field.getRaw(src_obj))
+-    else:
+-        at_value = getattr(src_obj, src_fieldname, None)
+-        if at_value:
+-            mime_type = at_value.mimetype
+-            raw_text = safe_unicode(at_value.raw)
+-
+-    if raw_text.strip() == '':
+-            return
+-    richtext = RichTextValue(raw=raw_text, mimeType=mime_type,
+-                             outputMimeType='text/x-html-safe')
+-    setattr(dst_obj, dst_fieldname, richtext)
+-
+-
+-def migrate_imagefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+-    """
+-    migrate an image field.
+-    This field needs to be migrated with an NamedBlobImage instance.
+-    """
+-    # get old image data and filename
+-    old_image = src_obj.getField(src_fieldname).get(src_obj)
+-    if old_image == '':
+-        return
+-    filename = safe_unicode(old_image.filename)
+-    old_image_data = old_image.data
+-    if safe_hasattr(old_image_data, 'data'):
+-        old_image_data = old_image_data.data
+-
+-    # create the new image field
+-    namedblobimage = NamedBlobImage(data=old_image_data,
+-                                    filename=filename)
+-
+-    # set new field on destination object
+-    setattr(dst_obj, dst_fieldname, namedblobimage)
+-
+-    # handle a possible image caption field
+-    # postulate is the old caption field name is ending by 'Caption'
+-    # and the new field name is ending by '_caption'
+-    # is this postulate correct ?
+-    # should this field not be handle by itself because it will appear in the
+-    # old field list ?
+-    caption_field = src_obj.getField('%sCaption' % src_fieldname, None)
+-    if caption_field:
+-        setattr(dst_obj,
+-                ('%s_caption' % dst_fieldname),
+-                safe_unicode(caption_field.get(src_obj)))
+-
+-    logger.info("Migrating image %s" % filename)
+-
+-
+-def migrate_filefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+-    """
+-    migrate a file field.
+-    This field needs to be migrated with an NamedBlobFile instance.
+-    """
+-    old_file = src_obj.getField(src_fieldname).get(src_obj)
+-    if old_file == '':
+-        return
+-    filename = safe_unicode(old_file.filename)
+-    old_file_data = old_file.data
+-    if safe_hasattr(old_file_data, 'data'):
+-        old_file_data = old_file_data.data
+-    namedblobfile = NamedBlobFile(data=old_file_data,
+-                                  filename=filename)
+-    setattr(dst_obj, dst_fieldname, namedblobfile)
+-    logger.info("Migrating file %s" % filename)
+-
+-
+-def migrate_datetimefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+-    """Migrate a datefield."""
+-    old_value = src_obj.getField(src_fieldname).get(src_obj)
+-    if old_value == '':
+-        return
+-    if src_obj.getField('timezone', None) is not None:
+-        old_timezone = src_obj.getField('timezone').get(src_obj)
+-    else:
+-        old_timezone = default_timezone(fallback='UTC')
+-    new_value = datetime_fixer(old_value.asdatetime(), old_timezone)
+-    setattr(dst_obj, dst_fieldname, new_value)
+-
+-
+-# this mapping is needed to use the right migration method
+-# we use the full field type path as it is retrieved from the target-field
+-# (field.getType()), to avoid conflict.
+-# TODO In the __future__ we should have a more dynamic way to configure this
+-# mapping
+-FIELDS_MAPPING = {'RichText': migrate_richtextfield,
+-                  'NamedBlobFile': migrate_filefield,
+-                  'NamedBlobImage': migrate_imagefield,
+-                  'Datetime': migrate_datetimefield,
+-                  'Date': migrate_datetimefield}
+-
+-
+ def migrate(portal, migrator):
+     """return a CatalogWalker instance in order
+     to have its output after migration"""
+@@ -181,134 +50,6 @@ def migrate(portal, migrator):
+     return walker
+ 
+ 
+-def migrate_portlets(src_obj, dst_obj):
+-    """Copy portlets for all available portletmanagers from one object
+-    to another.
+-    Also takes blocked portlet settings into account, keeps hidden portlets
+-    hidden and skips broken assignments.
+-    """
+-
+-    # also take custom portlet managers into account
+-    managers = [reg.name for reg in getSiteManager().registeredUtilities()
+-                if reg.provided == IPortletManager]
+-    # faster, but no custom managers
+-    # managers = [u'plone.leftcolumn', u'plone.rightcolumn']
+-
+-    # copy information which categories are hidden for which manager
+-    blacklist_status = IAnnotations(src_obj).get(
+-        CONTEXT_BLACKLIST_STATUS_KEY, None)
+-    if blacklist_status is not None:
+-        IAnnotations(dst_obj)[CONTEXT_BLACKLIST_STATUS_KEY] = \
+-            deepcopy(blacklist_status)
+-
+-    # copy all portlet assignments (visibilty is stored as annotation
+-    # on the assignments and gets copied here too)
+-    for manager in managers:
+-        column = getUtility(IPortletManager, manager)
+-        mappings = getMultiAdapter((src_obj, column),
+-                                   IPortletAssignmentMapping)
+-        for key, assignment in mappings.items():
+-            # skip possibly broken portlets here
+-            if not hasattr(assignment, '__Broken_state__'):
+-                add_portlet(dst_obj, assignment, key, manager)
+-            else:
+-                logger.warn(u'skipping broken portlet assignment {0} '
+-                            'for manager {1}'.format(key, manager))
+-
+-
+-def restore_refs(obj):
+-    """Restore references stored in the attribute _relatedItems.
+-    """
+-    intids = getUtility(IIntIds)
+-    try:
+-        if not getattr(obj, 'relatedItems', None):
+-            obj.relatedItems = PersistentList()
+-
+-        elif not isinstance(obj.relatedItems, PersistentList):
+-            obj.relatedItems = PersistentList(obj.relatedItems)
+-
+-        for uuid in obj._relatedItems:
+-            to_obj = uuidToObject(uuid)
+-            to_id = intids.getId(to_obj)
+-            obj.relatedItems.append(RelationValue(to_id))
+-            logger.info('Restored Relation from %s to %s' % (obj, to_obj))
+-    except AttributeError:
+-        pass
+-
+-
+-def restore_backrefs(portal, obj):
+-    """Restore backreferences stored in the attribute _backrefs.
+-    """
+-    intids = getUtility(IIntIds)
+-    uid_catalog = getToolByName(portal, 'uid_catalog')
+-    try:
+-        backrefobjs = [uuidToObject(uuid) for uuid in obj._backrefs]
+-        for backrefobj in backrefobjs:
+-            # Dexterity and
+-            if IDexterityContent.providedBy(backrefobj):
+-                relitems = getattr(backrefobj, 'relatedItems', None)
+-                if not relitems:
+-                    backrefobj.relatedItems = PersistentList()
+-                elif not isinstance(obj.relatedItems, PersistentList):
+-                    backrefobj.relatedItems = PersistentList(
+-                        obj.relatedItems
+-                    )
+-                to_id = intids.getId(obj)
+-                backrefobj.relatedItems.append(RelationValue(to_id))
+-
+-            # Archetypes
+-            elif IATContentType.providedBy(backrefobj):
+-                # reindex UID so we are able to set the reference
+-                path = '/'.join(obj.getPhysicalPath())
+-                uid_catalog.catalog_object(obj, path)
+-                backrefobj.setRelatedItems(obj)
+-            logger.info(
+-                'Restored BackRelation from %s to %s' % (backrefobj, obj))
+-    except AttributeError:
+-        pass
+-
+-
+-def restore_reforder(obj):
+-    """Restore order of references stored in the attribute _relatedItemsOrder.
+-    """
+-    if not hasattr(obj, '_relatedItemsOrder'):
+-        # Nothing to do
+-        return
+-    relatedItemsOrder = obj._relatedItemsOrder
+-    uid_position_map = dict([(y, x) for x, y in enumerate(relatedItemsOrder)])
+-    key = lambda rel: uid_position_map.get(rel.to_object.UID(), 0)
+-    obj.relatedItems = sorted(obj.relatedItems, key=key)
+-
+-
+-def cleanup_stored_refs(obj):
+-    """Cleanup new dx item."""
+-    if safe_hasattr(obj, '_relatedItems'):
+-        del obj._relatedItems
+-    if safe_hasattr(obj, '_backrefs'):
+-        del obj._backrefs
+-    if safe_hasattr(obj, '_relatedItemsOrder'):
+-        del obj._relatedItemsOrder
+-
+-
+-def restoreReferences(portal,
+-                      migrate_references=True,
+-                      content_types=DEFAULT_TYPES):
+-    """Iterate over new Dexterity items and restore Dexterity References.
+-    """
+-    catalog = getToolByName(portal, "portal_catalog")
+-    results = catalog.searchResults(
+-        object_provides=IDexterityContent.__identifier__,
+-        portal_type=content_types)
+-
+-    for brain in results:
+-        obj = brain.getObject()
+-        if migrate_references:
+-            restore_refs(obj)
+-            restore_backrefs(portal, obj)
+-            restore_reforder(obj)
+-        cleanup_stored_refs(obj)
+-
+-
+ class ReferenceMigrator(object):
+ 
+     def beforeChange_relatedItemsOrder(self):
+diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
+index d283847..782e433 100644
+--- a/plone/app/contenttypes/migration/utils.py
++++ b/plone/app/contenttypes/migration/utils.py
+@@ -1,4 +1,5 @@
+ # -*- coding: utf-8 -*-
++from Products.ATContentTypes.interfaces.interfaces import IATContentType
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.interfaces import IPloneSiteRoot
+ from Products.CMFPlone.utils import safe_unicode, safe_hasattr
+@@ -9,25 +10,32 @@
+ from archetypes.schemaextender.interfaces import ISchemaExtender
+ from archetypes.schemaextender.interfaces import ISchemaModifier
+ from copy import deepcopy
++from persistent.list import PersistentList
+ from plone.app.contentrules.api import assign_rule
+ from plone.app.contenttypes.behaviors.leadimage import ILeadImage
+ from plone.app.contenttypes.utils import DEFAULT_TYPES
+ from plone.app.discussion.conversation import ANNOTATION_KEY as DISCUSSION_KEY
+ from plone.app.discussion.interfaces import IConversation
++from plone.app.uuid.utils import uuidToObject
+ from plone.contentrules.engine.interfaces import IRuleAssignmentManager
++from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
+ from plone.namedfile.file import NamedBlobImage
++from plone.portlets.constants import CONTEXT_BLACKLIST_STATUS_KEY
+ from plone.portlets.interfaces import IPortletAssignmentMapping
+ from plone.portlets.interfaces import IPortletManager
++from z3c.relationfield import RelationValue
+ from zope.annotation.interfaces import IAnnotations
+ from zope.component import getGlobalSiteManager
+ from zope.component import getMultiAdapter
++from zope.component import getSiteManager
+ from zope.component import getUtility
+ from zope.component.hooks import getSite
+-
++from zope.intid.interfaces import IIntIds
+ import logging
+ import os
+ import pkg_resources
++import pytz
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -213,3 +221,139 @@ def migrate_leadimage(source_object, target_object):
+                 (NEW_CAPTION_FIELD_NAME),
+                 safe_unicode(caption_field.get(source_object)))
+     logger.info("Migrating contentlead image %s" % filename)
++
++
++def migrate_portlets(src_obj, dst_obj):
++    """Copy portlets for all available portletmanagers from one object
++    to another.
++    Also takes blocked portlet settings into account, keeps hidden portlets
++    hidden and skips broken assignments.
++    """
++
++    # also take custom portlet managers into account
++    managers = [reg.name for reg in getSiteManager().registeredUtilities()
++                if reg.provided == IPortletManager]
++    # faster, but no custom managers
++    # managers = [u'plone.leftcolumn', u'plone.rightcolumn']
++
++    # copy information which categories are hidden for which manager
++    blacklist_status = IAnnotations(src_obj).get(
++        CONTEXT_BLACKLIST_STATUS_KEY, None)
++    if blacklist_status is not None:
++        IAnnotations(dst_obj)[CONTEXT_BLACKLIST_STATUS_KEY] = \
++            deepcopy(blacklist_status)
++
++    # copy all portlet assignments (visibilty is stored as annotation
++    # on the assignments and gets copied here too)
++    for manager in managers:
++        column = getUtility(IPortletManager, manager)
++        mappings = getMultiAdapter((src_obj, column),
++                                   IPortletAssignmentMapping)
++        for key, assignment in mappings.items():
++            # skip possibly broken portlets here
++            if not hasattr(assignment, '__Broken_state__'):
++                add_portlet(dst_obj, assignment, key, manager)
++            else:
++                logger.warn(u'skipping broken portlet assignment {0} '
++                            'for manager {1}'.format(key, manager))
++
++
++def restore_refs(obj):
++    """Restore references stored in the attribute _relatedItems.
++    """
++    intids = getUtility(IIntIds)
++    try:
++        if not getattr(obj, 'relatedItems', None):
++            obj.relatedItems = PersistentList()
++
++        elif not isinstance(obj.relatedItems, PersistentList):
++            obj.relatedItems = PersistentList(obj.relatedItems)
++
++        for uuid in obj._relatedItems:
++            to_obj = uuidToObject(uuid)
++            to_id = intids.getId(to_obj)
++            obj.relatedItems.append(RelationValue(to_id))
++            logger.info('Restored Relation from %s to %s' % (obj, to_obj))
++    except AttributeError:
++        pass
++
++
++def restore_backrefs(portal, obj):
++    """Restore backreferences stored in the attribute _backrefs.
++    """
++    intids = getUtility(IIntIds)
++    uid_catalog = getToolByName(portal, 'uid_catalog')
++    try:
++        backrefobjs = [uuidToObject(uuid) for uuid in obj._backrefs]
++        for backrefobj in backrefobjs:
++            # Dexterity and
++            if IDexterityContent.providedBy(backrefobj):
++                relitems = getattr(backrefobj, 'relatedItems', None)
++                if not relitems:
++                    backrefobj.relatedItems = PersistentList()
++                elif not isinstance(obj.relatedItems, PersistentList):
++                    backrefobj.relatedItems = PersistentList(
++                        obj.relatedItems
++                    )
++                to_id = intids.getId(obj)
++                backrefobj.relatedItems.append(RelationValue(to_id))
++
++            # Archetypes
++            elif IATContentType.providedBy(backrefobj):
++                # reindex UID so we are able to set the reference
++                path = '/'.join(obj.getPhysicalPath())
++                uid_catalog.catalog_object(obj, path)
++                backrefobj.setRelatedItems(obj)
++            logger.info(
++                'Restored BackRelation from %s to %s' % (backrefobj, obj))
++    except AttributeError:
++        pass
++
++
++def restore_reforder(obj):
++    """Restore order of references stored in the attribute _relatedItemsOrder.
++    """
++    if not hasattr(obj, '_relatedItemsOrder'):
++        # Nothing to do
++        return
++    relatedItemsOrder = obj._relatedItemsOrder
++    uid_position_map = dict([(y, x) for x, y in enumerate(relatedItemsOrder)])
++    key = lambda rel: uid_position_map.get(rel.to_object.UID(), 0)
++    obj.relatedItems = sorted(obj.relatedItems, key=key)
++
++
++def cleanup_stored_refs(obj):
++    """Cleanup new dx item."""
++    if safe_hasattr(obj, '_relatedItems'):
++        del obj._relatedItems
++    if safe_hasattr(obj, '_backrefs'):
++        del obj._backrefs
++    if safe_hasattr(obj, '_relatedItemsOrder'):
++        del obj._relatedItemsOrder
++
++
++def restoreReferences(portal,
++                      migrate_references=True,
++                      content_types=DEFAULT_TYPES):
++    """Iterate over new Dexterity items and restore Dexterity References.
++    """
++    catalog = getToolByName(portal, "portal_catalog")
++    results = catalog.searchResults(
++        object_provides=IDexterityContent.__identifier__,
++        portal_type=content_types)
++
++    for brain in results:
++        obj = brain.getObject()
++        if migrate_references:
++            restore_refs(obj)
++            restore_backrefs(portal, obj)
++            restore_reforder(obj)
++        cleanup_stored_refs(obj)
++
++
++def datetime_fixer(dt, zone):
++    timezone = pytz.timezone(zone)
++    if dt.tzinfo is None:
++        return timezone.localize(dt)
++    else:
++        return timezone.normalize(dt)
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index b753239..c7b04e3 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -938,10 +938,10 @@ def test_folder_children_are_migrated(self):
+ 
+     def test_relations_are_migrated(self):
+         from plone.app.contenttypes.migration.migration import (
+-            restoreReferences,
+             migrate_documents,
+-            migrate_folders
++            migrate_folders,
+         )
++        from plone.app.contenttypes.migration.utils import restoreReferences
+ 
+         # IIntIds is not registered in the test env. So register it here
+         sm = getSiteManager(self.portal)
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index 4ec135a..cebd18c 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -1,9 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from Products.CMFPlone.utils import safe_unicode
+ from datetime import datetime
+-from plone.app.contenttypes.migration.migration import migrate_filefield
+-from plone.app.contenttypes.migration.migration import migrate_imagefield
+-from plone.app.contenttypes.migration.migration import migrate_simplefield
++from plone.app.contenttypes.migration.field_migrators import migrate_filefield
++from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
++from plone.app.contenttypes.migration.field_migrators import migrate_simplefield
+ from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+ from plone.app.contenttypes.testing import \
+     PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
 
 
