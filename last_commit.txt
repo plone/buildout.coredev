@@ -1,60 +1,93 @@
-Repository: plone.batching
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-07-16T17:22:05+02:00
-Author: Patrick Gerken (do3cc) <do3cc@patrick-gerken.de>
-Commit: https://github.com/plone/plone.batching/commit/4ef092cc52ebca49b4eb2a0c94491fb79f541638
+Date: 2015-07-16T17:31:02+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/acb7d1b6d6af476470226879ad9fff7c52f55769
 
-Fix assertion on edge cse
+get and set linkintegrity-setting with registry
 
 Files changed:
-M CHANGES.rst
-M plone/batching/batch.py
-M plone/batching/tests.py
+M plone/app/contenttypes/migration/browser.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b1dd523..682db93 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -8,6 +8,10 @@ Changelog
-   or it fails in previous_pages when using orphan
-   [gbastien]
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index fbafdd0..6370dfb 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -2,10 +2,12 @@
+ from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
+ from Products.CMFCore.interfaces import IPropertiesTool
+ from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
+ from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
++from Products.CMFPlone.interfaces import IEditingSchema
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
++from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
+ from Products.contentmigration.utils import patch, undoPatch
+ from Products.statusmessages.interfaces import IStatusMessage
+ from datetime import datetime
+@@ -30,6 +32,7 @@
+ from plone.dexterity.content import DexterityContent
+ from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
++from plone.registry.interfaces import IRegistry
+ from plone.z3cform.layout import wrap_form
+ from pprint import pformat
+ from z3c.form import button
+@@ -39,9 +42,9 @@
+ from z3c.form.interfaces import HIDDEN_MODE
+ from zope import schema
+ from zope.component import getMultiAdapter
++from zope.component import getUtility
+ from zope.component import queryUtility
+ from zope.interface import Interface
+-from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
  
-+- Allow orphan size to be equal to batch size. This allows
-+  the edge case of batch size 0 with default orphan size 0.
-+  [do3cc]
-+
+ import logging
+ import pkg_resources
+@@ -155,9 +158,21 @@ def __call__(self,
+         # switch linkintegrity temp off
+         ptool = queryUtility(IPropertiesTool)
+         site_props = getattr(ptool, 'site_properties', None)
+-        link_integrity = site_props.getProperty('enable_link_integrity_checks',
+-                                                False)
+-        site_props.manage_changeProperties(enable_link_integrity_checks=False)
++        link_integrity_in_props = False
++        if site_props and site_props.hasProperty(
++                'enable_link_integrity_checks'):
++            link_integrity_in_props = True
++            link_integrity = site_props.getProperty(
++                'enable_link_integrity_checks', False)
++            site_props.manage_changeProperties(
++                enable_link_integrity_checks=False)
++        else:
++            # Plone 5
++            registry = getUtility(IRegistry)
++            editing_settings = registry.forInterface(
++                IEditingSchema, prefix='plone')
++            link_integrity = editing_settings.enable_link_integrity_checks
++            editing_settings.enable_link_integrity_checks = False
  
- 1.0.4 (2015-04-28)
- ------------------
-diff --git a/plone/batching/batch.py b/plone/batching/batch.py
-index cb30b1e..da15cdc 100644
---- a/plone/batching/batch.py
-+++ b/plone/batching/batch.py
-@@ -31,8 +31,8 @@ def __init__(self, sequence, size, start=0, end=0, orphan=0, overlap=0,
-         overlap   - the number of overlapping elements in each batch
-         pagerange - the number of pages to display in the navigation
-         """
--        assert orphan < size, "Having an orphan size, higher than batch size" \
--                              " is undefined"
-+        assert orphan <= size, "Having an orphan size higher than batch size" \
-+                               " is undefined"
-         start += 1
-         self._sequence = sequence
-         self._size = size
-diff --git a/plone/batching/tests.py b/plone/batching/tests.py
-index eda6168..8c9a42d 100644
---- a/plone/batching/tests.py
-+++ b/plone/batching/tests.py
-@@ -104,6 +104,8 @@ def test_lastpage_with_orphans(self):
-         self.assertEqual(10, batch.lastpage)
-         batch = BaseBatch(range(71), 10, orphan=2)
-         self.assertEqual(7, batch.lastpage)
-+        batch = BaseBatch(range(0), 0, orphan=0)
-+        self.assertEqual(1, batch.lastpage)
-         self.assertRaises(AssertionError, BaseBatch, [], 10, orphan=20)
+         # switch of setModificationDate on changes
+         self.patchNotifyModified()
+@@ -221,9 +236,12 @@ def __call__(self,
+         restoreReferences(portal, migrate_references, content_types)
  
-     def test_items_not_on_page(self):
+         # switch linkintegrity back to what it was before migrating
+-        site_props.manage_changeProperties(
+-            enable_link_integrity_checks=link_integrity
+-        )
++        if link_integrity_in_props:
++            site_props.manage_changeProperties(
++                enable_link_integrity_checks=link_integrity
++            )
++        else:
++            editing_settings.enable_link_integrity_checks = link_integrity
+ 
+         # switch on setModificationDate on changes
+         self.resetNotifyModified()
 
 
