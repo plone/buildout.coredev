@@ -14,7 +14,7 @@ please attach your review to the PLIP ticket itself.
 
 Setting up the environment
 ==========================
-Follow the instructions on `setting up a development environment <https://dev.plone.org/wiki/DevelopmentEnvironment>`_ for "Getting the Code".
+Follow the instructions on `setting up a development environment <http://docs.plone.org/develop/plone-coredev/intro.html#setting-up-your-development-environment>`_ for "Getting the Code".
 You will need to checkout the branch to which the PLIP is assigned.
 Instead of running the buildout with the default buildout file,
 you will run the config specific to that plip::
@@ -92,7 +92,7 @@ Python
 Javascript
 ----------
 * Does the javascript meet our set of javascript standards?
-  See http://developer.plone.org/templates_css_and_javascripts/javascript.html
+  See http://docs.plone.org/5/en/develop/addons/javascript.html
 * Does the Javascript work in all currently supported browsers?
   Is it performant?
 
@@ -103,8 +103,4 @@ ME/TAL
 * Are there any deprecated or old style ME/TAL lines of code such as using DateTime?
 * Is the rendered html standards compliant? Are ids and classes used appropriately?
 
-Example PLIP Reviews
---------------------
-* https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-davisagli.txt
-* https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip10886-review-cah190.txt
-* https://svn.plone.org/svn/plone/buildouts/plone-coredev/branches/4.1/plips/plip9352-review-rossp.txt
+
