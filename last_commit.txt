@@ -1,86 +1,763 @@
-Repository: plone.app.i18n
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2015-07-18T16:01:12+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.i18n/commit/5a9eaa7946b92c66b3eb20c3bc7ed024047975a5
+Date: 2015-07-19T08:47:29-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/98e2a3a2d86b6c22051e058f6cd1cc7752e8da66
 
-Preparing release 3.0.1
+better csrf handling
 
 Files changed:
 M CHANGES.rst
-M setup.py
+M README.rst
+M plone/protect/auto.py
+M plone/protect/monkey.py
+M plone/protect/testing.py
+M plone/protect/tests/testAuto.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 9df1bf0..648d215 100644
+index 5a0d4b4..c702ba4 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--3.0.1 (unreleased)
-+3.0.1 (2015-07-18)
+@@ -4,7 +4,9 @@ Changelog
+ 3.0.5 (unreleased)
  ------------------
  
- - Fix switchLanguage links. Refs https://github.com/plone/Products.CMFPlone/issues/431
-diff --git a/setup.py b/setup.py
-index d85b057..fab7edb 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,6 +1,6 @@
- from setuptools import setup, find_packages
+-- Nothing changed yet.
++- instead of using _v_safe_write users should now use the safeWrite function
++  in plone.protect.auto
++  [vangheem]
  
--version = '3.0.1.dev0'
-+version = '3.0.1'
  
- setup(name='plone.app.i18n',
-       version=version,
+ 3.0.4 (2015-05-13)
+diff --git a/README.rst b/README.rst
+index 662019d..a70a915 100644
+--- a/README.rst
++++ b/README.rst
+@@ -167,10 +167,10 @@ exploits so do any required CSRF protection manually.
+ If you just want to allow an object to be writable on a request...
+ ******************************************************************
+ 
+-You can add the attribute _v_safe_write onto an object to specify that
+-it is safe to write on read.
++You can use the `safeWrite` helper function.
+ 
+-    myobj._v_safe_write = True
++    from plone.protect.auto import safeWrite
++    safeWrite(myobj, request)
+ 
+ 
+ Clickjacking Protection
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 2e8cd53..b4c60a9 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -1,37 +1,54 @@
++import itertools
++import logging
++import os
++import traceback
++from urllib import urlencode
++from urlparse import urlparse
++
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_parent
+-from lxml import etree
+ from OFS.interfaces import IApplication
++from lxml import etree
++from plone.keyring.interfaces import IKeyManager
+ from plone.portlets.interfaces import IPortletAssignment
+ from plone.protect.authenticator import check
+ from plone.protect.authenticator import createToken
+ from plone.protect.authenticator import isAnonymousUser
+ from plone.protect.interfaces import IConfirmView
+ from plone.protect.interfaces import IDisableCSRFProtection
+-from plone.keyring.interfaces import IKeyManager
+ from plone.transformchain.interfaces import ITransform
+ from repoze.xmliter.utils import getHTMLSerializer
+ import transaction
+ from zExceptions import Forbidden
++from zope.component import ComponentLookupError
+ from zope.component import adapts
+-from zope.component.hooks import getSite
+ from zope.component import getUtility
+-from zope.component import ComponentLookupError
++from zope.component.hooks import getSite
++from zope.globalrequest import getRequest
+ from zope.interface import implements, Interface
+ 
+-from urlparse import urlparse
+-from urllib import urlencode
+-import itertools
+-import os
+-import traceback
+-import logging
+ LOGGER = logging.getLogger('plone.protect')
+ 
++SAFE_WRITE_KEY = 'plone.protect.safe_oids'
+ 
+ X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false') == 'true'
+ 
+ 
++def safeWrite(obj, request=None):
++    if request is None:
++        request = getRequest()
++    if request is None:
++        LOGGER.info('could not mark object as a safe write')
++    if SAFE_WRITE_KEY not in request.environ:
++        request.environ[SAFE_WRITE_KEY] = []
++    try:
++        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
++            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
++    except:
++        LOGGER.info('object you attempted to mark safe does not have an oid')
++
++
+ class ProtectTransform(object):
+     """
+     XXX Need to be extremely careful with everything we do in here
+@@ -181,13 +198,17 @@ def _check(self):
+                 # cause some writes on read. ALL, registered objects
+                 # need to be portlet assignments. XXX needs to be fixed
+                 # somehow...
++                safe_oids = []
++                if SAFE_WRITE_KEY in self.request.environ:
++                    safe_oids = self.request.environ[SAFE_WRITE_KEY]
+                 safe = True
+                 for obj in registered:
+                     if (not IPortletAssignment.providedBy(obj) and
+-                            not getattr(obj, '_v_safe_write', False)):
++                            getattr(obj, '_p_oid', False) not in safe_oids):
+                         safe = False
+                         break
+                 if not safe:
++                    import pdb; pdb.set_trace()
+                     LOGGER.info('aborting transaction due to no CSRF '
+                                 'protection on url %s' % self.request.URL)
+                     transaction.abort()
+diff --git a/plone/protect/monkey.py b/plone/protect/monkey.py
+index f7bfb78..b755a00 100644
+--- a/plone/protect/monkey.py
++++ b/plone/protect/monkey.py
+@@ -1,4 +1,5 @@
+ from urlparse import urlparse, urljoin
++from plone.protect.auto import safeWrite
+ 
+ 
+ def RedirectTo__call__(self, controller_state):
+@@ -28,10 +29,10 @@ def wl_lockmapping(self, killinvalids=0, create=0):
+     has_write_locks = hasattr(self, '_dav_writelocks')
+     locks = self._old_wl_lockmapping(killinvalids=killinvalids, create=create)
+     try:
+-        locks._v_safe_write = True  # hint to tell plone.protect to ignore this object
++        safeWrite(locks)
+         if not has_write_locks and create:
+             # first time writing to object, need to mark it safe
+-            self._v_safe_write = True
++            safeWrite(self)
+     except AttributeError:
+         # not a persistent class, ignore
+         pass
+diff --git a/plone/protect/testing.py b/plone/protect/testing.py
+index 533a5b5..4fce137 100644
+--- a/plone/protect/testing.py
++++ b/plone/protect/testing.py
+@@ -1,8 +1,9 @@
++from Products.Five import BrowserView
+ from plone.app.testing import PLONE_FIXTURE
+ from plone.app.testing import PloneSandboxLayer
+ from plone.app.testing import applyProfile
+ from plone.app.testing.layers import FunctionalTesting
+-from Products.Five import BrowserView
++from plone.protect.auto import safeWrite
+ from zope.configuration import xmlconfig
+ 
+ 
+@@ -67,6 +68,5 @@ def __call__(self):
+ class TestSafeToWriteObject(BrowserView):
+     def __call__(self):
+         self.context.foo = 'bar'
+-        self.context._p_changed = True
+-        self.context._v_safe_write = True
++        safeWrite(self)
+         return 'done'
+diff --git a/plone/protect/tests/testAuto.py b/plone/protect/tests/testAuto.py
+index f084660..bbaedbf 100644
+--- a/plone/protect/tests/testAuto.py
++++ b/plone/protect/tests/testAuto.py
+@@ -1,17 +1,18 @@
+-import unittest2 as unittest
+-import transaction
+-
+-from plone.testing.z2 import Browser
+-from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
+-
++from plone.app.testing import TEST_USER_NAME
++from plone.app.testing import TEST_USER_PASSWORD
++from plone.app.testing import login
++from plone.app.testing import logout
++from plone.keyring.interfaces import IKeyManager
+ from plone.protect import createToken
+ from plone.protect.authenticator import AuthenticatorView
+-from plone.keyring.interfaces import IKeyManager
++from plone.protect.auto import ProtectTransform
++from plone.protect.auto import safeWrite
++from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
++from plone.testing.z2 import Browser
++import transaction
++import unittest2 as unittest
++from zExceptions import Forbidden
+ from zope.component import getUtility
+-from plone.app.testing import logout
+-from plone.app.testing import login
+-from plone.app.testing import TEST_USER_NAME
+-from plone.app.testing import TEST_USER_PASSWORD
+ 
+ 
+ class AutoCSRFProtectTests(unittest.TestCase):
+@@ -115,11 +116,6 @@ def test_only_add_auth_when_user_logged_in(self):
+         except LookupError:
+             pass
+ 
+-    def test_safe_to_write_with_v_safe_write(self):
+-        self.open('test-safetowrite')
+-        self.assertTrue(self.portal.foo, 'bar')
+-        self.assertEqual(self.browser.contents, 'done')
+-
+ 
+ class AutoRotateTests(unittest.TestCase):
+     layer = PROTECT_FUNCTIONAL_TESTING
+@@ -146,3 +142,23 @@ def test_keyrings_get_rotated_on_login(self):
+ 
+         self.assertNotEqual(keys, ring.data)
+         self.assertNotEqual(ring.last_rotation, 0)
++
++
++class TestAutoChecks(unittest.TestCase):
++    layer = PROTECT_FUNCTIONAL_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++        self.request.REQUEST_METHOD = 'POST'
++
++    def test_safe_write_empty_returns_false(self):
++        transform = ProtectTransform(self.portal, self.request)
++        transform._registered_objects = lambda: [self.portal]
++        self.assertRaises(Forbidden, transform._check)
++
++    def test_safe_write_empty_returns_true(self):
++        safeWrite(self.portal, self.request)
++        transform = ProtectTransform(self.portal, self.request)
++        transform._registered_objects = lambda: [self.portal]
++        self.assertTrue(transform._check())
 
 
-Repository: plone.app.i18n
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2015-07-18T16:01:34+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.i18n/commit/40ba247d4b5301caa0672a8352b7c08453c56203
+Date: 2015-07-19T12:47:38-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/1d47bad12f04fd199d4a9ce9bdf6addd8d4317ec
 
-Back to development: 3.0.2
+fix detecting safe object writes on non-GET requests
 
 Files changed:
 M CHANGES.rst
-M setup.py
+M plone/protect/auto.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 648d215..86d17c4 100644
+index c702ba4..781a12b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,6 +1,12 @@
- Changelog
- =========
- 
-+3.0.2 (unreleased)
-+------------------
-+
-+- Nothing changed yet.
-+
-+
- 3.0.1 (2015-07-18)
+@@ -4,6 +4,9 @@ Changelog
+ 3.0.5 (unreleased)
  ------------------
  
-diff --git a/setup.py b/setup.py
-index fab7edb..30c0e04 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,6 +1,6 @@
- from setuptools import setup, find_packages
++- fix detecting safe object writes on non-GET requests
++  [vangheem]
++
+ - instead of using _v_safe_write users should now use the safeWrite function
+   in plone.protect.auto
+   [vangheem]
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index b4c60a9..bfac504 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -187,10 +187,6 @@ def _check(self):
+                     return True
+                 raise
+             except Forbidden:
+-                if self.request.REQUEST_METHOD != 'GET':
+-                    # only try to be "smart" with GET requests
+-                    raise
+-
+                 # XXX
+                 # okay, so right now, we're going to check if the current
+                 # registered objects to write, are just portlet assignments.
+@@ -208,7 +204,9 @@ def _check(self):
+                         safe = False
+                         break
+                 if not safe:
+-                    import pdb; pdb.set_trace()
++                    if self.request.REQUEST_METHOD != 'GET':
++                        # only try to be "smart" with GET requests
++                        raise
+                     LOGGER.info('aborting transaction due to no CSRF '
+                                 'protection on url %s' % self.request.URL)
+                     transaction.abort()
+
+
+Repository: plone.protect
+
+
+Branch: refs/heads/master
+Date: 2015-07-19T13:14:23-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/e6543d606b1c60e3a880602ada84a20869068f23
+
+use debug log instead
+
+Files changed:
+M plone/protect/auto.py
+
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index bfac504..ca065cd 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -39,14 +39,14 @@ def safeWrite(obj, request=None):
+     if request is None:
+         request = getRequest()
+     if request is None:
+-        LOGGER.info('could not mark object as a safe write')
++        LOGGER.debug('could not mark object as a safe write')
+     if SAFE_WRITE_KEY not in request.environ:
+         request.environ[SAFE_WRITE_KEY] = []
+     try:
+         if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
+             request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
+-    except:
+-        LOGGER.info('object you attempted to mark safe does not have an oid')
++    except AttributeError:
++        LOGGER.debug('object you attempted to mark safe does not have an oid')
  
--version = '3.0.1'
-+version = '3.0.2.dev0'
  
- setup(name='plone.app.i18n',
-       version=version,
+ class ProtectTransform(object):
+
+
+Repository: plone.protect
+
+
+Branch: refs/heads/master
+Date: 2015-07-19T15:34:51-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/9f3807ae7f25da76fc82d399baae1c551a956985
+
+do not use pluggable auth csrf
+
+Files changed:
+M CHANGES.rst
+M plone/protect/configure.zcml
+M plone/protect/monkey.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 781a12b..ea3fef9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 3.0.5 (unreleased)
+ ------------------
+ 
++- fix pluggable auth CSRF warnings
++  [vangheem]
++
+ - fix detecting safe object writes on non-GET requests
+   [vangheem]
+ 
+diff --git a/plone/protect/configure.zcml b/plone/protect/configure.zcml
+index d6f66d3..2772d43 100644
+--- a/plone/protect/configure.zcml
++++ b/plone/protect/configure.zcml
+@@ -60,4 +60,19 @@
+         preserveOriginal="True"
+         />
+ 
++    <monkey:patch
++        description="Patch old pluggable auth to use plone mechanism"
++        class="Products.PluggableAuthService.utils"
++        original="getCSRFToken"
++        replacement=".monkey.pluggableauth__getCSRFToken"
++        preserveOriginal="True"
++        />
++    <monkey:patch
++        description="Patch old pluggable auth to use plone mechanism"
++        class="Products.PluggableAuthService.utils"
++        original="checkCSRFToken"
++        replacement=".monkey.pluggableauth__checkCSRFToken"
++        preserveOriginal="True"
++        />
++
+ </configure>
+diff --git a/plone/protect/monkey.py b/plone/protect/monkey.py
+index b755a00..84d5f5e 100644
+--- a/plone/protect/monkey.py
++++ b/plone/protect/monkey.py
+@@ -1,5 +1,7 @@
++from zope.component.hooks import getSite
+ from urlparse import urlparse, urljoin
+ from plone.protect.auto import safeWrite
++from Products.PluggableAuthService import utils as pluaggable_utils
+ 
+ 
+ def RedirectTo__call__(self, controller_state):
+@@ -37,3 +39,21 @@ def wl_lockmapping(self, killinvalids=0, create=0):
+         # not a persistent class, ignore
+         pass
+     return locks
++
++
++def pluggableauth__getCSRFToken(request):
++    """
++    if we have a site object, let plone.protect do it's job
++    """
++    if getSite():
++        return
++    return pluaggable_utils._old_getCSRFToken(request)
++
++
++def pluggableauth__checkCSRFToken(request, token='csrf_token', raises=True):
++    """
++    if we have a site object, let plone.protect do it's job
++    """
++    if getSite():
++        return
++    return pluaggable_utils._old_checkCSRFToken(request)
+
+
+Repository: plone.protect
+
+
+Branch: refs/heads/master
+Date: 2015-07-19T18:30:23-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/6d97d46362868eefb76cfd82111f467e5ac80f81
+
+Merge pull request #12 from plone/safe-write-objects
+
+provide safeWrite function
+
+Files changed:
+M CHANGES.rst
+M README.rst
+M plone/protect/auto.py
+M plone/protect/configure.zcml
+M plone/protect/monkey.py
+M plone/protect/testing.py
+M plone/protect/tests/testAuto.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 5a0d4b4..ea3fef9 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,15 @@ Changelog
+ 3.0.5 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- fix pluggable auth CSRF warnings
++  [vangheem]
++
++- fix detecting safe object writes on non-GET requests
++  [vangheem]
++
++- instead of using _v_safe_write users should now use the safeWrite function
++  in plone.protect.auto
++  [vangheem]
+ 
+ 
+ 3.0.4 (2015-05-13)
+diff --git a/README.rst b/README.rst
+index 662019d..a70a915 100644
+--- a/README.rst
++++ b/README.rst
+@@ -167,10 +167,10 @@ exploits so do any required CSRF protection manually.
+ If you just want to allow an object to be writable on a request...
+ ******************************************************************
+ 
+-You can add the attribute _v_safe_write onto an object to specify that
+-it is safe to write on read.
++You can use the `safeWrite` helper function.
+ 
+-    myobj._v_safe_write = True
++    from plone.protect.auto import safeWrite
++    safeWrite(myobj, request)
+ 
+ 
+ Clickjacking Protection
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 2e8cd53..ca065cd 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -1,37 +1,54 @@
++import itertools
++import logging
++import os
++import traceback
++from urllib import urlencode
++from urlparse import urlparse
++
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_parent
+-from lxml import etree
+ from OFS.interfaces import IApplication
++from lxml import etree
++from plone.keyring.interfaces import IKeyManager
+ from plone.portlets.interfaces import IPortletAssignment
+ from plone.protect.authenticator import check
+ from plone.protect.authenticator import createToken
+ from plone.protect.authenticator import isAnonymousUser
+ from plone.protect.interfaces import IConfirmView
+ from plone.protect.interfaces import IDisableCSRFProtection
+-from plone.keyring.interfaces import IKeyManager
+ from plone.transformchain.interfaces import ITransform
+ from repoze.xmliter.utils import getHTMLSerializer
+ import transaction
+ from zExceptions import Forbidden
++from zope.component import ComponentLookupError
+ from zope.component import adapts
+-from zope.component.hooks import getSite
+ from zope.component import getUtility
+-from zope.component import ComponentLookupError
++from zope.component.hooks import getSite
++from zope.globalrequest import getRequest
+ from zope.interface import implements, Interface
+ 
+-from urlparse import urlparse
+-from urllib import urlencode
+-import itertools
+-import os
+-import traceback
+-import logging
+ LOGGER = logging.getLogger('plone.protect')
+ 
++SAFE_WRITE_KEY = 'plone.protect.safe_oids'
+ 
+ X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false') == 'true'
+ 
+ 
++def safeWrite(obj, request=None):
++    if request is None:
++        request = getRequest()
++    if request is None:
++        LOGGER.debug('could not mark object as a safe write')
++    if SAFE_WRITE_KEY not in request.environ:
++        request.environ[SAFE_WRITE_KEY] = []
++    try:
++        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
++            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
++    except AttributeError:
++        LOGGER.debug('object you attempted to mark safe does not have an oid')
++
++
+ class ProtectTransform(object):
+     """
+     XXX Need to be extremely careful with everything we do in here
+@@ -170,10 +187,6 @@ def _check(self):
+                     return True
+                 raise
+             except Forbidden:
+-                if self.request.REQUEST_METHOD != 'GET':
+-                    # only try to be "smart" with GET requests
+-                    raise
+-
+                 # XXX
+                 # okay, so right now, we're going to check if the current
+                 # registered objects to write, are just portlet assignments.
+@@ -181,13 +194,19 @@ def _check(self):
+                 # cause some writes on read. ALL, registered objects
+                 # need to be portlet assignments. XXX needs to be fixed
+                 # somehow...
++                safe_oids = []
++                if SAFE_WRITE_KEY in self.request.environ:
++                    safe_oids = self.request.environ[SAFE_WRITE_KEY]
+                 safe = True
+                 for obj in registered:
+                     if (not IPortletAssignment.providedBy(obj) and
+-                            not getattr(obj, '_v_safe_write', False)):
++                            getattr(obj, '_p_oid', False) not in safe_oids):
+                         safe = False
+                         break
+                 if not safe:
++                    if self.request.REQUEST_METHOD != 'GET':
++                        # only try to be "smart" with GET requests
++                        raise
+                     LOGGER.info('aborting transaction due to no CSRF '
+                                 'protection on url %s' % self.request.URL)
+                     transaction.abort()
+diff --git a/plone/protect/configure.zcml b/plone/protect/configure.zcml
+index d6f66d3..2772d43 100644
+--- a/plone/protect/configure.zcml
++++ b/plone/protect/configure.zcml
+@@ -60,4 +60,19 @@
+         preserveOriginal="True"
+         />
+ 
++    <monkey:patch
++        description="Patch old pluggable auth to use plone mechanism"
++        class="Products.PluggableAuthService.utils"
++        original="getCSRFToken"
++        replacement=".monkey.pluggableauth__getCSRFToken"
++        preserveOriginal="True"
++        />
++    <monkey:patch
++        description="Patch old pluggable auth to use plone mechanism"
++        class="Products.PluggableAuthService.utils"
++        original="checkCSRFToken"
++        replacement=".monkey.pluggableauth__checkCSRFToken"
++        preserveOriginal="True"
++        />
++
+ </configure>
+diff --git a/plone/protect/monkey.py b/plone/protect/monkey.py
+index f7bfb78..84d5f5e 100644
+--- a/plone/protect/monkey.py
++++ b/plone/protect/monkey.py
+@@ -1,4 +1,7 @@
++from zope.component.hooks import getSite
+ from urlparse import urlparse, urljoin
++from plone.protect.auto import safeWrite
++from Products.PluggableAuthService import utils as pluaggable_utils
+ 
+ 
+ def RedirectTo__call__(self, controller_state):
+@@ -28,11 +31,29 @@ def wl_lockmapping(self, killinvalids=0, create=0):
+     has_write_locks = hasattr(self, '_dav_writelocks')
+     locks = self._old_wl_lockmapping(killinvalids=killinvalids, create=create)
+     try:
+-        locks._v_safe_write = True  # hint to tell plone.protect to ignore this object
++        safeWrite(locks)
+         if not has_write_locks and create:
+             # first time writing to object, need to mark it safe
+-            self._v_safe_write = True
++            safeWrite(self)
+     except AttributeError:
+         # not a persistent class, ignore
+         pass
+     return locks
++
++
++def pluggableauth__getCSRFToken(request):
++    """
++    if we have a site object, let plone.protect do it's job
++    """
++    if getSite():
++        return
++    return pluaggable_utils._old_getCSRFToken(request)
++
++
++def pluggableauth__checkCSRFToken(request, token='csrf_token', raises=True):
++    """
++    if we have a site object, let plone.protect do it's job
++    """
++    if getSite():
++        return
++    return pluaggable_utils._old_checkCSRFToken(request)
+diff --git a/plone/protect/testing.py b/plone/protect/testing.py
+index 533a5b5..4fce137 100644
+--- a/plone/protect/testing.py
++++ b/plone/protect/testing.py
+@@ -1,8 +1,9 @@
++from Products.Five import BrowserView
+ from plone.app.testing import PLONE_FIXTURE
+ from plone.app.testing import PloneSandboxLayer
+ from plone.app.testing import applyProfile
+ from plone.app.testing.layers import FunctionalTesting
+-from Products.Five import BrowserView
++from plone.protect.auto import safeWrite
+ from zope.configuration import xmlconfig
+ 
+ 
+@@ -67,6 +68,5 @@ def __call__(self):
+ class TestSafeToWriteObject(BrowserView):
+     def __call__(self):
+         self.context.foo = 'bar'
+-        self.context._p_changed = True
+-        self.context._v_safe_write = True
++        safeWrite(self)
+         return 'done'
+diff --git a/plone/protect/tests/testAuto.py b/plone/protect/tests/testAuto.py
+index f084660..bbaedbf 100644
+--- a/plone/protect/tests/testAuto.py
++++ b/plone/protect/tests/testAuto.py
+@@ -1,17 +1,18 @@
+-import unittest2 as unittest
+-import transaction
+-
+-from plone.testing.z2 import Browser
+-from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
+-
++from plone.app.testing import TEST_USER_NAME
++from plone.app.testing import TEST_USER_PASSWORD
++from plone.app.testing import login
++from plone.app.testing import logout
++from plone.keyring.interfaces import IKeyManager
+ from plone.protect import createToken
+ from plone.protect.authenticator import AuthenticatorView
+-from plone.keyring.interfaces import IKeyManager
++from plone.protect.auto import ProtectTransform
++from plone.protect.auto import safeWrite
++from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
++from plone.testing.z2 import Browser
++import transaction
++import unittest2 as unittest
++from zExceptions import Forbidden
+ from zope.component import getUtility
+-from plone.app.testing import logout
+-from plone.app.testing import login
+-from plone.app.testing import TEST_USER_NAME
+-from plone.app.testing import TEST_USER_PASSWORD
+ 
+ 
+ class AutoCSRFProtectTests(unittest.TestCase):
+@@ -115,11 +116,6 @@ def test_only_add_auth_when_user_logged_in(self):
+         except LookupError:
+             pass
+ 
+-    def test_safe_to_write_with_v_safe_write(self):
+-        self.open('test-safetowrite')
+-        self.assertTrue(self.portal.foo, 'bar')
+-        self.assertEqual(self.browser.contents, 'done')
+-
+ 
+ class AutoRotateTests(unittest.TestCase):
+     layer = PROTECT_FUNCTIONAL_TESTING
+@@ -146,3 +142,23 @@ def test_keyrings_get_rotated_on_login(self):
+ 
+         self.assertNotEqual(keys, ring.data)
+         self.assertNotEqual(ring.last_rotation, 0)
++
++
++class TestAutoChecks(unittest.TestCase):
++    layer = PROTECT_FUNCTIONAL_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++        self.request.REQUEST_METHOD = 'POST'
++
++    def test_safe_write_empty_returns_false(self):
++        transform = ProtectTransform(self.portal, self.request)
++        transform._registered_objects = lambda: [self.portal]
++        self.assertRaises(Forbidden, transform._check)
++
++    def test_safe_write_empty_returns_true(self):
++        safeWrite(self.portal, self.request)
++        transform = ProtectTransform(self.portal, self.request)
++        transform._registered_objects = lambda: [self.portal]
++        self.assertTrue(transform._check())
 
 
