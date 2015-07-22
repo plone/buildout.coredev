@@ -1,2601 +1,594 @@
-Repository: plone.app.contenttypes
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-07-22T12:57:10+02:00
+Date: 2015-07-22T12:17:58+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/2646506380319c3f1405bb192808cf8d9c61a5f7
+Commit: https://github.com/plone/plone.app.content/commit/d7c28bfaab56813bce13064aecde671cbe39ff20
 
-replace ReferenceMigrator and helpers with new methods that have to be run before and after a migration
+translate buttons
 
 Files changed:
-M plone/app/contenttypes/migration/browser.py
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/migration/topics.py
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/copy.py
+M plone/app/content/browser/contents/cut.py
+M plone/app/content/browser/contents/delete.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/browser/contents/properties.py
+M plone/app/content/browser/contents/rename.py
+M plone/app/content/browser/contents/tags.py
+M plone/app/content/browser/contents/workflow.py
 
-diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
-index 6370dfb..b2a113d 100644
---- a/plone/app/contenttypes/migration/browser.py
-+++ b/plone/app/contenttypes/migration/browser.py
-@@ -25,7 +25,8 @@
- from plone.app.contenttypes.migration.utils import HAS_MULTILINGUAL
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.migration.utils import isSchemaExtended
--from plone.app.contenttypes.migration.utils import restoreReferences
-+from plone.app.contenttypes.migration.utils import restore_references
-+from plone.app.contenttypes.migration.utils import store_references
- from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
- from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.browserlayer.interfaces import ILocalBrowserLayerType
-@@ -153,6 +154,10 @@ def __call__(self,
- 
-         stats_before = self.stats()
-         starttime = datetime.now()
-+
-+        # store references on the portal
-+        if migrate_references:
-+            store_references(portal)
-         catalog = portal.portal_catalog
- 
-         # switch linkintegrity temp off
-@@ -232,8 +237,9 @@ def __call__(self,
- 
-         catalog.clearFindAndRebuild()
- 
--        # rebuild catalog, restore references and cleanup
--        restoreReferences(portal, migrate_references, content_types)
-+        # restore references
-+        if migrate_references:
-+            restore_references(portal)
- 
-         # switch linkintegrity back to what it was before migrating
-         if link_integrity_in_props:
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index 9a901c2..3cc9b81 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -7,13 +7,11 @@
- module will only work if Products.contentmigration is installed so make sure
- you catch ImportErrors
- '''
--from Products.Archetypes.config import REFERENCE_CATALOG
- from Products.CMFCore.utils import getToolByName
- from Products.contentmigration.basemigrator.migrator import CMFFolderMigrator
- from Products.contentmigration.basemigrator.migrator import CMFItemMigrator
- from Products.contentmigration.basemigrator.walker import CatalogWalker
- from Products.contentmigration.walker import CustomQueryWalker
--from persistent.list import PersistentList
- from plone.app.contenttypes.behaviors.collection import ICollection
- from plone.app.contenttypes.migration.dxmigration import DXEventMigrator
- from plone.app.contenttypes.migration.dxmigration import DXOldEventMigrator
-@@ -53,56 +51,6 @@ def migrate(portal, migrator):
-     return walker
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 89dc0ce..22d8f8e 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -327,4 +327,4 @@ def __call__(self):
+                 ordering.moveObjectToPosition(brain.id, idx)
+         else:
+             self.errors.append(_(u'cannot rearrange folder'))
+-        return self.message()
+\ No newline at end of file
++        return self.message()
+diff --git a/plone/app/content/browser/contents/copy.py b/plone/app/content/browser/contents/copy.py
+index e353b1d..dbb4c19 100644
+--- a/plone/app/content/browser/contents/copy.py
++++ b/plone/app/content/browser/contents/copy.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from OFS.CopySupport import CopyError
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
+@@ -7,6 +8,7 @@
+ from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class ReferenceMigrator(object):
--
--    def beforeChange_relatedItemsOrder(self):
--        """ Store Archetype relations as target uids on the old archetype
--            object to restore the order later.
--            Because all relations to deleted objects will be lost, we iterate
--            over all backref objects and store the relations of the backref
--            object in advance.
--            This is automatically called by Products.contentmigration.
--        """
--        # Relations UIDs:
--        if not hasattr(self.old, "_relatedItemsOrder"):
--            relatedItems = self.old.getRelatedItems()
--            relatedItemsOrder = [item.UID() for item in relatedItems]
--            self.old._relatedItemsOrder = PersistentList(relatedItemsOrder)
--
--        # Backrefs Relations UIDs:
--        reference_cat = getToolByName(self.old, REFERENCE_CATALOG)
--        backrefs = reference_cat.getBackReferences(self.old,
--                                                   relationship="relatesTo")
--        backref_objects = map(lambda x: x.getSourceObject(), backrefs)
--        for obj in backref_objects:
--            if obj.portal_type != self.src_portal_type:
--                continue
--            if not hasattr(obj, "_relUids"):
--                relatedItems = obj.getRelatedItems()
--                relatedItemsOrder = [item.UID() for item in relatedItems]
--                obj._relatedItemsOrder = PersistentList(relatedItemsOrder)
--
--    def migrate_at_relatedItems(self):
--        """ Store Archetype relations as target uids on the dexterity object
--            for later restore. Backrelations are saved as well because all
--            relation to deleted objects would be lost.
--        """
--        # Relations:
--        relItems = self.old.getRelatedItems()
--        relUids = [item.UID() for item in relItems]
--        self.new._relatedItems = relUids
--
--        # Backrefs:
--        reference_catalog = getToolByName(self.old, REFERENCE_CATALOG)
--
--        backrefs = [i.sourceUID for i in reference_catalog.getBackReferences(
--            self.old, relationship="relatesTo")]
--        self.new._backrefs = backrefs
--
--        # Order:
--        self.new._relatedItemsOrder = self.old._relatedItemsOrder
--
--
- class ICustomMigrator(Interface):
-     """Adapter implementer interface for custom migrators.
-     Please note that you have to register named adapters in order to be able to
-@@ -130,7 +78,7 @@ def migrate(self, old, new):
-         return
+@@ -21,7 +23,7 @@ def __init__(self, context, request):
+ 
+     def get_options(self):
+         return {
+-            'title': _('Copy'),
++            'title': translate(_('Copy'), context=self.request),
+             'id': 'copy',
+             'icon': 'copy',
+             'url': self.context.absolute_url() + '/@@fc-copy'
+@@ -50,4 +52,4 @@ def finish(self):
+ 
+     def __call__(self):
+         self.oblist = []
+-        return super(CopyActionView, self).__call__()
+\ No newline at end of file
++        return super(CopyActionView, self).__call__()
+diff --git a/plone/app/content/browser/contents/cut.py b/plone/app/content/browser/contents/cut.py
+index ae86724..391c474 100644
+--- a/plone/app/content/browser/contents/cut.py
++++ b/plone/app/content/browser/contents/cut.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from OFS.CopySupport import CopyError
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
+@@ -8,6 +9,7 @@
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+ from webdav.Lockable import ResourceLockedError
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class ATCTContentMigrator(CMFItemMigrator, ReferenceMigrator):
-+class ATCTContentMigrator(CMFItemMigrator):
-     """Base for contentish ATCT
-     """
+@@ -22,7 +24,7 @@ def __init__(self, context, request):
  
-@@ -174,7 +122,7 @@ def last_migrate_comments(self):
-         move_comments(portal, self.new)
- 
- 
--class ATCTFolderMigrator(CMFFolderMigrator, ReferenceMigrator):
-+class ATCTFolderMigrator(CMFFolderMigrator):
-     """Base for folderish ATCT
-     """
- 
-diff --git a/plone/app/contenttypes/migration/topics.py b/plone/app/contenttypes/migration/topics.py
-index 018b746..65db603 100644
---- a/plone/app/contenttypes/migration/topics.py
-+++ b/plone/app/contenttypes/migration/topics.py
-@@ -14,7 +14,6 @@
- from Products.contentmigration.inplace import InplaceCMFItemMigrator
- from Products.contentmigration.walker import CustomQueryWalker
- from plone.app.contenttypes.behaviors.collection import ICollection
--from plone.app.contenttypes.migration.migration import ReferenceMigrator
- from plone.app.querystring.interfaces import IQuerystringRegistryReader
- from plone.registry.interfaces import IRegistry
- from plone.uuid.interfaces import IMutableUUID
-@@ -450,7 +449,7 @@ def get_query_value(self, value, index, criterion):
-         return value['query']
+     def get_options(self):
+         return {
+-            'title': _('Cut'),
++            'title': translate(_('Cut'), context=self.request),
+             'id': 'cut',
+             'icon': 'scissors',
+             'url': self.context.absolute_url() + '/@@fc-cut'
+diff --git a/plone/app/content/browser/contents/delete.py b/plone/app/content/browser/contents/delete.py
+index 806c868..b6f3f0b 100644
+--- a/plone/app/content/browser/contents/delete.py
++++ b/plone/app/content/browser/contents/delete.py
+@@ -1,9 +1,11 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from AccessControl.Permissions import delete_objects
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class TopicMigrator(InplaceCMFItemMigrator, ReferenceMigrator):
-+class TopicMigrator(InplaceCMFItemMigrator):
-     """Migrate Topics to Collections. Existing subtopics will be lost.
+@@ -19,7 +21,7 @@ def __init__(self, context, request):
  
-     The only difference to the migration below is the base-class
-@@ -562,7 +561,7 @@ def migrate_at_uuid(self):
-             IMutableUUID(self.new).set(str(uid))
- 
- 
--class FolderishTopicMigrator(InplaceCMFFolderMigrator, ReferenceMigrator):
-+class FolderishTopicMigrator(InplaceCMFFolderMigrator):
-     """Migrate Topics and Subtopics to folderish collections.
- 
-     The only difference to the migration above is the base-class
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T12:57:10+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/cb80ae430b56e50718013f60f60f23f3b28845d2
-
-add new migration-methods
-
-Files changed:
-M plone/app/contenttypes/migration/utils.py
-
-diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
-index e1ebe20..f2c2291 100644
---- a/plone/app/contenttypes/migration/utils.py
-+++ b/plone/app/contenttypes/migration/utils.py
-@@ -1,5 +1,8 @@
- # -*- coding: utf-8 -*-
--from Products.ATContentTypes.interfaces.interfaces import IATContentType
-+from Acquisition import aq_base
-+from Acquisition import aq_inner
-+from Products.Archetypes.config import REFERENCE_CATALOG
-+from Products.Archetypes.interfaces.referenceable import IReferenceable
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.utils import safe_hasattr
-@@ -10,15 +13,15 @@
- from archetypes.schemaextender.interfaces import ISchemaExtender
- from archetypes.schemaextender.interfaces import ISchemaModifier
- from copy import deepcopy
--from persistent.list import PersistentList
- from plone.app.contentrules.api import assign_rule
- from plone.app.contenttypes.behaviors.leadimage import ILeadImage
--from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
- from plone.app.contenttypes.migration.field_migrators import \
-     migrate_simplefield
-+from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.app.discussion.conversation import ANNOTATION_KEY as DISCUSSION_KEY
- from plone.app.discussion.interfaces import IConversation
-+from plone.app.linkintegrity.handlers import referencedRelationship
- from plone.app.uuid.utils import uuidToObject
- from plone.contentrules.engine.interfaces import IRuleAssignmentManager
- from plone.dexterity.interfaces import IDexterityContent
-@@ -26,14 +29,20 @@
- from plone.portlets.constants import CONTEXT_BLACKLIST_STATUS_KEY
- from plone.portlets.interfaces import IPortletAssignmentMapping
- from plone.portlets.interfaces import IPortletManager
-+from plone.uuid.interfaces import IUUID
- from z3c.relationfield import RelationValue
-+from zc.relation.interfaces import ICatalog
- from zope.annotation.interfaces import IAnnotations
- from zope.component import getGlobalSiteManager
- from zope.component import getMultiAdapter
- from zope.component import getSiteManager
- from zope.component import getUtility
-+from zope.component import queryUtility
+     def get_options(self):
+         return {
+-            'title': _('Delete'),
++            'title': translate(_('Delete'), context=self.request),
+             'id': 'delete',
+             'icon': 'trash',
+             'context': 'danger',
+@@ -58,4 +60,4 @@ def action(self, obj):
+             except Unauthorized:
+                 self.errors.append(
+                     _(u'You are not authorized to delete ${title}.',
+-                        mapping={u'title': self.objectTitle(self.dest)}))
+\ No newline at end of file
++                        mapping={u'title': self.objectTitle(self.dest)}))
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 15a42e9..32ad49f 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from OFS.CopySupport import cookie_path
+ from Products.CMFPlone import PloneMessageFactory as _
+@@ -5,6 +6,7 @@
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
  from zope.component.hooks import getSite
-+from zope.event import notify
- from zope.intid.interfaces import IIntIds
-+from zope.lifecycleevent import ObjectModifiedEvent
-+
- import logging
- import os
- import pkg_resources
-@@ -248,94 +257,196 @@ def migrate_portlets(src_obj, dst_obj):
-                             'for manager {1}'.format(key, manager))
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--def restore_refs(obj):
--    """Restore references stored in the attribute _relatedItems.
-+def store_references(context):
-+    """Store all references in the portal as a annotation on the portal."""
-+    all_annotations = []
-+    key = 'ALL_REFERENCES'
-+    portal_catalog = getToolByName(context, 'portal_catalog')
-+
-+    # Archetypes
-+    # Get all data from the reference_catalog
-+    reference_catalog = getToolByName(context, REFERENCE_CATALOG)
-+    # query = {}
-+    # if HAS_MULTILINGUAL and 'Language' in portal_catalog.indexes():
-+    #     query['Language'] = 'all'
-+    for brain in reference_catalog():
-+        all_annotations.append({
-+            'from_uuid': brain.sourceUID,
-+            'to_uuid': brain.targetUID,
-+            'relationship': brain.relationship,
-+        })
-+
-+    # Dexterity
-+    # Get all data from zc.relation (relation_catalog)
-+    relation_catalog = queryUtility(ICatalog)
-+    for rel in relation_catalog.findRelations():
-+        from_brain = portal_catalog(path=dict(query=rel.from_path, depth=0))[0]
-+        to_brain = portal_catalog(path=dict(query=rel.to_path, depth=0))[0]
-+        all_annotations.append({
-+            'from_uuid': from_brain.UID,
-+            'to_uuid': to_brain.UID,
-+            'relationship': rel.from_attribute,
-+        })
-+    IAnnotations(context)[key] = all_annotations
-+    logger.info('Stored {} relations for later restore.'.format(
-+        len(all_annotations)))
-+
-+
-+def restore_references(context):
-+    """Recreate all references stored in annotations.
-+
-+    Iterate over the stored references and restore them all according to
-+    the content-types framework.
-     """
--    intids = getUtility(IIntIds)
--    try:
--        if not getattr(obj, 'relatedItems', None):
--            obj.relatedItems = PersistentList()
--
--        elif not isinstance(obj.relatedItems, PersistentList):
--            obj.relatedItems = PersistentList(obj.relatedItems)
--
--        for uuid in obj._relatedItems:
--            to_obj = uuidToObject(uuid)
--            to_id = intids.getId(to_obj)
--            obj.relatedItems.append(RelationValue(to_id))
--            logger.info('Restored Relation from %s to %s' % (obj, to_obj))
--    except AttributeError:
--        pass
-+    key = 'ALL_REFERENCES'
-+    for ref in IAnnotations(context)[key]:
-+        source_obj = uuidToObject(ref['from_uuid'])
-+        target_obj = uuidToObject(ref['to_uuid'])
-+        relationship = ref['relationship']
-+        link_items(context, source_obj, target_obj, relationship)
-+
-+    del IAnnotations(context)[key]
-+
-+
-+def link_items(
-+    context,
-+    source_obj,
-+    target_obj,
-+    relationship=None,
-+    fieldname='relatedItems',
-+):
-+    """Add a relation between two content objects.
-+
-+    This uses the field 'relatedItems' and works for Archetypes and Dexterity.
-+    By passing a fieldname and a relationship it can be used to create
-+    arbitrary relations.
-+    """
-+    drop_msg = """Dropping reference from %s to %s since
-+    plone.app.referenceablebehavior is not enabled!"""
+@@ -19,7 +21,7 @@ def __init__(self, context, request):
  
-+    reference_catalog = getToolByName(context, REFERENCE_CATALOG)
-+    if source_obj is target_obj:
-+        # Thou shalt not relate to yourself.
-+        return
- 
--def restore_backrefs(portal, obj):
--    """Restore backreferences stored in the attribute _backrefs.
--    """
--    intids = getUtility(IIntIds)
--    uid_catalog = getToolByName(portal, 'uid_catalog')
--    try:
--        backrefobjs = [uuidToObject(uuid) for uuid in obj._backrefs]
--        for backrefobj in backrefobjs:
--            # Dexterity and
--            if IDexterityContent.providedBy(backrefobj):
--                relitems = getattr(backrefobj, 'relatedItems', None)
--                if not relitems:
--                    backrefobj.relatedItems = PersistentList()
--                elif not isinstance(obj.relatedItems, PersistentList):
--                    backrefobj.relatedItems = PersistentList(
--                        obj.relatedItems
--                    )
--                to_id = intids.getId(obj)
--                backrefobj.relatedItems.append(RelationValue(to_id))
--
--            # Archetypes
--            elif IATContentType.providedBy(backrefobj):
--                # reindex UID so we are able to set the reference
--                path = '/'.join(obj.getPhysicalPath())
--                uid_catalog.catalog_object(obj, path)
--                backrefobj.setRelatedItems(obj)
--            logger.info(
--                'Restored BackRelation from %s to %s' % (backrefobj, obj))
--    except AttributeError:
-+    if relationship is referencedRelationship:
-+        # 'relatesTo' is the relationship for linkintegrity-relations.
-+        # Linkintegrity-relations should automatically be (re)created by
-+        # plone.app.linkintegrity.handlers.modifiedDexterity or
-+        # plone.app.linkintegrity.handlers.modifiedArchetype
-+        # when the ObjectModifiedEvent is thrown.
-+        # TODO: This needs to be tested though!!!
-+        return
-+
-+    # if fieldname != 'relatedItems':
-+        # 'relatedItems' is the default field for AT and DX
-+        # See plone.app.relationfield.behavior.IRelatedItems for DX and
-+        # Products.ATContentTypes.content.schemata.relatedItemsField for AT
-+        # sourcefield_name = 'relatedItems'
-+        # Mabye be we should handle custom relations somewhat different?
-+
-+    if relationship in ['relatesTo', 'relatedItems']:
-+        # These are the two default-relationships used by AT and DX
-+        # for the field 'relatedItems' respectively.
-         pass
- 
-+    if IDexterityContent.providedBy(source_obj):
-+        source_type = 'DX'
-+    else:
-+        source_type = 'AT'
- 
--def restore_reforder(obj):
--    """Restore order of references stored in the attribute _relatedItemsOrder.
--    """
--    if not hasattr(obj, '_relatedItemsOrder'):
--        # Nothing to do
-+    if IDexterityContent.providedBy(target_obj):
-+        target_type = 'DX'
-+    else:
-+        target_type = 'AT'
-+
-+    if source_type is 'AT':
-+
-+        if target_type is 'DX' and not is_referenceable(target_obj):
-+            logger.info(drop_msg % (
-+                source_obj.absolute_url(), target_obj.absolute_url()))
-+
-+        # make sure both objects are properly indexed and referenceable
-+        uid_catalog = getToolByName(context, 'uid_catalog')
-+        source_uid = IUUID(source_obj)
-+        target_uid = IUUID(target_obj)
-+        _catalog = uid_catalog._catalog
-+
-+        if not _catalog.indexes['UID']._index.get(source_uid, None):
-+            uid_catalog.catalog_object(source_obj, source_uid)
-+            notify(ObjectModifiedEvent(source_obj))
-+
-+        if not _catalog.indexes['UID']._index.get(target_uid, None):
-+            uid_catalog.catalog_object(target_obj, target_uid)
-+            notify(ObjectModifiedEvent(target_obj))
-+
-+        field = source_obj.getField(fieldname)
-+        accessor = field.getAccessor(source_obj)
-+        existing_at_relations = accessor()
-+
-+        if not isinstance(existing_at_relations, list):
-+            existing_at_relations = [i for i in existing_at_relations]
-+        if not existing_at_relations:
-+            existing_at_relations = []
-+        if target_obj in existing_at_relations:
-+            # don't do anything
-+            return
-+
-+        target_uid = target_obj.UID()
-+        if not source_obj._optimizedGetObject(target_uid):
-+            uid_catalog = getToolByName(aq_inner(context), 'uid_catalog')
-+            uid_catalog.catalog_object(target_obj, target_uid)
-+            notify(ObjectModifiedEvent(target_obj))
-+
-+        targetUIDs = [ref.targetUID for ref in reference_catalog.getReferences(
-+            source_obj, relationship)]
-+        if target_uid in targetUIDs:
-+            reference_catalog.deleteReference(
-+                source_obj, target_uid, relationship)
-+
-+        existing_at_relations.append(target_obj)
-+        mutator = field.getMutator(source_obj)
-+        mutator(existing_at_relations)
-+        notify(ObjectModifiedEvent(source_obj))
-         return
--    relatedItemsOrder = obj._relatedItemsOrder
--    uid_position_map = dict([(y, x) for x, y in enumerate(relatedItemsOrder)])
--    key = lambda rel: uid_position_map.get(rel.to_object.UID(), 0)
--    obj.relatedItems = sorted(obj.relatedItems, key=key)
--
--
--def cleanup_stored_refs(obj):
--    """Cleanup new dx item."""
--    if safe_hasattr(obj, '_relatedItems'):
--        del obj._relatedItems
--    if safe_hasattr(obj, '_backrefs'):
--        del obj._backrefs
--    if safe_hasattr(obj, '_relatedItemsOrder'):
--        del obj._relatedItemsOrder
--
--
--def restoreReferences(portal,
--                      migrate_references=True,
--                      content_types=DEFAULT_TYPES):
--    """Iterate over new Dexterity items and restore Dexterity References.
--    """
--    catalog = getToolByName(portal, "portal_catalog")
--    results = catalog.searchResults(
--        object_provides=IDexterityContent.__identifier__,
--        portal_type=content_types)
- 
--    for brain in results:
--        obj = brain.getObject()
--        if migrate_references:
--            restore_refs(obj)
--            restore_backrefs(portal, obj)
--            restore_reforder(obj)
--        cleanup_stored_refs(obj)
-+    if source_type is 'DX':
-+        if target_type is 'AT' and not is_referenceable(source_obj):
-+            logger.info(drop_msg % (
-+                source_obj.absolute_url(), target_obj.absolute_url()))
-+            return
-+        # handle dx-relation
-+        intids = getUtility(IIntIds)
-+        to_id = intids.getId(target_obj)
-+        existing_dx_relations = getattr(source_obj, fieldname, [])
-+        # purge broken relations
-+        existing_dx_relations = [
-+            i for i in existing_dx_relations if i.to_id is not None]
-+
-+        if to_id not in [i.to_id for i in existing_dx_relations]:
-+            existing_dx_relations.append(RelationValue(to_id))
-+            setattr(source_obj, fieldname, existing_dx_relations)
-+            notify(ObjectModifiedEvent(source_obj))
-+            return
-+
-+
-+def is_referenceable(obj):
-+    """Find out if this object (AT or DX) is referenceable.
-+
-+    Return True if a obj can be referenced using the reference_catalog used by
-+    Archetypes-Relations and Linkintegrity.
-+
-+    Relations using the relation_catalog (zc.relation.interfaces.ICatalog) are
-+    not covered by this test!
-+    """
-+    is_referenceable = False
-+    if IReferenceable.providedBy(obj) or \
-+            safe_hasattr(aq_base(obj), 'isReferenceable'):
-+        is_referenceable = True
-+    else:
-+        try:
-+            obj = IReferenceable(obj)
-+            is_referenceable = True
-+        except TypeError:
-+            is_referenceable = False
-+    return is_referenceable
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T12:57:10+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/db15716ca493209e5e3115b21b1f6873a84cfc76
-
-test new migrations
-
-Files changed:
-M plone/app/contenttypes/tests/test_migration.py
-M plone/app/contenttypes/tests/test_migration_custom.py
-M setup.py
-
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index 1ffe477..04fab4f 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -1,29 +1,49 @@
- # -*- coding: utf-8 -*-
-+from Acquisition import aq_base
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.utils import safe_hasattr
- from five.intid.intid import IntIds
- from five.intid.site import addUtility
- from lxml import etree
-+from persistent.list import PersistentList
- from plone.app.contenttypes.migration.utils import add_portlet
-+from plone.app.contenttypes.migration.utils import installTypeIfNeeded
-+from plone.app.contenttypes.migration.utils import is_referenceable
-+from plone.app.contenttypes.migration.utils import restore_references
-+from plone.app.contenttypes.migration.utils import store_references
-+from plone.app.contenttypes.migration.migration import migrate_documents
-+from plone.app.contenttypes.migration.migration import migrate_folders
-+from plone.app.contenttypes.migration.migration import migrate_newsitems
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
- from plone.app.contenttypes.testing import set_browserlayer
-+from plone.app.referenceablebehavior.referenceable import IReferenceable
- from plone.app.testing import SITE_OWNER_NAME
- from plone.app.testing import SITE_OWNER_PASSWORD
- from plone.app.testing import applyProfile
- from plone.app.testing import login
-+from plone.app.uuid.utils import uuidToObject
- from plone.app.z3cform.interfaces import IPloneFormLayer
- from plone.dexterity.content import Container
+     def get_options(self):
+         return {
+-            'title': _('Paste'),
++            'title': translate(_('Paste'), context=self.request),
+             'id': 'paste',
+             'icon': 'paste',
+             'url': self.context.absolute_url() + '/@@fc-paste'
+@@ -56,4 +58,4 @@ def __call__(self):
+                        path='%s' % cookie_path(self.request),
+                        expires='Wed, 31-Dec-97 23:59:59 GMT')
+         self.request['__cp'] = None
+-        return self.message()
+\ No newline at end of file
++        return self.message()
+diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
+index 037a2b7..b018327 100644
+--- a/plone/app/content/browser/contents/properties.py
++++ b/plone/app/content/browser/contents/properties.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from DateTime import DateTime
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+@@ -5,6 +6,7 @@
+ from plone.app.content.interfaces import IStructureAction
  from plone.dexterity.interfaces import IDexterityContent
-+from plone.dexterity.interfaces import IDexterityFTI
- from plone.event.interfaces import IEventAccessor
- from plone.namedfile.file import NamedBlobImage
- from plone.testing.z2 import Browser
-+from z3c.relationfield import RelationValue
-+from z3c.relationfield.index import dump
-+from zc.relation.interfaces import ICatalog
- from zope.annotation.interfaces import IAnnotations
+ from zope.component.hooks import getSite
++from zope.i18n import translate
+ from zope.interface import implements
+ 
+ 
+@@ -23,7 +25,7 @@ def get_options(self):
+         base_url = site.absolute_url()
+         base_vocabulary = '%s/@@getVocabulary?name=' % base_url
+         return {
+-            'title': _('Properties'),
++            'title': translate(_('Properties'), context=self.request),
+             'id': 'properties',
+             'icon': 'edit',
+             'url': self.context.absolute_url() + '/@@fc-properties',
+@@ -87,4 +89,4 @@ def action(self, obj):
+                 obj.setCreators(self.creators)
+             if self.exclude:
+                 obj.setExcludeFromNav(self.exclude == 'yes')
+-        obj.reindexObject()
+\ No newline at end of file
++        obj.reindexObject()
+diff --git a/plone/app/content/browser/contents/rename.py b/plone/app/content/browser/contents/rename.py
+index 185587e..38806b3 100644
+--- a/plone/app/content/browser/contents/rename.py
++++ b/plone/app/content/browser/contents/rename.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
+@@ -7,12 +8,13 @@
+ from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+-import transaction
  from zope.component import getMultiAdapter
- from zope.component import getSiteManager
- from zope.component import getUtility
-+from zope.component import queryUtility
-+from zope.event import notify
- from zope.interface import alsoProvides
- from zope.intid.interfaces import IIntIds
-+from zope.lifecycleevent import ObjectModifiedEvent
- from zope.schema.interfaces import IVocabularyFactory
-+
- import os.path
- import time
- import unittest2 as unittest
-@@ -847,6 +867,9 @@ def test_modifield_date_is_unchanged(self):
- 
-         # migrate content
-         applyProfile(self.portal, 'plone.app.contenttypes:default')
-+        self._enable_referenceable_for('Document')
-+        self._enable_referenceable_for('News Item')
-+        self._enable_referenceable_for('Folder')
- 
-         # we use the migration-view instead of calling the migratons by hand
-         # to make sure the patch for notifyModified is used.
-@@ -905,7 +928,6 @@ def test_modifield_date_is_unchanged(self):
- 
-         dx_folder1_related = [x.to_object for x in dx_folder1.relatedItems]
-         self.assertEqual(dx_folder1_related, [dx_doc2])
--
-         dx_folder2_related = [x.to_object for x in dx_folder2.relatedItems]
-         self.assertEqual(dx_folder2_related, [dx_doc1])
- 
-@@ -940,12 +962,6 @@ def test_folder_children_are_migrated(self):
-         self.assertTrue(at_child in dx_folder.contentValues())
- 
-     def test_relations_are_migrated(self):
--        from plone.app.contenttypes.migration.migration import (
--            migrate_documents,
--            migrate_folders,
--        )
--        from plone.app.contenttypes.migration.utils import restoreReferences
--
-         # IIntIds is not registered in the test env. So register it here
-         sm = getSiteManager(self.portal)
-         addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-@@ -972,9 +988,13 @@ def test_relations_are_migrated(self):
-         at_doc3.setRelatedItems(at_doc1)
-         at_folder1.setRelatedItems([at_doc2])
-         at_folder2.setRelatedItems([at_doc1])
--
-+        self.assertEqual([x for x in at_folder2.getRelatedItems()], [at_doc1])
-         # migrate content
-         applyProfile(self.portal, 'plone.app.contenttypes:default')
-+        self._enable_referenceable_for('Folder')
-+        self._enable_referenceable_for('Document')
-+        self._enable_referenceable_for('News Item')
-+        store_references(self.portal)
-         migrate_documents(self.portal)
-         migrate_folders(self.portal)
- 
-@@ -988,8 +1008,13 @@ def test_relations_are_migrated(self):
-         dx_doc2 = dx_folder2['doc2']
-         dx_doc3 = self.portal['doc3']
- 
-+        self.assertEqual([x.to_object for x in dx_folder2.relatedItems], [])
-+
-         # migrate references
--        restoreReferences(self.portal)
-+        restore_references(self.portal)
-+
-+        self.assertEqual(
-+            [x.to_object for x in dx_folder2.relatedItems], [dx_doc1])
- 
-         # assert single references
-         dx_doc1_related = [x.to_object for x in dx_doc1.relatedItems]
-@@ -1000,7 +1025,6 @@ def test_relations_are_migrated(self):
- 
-         dx_folder1_related = [x.to_object for x in dx_folder1.relatedItems]
-         self.assertEqual(dx_folder1_related, [dx_doc2])
--
-         dx_folder2_related = [x.to_object for x in dx_folder2.relatedItems]
-         self.assertEqual(dx_folder2_related, [dx_doc1])
- 
-@@ -1008,6 +1032,299 @@ def test_relations_are_migrated(self):
-         dx_doc2_related = [x.to_object for x in dx_doc2.relatedItems]
-         self.assertEqual(dx_doc2_related, [at_newsitem, dx_doc3, dx_doc1])
- 
-+    def test_backrelations_are_migrated_for_unnested_content(self):
-+        """relate a doc to a newsitem, migrate the newsitem but not the doc.
-+        check if the relations are still in place."""
-+
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('News Item', 'news')
-+        at_news = self.portal['news']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+
-+        # relate them
-+        at_news.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_news.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_news.getReferences(), [at_doc])
-+        self.assertEqual(at_news.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_news])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            # blacklisted_steps=['typeinfo']
-+        )
-+        # installTypeIfNeeded('News Item')
-+        store_references(self.portal)
-+        migrate_newsitems(self.portal)
-+        migrate_documents(self.portal)
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        dx_news = self.portal['news']
-+        dx_doc = self.portal['doc']
-+
-+        # references are not restored yet
-+        self.assertEqual(dx_news.relatedItems, [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual([i.to_object for i in dx_news.relatedItems], [dx_doc])
-+        self.assertEqual([i.to_object for i in dx_doc.relatedItems], [])
-+        self.assertEqual(self._backrefs(dx_doc), [dx_news])
-+        self.assertEqual(self._backrefs(dx_news), [])
-+
-+    def test_dx_at_relations_migrated_for_partially_migrated_nested(self):
-+        """This fails if referenceablebehavior is not enabled
-+        """
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        IReferenceable
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        at_folder.invokeFactory('Document', 'doc')
-+        at_doc = at_folder['doc']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('Folder')
-+        self._enable_referenceable_for('Folder')
-+
-+        store_references(self.portal)
-+        migrate_folders(self.portal)
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        dx_folder = self.portal['folder']
-+        at_doc = dx_folder['doc']
-+        # references are not restored yet
-+        self.assertEqual(dx_folder.relatedItems, [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual(
-+            [i.to_object for i in dx_folder.relatedItems], [at_doc])
-+        self.assertEqual(self._backrefs(at_doc), [dx_folder])
-+        self.assertEqual(self._backrefs(dx_folder), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+    def test_at_dx_relations_migrated_for_partialy_migrated_nested(self):
-+        """Fails if referenceablebehavior is not enabled"""
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        at_folder.invokeFactory('Document', 'doc')
-+        at_doc = at_folder['doc']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('Document')
-+        store_references(self.portal)
-+        migrate_documents(self.portal)
-+        self._enable_referenceable_for('Document')
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        at_folder = self.portal['folder']
-+        dx_doc = at_folder['doc']
-+
-+        # references are not restored yet
-+        # the at-folder has a broken reference now
-+        # since at_doc is now <ATDocument at /plone/folder/doc_MIGRATION_>
-+        self.assertNotEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+        self._backrefs(dx_doc)
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual(at_folder.getRelatedItems(), [dx_doc])
-+        self.assertEqual(self._backrefs(dx_doc), [at_folder])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+
-+    def _backrefs(self, obj):
-+        from Products.Archetypes.interfaces.referenceable import IReferenceable
-+        results = []
-+        relation_catalog = queryUtility(ICatalog)
-+        reference_catalog = getToolByName(obj, 'reference_catalog')
-+        int_id = dump(obj, relation_catalog, {})
-+        if int_id:
-+            brels = relation_catalog.findRelations(dict(to_id=int_id))
-+            for brel in brels:
-+                if brel.isBroken():
-+                    results.append('broken')
-+                else:
-+                    results.append(brel.from_object)
-+        if not results:
-+            if is_referenceable(obj):
-+                obj = IReferenceable(obj)
-+                for rel in reference_catalog.getBackReferences(obj):
-+                    results.append(uuidToObject(rel.sourceUID))
-+        return results
-+
-+    def _enable_referenceable_for(self, typename):
-+        behavior = 'plone.app.referenceablebehavior.referenceable.IReferenceable'  # noqa
-+        fti = queryUtility(IDexterityFTI, name=typename)
-+        behaviors = list(fti.behaviors)
-+        behaviors.append(behavior)
-+        fti._updateProperty('behaviors', tuple(behaviors))
-+
-+    def test_store_references(self):
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        notify(ObjectModifiedEvent(dx_news1))
-+        relation_catalog = queryUtility(ICatalog)
-+        all_rels = [i for i in relation_catalog.findRelations()]
-+        self.assertEqual(len(all_rels), 1)
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+        self.assertEqual(
-+            [i.to_object for i in dx_news1.relatedItems], [dx_news2])
-+
-+        store_references(self.portal)
-+        key = 'ALL_REFERENCES'
-+        self.assertEqual(len(IAnnotations(self.portal)[key]), 2)
-+
-+    def test_migrate_references_with_storage_on_portal(self):
-+        set_browserlayer(self.request)
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+        self._enable_referenceable_for('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(at_doc)))
-+        at_doc.setRelatedItems([dx_news2])
-+        notify(ObjectModifiedEvent(dx_news1))
-+        relation_catalog = queryUtility(ICatalog)
-+        all_rels = [i for i in relation_catalog.findRelations()]
-+        self.assertEqual(len(all_rels), 2)
-+
-+        store_references(self.portal)
-+        # migration_view = getMultiAdapter(
-+        #     (self.portal, self.request),
-+        #     name=u'migrate_from_atct'
-+        # )
-+        # migration_view(from_form=True, migrate_references=False)
-+
-+        # this is basically be the same as above
-+        installTypeIfNeeded('Document')
-+        installTypeIfNeeded('Folder')
-+        migrate_folders(self.portal)
-+        migrate_documents(self.portal)
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+        restore_references(self.portal)
-+
-+        dx_folder = self.portal['folder']
-+        dx_doc = self.portal['doc']
-+        self.assertEqual(
-+            [i.to_object for i in dx_folder.relatedItems], [dx_doc])
-+        self.assertEqual(
-+            [i.to_object for i in dx_doc.relatedItems], [dx_news2])
-+        self.assertEqual(
-+            [i.to_object for i in dx_news1.relatedItems], [dx_news2, dx_doc])
-+
-     def test_stats(self):
-         from plone.app.contenttypes.migration.migration import DocumentMigrator
-         from plone.app.contenttypes.migration.browser import \
-diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
-index cebd18c..9052771 100644
---- a/plone/app/contenttypes/tests/test_migration_custom.py
-+++ b/plone/app/contenttypes/tests/test_migration_custom.py
-@@ -3,7 +3,8 @@
- from datetime import datetime
- from plone.app.contenttypes.migration.field_migrators import migrate_filefield
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
--from plone.app.contenttypes.migration.field_migrators import migrate_simplefield
-+from plone.app.contenttypes.migration.field_migrators import \
-+    migrate_simplefield
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.testing import \
-     PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
-diff --git a/setup.py b/setup.py
-index dcaf408..bb3422e 100644
---- a/setup.py
-+++ b/setup.py
-@@ -60,6 +60,7 @@ def read(*rnames):
-               # 'plone.dexterity >= 2.3.0',  # fixes setting default values # NOT RELEASED YET. # noqa
-               'Products.ATContentTypes',
-               'Products.contentmigration >= 2.1.8.dev0',
-+              'plone.app.referenceablebehavior',
-           ],
-           'atrefs': [
-               'plone.app.referenceablebehavior',
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T12:57:11+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/81c9e691a6a856325b384a75d81539fa834a76c9
-
-get link_items to work without Archetypes
-
-Files changed:
-M plone/app/contenttypes/migration/utils.py
-M plone/app/contenttypes/tests/test_migration.py
-
-diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
-index f2c2291..d48641d 100644
---- a/plone/app/contenttypes/migration/utils.py
-+++ b/plone/app/contenttypes/migration/utils.py
-@@ -259,41 +259,43 @@ def migrate_portlets(src_obj, dst_obj):
- 
- def store_references(context):
-     """Store all references in the portal as a annotation on the portal."""
--    all_annotations = []
-+    all_references = get_all_references(context)
-     key = 'ALL_REFERENCES'
--    portal_catalog = getToolByName(context, 'portal_catalog')
-+    IAnnotations(context)[key] = all_references
-+    logger.info('Stored {} relations for later restore.'.format(
-+        len(all_references)))
-+
- 
-+def get_all_references(context):
-+    results = []
-     # Archetypes
--    # Get all data from the reference_catalog
--    reference_catalog = getToolByName(context, REFERENCE_CATALOG)
--    # query = {}
--    # if HAS_MULTILINGUAL and 'Language' in portal_catalog.indexes():
--    #     query['Language'] = 'all'
--    for brain in reference_catalog():
--        all_annotations.append({
--            'from_uuid': brain.sourceUID,
--            'to_uuid': brain.targetUID,
--            'relationship': brain.relationship,
--        })
-+    # Get all data from the reference_catalog if it exists
-+    reference_catalog = getToolByName(context, REFERENCE_CATALOG, None)
-+    if reference_catalog is not None:
-+        for brain in reference_catalog():
-+            results.append({
-+                'from_uuid': brain.sourceUID,
-+                'to_uuid': brain.targetUID,
-+                'relationship': brain.relationship,
-+            })
- 
-     # Dexterity
-     # Get all data from zc.relation (relation_catalog)
-+    portal_catalog = getToolByName(context, 'portal_catalog')
-     relation_catalog = queryUtility(ICatalog)
-     for rel in relation_catalog.findRelations():
-         from_brain = portal_catalog(path=dict(query=rel.from_path, depth=0))[0]
-         to_brain = portal_catalog(path=dict(query=rel.to_path, depth=0))[0]
--        all_annotations.append({
-+        results.append({
-             'from_uuid': from_brain.UID,
-             'to_uuid': to_brain.UID,
-             'relationship': rel.from_attribute,
-         })
--    IAnnotations(context)[key] = all_annotations
--    logger.info('Stored {} relations for later restore.'.format(
--        len(all_annotations)))
-+    return results
- 
- 
- def restore_references(context):
--    """Recreate all references stored in annotations.
-+    """Recreate all references stored in an annotation on the context.
- 
-     Iterate over the stored references and restore them all according to
-     the content-types framework.
-@@ -304,7 +306,6 @@ def restore_references(context):
-         target_obj = uuidToObject(ref['to_uuid'])
-         relationship = ref['relationship']
-         link_items(context, source_obj, target_obj, relationship)
--
-     del IAnnotations(context)[key]
- 
- 
-@@ -321,10 +322,12 @@ def link_items(
-     By passing a fieldname and a relationship it can be used to create
-     arbitrary relations.
-     """
-+    # relations from AT to DX and from DX to AT are only possible through
-+    # the refernceable-behavior:
-+    # plone.app.referenceablebehavior.referenceable.IReferenceable
-     drop_msg = """Dropping reference from %s to %s since
-     plone.app.referenceablebehavior is not enabled!"""
- 
--    reference_catalog = getToolByName(context, REFERENCE_CATALOG)
-     if source_obj is target_obj:
-         # Thou shalt not relate to yourself.
-         return
-@@ -336,14 +339,18 @@ def link_items(
-         # plone.app.linkintegrity.handlers.modifiedArchetype
-         # when the ObjectModifiedEvent is thrown.
-         # TODO: This needs to be tested though!!!
-+        #
-+        # Also: linkintegrity until now uses the reference_catalog which is
-+        # only available is Archetypes is installed.
-         return
- 
-     # if fieldname != 'relatedItems':
-         # 'relatedItems' is the default field for AT and DX
-         # See plone.app.relationfield.behavior.IRelatedItems for DX and
-         # Products.ATContentTypes.content.schemata.relatedItemsField for AT
--        # sourcefield_name = 'relatedItems'
--        # Mabye be we should handle custom relations somewhat different?
-+        # They always use these relationships:
-+        # 'relatesTo' (Archetpyes) and 'relatedItems' (Dexterity)
-+        # Maybe be we should handle custom relations somewhat different?
- 
-     if relationship in ['relatesTo', 'relatedItems']:
-         # These are the two default-relationships used by AT and DX
-@@ -361,13 +368,19 @@ def link_items(
-         target_type = 'AT'
- 
-     if source_type is 'AT':
--
-+        # If there is any Archetypes-content there is also the
-+        # reference_catalog and the uid_catalog.
-+        # For a site without AT content these might not be there at all.
-+        reference_catalog = getToolByName(context, REFERENCE_CATALOG)
-+        uid_catalog = getToolByName(context, 'uid_catalog')
-         if target_type is 'DX' and not is_referenceable(target_obj):
-             logger.info(drop_msg % (
-                 source_obj.absolute_url(), target_obj.absolute_url()))
-+            return
- 
--        # make sure both objects are properly indexed and referenceable
--        uid_catalog = getToolByName(context, 'uid_catalog')
-+        # Make sure both objects are properly indexed and referenceable
-+        # Some objects that werde just created (migrated) are not yet
-+        # indexed properly.
-         source_uid = IUUID(source_obj)
-         target_uid = IUUID(target_obj)
-         _catalog = uid_catalog._catalog
-@@ -392,7 +405,7 @@ def link_items(
-             # don't do anything
-             return
- 
--        target_uid = target_obj.UID()
-+        target_uid = IUUID(target_obj)
-         if not source_obj._optimizedGetObject(target_uid):
-             uid_catalog = getToolByName(aq_inner(context), 'uid_catalog')
-             uid_catalog.catalog_object(target_obj, target_uid)
-@@ -401,6 +414,7 @@ def link_items(
-         targetUIDs = [ref.targetUID for ref in reference_catalog.getReferences(
-             source_obj, relationship)]
-         if target_uid in targetUIDs:
-+            # Replace relations since is probably broken.
-             reference_catalog.deleteReference(
-                 source_obj, target_uid, relationship)
- 
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index 04fab4f..ec7e149 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -6,14 +6,14 @@
- from five.intid.site import addUtility
- from lxml import etree
- from persistent.list import PersistentList
-+from plone.app.contenttypes.migration.migration import migrate_documents
-+from plone.app.contenttypes.migration.migration import migrate_folders
-+from plone.app.contenttypes.migration.migration import migrate_newsitems
- from plone.app.contenttypes.migration.utils import add_portlet
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.migration.utils import is_referenceable
- from plone.app.contenttypes.migration.utils import restore_references
- from plone.app.contenttypes.migration.utils import store_references
--from plone.app.contenttypes.migration.migration import migrate_documents
--from plone.app.contenttypes.migration.migration import migrate_folders
--from plone.app.contenttypes.migration.migration import migrate_newsitems
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
- from plone.app.contenttypes.testing import set_browserlayer
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T12:57:11+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/684bdb94d620e912c3055bb2f52b44f8f55585b0
-
-add @@export_all_relations to export all relations as json
-
-Files changed:
-M plone/app/contenttypes/migration/configure.zcml
-M plone/app/contenttypes/migration/utils.py
-M plone/app/contenttypes/tests/test_migration.py
-
-diff --git a/plone/app/contenttypes/migration/configure.zcml b/plone/app/contenttypes/migration/configure.zcml
-index 78288f8..fa77866 100644
---- a/plone/app/contenttypes/migration/configure.zcml
-+++ b/plone/app/contenttypes/migration/configure.zcml
-@@ -93,6 +93,14 @@
-     permission="cmf.ManagePortal"
-     />
- 
-+  <browser:page
-+    name="export_all_references"
-+    for="*"
-+    class=".utils.ExportAllReferences"
-+    layer="..interfaces.IPloneAppContenttypesLayer"
-+    permission="cmf.ManagePortal"
-+    />
-+
-   <utility
-       factory=".vocabularies.ATCTypesVocabulary"
-       name="plone.app.contenttypes.migration.atctypes"
-diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
-index d48641d..32d28b4 100644
---- a/plone/app/contenttypes/migration/utils.py
-+++ b/plone/app/contenttypes/migration/utils.py
-@@ -42,6 +42,8 @@
+ from zope.container.interfaces import INameChooser
  from zope.event import notify
- from zope.intid.interfaces import IIntIds
++from zope.i18n import translate
+ from zope.interface import implements
  from zope.lifecycleevent import ObjectModifiedEvent
-+from Products.Five.browser import BrowserView
-+import json
- 
- import logging
- import os
-@@ -266,6 +268,16 @@ def store_references(context):
-         len(all_references)))
++import transaction
  
  
-+class ExportAllReferences(BrowserView):
-+    """Returns all references in the portal as json.
-+    """
-+
-+    def __call__(self):
-+        data = get_all_references(self.context)
-+        self.request.response.setHeader("Content-type", "application/json")
-+        return json.dumps(data)
-+
-+
- def get_all_references(context):
-     results = []
-     # Archetypes
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index ec7e149..8462983 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -44,6 +44,7 @@
- from zope.lifecycleevent import ObjectModifiedEvent
- from zope.schema.interfaces import IVocabularyFactory
+ class RenameAction(object):
+@@ -27,7 +29,7 @@ def __init__(self, context, request):
  
-+import json
- import os.path
- import time
- import unittest2 as unittest
-@@ -1264,6 +1265,44 @@ def test_store_references(self):
-         key = 'ALL_REFERENCES'
-         self.assertEqual(len(IAnnotations(self.portal)[key]), 2)
+     def get_options(self):
+         return {
+-            'title': _('Rename'),
++            'title': translate(_('Rename'), context=self.request),
+             'id': 'rename',
+             'icon': 'random',
+             'url': self.context.absolute_url() + '/@@fc-rename',
+@@ -99,4 +101,4 @@ def __call__(self):
+                 self.errors.append(_('Error renaming ${title}', mapping={
+                     'title': title}))
  
-+    def test_export_references(self):
-+        """Test the Browser-View @@export_all_references."""
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+        set_browserlayer(self.request)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+
-+        # relate them
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        notify(ObjectModifiedEvent(dx_news1))
-+
-+        view = self.portal.restrictedTraverse('export_all_references')
-+        result = view()
-+        data = json.loads(result)
-+        self.assertEqual(len(data), 2)
-+
-     def test_migrate_references_with_storage_on_portal(self):
-         set_browserlayer(self.request)
-         # IIntIds is not registered in the test env. So register it here
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T12:57:11+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/bc63dbf898e1d4a84cd3cf9fe3beda90db76c8c8
-
-use convenience-method instead of notify(ObjectModifiedEvent(obj))
-
-Files changed:
-M plone/app/contenttypes/migration/utils.py
-M plone/app/contenttypes/tests/test_migration.py
-
-diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
-index 32d28b4..8159a6d 100644
---- a/plone/app/contenttypes/migration/utils.py
-+++ b/plone/app/contenttypes/migration/utils.py
-@@ -39,9 +39,8 @@
- from zope.component import getUtility
- from zope.component import queryUtility
+-        return self.message(missing)
+\ No newline at end of file
++        return self.message(missing)
+diff --git a/plone/app/content/browser/contents/tags.py b/plone/app/content/browser/contents/tags.py
+index b568cce..cf6f581 100644
+--- a/plone/app/content/browser/contents/tags.py
++++ b/plone/app/content/browser/contents/tags.py
+@@ -1,8 +1,10 @@
++# -*- coding: utf-8 -*-
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
  from zope.component.hooks import getSite
--from zope.event import notify
- from zope.intid.interfaces import IIntIds
--from zope.lifecycleevent import ObjectModifiedEvent
-+from zope.lifecycleevent import modified
- from Products.Five.browser import BrowserView
- import json
- 
-@@ -399,11 +398,11 @@ def link_items(
- 
-         if not _catalog.indexes['UID']._index.get(source_uid, None):
-             uid_catalog.catalog_object(source_obj, source_uid)
--            notify(ObjectModifiedEvent(source_obj))
-+            modified(source_obj)
- 
-         if not _catalog.indexes['UID']._index.get(target_uid, None):
-             uid_catalog.catalog_object(target_obj, target_uid)
--            notify(ObjectModifiedEvent(target_obj))
-+            modified(target_obj)
- 
-         field = source_obj.getField(fieldname)
-         accessor = field.getAccessor(source_obj)
-@@ -421,7 +420,7 @@ def link_items(
-         if not source_obj._optimizedGetObject(target_uid):
-             uid_catalog = getToolByName(aq_inner(context), 'uid_catalog')
-             uid_catalog.catalog_object(target_obj, target_uid)
--            notify(ObjectModifiedEvent(target_obj))
-+            modified(target_obj)
- 
-         targetUIDs = [ref.targetUID for ref in reference_catalog.getReferences(
-             source_obj, relationship)]
-@@ -433,7 +432,7 @@ def link_items(
-         existing_at_relations.append(target_obj)
-         mutator = field.getMutator(source_obj)
-         mutator(existing_at_relations)
--        notify(ObjectModifiedEvent(source_obj))
-+        modified(source_obj)
-         return
- 
-     if source_type is 'DX':
-@@ -452,7 +451,7 @@ def link_items(
-         if to_id not in [i.to_id for i in existing_dx_relations]:
-             existing_dx_relations.append(RelationValue(to_id))
-             setattr(source_obj, fieldname, existing_dx_relations)
--            notify(ObjectModifiedEvent(source_obj))
-+            modified(source_obj)
-             return
++from zope.i18n import translate
+ from zope.interface import implements
  
  
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index 8462983..0fa10ea 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -38,10 +38,9 @@
- from zope.component import getSiteManager
- from zope.component import getUtility
- from zope.component import queryUtility
--from zope.event import notify
- from zope.interface import alsoProvides
- from zope.intid.interfaces import IIntIds
--from zope.lifecycleevent import ObjectModifiedEvent
-+from zope.lifecycleevent import modified
- from zope.schema.interfaces import IVocabularyFactory
+@@ -21,7 +23,7 @@ def get_options(self):
+         base_url = site.absolute_url()
+         base_vocabulary = '%s/@@getVocabulary?name=' % base_url
+         return {
+-            'title': _('Tags'),
++            'title': translate(_('Tags'), context=self.request),
+             'id': 'tags',
+             'icon': 'tags',
+             'url': self.context.absolute_url() + '/@@fc-tags',
+@@ -54,4 +56,4 @@ def action(self, obj):
+         tags = tags - toremove
+         tags = tags | toadd
+         obj.setSubject(list(tags))
+-        obj.reindexObject()
+\ No newline at end of file
++        obj.reindexObject()
+diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py
+index 8ab276e..d960f8b 100644
+--- a/plone/app/content/browser/contents/workflow.py
++++ b/plone/app/content/browser/contents/workflow.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from DateTime import DateTime
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFCore.utils import getToolByName
+@@ -6,6 +7,7 @@
+ from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
- import json
-@@ -1248,7 +1247,7 @@ def test_store_references(self):
-         dx_news2 = self.portal['news2']
-         dx_news1.relatedItems = PersistentList()
-         dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
--        notify(ObjectModifiedEvent(dx_news1))
-+        modified(dx_news1)
-         relation_catalog = queryUtility(ICatalog)
-         all_rels = [i for i in relation_catalog.findRelations()]
-         self.assertEqual(len(all_rels), 1)
-@@ -1296,7 +1295,7 @@ def test_export_references(self):
-         # relate them
-         dx_news1.relatedItems = PersistentList()
-         dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
--        notify(ObjectModifiedEvent(dx_news1))
-+        modified(dx_news1)
  
-         view = self.portal.restrictedTraverse('export_all_references')
-         result = view()
-@@ -1335,7 +1334,7 @@ def test_migrate_references_with_storage_on_portal(self):
-         dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-         dx_news1.relatedItems.append(RelationValue(intids.getId(at_doc)))
-         at_doc.setRelatedItems([dx_news2])
--        notify(ObjectModifiedEvent(dx_news1))
-+        modified(dx_news1)
-         relation_catalog = queryUtility(ICatalog)
-         all_rels = [i for i in relation_catalog.findRelations()]
-         self.assertEqual(len(all_rels), 2)
-@@ -1802,6 +1801,58 @@ def test_comments_are_migrated(self):
-             dx_comment.getText(),
-             '<p>Hey Dude! \xc3\x84 is not ascii.</p>')
+@@ -21,7 +23,7 @@ def __init__(self, context, request):
  
-+    def test_linkintegrity_relations_are_migrated(self):
-+        from plone.app.contenttypes.migration.utils import migrate_linkintegrity_relations  # noqa
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+
-+        # create folders
-+        self.portal.invokeFactory('Folder', 'folder1')
-+        at_folder1 = self.portal['folder1']
-+        self.portal.invokeFactory('Folder', 'folder2')
-+        at_folder2 = self.portal['folder2']
-+
-+        # create ATDocuments
-+        at_folder1.invokeFactory('Document', 'doc1')
-+        at_doc1 = at_folder1['doc1']
-+        at_folder2.invokeFactory('Document', 'doc2')
-+        at_doc2 = at_folder2['doc2']
-+        self.portal.invokeFactory('Document', 'doc3')
-+        at_doc3 = self.portal['doc3']
-+        at_folder1.invokeFactory('News Item', 'newsitem')
-+        at_newsitem = at_folder1['newsitem']
-+
-+        # relate them
-+        at_doc1.setRelatedItems([at_doc2])
-+        at_doc2.setRelatedItems([at_newsitem, at_doc3, at_doc1])
-+        at_doc3.setRelatedItems(at_doc1)
-+        at_folder1.setRelatedItems([at_doc2])
-+        at_folder2.setRelatedItems([at_doc1])
-+        self.assertEqual([x for x in at_folder2.getRelatedItems()], [at_doc1])
-+        # migrate content
-+        applyProfile(self.portal, 'plone.app.contenttypes:default')
-+        self._enable_referenceable_for('Folder')
-+        self._enable_referenceable_for('Document')
-+        self._enable_referenceable_for('News Item')
-+        store_references(self.portal)
-+        migrate_documents(self.portal)
-+        migrate_folders(self.portal)
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        dx_folder1 = self.portal['folder1']
-+        dx_folder2 = self.portal['folder2']
-+
-+        dx_doc1 = dx_folder1['doc1']
-+        dx_doc2 = dx_folder2['doc2']
-+        dx_doc3 = self.portal['doc3']
-+
-+        self.assertEqual([x.to_object for x in dx_folder2.relatedItems], [])
-+
-+        # migrate references
-+        restore_references(self.portal)
- 
- class MigrateDexterityBaseClassIntegrationTest(unittest.TestCase):
- 
+     def get_options(self):
+         return {
+-            'title': _('State'),
++            'title': translate(_('State'), context=self.request),
+             'id': 'workflow',
+             'icon': 'lock',
+             'url': self.context.absolute_url() + '/@@fc-workflow',
+@@ -84,4 +86,5 @@ def action(self, obj):
+                 raise
+             except Exception:
+                 self.errors.append(
+-                    _('Could not transition: ${title}', mapping={'title': self.objectTitle(obj)}))
+\ No newline at end of file
++                    _('Could not transition: ${title}',
++                      mapping={'title': self.objectTitle(obj)}))
 
 
-Repository: plone.app.contenttypes
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-07-22T12:57:11+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/4f7f2b50205c36c33e531928f7fd5ddb5300edbb
-
-remove obsolete test
-
-Files changed:
-M plone/app/contenttypes/tests/test_migration.py
-
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index 0fa10ea..9cafa0c 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -1801,58 +1801,6 @@ def test_comments_are_migrated(self):
-             dx_comment.getText(),
-             '<p>Hey Dude! \xc3\x84 is not ascii.</p>')
- 
--    def test_linkintegrity_relations_are_migrated(self):
--        from plone.app.contenttypes.migration.utils import migrate_linkintegrity_relations  # noqa
--        # IIntIds is not registered in the test env. So register it here
--        sm = getSiteManager(self.portal)
--        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
--
--        # create folders
--        self.portal.invokeFactory('Folder', 'folder1')
--        at_folder1 = self.portal['folder1']
--        self.portal.invokeFactory('Folder', 'folder2')
--        at_folder2 = self.portal['folder2']
--
--        # create ATDocuments
--        at_folder1.invokeFactory('Document', 'doc1')
--        at_doc1 = at_folder1['doc1']
--        at_folder2.invokeFactory('Document', 'doc2')
--        at_doc2 = at_folder2['doc2']
--        self.portal.invokeFactory('Document', 'doc3')
--        at_doc3 = self.portal['doc3']
--        at_folder1.invokeFactory('News Item', 'newsitem')
--        at_newsitem = at_folder1['newsitem']
--
--        # relate them
--        at_doc1.setRelatedItems([at_doc2])
--        at_doc2.setRelatedItems([at_newsitem, at_doc3, at_doc1])
--        at_doc3.setRelatedItems(at_doc1)
--        at_folder1.setRelatedItems([at_doc2])
--        at_folder2.setRelatedItems([at_doc1])
--        self.assertEqual([x for x in at_folder2.getRelatedItems()], [at_doc1])
--        # migrate content
--        applyProfile(self.portal, 'plone.app.contenttypes:default')
--        self._enable_referenceable_for('Folder')
--        self._enable_referenceable_for('Document')
--        self._enable_referenceable_for('News Item')
--        store_references(self.portal)
--        migrate_documents(self.portal)
--        migrate_folders(self.portal)
--
--        # rebuild catalog
--        self.portal.portal_catalog.clearFindAndRebuild()
--
--        dx_folder1 = self.portal['folder1']
--        dx_folder2 = self.portal['folder2']
--
--        dx_doc1 = dx_folder1['doc1']
--        dx_doc2 = dx_folder2['doc2']
--        dx_doc3 = self.portal['doc3']
--
--        self.assertEqual([x.to_object for x in dx_folder2.relatedItems], [])
--
--        # migrate references
--        restore_references(self.portal)
- 
- class MigrateDexterityBaseClassIntegrationTest(unittest.TestCase):
- 
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-07-22T16:16:43+02:00
+Date: 2015-07-22T16:19:46+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/3b6caca03af638e814c0d32bfa5911f25227a1b4
+Commit: https://github.com/plone/plone.app.content/commit/9b0225b12f9724ced2423754938bbac537ff357a
 
-Merge pull request #244 from plone/fix_referencemigration
+Merge pull request #40 from plone/translate_buttons
 
-Fix referencemigration
+translate buttons
 
 Files changed:
-M plone/app/contenttypes/migration/browser.py
-M plone/app/contenttypes/migration/configure.zcml
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/migration/topics.py
-M plone/app/contenttypes/migration/utils.py
-M plone/app/contenttypes/tests/test_migration.py
-M plone/app/contenttypes/tests/test_migration_custom.py
-M setup.py
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/copy.py
+M plone/app/content/browser/contents/cut.py
+M plone/app/content/browser/contents/delete.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/browser/contents/properties.py
+M plone/app/content/browser/contents/rename.py
+M plone/app/content/browser/contents/tags.py
+M plone/app/content/browser/contents/workflow.py
 
-diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
-index 6370dfb..b2a113d 100644
---- a/plone/app/contenttypes/migration/browser.py
-+++ b/plone/app/contenttypes/migration/browser.py
-@@ -25,7 +25,8 @@
- from plone.app.contenttypes.migration.utils import HAS_MULTILINGUAL
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.migration.utils import isSchemaExtended
--from plone.app.contenttypes.migration.utils import restoreReferences
-+from plone.app.contenttypes.migration.utils import restore_references
-+from plone.app.contenttypes.migration.utils import store_references
- from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
- from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.browserlayer.interfaces import ILocalBrowserLayerType
-@@ -153,6 +154,10 @@ def __call__(self,
- 
-         stats_before = self.stats()
-         starttime = datetime.now()
-+
-+        # store references on the portal
-+        if migrate_references:
-+            store_references(portal)
-         catalog = portal.portal_catalog
- 
-         # switch linkintegrity temp off
-@@ -232,8 +237,9 @@ def __call__(self,
- 
-         catalog.clearFindAndRebuild()
- 
--        # rebuild catalog, restore references and cleanup
--        restoreReferences(portal, migrate_references, content_types)
-+        # restore references
-+        if migrate_references:
-+            restore_references(portal)
- 
-         # switch linkintegrity back to what it was before migrating
-         if link_integrity_in_props:
-diff --git a/plone/app/contenttypes/migration/configure.zcml b/plone/app/contenttypes/migration/configure.zcml
-index 78288f8..fa77866 100644
---- a/plone/app/contenttypes/migration/configure.zcml
-+++ b/plone/app/contenttypes/migration/configure.zcml
-@@ -93,6 +93,14 @@
-     permission="cmf.ManagePortal"
-     />
- 
-+  <browser:page
-+    name="export_all_references"
-+    for="*"
-+    class=".utils.ExportAllReferences"
-+    layer="..interfaces.IPloneAppContenttypesLayer"
-+    permission="cmf.ManagePortal"
-+    />
-+
-   <utility
-       factory=".vocabularies.ATCTypesVocabulary"
-       name="plone.app.contenttypes.migration.atctypes"
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index 9a901c2..3cc9b81 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -7,13 +7,11 @@
- module will only work if Products.contentmigration is installed so make sure
- you catch ImportErrors
- '''
--from Products.Archetypes.config import REFERENCE_CATALOG
- from Products.CMFCore.utils import getToolByName
- from Products.contentmigration.basemigrator.migrator import CMFFolderMigrator
- from Products.contentmigration.basemigrator.migrator import CMFItemMigrator
- from Products.contentmigration.basemigrator.walker import CatalogWalker
- from Products.contentmigration.walker import CustomQueryWalker
--from persistent.list import PersistentList
- from plone.app.contenttypes.behaviors.collection import ICollection
- from plone.app.contenttypes.migration.dxmigration import DXEventMigrator
- from plone.app.contenttypes.migration.dxmigration import DXOldEventMigrator
-@@ -53,56 +51,6 @@ def migrate(portal, migrator):
-     return walker
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 89dc0ce..22d8f8e 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -327,4 +327,4 @@ def __call__(self):
+                 ordering.moveObjectToPosition(brain.id, idx)
+         else:
+             self.errors.append(_(u'cannot rearrange folder'))
+-        return self.message()
+\ No newline at end of file
++        return self.message()
+diff --git a/plone/app/content/browser/contents/copy.py b/plone/app/content/browser/contents/copy.py
+index e353b1d..dbb4c19 100644
+--- a/plone/app/content/browser/contents/copy.py
++++ b/plone/app/content/browser/contents/copy.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from OFS.CopySupport import CopyError
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
+@@ -7,6 +8,7 @@
+ from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class ReferenceMigrator(object):
--
--    def beforeChange_relatedItemsOrder(self):
--        """ Store Archetype relations as target uids on the old archetype
--            object to restore the order later.
--            Because all relations to deleted objects will be lost, we iterate
--            over all backref objects and store the relations of the backref
--            object in advance.
--            This is automatically called by Products.contentmigration.
--        """
--        # Relations UIDs:
--        if not hasattr(self.old, "_relatedItemsOrder"):
--            relatedItems = self.old.getRelatedItems()
--            relatedItemsOrder = [item.UID() for item in relatedItems]
--            self.old._relatedItemsOrder = PersistentList(relatedItemsOrder)
--
--        # Backrefs Relations UIDs:
--        reference_cat = getToolByName(self.old, REFERENCE_CATALOG)
--        backrefs = reference_cat.getBackReferences(self.old,
--                                                   relationship="relatesTo")
--        backref_objects = map(lambda x: x.getSourceObject(), backrefs)
--        for obj in backref_objects:
--            if obj.portal_type != self.src_portal_type:
--                continue
--            if not hasattr(obj, "_relUids"):
--                relatedItems = obj.getRelatedItems()
--                relatedItemsOrder = [item.UID() for item in relatedItems]
--                obj._relatedItemsOrder = PersistentList(relatedItemsOrder)
--
--    def migrate_at_relatedItems(self):
--        """ Store Archetype relations as target uids on the dexterity object
--            for later restore. Backrelations are saved as well because all
--            relation to deleted objects would be lost.
--        """
--        # Relations:
--        relItems = self.old.getRelatedItems()
--        relUids = [item.UID() for item in relItems]
--        self.new._relatedItems = relUids
--
--        # Backrefs:
--        reference_catalog = getToolByName(self.old, REFERENCE_CATALOG)
--
--        backrefs = [i.sourceUID for i in reference_catalog.getBackReferences(
--            self.old, relationship="relatesTo")]
--        self.new._backrefs = backrefs
--
--        # Order:
--        self.new._relatedItemsOrder = self.old._relatedItemsOrder
--
--
- class ICustomMigrator(Interface):
-     """Adapter implementer interface for custom migrators.
-     Please note that you have to register named adapters in order to be able to
-@@ -130,7 +78,7 @@ def migrate(self, old, new):
-         return
+@@ -21,7 +23,7 @@ def __init__(self, context, request):
+ 
+     def get_options(self):
+         return {
+-            'title': _('Copy'),
++            'title': translate(_('Copy'), context=self.request),
+             'id': 'copy',
+             'icon': 'copy',
+             'url': self.context.absolute_url() + '/@@fc-copy'
+@@ -50,4 +52,4 @@ def finish(self):
+ 
+     def __call__(self):
+         self.oblist = []
+-        return super(CopyActionView, self).__call__()
+\ No newline at end of file
++        return super(CopyActionView, self).__call__()
+diff --git a/plone/app/content/browser/contents/cut.py b/plone/app/content/browser/contents/cut.py
+index ae86724..391c474 100644
+--- a/plone/app/content/browser/contents/cut.py
++++ b/plone/app/content/browser/contents/cut.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from OFS.CopySupport import CopyError
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
+@@ -8,6 +9,7 @@
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+ from webdav.Lockable import ResourceLockedError
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class ATCTContentMigrator(CMFItemMigrator, ReferenceMigrator):
-+class ATCTContentMigrator(CMFItemMigrator):
-     """Base for contentish ATCT
-     """
+@@ -22,7 +24,7 @@ def __init__(self, context, request):
  
-@@ -174,7 +122,7 @@ def last_migrate_comments(self):
-         move_comments(portal, self.new)
- 
- 
--class ATCTFolderMigrator(CMFFolderMigrator, ReferenceMigrator):
-+class ATCTFolderMigrator(CMFFolderMigrator):
-     """Base for folderish ATCT
-     """
- 
-diff --git a/plone/app/contenttypes/migration/topics.py b/plone/app/contenttypes/migration/topics.py
-index 018b746..65db603 100644
---- a/plone/app/contenttypes/migration/topics.py
-+++ b/plone/app/contenttypes/migration/topics.py
-@@ -14,7 +14,6 @@
- from Products.contentmigration.inplace import InplaceCMFItemMigrator
- from Products.contentmigration.walker import CustomQueryWalker
- from plone.app.contenttypes.behaviors.collection import ICollection
--from plone.app.contenttypes.migration.migration import ReferenceMigrator
- from plone.app.querystring.interfaces import IQuerystringRegistryReader
- from plone.registry.interfaces import IRegistry
- from plone.uuid.interfaces import IMutableUUID
-@@ -450,7 +449,7 @@ def get_query_value(self, value, index, criterion):
-         return value['query']
+     def get_options(self):
+         return {
+-            'title': _('Cut'),
++            'title': translate(_('Cut'), context=self.request),
+             'id': 'cut',
+             'icon': 'scissors',
+             'url': self.context.absolute_url() + '/@@fc-cut'
+diff --git a/plone/app/content/browser/contents/delete.py b/plone/app/content/browser/contents/delete.py
+index 806c868..b6f3f0b 100644
+--- a/plone/app/content/browser/contents/delete.py
++++ b/plone/app/content/browser/contents/delete.py
+@@ -1,9 +1,11 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from AccessControl.Permissions import delete_objects
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--class TopicMigrator(InplaceCMFItemMigrator, ReferenceMigrator):
-+class TopicMigrator(InplaceCMFItemMigrator):
-     """Migrate Topics to Collections. Existing subtopics will be lost.
+@@ -19,7 +21,7 @@ def __init__(self, context, request):
  
-     The only difference to the migration below is the base-class
-@@ -562,7 +561,7 @@ def migrate_at_uuid(self):
-             IMutableUUID(self.new).set(str(uid))
- 
- 
--class FolderishTopicMigrator(InplaceCMFFolderMigrator, ReferenceMigrator):
-+class FolderishTopicMigrator(InplaceCMFFolderMigrator):
-     """Migrate Topics and Subtopics to folderish collections.
- 
-     The only difference to the migration above is the base-class
-diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py
-index e1ebe20..8159a6d 100644
---- a/plone/app/contenttypes/migration/utils.py
-+++ b/plone/app/contenttypes/migration/utils.py
-@@ -1,5 +1,8 @@
- # -*- coding: utf-8 -*-
--from Products.ATContentTypes.interfaces.interfaces import IATContentType
-+from Acquisition import aq_base
-+from Acquisition import aq_inner
-+from Products.Archetypes.config import REFERENCE_CATALOG
-+from Products.Archetypes.interfaces.referenceable import IReferenceable
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.utils import safe_hasattr
-@@ -10,15 +13,15 @@
- from archetypes.schemaextender.interfaces import ISchemaExtender
- from archetypes.schemaextender.interfaces import ISchemaModifier
- from copy import deepcopy
--from persistent.list import PersistentList
- from plone.app.contentrules.api import assign_rule
- from plone.app.contenttypes.behaviors.leadimage import ILeadImage
--from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
- from plone.app.contenttypes.migration.field_migrators import \
-     migrate_simplefield
-+from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.app.discussion.conversation import ANNOTATION_KEY as DISCUSSION_KEY
- from plone.app.discussion.interfaces import IConversation
-+from plone.app.linkintegrity.handlers import referencedRelationship
- from plone.app.uuid.utils import uuidToObject
- from plone.contentrules.engine.interfaces import IRuleAssignmentManager
- from plone.dexterity.interfaces import IDexterityContent
-@@ -26,14 +29,21 @@
- from plone.portlets.constants import CONTEXT_BLACKLIST_STATUS_KEY
- from plone.portlets.interfaces import IPortletAssignmentMapping
- from plone.portlets.interfaces import IPortletManager
-+from plone.uuid.interfaces import IUUID
- from z3c.relationfield import RelationValue
-+from zc.relation.interfaces import ICatalog
- from zope.annotation.interfaces import IAnnotations
- from zope.component import getGlobalSiteManager
- from zope.component import getMultiAdapter
- from zope.component import getSiteManager
- from zope.component import getUtility
-+from zope.component import queryUtility
+     def get_options(self):
+         return {
+-            'title': _('Delete'),
++            'title': translate(_('Delete'), context=self.request),
+             'id': 'delete',
+             'icon': 'trash',
+             'context': 'danger',
+@@ -58,4 +60,4 @@ def action(self, obj):
+             except Unauthorized:
+                 self.errors.append(
+                     _(u'You are not authorized to delete ${title}.',
+-                        mapping={u'title': self.objectTitle(self.dest)}))
+\ No newline at end of file
++                        mapping={u'title': self.objectTitle(self.dest)}))
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 15a42e9..32ad49f 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from OFS.CopySupport import cookie_path
+ from Products.CMFPlone import PloneMessageFactory as _
+@@ -5,6 +6,7 @@
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
  from zope.component.hooks import getSite
- from zope.intid.interfaces import IIntIds
-+from zope.lifecycleevent import modified
-+from Products.Five.browser import BrowserView
-+import json
-+
- import logging
- import os
- import pkg_resources
-@@ -248,94 +258,220 @@ def migrate_portlets(src_obj, dst_obj):
-                             'for manager {1}'.format(key, manager))
++from zope.i18n import translate
+ from zope.interface import implements
  
  
--def restore_refs(obj):
--    """Restore references stored in the attribute _relatedItems.
--    """
--    intids = getUtility(IIntIds)
--    try:
--        if not getattr(obj, 'relatedItems', None):
--            obj.relatedItems = PersistentList()
--
--        elif not isinstance(obj.relatedItems, PersistentList):
--            obj.relatedItems = PersistentList(obj.relatedItems)
--
--        for uuid in obj._relatedItems:
--            to_obj = uuidToObject(uuid)
--            to_id = intids.getId(to_obj)
--            obj.relatedItems.append(RelationValue(to_id))
--            logger.info('Restored Relation from %s to %s' % (obj, to_obj))
--    except AttributeError:
--        pass
-+def store_references(context):
-+    """Store all references in the portal as a annotation on the portal."""
-+    all_references = get_all_references(context)
-+    key = 'ALL_REFERENCES'
-+    IAnnotations(context)[key] = all_references
-+    logger.info('Stored {} relations for later restore.'.format(
-+        len(all_references)))
+@@ -19,7 +21,7 @@ def __init__(self, context, request):
  
- 
--def restore_backrefs(portal, obj):
--    """Restore backreferences stored in the attribute _backrefs.
-+class ExportAllReferences(BrowserView):
-+    """Returns all references in the portal as json.
-     """
--    intids = getUtility(IIntIds)
--    uid_catalog = getToolByName(portal, 'uid_catalog')
--    try:
--        backrefobjs = [uuidToObject(uuid) for uuid in obj._backrefs]
--        for backrefobj in backrefobjs:
--            # Dexterity and
--            if IDexterityContent.providedBy(backrefobj):
--                relitems = getattr(backrefobj, 'relatedItems', None)
--                if not relitems:
--                    backrefobj.relatedItems = PersistentList()
--                elif not isinstance(obj.relatedItems, PersistentList):
--                    backrefobj.relatedItems = PersistentList(
--                        obj.relatedItems
--                    )
--                to_id = intids.getId(obj)
--                backrefobj.relatedItems.append(RelationValue(to_id))
--
--            # Archetypes
--            elif IATContentType.providedBy(backrefobj):
--                # reindex UID so we are able to set the reference
--                path = '/'.join(obj.getPhysicalPath())
--                uid_catalog.catalog_object(obj, path)
--                backrefobj.setRelatedItems(obj)
--            logger.info(
--                'Restored BackRelation from %s to %s' % (backrefobj, obj))
--    except AttributeError:
-+
-+    def __call__(self):
-+        data = get_all_references(self.context)
-+        self.request.response.setHeader("Content-type", "application/json")
-+        return json.dumps(data)
-+
-+
-+def get_all_references(context):
-+    results = []
-+    # Archetypes
-+    # Get all data from the reference_catalog if it exists
-+    reference_catalog = getToolByName(context, REFERENCE_CATALOG, None)
-+    if reference_catalog is not None:
-+        for brain in reference_catalog():
-+            results.append({
-+                'from_uuid': brain.sourceUID,
-+                'to_uuid': brain.targetUID,
-+                'relationship': brain.relationship,
-+            })
-+
-+    # Dexterity
-+    # Get all data from zc.relation (relation_catalog)
-+    portal_catalog = getToolByName(context, 'portal_catalog')
-+    relation_catalog = queryUtility(ICatalog)
-+    for rel in relation_catalog.findRelations():
-+        from_brain = portal_catalog(path=dict(query=rel.from_path, depth=0))[0]
-+        to_brain = portal_catalog(path=dict(query=rel.to_path, depth=0))[0]
-+        results.append({
-+            'from_uuid': from_brain.UID,
-+            'to_uuid': to_brain.UID,
-+            'relationship': rel.from_attribute,
-+        })
-+    return results
-+
-+
-+def restore_references(context):
-+    """Recreate all references stored in an annotation on the context.
-+
-+    Iterate over the stored references and restore them all according to
-+    the content-types framework.
-+    """
-+    key = 'ALL_REFERENCES'
-+    for ref in IAnnotations(context)[key]:
-+        source_obj = uuidToObject(ref['from_uuid'])
-+        target_obj = uuidToObject(ref['to_uuid'])
-+        relationship = ref['relationship']
-+        link_items(context, source_obj, target_obj, relationship)
-+    del IAnnotations(context)[key]
-+
-+
-+def link_items(
-+    context,
-+    source_obj,
-+    target_obj,
-+    relationship=None,
-+    fieldname='relatedItems',
-+):
-+    """Add a relation between two content objects.
-+
-+    This uses the field 'relatedItems' and works for Archetypes and Dexterity.
-+    By passing a fieldname and a relationship it can be used to create
-+    arbitrary relations.
-+    """
-+    # relations from AT to DX and from DX to AT are only possible through
-+    # the refernceable-behavior:
-+    # plone.app.referenceablebehavior.referenceable.IReferenceable
-+    drop_msg = """Dropping reference from %s to %s since
-+    plone.app.referenceablebehavior is not enabled!"""
-+
-+    if source_obj is target_obj:
-+        # Thou shalt not relate to yourself.
-+        return
-+
-+    if relationship is referencedRelationship:
-+        # 'relatesTo' is the relationship for linkintegrity-relations.
-+        # Linkintegrity-relations should automatically be (re)created by
-+        # plone.app.linkintegrity.handlers.modifiedDexterity or
-+        # plone.app.linkintegrity.handlers.modifiedArchetype
-+        # when the ObjectModifiedEvent is thrown.
-+        # TODO: This needs to be tested though!!!
-+        #
-+        # Also: linkintegrity until now uses the reference_catalog which is
-+        # only available is Archetypes is installed.
-+        return
-+
-+    # if fieldname != 'relatedItems':
-+        # 'relatedItems' is the default field for AT and DX
-+        # See plone.app.relationfield.behavior.IRelatedItems for DX and
-+        # Products.ATContentTypes.content.schemata.relatedItemsField for AT
-+        # They always use these relationships:
-+        # 'relatesTo' (Archetpyes) and 'relatedItems' (Dexterity)
-+        # Maybe be we should handle custom relations somewhat different?
-+
-+    if relationship in ['relatesTo', 'relatedItems']:
-+        # These are the two default-relationships used by AT and DX
-+        # for the field 'relatedItems' respectively.
-         pass
- 
-+    if IDexterityContent.providedBy(source_obj):
-+        source_type = 'DX'
-+    else:
-+        source_type = 'AT'
- 
--def restore_reforder(obj):
--    """Restore order of references stored in the attribute _relatedItemsOrder.
--    """
--    if not hasattr(obj, '_relatedItemsOrder'):
--        # Nothing to do
-+    if IDexterityContent.providedBy(target_obj):
-+        target_type = 'DX'
-+    else:
-+        target_type = 'AT'
-+
-+    if source_type is 'AT':
-+        # If there is any Archetypes-content there is also the
-+        # reference_catalog and the uid_catalog.
-+        # For a site without AT content these might not be there at all.
-+        reference_catalog = getToolByName(context, REFERENCE_CATALOG)
-+        uid_catalog = getToolByName(context, 'uid_catalog')
-+        if target_type is 'DX' and not is_referenceable(target_obj):
-+            logger.info(drop_msg % (
-+                source_obj.absolute_url(), target_obj.absolute_url()))
-+            return
-+
-+        # Make sure both objects are properly indexed and referenceable
-+        # Some objects that werde just created (migrated) are not yet
-+        # indexed properly.
-+        source_uid = IUUID(source_obj)
-+        target_uid = IUUID(target_obj)
-+        _catalog = uid_catalog._catalog
-+
-+        if not _catalog.indexes['UID']._index.get(source_uid, None):
-+            uid_catalog.catalog_object(source_obj, source_uid)
-+            modified(source_obj)
-+
-+        if not _catalog.indexes['UID']._index.get(target_uid, None):
-+            uid_catalog.catalog_object(target_obj, target_uid)
-+            modified(target_obj)
-+
-+        field = source_obj.getField(fieldname)
-+        accessor = field.getAccessor(source_obj)
-+        existing_at_relations = accessor()
-+
-+        if not isinstance(existing_at_relations, list):
-+            existing_at_relations = [i for i in existing_at_relations]
-+        if not existing_at_relations:
-+            existing_at_relations = []
-+        if target_obj in existing_at_relations:
-+            # don't do anything
-+            return
-+
-+        target_uid = IUUID(target_obj)
-+        if not source_obj._optimizedGetObject(target_uid):
-+            uid_catalog = getToolByName(aq_inner(context), 'uid_catalog')
-+            uid_catalog.catalog_object(target_obj, target_uid)
-+            modified(target_obj)
-+
-+        targetUIDs = [ref.targetUID for ref in reference_catalog.getReferences(
-+            source_obj, relationship)]
-+        if target_uid in targetUIDs:
-+            # Replace relations since is probably broken.
-+            reference_catalog.deleteReference(
-+                source_obj, target_uid, relationship)
-+
-+        existing_at_relations.append(target_obj)
-+        mutator = field.getMutator(source_obj)
-+        mutator(existing_at_relations)
-+        modified(source_obj)
-         return
--    relatedItemsOrder = obj._relatedItemsOrder
--    uid_position_map = dict([(y, x) for x, y in enumerate(relatedItemsOrder)])
--    key = lambda rel: uid_position_map.get(rel.to_object.UID(), 0)
--    obj.relatedItems = sorted(obj.relatedItems, key=key)
--
--
--def cleanup_stored_refs(obj):
--    """Cleanup new dx item."""
--    if safe_hasattr(obj, '_relatedItems'):
--        del obj._relatedItems
--    if safe_hasattr(obj, '_backrefs'):
--        del obj._backrefs
--    if safe_hasattr(obj, '_relatedItemsOrder'):
--        del obj._relatedItemsOrder
--
--
--def restoreReferences(portal,
--                      migrate_references=True,
--                      content_types=DEFAULT_TYPES):
--    """Iterate over new Dexterity items and restore Dexterity References.
--    """
--    catalog = getToolByName(portal, "portal_catalog")
--    results = catalog.searchResults(
--        object_provides=IDexterityContent.__identifier__,
--        portal_type=content_types)
- 
--    for brain in results:
--        obj = brain.getObject()
--        if migrate_references:
--            restore_refs(obj)
--            restore_backrefs(portal, obj)
--            restore_reforder(obj)
--        cleanup_stored_refs(obj)
-+    if source_type is 'DX':
-+        if target_type is 'AT' and not is_referenceable(source_obj):
-+            logger.info(drop_msg % (
-+                source_obj.absolute_url(), target_obj.absolute_url()))
-+            return
-+        # handle dx-relation
-+        intids = getUtility(IIntIds)
-+        to_id = intids.getId(target_obj)
-+        existing_dx_relations = getattr(source_obj, fieldname, [])
-+        # purge broken relations
-+        existing_dx_relations = [
-+            i for i in existing_dx_relations if i.to_id is not None]
-+
-+        if to_id not in [i.to_id for i in existing_dx_relations]:
-+            existing_dx_relations.append(RelationValue(to_id))
-+            setattr(source_obj, fieldname, existing_dx_relations)
-+            modified(source_obj)
-+            return
-+
-+
-+def is_referenceable(obj):
-+    """Find out if this object (AT or DX) is referenceable.
-+
-+    Return True if a obj can be referenced using the reference_catalog used by
-+    Archetypes-Relations and Linkintegrity.
-+
-+    Relations using the relation_catalog (zc.relation.interfaces.ICatalog) are
-+    not covered by this test!
-+    """
-+    is_referenceable = False
-+    if IReferenceable.providedBy(obj) or \
-+            safe_hasattr(aq_base(obj), 'isReferenceable'):
-+        is_referenceable = True
-+    else:
-+        try:
-+            obj = IReferenceable(obj)
-+            is_referenceable = True
-+        except TypeError:
-+            is_referenceable = False
-+    return is_referenceable
-diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
-index 1ffe477..9cafa0c 100644
---- a/plone/app/contenttypes/tests/test_migration.py
-+++ b/plone/app/contenttypes/tests/test_migration.py
-@@ -1,29 +1,49 @@
- # -*- coding: utf-8 -*-
-+from Acquisition import aq_base
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.utils import safe_hasattr
- from five.intid.intid import IntIds
- from five.intid.site import addUtility
- from lxml import etree
-+from persistent.list import PersistentList
-+from plone.app.contenttypes.migration.migration import migrate_documents
-+from plone.app.contenttypes.migration.migration import migrate_folders
-+from plone.app.contenttypes.migration.migration import migrate_newsitems
- from plone.app.contenttypes.migration.utils import add_portlet
-+from plone.app.contenttypes.migration.utils import installTypeIfNeeded
-+from plone.app.contenttypes.migration.utils import is_referenceable
-+from plone.app.contenttypes.migration.utils import restore_references
-+from plone.app.contenttypes.migration.utils import store_references
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
- from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
- from plone.app.contenttypes.testing import set_browserlayer
-+from plone.app.referenceablebehavior.referenceable import IReferenceable
- from plone.app.testing import SITE_OWNER_NAME
- from plone.app.testing import SITE_OWNER_PASSWORD
- from plone.app.testing import applyProfile
- from plone.app.testing import login
-+from plone.app.uuid.utils import uuidToObject
- from plone.app.z3cform.interfaces import IPloneFormLayer
- from plone.dexterity.content import Container
+     def get_options(self):
+         return {
+-            'title': _('Paste'),
++            'title': translate(_('Paste'), context=self.request),
+             'id': 'paste',
+             'icon': 'paste',
+             'url': self.context.absolute_url() + '/@@fc-paste'
+@@ -56,4 +58,4 @@ def __call__(self):
+                        path='%s' % cookie_path(self.request),
+                        expires='Wed, 31-Dec-97 23:59:59 GMT')
+         self.request['__cp'] = None
+-        return self.message()
+\ No newline at end of file
++        return self.message()
+diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
+index 037a2b7..b018327 100644
+--- a/plone/app/content/browser/contents/properties.py
++++ b/plone/app/content/browser/contents/properties.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from DateTime import DateTime
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+@@ -5,6 +6,7 @@
+ from plone.app.content.interfaces import IStructureAction
  from plone.dexterity.interfaces import IDexterityContent
-+from plone.dexterity.interfaces import IDexterityFTI
- from plone.event.interfaces import IEventAccessor
- from plone.namedfile.file import NamedBlobImage
- from plone.testing.z2 import Browser
-+from z3c.relationfield import RelationValue
-+from z3c.relationfield.index import dump
-+from zc.relation.interfaces import ICatalog
- from zope.annotation.interfaces import IAnnotations
+ from zope.component.hooks import getSite
++from zope.i18n import translate
+ from zope.interface import implements
+ 
+ 
+@@ -23,7 +25,7 @@ def get_options(self):
+         base_url = site.absolute_url()
+         base_vocabulary = '%s/@@getVocabulary?name=' % base_url
+         return {
+-            'title': _('Properties'),
++            'title': translate(_('Properties'), context=self.request),
+             'id': 'properties',
+             'icon': 'edit',
+             'url': self.context.absolute_url() + '/@@fc-properties',
+@@ -87,4 +89,4 @@ def action(self, obj):
+                 obj.setCreators(self.creators)
+             if self.exclude:
+                 obj.setExcludeFromNav(self.exclude == 'yes')
+-        obj.reindexObject()
+\ No newline at end of file
++        obj.reindexObject()
+diff --git a/plone/app/content/browser/contents/rename.py b/plone/app/content/browser/contents/rename.py
+index 185587e..38806b3 100644
+--- a/plone/app/content/browser/contents/rename.py
++++ b/plone/app/content/browser/contents/rename.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
+@@ -7,12 +8,13 @@
+ from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+-import transaction
  from zope.component import getMultiAdapter
- from zope.component import getSiteManager
- from zope.component import getUtility
-+from zope.component import queryUtility
- from zope.interface import alsoProvides
- from zope.intid.interfaces import IIntIds
-+from zope.lifecycleevent import modified
- from zope.schema.interfaces import IVocabularyFactory
-+
-+import json
- import os.path
- import time
- import unittest2 as unittest
-@@ -847,6 +867,9 @@ def test_modifield_date_is_unchanged(self):
+ from zope.container.interfaces import INameChooser
+ from zope.event import notify
++from zope.i18n import translate
+ from zope.interface import implements
+ from zope.lifecycleevent import ObjectModifiedEvent
++import transaction
  
-         # migrate content
-         applyProfile(self.portal, 'plone.app.contenttypes:default')
-+        self._enable_referenceable_for('Document')
-+        self._enable_referenceable_for('News Item')
-+        self._enable_referenceable_for('Folder')
  
-         # we use the migration-view instead of calling the migratons by hand
-         # to make sure the patch for notifyModified is used.
-@@ -905,7 +928,6 @@ def test_modifield_date_is_unchanged(self):
+ class RenameAction(object):
+@@ -27,7 +29,7 @@ def __init__(self, context, request):
  
-         dx_folder1_related = [x.to_object for x in dx_folder1.relatedItems]
-         self.assertEqual(dx_folder1_related, [dx_doc2])
--
-         dx_folder2_related = [x.to_object for x in dx_folder2.relatedItems]
-         self.assertEqual(dx_folder2_related, [dx_doc1])
+     def get_options(self):
+         return {
+-            'title': _('Rename'),
++            'title': translate(_('Rename'), context=self.request),
+             'id': 'rename',
+             'icon': 'random',
+             'url': self.context.absolute_url() + '/@@fc-rename',
+@@ -99,4 +101,4 @@ def __call__(self):
+                 self.errors.append(_('Error renaming ${title}', mapping={
+                     'title': title}))
  
-@@ -940,12 +962,6 @@ def test_folder_children_are_migrated(self):
-         self.assertTrue(at_child in dx_folder.contentValues())
+-        return self.message(missing)
+\ No newline at end of file
++        return self.message(missing)
+diff --git a/plone/app/content/browser/contents/tags.py b/plone/app/content/browser/contents/tags.py
+index b568cce..cf6f581 100644
+--- a/plone/app/content/browser/contents/tags.py
++++ b/plone/app/content/browser/contents/tags.py
+@@ -1,8 +1,10 @@
++# -*- coding: utf-8 -*-
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+ from zope.component.hooks import getSite
++from zope.i18n import translate
+ from zope.interface import implements
  
-     def test_relations_are_migrated(self):
--        from plone.app.contenttypes.migration.migration import (
--            migrate_documents,
--            migrate_folders,
--        )
--        from plone.app.contenttypes.migration.utils import restoreReferences
--
-         # IIntIds is not registered in the test env. So register it here
-         sm = getSiteManager(self.portal)
-         addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-@@ -972,9 +988,13 @@ def test_relations_are_migrated(self):
-         at_doc3.setRelatedItems(at_doc1)
-         at_folder1.setRelatedItems([at_doc2])
-         at_folder2.setRelatedItems([at_doc1])
--
-+        self.assertEqual([x for x in at_folder2.getRelatedItems()], [at_doc1])
-         # migrate content
-         applyProfile(self.portal, 'plone.app.contenttypes:default')
-+        self._enable_referenceable_for('Folder')
-+        self._enable_referenceable_for('Document')
-+        self._enable_referenceable_for('News Item')
-+        store_references(self.portal)
-         migrate_documents(self.portal)
-         migrate_folders(self.portal)
  
-@@ -988,8 +1008,13 @@ def test_relations_are_migrated(self):
-         dx_doc2 = dx_folder2['doc2']
-         dx_doc3 = self.portal['doc3']
+@@ -21,7 +23,7 @@ def get_options(self):
+         base_url = site.absolute_url()
+         base_vocabulary = '%s/@@getVocabulary?name=' % base_url
+         return {
+-            'title': _('Tags'),
++            'title': translate(_('Tags'), context=self.request),
+             'id': 'tags',
+             'icon': 'tags',
+             'url': self.context.absolute_url() + '/@@fc-tags',
+@@ -54,4 +56,4 @@ def action(self, obj):
+         tags = tags - toremove
+         tags = tags | toadd
+         obj.setSubject(list(tags))
+-        obj.reindexObject()
+\ No newline at end of file
++        obj.reindexObject()
+diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py
+index 8ab276e..d960f8b 100644
+--- a/plone/app/content/browser/contents/workflow.py
++++ b/plone/app/content/browser/contents/workflow.py
+@@ -1,3 +1,4 @@
++# -*- coding: utf-8 -*-
+ from DateTime import DateTime
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFCore.utils import getToolByName
+@@ -6,6 +7,7 @@
+ from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from zope.i18n import translate
+ from zope.interface import implements
  
-+        self.assertEqual([x.to_object for x in dx_folder2.relatedItems], [])
-+
-         # migrate references
--        restoreReferences(self.portal)
-+        restore_references(self.portal)
-+
-+        self.assertEqual(
-+            [x.to_object for x in dx_folder2.relatedItems], [dx_doc1])
  
-         # assert single references
-         dx_doc1_related = [x.to_object for x in dx_doc1.relatedItems]
-@@ -1000,7 +1025,6 @@ def test_relations_are_migrated(self):
+@@ -21,7 +23,7 @@ def __init__(self, context, request):
  
-         dx_folder1_related = [x.to_object for x in dx_folder1.relatedItems]
-         self.assertEqual(dx_folder1_related, [dx_doc2])
--
-         dx_folder2_related = [x.to_object for x in dx_folder2.relatedItems]
-         self.assertEqual(dx_folder2_related, [dx_doc1])
- 
-@@ -1008,6 +1032,337 @@ def test_relations_are_migrated(self):
-         dx_doc2_related = [x.to_object for x in dx_doc2.relatedItems]
-         self.assertEqual(dx_doc2_related, [at_newsitem, dx_doc3, dx_doc1])
- 
-+    def test_backrelations_are_migrated_for_unnested_content(self):
-+        """relate a doc to a newsitem, migrate the newsitem but not the doc.
-+        check if the relations are still in place."""
-+
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('News Item', 'news')
-+        at_news = self.portal['news']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+
-+        # relate them
-+        at_news.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_news.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_news.getReferences(), [at_doc])
-+        self.assertEqual(at_news.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_news])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            # blacklisted_steps=['typeinfo']
-+        )
-+        # installTypeIfNeeded('News Item')
-+        store_references(self.portal)
-+        migrate_newsitems(self.portal)
-+        migrate_documents(self.portal)
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        dx_news = self.portal['news']
-+        dx_doc = self.portal['doc']
-+
-+        # references are not restored yet
-+        self.assertEqual(dx_news.relatedItems, [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual([i.to_object for i in dx_news.relatedItems], [dx_doc])
-+        self.assertEqual([i.to_object for i in dx_doc.relatedItems], [])
-+        self.assertEqual(self._backrefs(dx_doc), [dx_news])
-+        self.assertEqual(self._backrefs(dx_news), [])
-+
-+    def test_dx_at_relations_migrated_for_partially_migrated_nested(self):
-+        """This fails if referenceablebehavior is not enabled
-+        """
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        IReferenceable
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        at_folder.invokeFactory('Document', 'doc')
-+        at_doc = at_folder['doc']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('Folder')
-+        self._enable_referenceable_for('Folder')
-+
-+        store_references(self.portal)
-+        migrate_folders(self.portal)
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        dx_folder = self.portal['folder']
-+        at_doc = dx_folder['doc']
-+        # references are not restored yet
-+        self.assertEqual(dx_folder.relatedItems, [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual(
-+            [i.to_object for i in dx_folder.relatedItems], [at_doc])
-+        self.assertEqual(self._backrefs(at_doc), [dx_folder])
-+        self.assertEqual(self._backrefs(dx_folder), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [])
-+
-+    def test_at_dx_relations_migrated_for_partialy_migrated_nested(self):
-+        """Fails if referenceablebehavior is not enabled"""
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        at_folder.invokeFactory('Document', 'doc')
-+        at_doc = at_folder['doc']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+
-+        # migrate content (stores references on new objects for later restore)
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('Document')
-+        store_references(self.portal)
-+        migrate_documents(self.portal)
-+        self._enable_referenceable_for('Document')
-+
-+        # rebuild catalog
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+
-+        at_folder = self.portal['folder']
-+        dx_doc = at_folder['doc']
-+
-+        # references are not restored yet
-+        # the at-folder has a broken reference now
-+        # since at_doc is now <ATDocument at /plone/folder/doc_MIGRATION_>
-+        self.assertNotEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+        self._backrefs(dx_doc)
-+
-+        # restore references
-+        restore_references(self.portal)
-+
-+        # references should be restored
-+        self.assertEqual(at_folder.getRelatedItems(), [dx_doc])
-+        self.assertEqual(self._backrefs(dx_doc), [at_folder])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+        self.assertEqual(dx_doc.relatedItems, [])
-+
-+    def _backrefs(self, obj):
-+        from Products.Archetypes.interfaces.referenceable import IReferenceable
-+        results = []
-+        relation_catalog = queryUtility(ICatalog)
-+        reference_catalog = getToolByName(obj, 'reference_catalog')
-+        int_id = dump(obj, relation_catalog, {})
-+        if int_id:
-+            brels = relation_catalog.findRelations(dict(to_id=int_id))
-+            for brel in brels:
-+                if brel.isBroken():
-+                    results.append('broken')
-+                else:
-+                    results.append(brel.from_object)
-+        if not results:
-+            if is_referenceable(obj):
-+                obj = IReferenceable(obj)
-+                for rel in reference_catalog.getBackReferences(obj):
-+                    results.append(uuidToObject(rel.sourceUID))
-+        return results
-+
-+    def _enable_referenceable_for(self, typename):
-+        behavior = 'plone.app.referenceablebehavior.referenceable.IReferenceable'  # noqa
-+        fti = queryUtility(IDexterityFTI, name=typename)
-+        behaviors = list(fti.behaviors)
-+        behaviors.append(behavior)
-+        fti._updateProperty('behaviors', tuple(behaviors))
-+
-+    def test_store_references(self):
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        modified(dx_news1)
-+        relation_catalog = queryUtility(ICatalog)
-+        all_rels = [i for i in relation_catalog.findRelations()]
-+        self.assertEqual(len(all_rels), 1)
-+
-+        self.assertEqual(at_folder.getRelatedItems(), [at_doc])
-+        self.assertEqual(at_folder.getReferences(), [at_doc])
-+        self.assertEqual(at_folder.getBackReferences(), [])
-+        self.assertEqual(at_doc.getReferences(), [])
-+        self.assertEqual(at_doc.getBackReferences(), [at_folder])
-+        self.assertEqual(
-+            [i.to_object for i in dx_news1.relatedItems], [dx_news2])
-+
-+        store_references(self.portal)
-+        key = 'ALL_REFERENCES'
-+        self.assertEqual(len(IAnnotations(self.portal)[key]), 2)
-+
-+    def test_export_references(self):
-+        """Test the Browser-View @@export_all_references."""
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+        set_browserlayer(self.request)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+
-+        # relate them
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        modified(dx_news1)
-+
-+        view = self.portal.restrictedTraverse('export_all_references')
-+        result = view()
-+        data = json.loads(result)
-+        self.assertEqual(len(data), 2)
-+
-+    def test_migrate_references_with_storage_on_portal(self):
-+        set_browserlayer(self.request)
-+        # IIntIds is not registered in the test env. So register it here
-+        sm = getSiteManager(self.portal)
-+        addUtility(sm, IIntIds, IntIds, ofs_name='intids', findroot=False)
-+        intids = getUtility(IIntIds)
-+
-+        applyProfile(
-+            self.portal,
-+            'plone.app.contenttypes:default',
-+            blacklisted_steps=['typeinfo'])
-+        installTypeIfNeeded('News Item')
-+        self._enable_referenceable_for('News Item')
-+
-+        # create ATFolder and ATDocument
-+        self.portal.invokeFactory('Folder', 'folder')
-+        at_folder = self.portal['folder']
-+        self.portal.invokeFactory('Document', 'doc')
-+        at_doc = self.portal['doc']
-+
-+        # create DX News Items
-+        self.portal.invokeFactory('News Item', 'news1')
-+        dx_news1 = self.portal['news1']
-+        self.portal.invokeFactory('News Item', 'news2')
-+        dx_news2 = self.portal['news2']
-+
-+        # relate them
-+        at_folder.setRelatedItems([at_doc])
-+        dx_news1.relatedItems = PersistentList()
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(dx_news2)))
-+        dx_news1.relatedItems.append(RelationValue(intids.getId(at_doc)))
-+        at_doc.setRelatedItems([dx_news2])
-+        modified(dx_news1)
-+        relation_catalog = queryUtility(ICatalog)
-+        all_rels = [i for i in relation_catalog.findRelations()]
-+        self.assertEqual(len(all_rels), 2)
-+
-+        store_references(self.portal)
-+        # migration_view = getMultiAdapter(
-+        #     (self.portal, self.request),
-+        #     name=u'migrate_from_atct'
-+        # )
-+        # migration_view(from_form=True, migrate_references=False)
-+
-+        # this is basically be the same as above
-+        installTypeIfNeeded('Document')
-+        installTypeIfNeeded('Folder')
-+        migrate_folders(self.portal)
-+        migrate_documents(self.portal)
-+        self.portal.portal_catalog.clearFindAndRebuild()
-+        restore_references(self.portal)
-+
-+        dx_folder = self.portal['folder']
-+        dx_doc = self.portal['doc']
-+        self.assertEqual(
-+            [i.to_object for i in dx_folder.relatedItems], [dx_doc])
-+        self.assertEqual(
-+            [i.to_object for i in dx_doc.relatedItems], [dx_news2])
-+        self.assertEqual(
-+            [i.to_object for i in dx_news1.relatedItems], [dx_news2, dx_doc])
-+
-     def test_stats(self):
-         from plone.app.contenttypes.migration.migration import DocumentMigrator
-         from plone.app.contenttypes.migration.browser import \
-diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
-index cebd18c..9052771 100644
---- a/plone/app/contenttypes/tests/test_migration_custom.py
-+++ b/plone/app/contenttypes/tests/test_migration_custom.py
-@@ -3,7 +3,8 @@
- from datetime import datetime
- from plone.app.contenttypes.migration.field_migrators import migrate_filefield
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
--from plone.app.contenttypes.migration.field_migrators import migrate_simplefield
-+from plone.app.contenttypes.migration.field_migrators import \
-+    migrate_simplefield
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.testing import \
-     PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
-diff --git a/setup.py b/setup.py
-index dcaf408..bb3422e 100644
---- a/setup.py
-+++ b/setup.py
-@@ -60,6 +60,7 @@ def read(*rnames):
-               # 'plone.dexterity >= 2.3.0',  # fixes setting default values # NOT RELEASED YET. # noqa
-               'Products.ATContentTypes',
-               'Products.contentmigration >= 2.1.8.dev0',
-+              'plone.app.referenceablebehavior',
-           ],
-           'atrefs': [
-               'plone.app.referenceablebehavior',
+     def get_options(self):
+         return {
+-            'title': _('State'),
++            'title': translate(_('State'), context=self.request),
+             'id': 'workflow',
+             'icon': 'lock',
+             'url': self.context.absolute_url() + '/@@fc-workflow',
+@@ -84,4 +86,5 @@ def action(self, obj):
+                 raise
+             except Exception:
+                 self.errors.append(
+-                    _('Could not transition: ${title}', mapping={'title': self.objectTitle(obj)}))
+\ No newline at end of file
++                    _('Could not transition: ${title}',
++                      mapping={'title': self.objectTitle(obj)}))
 
 
