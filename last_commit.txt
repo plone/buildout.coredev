@@ -1,148 +1,298 @@
-Repository: plone.testing
+Repository: plone.app.blob
 
 
 Branch: refs/heads/master
-Date: 2015-07-10T15:08:43+02:00
-Author: Tom Gross (tomgross) <itconsense@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/fea5658df0c92b2e4cc3419b413e8f53878fe928
+Date: 2015-07-06T15:07:34+02:00
+Author: Harald Friessnegger (frisi) <harald@webmeisterei.com>
+Commit: https://github.com/plone/plone.app.blob/commit/9e31da605e6c1855ea7440b700ccdb45e7dcdf86
 
-Allow mulitple registration functions for product install
+fix inline migrator for AT types
 
-In some rare cases multiple registration functions are helpful (ie the use of archetypes.configure). This commit introduces a parameter for the installProduct method which allows this behavior. It is set to False by default
+* also add an option to remove data in old field
+* skip fields that are already blobfields
+* do not copy fields with no value - this allows to run migration on already migrated content w/o loosing data
 
-Files changed:
-M src/plone/testing/z2.py
-
-diff --git a/src/plone/testing/z2.py b/src/plone/testing/z2.py
-index da2cd89..bc68839 100644
---- a/src/plone/testing/z2.py
-+++ b/src/plone/testing/z2.py
-@@ -26,7 +26,7 @@
- 
- _INSTALLED_PRODUCTS = {}
- 
--def installProduct(app, productName, quiet=False):
-+def installProduct(app, productName, quiet=False, multiinit=False):
-     """Install the Zope 2 product with the given name, so that it will show
-     up in the Zope 2 control panel and have its ``initialize()`` hook called.
- 
-@@ -81,7 +81,8 @@ def installProduct(app, productName, quiet=False):
-                 _INSTALLED_PRODUCTS[productName] = (module, init_func,)
- 
-                 found = True
--                break
-+                if not multiinit:
-+                    break
- 
-     if not found and not quiet:
-         sys.stderr.write("Could not install product %s\n" % productName)
-
-
-Repository: plone.testing
-
-
-Branch: refs/heads/master
-Date: 2015-07-15T14:06:17Z
-Author: Tom Gross (tomgross) <itconsense@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/3b2238431af71b552a4b6227b4741aa9ed863ae9
-
-document changes
+see commments on this commit for details: https://github.com/plone/plone.app.blob/commit/f57656ee2c5e483fd02db0d2ac256d6e98d9e609
 
 Files changed:
 M CHANGES.rst
+M src/plone/app/blob/migrations.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e060a8d..80f4c3e 100644
+index 0b08472..633411f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,6 +1,13 @@
- Changelog
- =========
- 
-+4.0.14 (unreleased)
-+-------------------
-+
-+- Added ``multiinit``-parameter to z2.installProduct
-+  to allow multiple initialize methods for a package
-+  [tomgross]
-+
- 4.0.13 (2015-03-13)
+@@ -4,7 +4,10 @@ Changelog
+ 1.5.16 (unreleased)
  -------------------
  
-@@ -10,7 +17,6 @@ Changelog
- - Add tox.ini
-   [icemac]
+-- Nothing changed yet.
++- Fix migrator for AT-based types that got broken in 1.5.8 release and add
++  an option to remove the content of the non-blob field during migration to
++  not end up having stale data in the ZODB
++  [fRiSi]
  
--
- 4.0.12 (2014-09-07)
+ 
+ 1.5.15 (2015-05-31)
+@@ -46,6 +49,7 @@ Changelog
+ - ported tests to plone.app.testing
+   [tomgross]
+ 
++
+ 1.5.10 (2014-04-16)
  -------------------
  
+diff --git a/src/plone/app/blob/migrations.py b/src/plone/app/blob/migrations.py
+index 168a799..005a1b1 100644
+--- a/src/plone/app/blob/migrations.py
++++ b/src/plone/app/blob/migrations.py
+@@ -10,10 +10,12 @@
+     InlineMigrator = object
+     haveContentMigrations = False
+ 
+-from transaction import savepoint
+-from Products.CMFCore.utils import getToolByName
++from Acquisition import aq_base
+ from Products.Archetypes.interfaces import ISchema
++from Products.CMFCore.utils import getToolByName
++from plone.app.blob.field import BlobWrapper
+ from plone.app.blob.interfaces import IBlobField
++from transaction import savepoint
+ 
+ 
+ def getMigrationWalker(context, migrator):
+@@ -22,10 +24,12 @@ def getMigrationWalker(context, migrator):
+     return CustomQueryWalker(portal, migrator, use_savepoint=True)
+ 
+ 
+-def migrate(context, portal_type=None, meta_type=None, walker=None):
++def migrate(context, portal_type=None, meta_type=None, walker=None,
++            remove_old_value=False):
+     """ migrate instances using the given walker """
+     if walker is None:
+-        migrator = makeMigrator(context, portal_type, meta_type)
++        migrator = makeMigrator(context, portal_type, meta_type,
++                                remove_old_value)
+         walker = CustomQueryWalker(context, migrator, full_transaction=True)
+     else:
+         walker = walker(context)
+@@ -35,12 +39,21 @@ def migrate(context, portal_type=None, meta_type=None, walker=None):
+ 
+ 
+ # helper to build custom blob migrators for the given type
+-def makeMigrator(context, portal_type, meta_type=None):
++def makeMigrator(context, portal_type, meta_type=None, remove_old_value=False):
+     """ generate a migrator for the given at-based portal type """
+     if meta_type is None:
+         meta_type = portal_type
+ 
+     class BlobMigrator(InlineMigrator):
++        """in-place migrator for archetypes based content that copies
++        file/image data from old non-blob fields to new fields with the same
++        name  provided by archetypes.schemaextender.
++
++        see `plone3 to 4 migration guide`__
++
++        .. __: https://plone.org/documentation/manual/upgrade-guide/version/upgrading-plone-3-x-to-4.0/updating-add-on-products-for-plone-4.0/use-plone.app.blob-based-blob-storage
++        """
++
+         src_portal_type = portal_type
+         src_meta_type = meta_type
+         dst_portal_type = portal_type
+@@ -63,14 +76,37 @@ def fields_map(self):
+         def migrate_data(self):
+             fields = self.getFields(self.obj)
+             for name in fields:
+-                oldfield = self.obj.Schema()[name]
++                # access old field by not using schemaextender
++                oldfield = self.obj.schema[name]
++                is_imagefield = False
+                 if hasattr(oldfield, 'removeScales'):
+                     # clean up old image scales
++                    is_imagefield = True
+                     oldfield.removeScales(self.obj)
+                 value = oldfield.get(self.obj)
++
++                if not value:
++                    # no image/file data: don't copy it over to blob field
++                    # this way it's save to run migration multiple times w/o
++                    # overwriting existing data
++                    continue
++
++                if isinstance(aq_base(value), BlobWrapper):
++                    # already a blob field, no need to migrate it
++                    continue
++
++                # access new field via schemaextender
+                 field = self.obj.getField(name)
+                 field.getMutator(self.obj)(value)
+ 
++                if remove_old_value:
++                    # Remove data from old field to not end up with data
++                    # stored twice - in ZODB and blobstorage
++                    if is_imagefield:
++                        oldfield.set(self.obj, 'DELETE_IMAGE')
++                    else:
++                        oldfield.set(self.obj, 'DELETE_FILE')
++
+         def last_migrate_reindex(self):
+             # prevent update of modification date during reindexing without
+             # copying code from `CatalogMultiplex` (which should go anyway)
+@@ -101,7 +137,7 @@ def migrate_data(self):
+ 
+     def last_migrate_reindex(self):
+         self.new.reindexObject(idxs=['object_provides', 'portal_type',
+-            'Type', 'UID'])
++                                     'Type', 'UID'])
+ 
+ 
+ def getATFilesMigrationWalker(self):
 
 
-Repository: plone.testing
+Repository: plone.app.blob
 
 
 Branch: refs/heads/master
-Date: 2015-07-24T09:47:35+02:00
+Date: 2015-07-24T11:12:48+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.testing/commit/68790a5088f035e3affeee2b70800f76d9d145a4
+Commit: https://github.com/plone/plone.app.blob/commit/2f268f95beb1b118747fb00d9045102b397dab55
 
-Merge pull request #14 from plone/tomgross-patch-1
+Merge pull request #15 from plone/fix-blob-migration
 
-Allow mulitple registration functions for product install
+fix inline migrator for AT types and add option to remove data in old field
 
 Files changed:
 M CHANGES.rst
-M src/plone/testing/z2.py
+M src/plone/app/blob/migrations.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e060a8d..80f4c3e 100644
+index 0b08472..633411f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,6 +1,13 @@
- Changelog
- =========
- 
-+4.0.14 (unreleased)
-+-------------------
-+
-+- Added ``multiinit``-parameter to z2.installProduct
-+  to allow multiple initialize methods for a package
-+  [tomgross]
-+
- 4.0.13 (2015-03-13)
+@@ -4,7 +4,10 @@ Changelog
+ 1.5.16 (unreleased)
  -------------------
  
-@@ -10,7 +17,6 @@ Changelog
- - Add tox.ini
-   [icemac]
+-- Nothing changed yet.
++- Fix migrator for AT-based types that got broken in 1.5.8 release and add
++  an option to remove the content of the non-blob field during migration to
++  not end up having stale data in the ZODB
++  [fRiSi]
  
--
- 4.0.12 (2014-09-07)
+ 
+ 1.5.15 (2015-05-31)
+@@ -46,6 +49,7 @@ Changelog
+ - ported tests to plone.app.testing
+   [tomgross]
+ 
++
+ 1.5.10 (2014-04-16)
  -------------------
  
-diff --git a/src/plone/testing/z2.py b/src/plone/testing/z2.py
-index da2cd89..bc68839 100644
---- a/src/plone/testing/z2.py
-+++ b/src/plone/testing/z2.py
-@@ -26,7 +26,7 @@
+diff --git a/src/plone/app/blob/migrations.py b/src/plone/app/blob/migrations.py
+index 168a799..005a1b1 100644
+--- a/src/plone/app/blob/migrations.py
++++ b/src/plone/app/blob/migrations.py
+@@ -10,10 +10,12 @@
+     InlineMigrator = object
+     haveContentMigrations = False
  
- _INSTALLED_PRODUCTS = {}
+-from transaction import savepoint
+-from Products.CMFCore.utils import getToolByName
++from Acquisition import aq_base
+ from Products.Archetypes.interfaces import ISchema
++from Products.CMFCore.utils import getToolByName
++from plone.app.blob.field import BlobWrapper
+ from plone.app.blob.interfaces import IBlobField
++from transaction import savepoint
  
--def installProduct(app, productName, quiet=False):
-+def installProduct(app, productName, quiet=False, multiinit=False):
-     """Install the Zope 2 product with the given name, so that it will show
-     up in the Zope 2 control panel and have its ``initialize()`` hook called.
  
-@@ -81,7 +81,8 @@ def installProduct(app, productName, quiet=False):
-                 _INSTALLED_PRODUCTS[productName] = (module, init_func,)
+ def getMigrationWalker(context, migrator):
+@@ -22,10 +24,12 @@ def getMigrationWalker(context, migrator):
+     return CustomQueryWalker(portal, migrator, use_savepoint=True)
  
-                 found = True
--                break
-+                if not multiinit:
-+                    break
  
-     if not found and not quiet:
-         sys.stderr.write("Could not install product %s\n" % productName)
+-def migrate(context, portal_type=None, meta_type=None, walker=None):
++def migrate(context, portal_type=None, meta_type=None, walker=None,
++            remove_old_value=False):
+     """ migrate instances using the given walker """
+     if walker is None:
+-        migrator = makeMigrator(context, portal_type, meta_type)
++        migrator = makeMigrator(context, portal_type, meta_type,
++                                remove_old_value)
+         walker = CustomQueryWalker(context, migrator, full_transaction=True)
+     else:
+         walker = walker(context)
+@@ -35,12 +39,21 @@ def migrate(context, portal_type=None, meta_type=None, walker=None):
+ 
+ 
+ # helper to build custom blob migrators for the given type
+-def makeMigrator(context, portal_type, meta_type=None):
++def makeMigrator(context, portal_type, meta_type=None, remove_old_value=False):
+     """ generate a migrator for the given at-based portal type """
+     if meta_type is None:
+         meta_type = portal_type
+ 
+     class BlobMigrator(InlineMigrator):
++        """in-place migrator for archetypes based content that copies
++        file/image data from old non-blob fields to new fields with the same
++        name  provided by archetypes.schemaextender.
++
++        see `plone3 to 4 migration guide`__
++
++        .. __: https://plone.org/documentation/manual/upgrade-guide/version/upgrading-plone-3-x-to-4.0/updating-add-on-products-for-plone-4.0/use-plone.app.blob-based-blob-storage
++        """
++
+         src_portal_type = portal_type
+         src_meta_type = meta_type
+         dst_portal_type = portal_type
+@@ -63,14 +76,37 @@ def fields_map(self):
+         def migrate_data(self):
+             fields = self.getFields(self.obj)
+             for name in fields:
+-                oldfield = self.obj.Schema()[name]
++                # access old field by not using schemaextender
++                oldfield = self.obj.schema[name]
++                is_imagefield = False
+                 if hasattr(oldfield, 'removeScales'):
+                     # clean up old image scales
++                    is_imagefield = True
+                     oldfield.removeScales(self.obj)
+                 value = oldfield.get(self.obj)
++
++                if not value:
++                    # no image/file data: don't copy it over to blob field
++                    # this way it's save to run migration multiple times w/o
++                    # overwriting existing data
++                    continue
++
++                if isinstance(aq_base(value), BlobWrapper):
++                    # already a blob field, no need to migrate it
++                    continue
++
++                # access new field via schemaextender
+                 field = self.obj.getField(name)
+                 field.getMutator(self.obj)(value)
+ 
++                if remove_old_value:
++                    # Remove data from old field to not end up with data
++                    # stored twice - in ZODB and blobstorage
++                    if is_imagefield:
++                        oldfield.set(self.obj, 'DELETE_IMAGE')
++                    else:
++                        oldfield.set(self.obj, 'DELETE_FILE')
++
+         def last_migrate_reindex(self):
+             # prevent update of modification date during reindexing without
+             # copying code from `CatalogMultiplex` (which should go anyway)
+@@ -101,7 +137,7 @@ def migrate_data(self):
+ 
+     def last_migrate_reindex(self):
+         self.new.reindexObject(idxs=['object_provides', 'portal_type',
+-            'Type', 'UID'])
++                                     'Type', 'UID'])
+ 
+ 
+ def getATFilesMigrationWalker(self):
 
 
