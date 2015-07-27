@@ -1,392 +1,732 @@
-Repository: plone.app.users
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-07-27T16:18:27+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/58b8a9405484cc7303494af825f9421983c005b7
+Date: 2015-07-25T10:29:44+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/df540eaab40654b3c81ed20de845fa50fdd29df9
 
-cache schemas in volatile attributes of portal
+remove obsolete method to delete at-default-content on site-creation
 
 Files changed:
-M plone/app/users/browser/register.py
-M plone/app/users/browser/schemaeditor.py
-M plone/app/users/browser/userdatapanel.py
+M plone/app/contenttypes/setuphandlers.py
 
-diff --git a/plone/app/users/browser/register.py b/plone/app/users/browser/register.py
-index 68bbd76..fc8aa8d 100644
---- a/plone/app/users/browser/register.py
-+++ b/plone/app/users/browser/register.py
-@@ -26,15 +26,15 @@
-     getAdapter,
-     provideAdapter,
-     getMultiAdapter)
--from zope.interface import Interface
-+from zope.component.hooks import getSite
- from zope.schema import getFieldNames
- import logging
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index de4b210..5413c90 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -347,11 +347,9 @@ def step_import_content(context):
+     # Because the portal doesn't implement __contains__?
+     target_language, is_combined_language, locale = _get_locales_info(portal)
  
- from ..schema import (
-     IRegisterSchema,
-     IAddUserSchema,
--    ICombinedRegisterSchema,
--    IUserDataSchema)
-+    ICombinedRegisterSchema
-+)
- from ..utils import (
-     notifyWidgetActionExecutionError,
-     uuid_userid_generator,
-@@ -50,13 +50,16 @@
+-    # Set up Language specific information
+-    # _set_language_settings(portal, is_combined_language)
+     _setup_calendar(locale)
+     _setup_visible_ids(target_language, locale)
+-    _delete_at_example_content(portal)
++    # _delete_at_example_content(portal)
+ 
+     # The front-page
+     create_frontpage(portal, target_language)
+@@ -366,50 +364,6 @@ def step_import_content(context):
+     configure_members_folder(portal, target_language)
  
  
- def getRegisterSchema():
--    schema = getFromBaseSchema(
--        ICombinedRegisterSchema,
--        form_name=u'On Registration'
--    )
--    # as schema is a generated supermodel,
--    # needed adapters can only be registered at run time
--    provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-+    portal = getSite()
-+    schema = getattr(portal, '_v_register_schema', None)
-+    if schema is None:
-+        portal._v_register_schema = schema = getFromBaseSchema(
-+            ICombinedRegisterSchema,
-+            form_name=u'On Registration'
-+        )
-+        # as schema is a generated supermodel,
-+        # needed adapters can only be registered at run time
-+        provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-     return schema
- 
- 
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index 66c3e80..249726a 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -1,13 +1,14 @@
- import copy
- import re
- import logging
--import hashlib
- 
-+from zope.component import getGlobalSiteManager
- from zope.component.hooks import getSite
- from zope.annotation.interfaces import IAnnotations
- from zope.interface import Interface, implements
- 
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-@@ -28,7 +29,6 @@
-     SCHEMATA_KEY,
- )
- 
--CACHE_CONTAINER = {}
- USERS_NAMESPACE = 'http://namespaces.plone.org/supermodel/users'
- USERS_PREFIX = 'users'
- SPLITTER = '_//_'
-@@ -118,7 +118,6 @@ def updateSchema(object, event):
- 
- 
- def applySchema(snew_schema):
--    CACHE_CONTAINER.clear()
-     site = getSite()
- 
-     # get the old schema (currently stored in the annotation)
-@@ -169,17 +168,9 @@ def applySchema(snew_schema):
-                 continue
-             pm._delProperty(field_id)
- 
+-def _delete_at_example_content(portal):
+-    all_content = portal.portal_catalog()
+-    if all_content:
+-        expected = [
+-            'front-page',
+-            'news',
+-            'aggregator',
+-            'events',
+-            'aggregator',
+-            'Members'
+-        ]
+-        if not [i.id for i in all_content] == expected:
+-            return
+-        to_delete = ['front-page', 'news', 'events', 'Members']
+-        for i in to_delete:
+-            obj = portal[i]
+-            if IDexterityContent.providedBy(obj):
+-                return
+-            modification_date = obj.modification_date.utcdatetime()
+-            creation_date = obj.creation_date.utcdatetime()
+-            delta = modification_date - creation_date
+-            if delta >= timedelta(seconds=1):
+-                return
+-        # None of the default content is dexterity and has been modified.
+-        portal.manage_delObjects(to_delete)
 -
--def model_key(*a, **kw):
--    site = getSite()
--    psite = '/'.join(site.getPhysicalPath())
--    annotations = IAnnotations(site)
--    schema = annotations.get(SCHEMA_ANNOTATION, '')
--    key = hashlib.sha224(schema).hexdigest()
--    return (psite, key)
-+    invalidateSchemasInCache(site)
- 
- 
--# @ram.cache(model_key)
- def get_ttw_edited_schema():
-     data = get_schema()
-     if data:
-@@ -298,15 +289,34 @@ def set_schema(string, site=None):
-     annotations[SCHEMA_ANNOTATION] = string
- 
- 
--def cache_storage(fun, *args, **kwargs):
--    return CACHE_CONTAINER
-+def invalidateSchemasInCache(portal):
- 
-+    gsm = getGlobalSiteManager()
-+
-+    schema = getattr(portal, '_v_register_schema', None)
-+    if schema is not None:
-+        from .account import AccountPanelSchemaAdapter
-+        gsm.unregisterAdapter(
-+            AccountPanelSchemaAdapter,
-+            (IPloneSiteRoot,),
-+            schema
-+        )
-+    portal._v_register_schema = None
-+
-+    schema = getattr(portal, '_v_userdata_schema', None)
-+    if schema is not None:
-+        from .userdatapanel import UserDataPanelAdapter
-+        gsm.unregisterAdapter(
-+            UserDataPanelAdapter,
-+            (IPloneSiteRoot,),
-+            schema
-+        )
-+    portal._v_userdata_schema = None
- 
--def cache_key(fun, *args, **kw):
--    return "%s-%s" % (model_key(), args)
-+    # kill volatile attributes in all threads
-+    portal._p_changed = 1
- 
- 
--# @volatile.cache(cache_key, cache_storage)
- def getFromBaseSchema(baseSchema, form_name=None):
-     attrs = copySchemaAttrs(baseSchema, form_name)
-     ttwschema = get_ttw_edited_schema()
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index 1978aab..6645dbe 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -1,6 +1,7 @@
- # -*- coding: utf-8 -*-
- from zope.component import getUtility
- from zope.component import provideAdapter
-+from zope.component.hooks import getSite
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
- from Products.CMFPlone.interfaces import IPloneSiteRoot
-@@ -76,13 +77,16 @@ def __call__(self):
- 
- 
- def getUserDataSchema():
--    schema = getFromBaseSchema(
--        IUserDataSchema,
--        form_name=u'In User Profile'
--    )
--    # as schema is a generated supermodel,
--    # needed adapters can only be registered at run time
--    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-+    portal = getSite()
-+    schema = getattr(portal, '_v_userdata_schema', None)
-+    if schema is None:
-+        portal._v_userdata_schema = schema = getFromBaseSchema(
-+            IUserDataSchema,
-+            form_name=u'In User Profile'
-+        )
-+        # as schema is a generated supermodel,
-+        # needed adapters can only be registered at run time
-+        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-     return schema
- 
- 
+-
+ def step_setup_various(context):
+     if context.readDataFile('plone.app.contenttypes_default.txt') is None:
+         return
+-#    portal = context.getSite()
+-#     enable_multilingual_behavior(portal)
+-
+-
+-# def enable_multilingual_behavior(portal):
+-#     if not HAS_MULTILINGUAL:
+-#         return
+-#     types_tool = portal.portal_types
+-#     all_ftis = types_tool.listTypeInfo()
+-#     dx_ftis = [x for x in all_ftis if getattr(x, 'behaviors', False)]
+-#     for fti in dx_ftis:
+-#         behaviors = [i for i in fti.behaviors]
+-#         behaviors.extend([
+-#             'plone.app.multilingual.dx.interfaces.IDexterityTranslatable',
+-#         ])
+-#         behaviors = tuple(set(behaviors))
+-#         fti._updateProperty('behaviors', behaviors)
 
 
-Repository: plone.app.users
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-07-27T17:34:17+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/3cf608d2a31957ae9004d55706f31143a069614c
+Date: 2015-07-27T13:58:20+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/3ebd0321d7227eb829d8bf87a83ef88882a575ac
 
-Merge pull request #48 from plone/gotcha-proper-caching
-
-cache schemas in volatile attributes on portal
+Avoid mutable default arguments
 
 Files changed:
-M plone/app/users/browser/register.py
-M plone/app/users/browser/schemaeditor.py
-M plone/app/users/browser/userdatapanel.py
+M plone/app/contenttypes/behaviors/collection.py
+M plone/app/contenttypes/migration/dxmigration.py
 
-diff --git a/plone/app/users/browser/register.py b/plone/app/users/browser/register.py
-index 68bbd76..fc8aa8d 100644
---- a/plone/app/users/browser/register.py
-+++ b/plone/app/users/browser/register.py
-@@ -26,15 +26,15 @@
-     getAdapter,
-     provideAdapter,
-     getMultiAdapter)
--from zope.interface import Interface
-+from zope.component.hooks import getSite
- from zope.schema import getFieldNames
- import logging
+diff --git a/plone/app/contenttypes/behaviors/collection.py b/plone/app/contenttypes/behaviors/collection.py
+index 7c08ea2..a1ce539 100644
+--- a/plone/app/contenttypes/behaviors/collection.py
++++ b/plone/app/contenttypes/behaviors/collection.py
+@@ -101,7 +101,9 @@ def __init__(self, context):
  
- from ..schema import (
-     IRegisterSchema,
-     IAddUserSchema,
--    ICombinedRegisterSchema,
--    IUserDataSchema)
-+    ICombinedRegisterSchema
-+)
- from ..utils import (
-     notifyWidgetActionExecutionError,
-     uuid_userid_generator,
-@@ -50,13 +50,16 @@
+     def results(self, batch=True, b_start=0, b_size=None,
+                 sort_on=None, limit=None, brains=False,
+-                custom_query={}):
++                custom_query=None):
++        if custom_query is None:
++            custom_query = {}
+         querybuilder = getMultiAdapter((self.context, self.context.REQUEST),
+                                        name='querybuilderresults')
+         sort_order = 'reverse' if self.sort_reversed else 'ascending'
+diff --git a/plone/app/contenttypes/migration/dxmigration.py b/plone/app/contenttypes/migration/dxmigration.py
+index dffe25b..c838e11 100644
+--- a/plone/app/contenttypes/migration/dxmigration.py
++++ b/plone/app/contenttypes/migration/dxmigration.py
+@@ -128,14 +128,13 @@ def get_portal_type_name_string(obj):
  
  
- def getRegisterSchema():
--    schema = getFromBaseSchema(
--        ICombinedRegisterSchema,
--        form_name=u'On Registration'
--    )
--    # as schema is a generated supermodel,
--    # needed adapters can only be registered at run time
--    provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-+    portal = getSite()
-+    schema = getattr(portal, '_v_register_schema', None)
-+    if schema is None:
-+        portal._v_register_schema = schema = getFromBaseSchema(
-+            ICombinedRegisterSchema,
-+            form_name=u'On Registration'
-+        )
-+        # as schema is a generated supermodel,
-+        # needed adapters can only be registered at run time
-+        provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-     return schema
+ def migrate_base_class_to_new_class(obj,
+-                                    indexes=[
+-                                        'is_folderish',
+-                                        'object_provides',
+-                                    ],
++                                    indexes=None,
+                                     old_class_name='',
+                                     new_class_name='',
+                                     migrate_to_folderish=False,
+                                     ):
++    if indexes is None:
++        indexes = ['is_folderish', 'object_provides']
+     if not old_class_name:
+         old_class_name = get_old_class_name_string(obj)
+     if not new_class_name:
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T13:58:57+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/0b730febc7b85d225e52da7ba50c19a7d5130f80
+
+Avoid overwriting built-in functions/attributes
+
+Files changed:
+M plone/app/contenttypes/tests/test_file.py
+
+diff --git a/plone/app/contenttypes/tests/test_file.py b/plone/app/contenttypes/tests/test_file.py
+index b31fd86..f1b921b 100644
+--- a/plone/app/contenttypes/tests/test_file.py
++++ b/plone/app/contenttypes/tests/test_file.py
+@@ -69,13 +69,13 @@ def test_adding(self):
  
+     def test_view(self):
+         self.portal.invokeFactory('File', 'file')
+-        file = self.portal['file']
+-        file.title = "My File"
+-        file.description = "This is my file."
+-        self.request.set('URL', file.absolute_url())
+-        self.request.set('ACTUAL_URL', file.absolute_url())
++        file1 = self.portal['file']
++        file1.title = "My File"
++        file1.description = "This is my file."
++        self.request.set('URL', file1.absolute_url())
++        self.request.set('ACTUAL_URL', file1.absolute_url())
+         alsoProvides(self.request, IPloneFormLayer)
+-        view = file.restrictedTraverse('@@view')
++        view = file1.restrictedTraverse('@@view')
  
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index 66c3e80..249726a 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -1,13 +1,14 @@
- import copy
- import re
- import logging
--import hashlib
+         self.assertTrue(view())
+         self.assertEqual(view.request.response.status, 200)
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T16:38:39+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/9b653d2ed008663ec5cafac5a0ec643932f7582a
+
+translate leadimage (fixes #240)
+
+Files changed:
+M plone/app/contenttypes/behaviors/leadimage.py
+
+diff --git a/plone/app/contenttypes/behaviors/leadimage.py b/plone/app/contenttypes/behaviors/leadimage.py
+index fbe6388..8caa702 100644
+--- a/plone/app/contenttypes/behaviors/leadimage.py
++++ b/plone/app/contenttypes/behaviors/leadimage.py
+@@ -14,14 +14,14 @@
+ class ILeadImage(model.Schema):
  
-+from zope.component import getGlobalSiteManager
- from zope.component.hooks import getSite
- from zope.annotation.interfaces import IAnnotations
- from zope.interface import Interface, implements
+     image = namedfile.NamedBlobImage(
+-        title=_(u"Lead Image"),
+-        description=u"",
++        title=_(u'label_leadimage', default=u'Lead Image'),
++        description=_(u'help_leadimage', default=u''),
+         required=False,
+     )
  
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
+     image_caption = schema.TextLine(
+-        title=_(u"Lead Image Caption"),
+-        description=u"",
++        title=_(u'label_leadimage_caption', default=u'Lead Image Caption'),
++        description=_(u'help_leadimage_caption', default=u''),
+         required=False,
+     )
+ 
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T16:50:23+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/798d22473f866a75e42cd578bc1ce8aca6b8c96f
+
+cleanup setuphandler
+
+Files changed:
+M plone/app/contenttypes/setuphandlers.py
+
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index 5413c90..4cf2077 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -2,14 +2,13 @@
+ from AccessControl import Unauthorized
+ from Acquisition import aq_base, aq_inner
  from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-from Products.CMFPlone.utils import bodyfinder
+ from Products.CMFPlone.interfaces import INonInstallable
+ from Products.CMFPlone.interfaces.constrains import ISelectableConstrainTypes
+ from Products.CMFPlone.utils import _createObjectByType
+-from datetime import timedelta
++from Products.CMFPlone.utils import bodyfinder
++from plone.app.dexterity.behaviors import constrains
+ from plone.app.textfield.value import RichTextValue
+ from plone.dexterity.fti import IDexterityFTI
+-from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.utils import createContent
+ from plone.i18n.normalizer.interfaces import IURLNormalizer
+ from plone.portlets.interfaces import ILocalPortletAssignmentManager
+@@ -26,13 +25,6 @@
+ from zope.interface import implements
  
-@@ -28,7 +29,6 @@
-     SCHEMATA_KEY,
- )
  
--CACHE_CONTAINER = {}
- USERS_NAMESPACE = 'http://namespaces.plone.org/supermodel/users'
- USERS_PREFIX = 'users'
- SPLITTER = '_//_'
-@@ -118,7 +118,6 @@ def updateSchema(object, event):
- 
- 
- def applySchema(snew_schema):
--    CACHE_CONTAINER.clear()
-     site = getSite()
- 
-     # get the old schema (currently stored in the annotation)
-@@ -169,17 +168,9 @@ def applySchema(snew_schema):
-                 continue
-             pm._delProperty(field_id)
- 
+-try:
+-    DEXTERITY_WITH_CONSTRAINS = True
+-    from plone.app.dexterity.behaviors import constrains
+-except ImportError:
+-    DEXTERITY_WITH_CONSTRAINS = False
 -
--def model_key(*a, **kw):
--    site = getSite()
--    psite = '/'.join(site.getPhysicalPath())
--    annotations = IAnnotations(site)
--    schema = annotations.get(SCHEMA_ANNOTATION, '')
--    key = hashlib.sha224(schema).hexdigest()
--    return (psite, key)
-+    invalidateSchemasInCache(site)
+-
+ class HiddenProfiles(object):
+     implements(INonInstallable)
+ 
+@@ -112,22 +104,10 @@ def _get_locales_info(portal):
+     return locale.id.language, False, locale
  
  
--# @ram.cache(model_key)
- def get_ttw_edited_schema():
-     data = get_schema()
-     if data:
-@@ -298,15 +289,34 @@ def set_schema(string, site=None):
-     annotations[SCHEMA_ANNOTATION] = string
+-# def _set_language_settings(portal, uses_combined_lanagage):
+-#     """Set the portals language settings from the given lanage codes."""
+-#     language = portal.Language()
+-#     portal_languages = getToolByName(portal, 'portal_languages')
+-#     portal_languages.manage_setLanguageSettings(
+-#         language,
+-#         [language],
+-#         setUseCombinedLanguageCodes=uses_combined_lanagage,
+-#         startNeutral=False)
+-
+-
+-# ??? Why do we only do this calendar setup when content is created?
+-def _setup_calendar(locale):
++def _setup_calendar(portal, locale):
+     """Set the calendar's date system to reflect the default locale"""
+     gregorian_calendar = locale.dates.calendars.get(u'gregorian', None)
+-    portal_calendar = getToolByName(getSite(), "portal_calendar", None)
++    portal_calendar = getToolByName(portal, "portal_calendar", None)
+     if portal_calendar is not None:
+         first = 6
+         if gregorian_calendar is not None:
+@@ -139,8 +119,8 @@ def _setup_calendar(locale):
+         portal_calendar.firstweekday = first
  
  
--def cache_storage(fun, *args, **kwargs):
--    return CACHE_CONTAINER
-+def invalidateSchemasInCache(portal):
+-def _setup_visible_ids(target_language, locale):
+-    portal_properties = getToolByName(getSite(), 'portal_properties')
++def _setup_visible_ids(portal, target_language, locale):
++    portal_properties = getToolByName(portal, 'portal_properties')
+     site_properties = portal_properties.site_properties
  
-+    gsm = getGlobalSiteManager()
+     # See if we have a URL normalizer
+@@ -159,7 +139,6 @@ def _setup_visible_ids(target_language, locale):
+ 
+ 
+ def _setup_constrains(container, allowed_types):
+-    if DEXTERITY_WITH_CONSTRAINS:
+         behavior = ISelectableConstrainTypes(container)
+         behavior.setConstrainTypesMode(constrains.ENABLED)
+         behavior.setImmediatelyAddableTypes(allowed_types)
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T16:51:19+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/30272a5159173c762a7ffb89da879a028e44b0b7
+
+cleanup read. mention another way to extend types
+
+Files changed:
+M docs/README.rst
+
+diff --git a/docs/README.rst b/docs/README.rst
+index 2ed3d30..fd509b1 100644
+--- a/docs/README.rst
++++ b/docs/README.rst
+@@ -408,13 +408,11 @@ You have several options:
+       </schema>
+     </model>
+ 
+-For more complex features you should create custom behaviors and/or write your own content-types. For more information on creating custom dexterity-types or custom behaviors to extend these types with read the `dexterity documentation <http://docs.plone.org/external/plone.app.dexterity/docs/>`_.
++You could alternatively override the peroperty ``model_file`` of the type-definition with a empty string and use the property ``schema`` to provide your custom python-schema.
+ 
++For more complex features you should always consider create custom behaviors and/or write your own content-types since that will most likely give you more flexibility and less problem when you want to upgrade to a newer version in the future.
+ 
+-Reordering fields provided by behaviors
+-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-
+-TODO
++For more information on custom dexterity-types and custom behaviors please read the `dexterity documentation <http://docs.plone.org/external/plone.app.dexterity/docs/>`_.
+ 
+ 
+ Differences to Products.ATContentTypes
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T17:08:45+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/fc3a997b1f43abaf0b57e1c1f26ef8a0f82a68d9
+
+setup calendar and visible ids even when no default-content gets created.
+
+Files changed:
+M plone/app/contenttypes/setuphandlers.py
+
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index 4cf2077..b31afce 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -318,31 +318,21 @@ def configure_members_folder(portal, target_language):
+ 
+ 
+ def step_import_content(context):
+-    """Remove existing AT-content and create DX-content instead."""
+-
++    """Create default content."""
+     if context.readDataFile('plone.app.contenttypes_content.txt') is None:
+         return
+     portal = context.getSite()
+-    # Because the portal doesn't implement __contains__?
+     target_language, is_combined_language, locale = _get_locales_info(portal)
+-
+-    _setup_calendar(locale)
+-    _setup_visible_ids(target_language, locale)
+-    # _delete_at_example_content(portal)
+-
+-    # The front-page
+     create_frontpage(portal, target_language)
+-
+-    # News topic
+     create_news_topic(portal, target_language)
+-
+-    # Events topic
+     create_events_topic(portal, target_language)
+-
+-    # configure Members folder
+     configure_members_folder(portal, target_language)
+ 
+ 
+ def step_setup_various(context):
+     if context.readDataFile('plone.app.contenttypes_default.txt') is None:
+         return
++    portal = context.getSite()
++    target_language, is_combined_language, locale = _get_locales_info(portal)
++    _setup_calendar(portal, locale)
++    _setup_visible_ids(portal, target_language, locale)
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T17:12:57+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/305699a88e197115eeeceafe3285f6fdb3beb8cc
+
+update changelog
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index dea94d7..8de9835 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 1.2b4 (unreleased)
+ ------------------
+ 
++- Setup calendar and visible ids even when no default-content gets created.
++  [pbauer]
 +
-+    schema = getattr(portal, '_v_register_schema', None)
-+    if schema is not None:
-+        from .account import AccountPanelSchemaAdapter
-+        gsm.unregisterAdapter(
-+            AccountPanelSchemaAdapter,
-+            (IPloneSiteRoot,),
-+            schema
-+        )
-+    portal._v_register_schema = None
+ - Remove upgrade-step that resets all behaviors. Fixes #246.
+   [pbauer]
+ 
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-07-27T18:49:56+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/3d9c54d1f03fc6ad4591ee6328e5c0ba6bc3dafb
+
+Merge pull request #249 from plone/p5_cleanup
+
+Various minor cleanups
+
+Files changed:
+M CHANGES.rst
+M docs/README.rst
+M plone/app/contenttypes/behaviors/collection.py
+M plone/app/contenttypes/behaviors/leadimage.py
+M plone/app/contenttypes/migration/dxmigration.py
+M plone/app/contenttypes/setuphandlers.py
+M plone/app/contenttypes/tests/test_file.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index dea94d7..8de9835 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 1.2b4 (unreleased)
+ ------------------
+ 
++- Setup calendar and visible ids even when no default-content gets created.
++  [pbauer]
 +
-+    schema = getattr(portal, '_v_userdata_schema', None)
-+    if schema is not None:
-+        from .userdatapanel import UserDataPanelAdapter
-+        gsm.unregisterAdapter(
-+            UserDataPanelAdapter,
-+            (IPloneSiteRoot,),
-+            schema
-+        )
-+    portal._v_userdata_schema = None
+ - Remove upgrade-step that resets all behaviors. Fixes #246.
+   [pbauer]
  
--def cache_key(fun, *args, **kw):
--    return "%s-%s" % (model_key(), args)
-+    # kill volatile attributes in all threads
-+    portal._p_changed = 1
+diff --git a/docs/README.rst b/docs/README.rst
+index 2ed3d30..fd509b1 100644
+--- a/docs/README.rst
++++ b/docs/README.rst
+@@ -408,13 +408,11 @@ You have several options:
+       </schema>
+     </model>
+ 
+-For more complex features you should create custom behaviors and/or write your own content-types. For more information on creating custom dexterity-types or custom behaviors to extend these types with read the `dexterity documentation <http://docs.plone.org/external/plone.app.dexterity/docs/>`_.
++You could alternatively override the peroperty ``model_file`` of the type-definition with a empty string and use the property ``schema`` to provide your custom python-schema.
+ 
++For more complex features you should always consider create custom behaviors and/or write your own content-types since that will most likely give you more flexibility and less problem when you want to upgrade to a newer version in the future.
+ 
+-Reordering fields provided by behaviors
+-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-
+-TODO
++For more information on custom dexterity-types and custom behaviors please read the `dexterity documentation <http://docs.plone.org/external/plone.app.dexterity/docs/>`_.
  
  
--# @volatile.cache(cache_key, cache_storage)
- def getFromBaseSchema(baseSchema, form_name=None):
-     attrs = copySchemaAttrs(baseSchema, form_name)
-     ttwschema = get_ttw_edited_schema()
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index 1978aab..6645dbe 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -1,6 +1,7 @@
- # -*- coding: utf-8 -*-
- from zope.component import getUtility
- from zope.component import provideAdapter
-+from zope.component.hooks import getSite
+ Differences to Products.ATContentTypes
+diff --git a/plone/app/contenttypes/behaviors/collection.py b/plone/app/contenttypes/behaviors/collection.py
+index 7c08ea2..a1ce539 100644
+--- a/plone/app/contenttypes/behaviors/collection.py
++++ b/plone/app/contenttypes/behaviors/collection.py
+@@ -101,7 +101,9 @@ def __init__(self, context):
+ 
+     def results(self, batch=True, b_start=0, b_size=None,
+                 sort_on=None, limit=None, brains=False,
+-                custom_query={}):
++                custom_query=None):
++        if custom_query is None:
++            custom_query = {}
+         querybuilder = getMultiAdapter((self.context, self.context.REQUEST),
+                                        name='querybuilderresults')
+         sort_order = 'reverse' if self.sort_reversed else 'ascending'
+diff --git a/plone/app/contenttypes/behaviors/leadimage.py b/plone/app/contenttypes/behaviors/leadimage.py
+index fbe6388..8caa702 100644
+--- a/plone/app/contenttypes/behaviors/leadimage.py
++++ b/plone/app/contenttypes/behaviors/leadimage.py
+@@ -14,14 +14,14 @@
+ class ILeadImage(model.Schema):
+ 
+     image = namedfile.NamedBlobImage(
+-        title=_(u"Lead Image"),
+-        description=u"",
++        title=_(u'label_leadimage', default=u'Lead Image'),
++        description=_(u'help_leadimage', default=u''),
+         required=False,
+     )
+ 
+     image_caption = schema.TextLine(
+-        title=_(u"Lead Image Caption"),
+-        description=u"",
++        title=_(u'label_leadimage_caption', default=u'Lead Image Caption'),
++        description=_(u'help_leadimage_caption', default=u''),
+         required=False,
+     )
+ 
+diff --git a/plone/app/contenttypes/migration/dxmigration.py b/plone/app/contenttypes/migration/dxmigration.py
+index dffe25b..c838e11 100644
+--- a/plone/app/contenttypes/migration/dxmigration.py
++++ b/plone/app/contenttypes/migration/dxmigration.py
+@@ -128,14 +128,13 @@ def get_portal_type_name_string(obj):
+ 
+ 
+ def migrate_base_class_to_new_class(obj,
+-                                    indexes=[
+-                                        'is_folderish',
+-                                        'object_provides',
+-                                    ],
++                                    indexes=None,
+                                     old_class_name='',
+                                     new_class_name='',
+                                     migrate_to_folderish=False,
+                                     ):
++    if indexes is None:
++        indexes = ['is_folderish', 'object_provides']
+     if not old_class_name:
+         old_class_name = get_old_class_name_string(obj)
+     if not new_class_name:
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index de4b210..b31afce 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -2,14 +2,13 @@
+ from AccessControl import Unauthorized
+ from Acquisition import aq_base, aq_inner
  from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
- from Products.CMFPlone.interfaces import IPloneSiteRoot
-@@ -76,13 +77,16 @@ def __call__(self):
+-from Products.CMFPlone.utils import bodyfinder
+ from Products.CMFPlone.interfaces import INonInstallable
+ from Products.CMFPlone.interfaces.constrains import ISelectableConstrainTypes
+ from Products.CMFPlone.utils import _createObjectByType
+-from datetime import timedelta
++from Products.CMFPlone.utils import bodyfinder
++from plone.app.dexterity.behaviors import constrains
+ from plone.app.textfield.value import RichTextValue
+ from plone.dexterity.fti import IDexterityFTI
+-from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.utils import createContent
+ from plone.i18n.normalizer.interfaces import IURLNormalizer
+ from plone.portlets.interfaces import ILocalPortletAssignmentManager
+@@ -26,13 +25,6 @@
+ from zope.interface import implements
  
  
- def getUserDataSchema():
--    schema = getFromBaseSchema(
--        IUserDataSchema,
--        form_name=u'In User Profile'
--    )
--    # as schema is a generated supermodel,
--    # needed adapters can only be registered at run time
--    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-+    portal = getSite()
-+    schema = getattr(portal, '_v_userdata_schema', None)
-+    if schema is None:
-+        portal._v_userdata_schema = schema = getFromBaseSchema(
-+            IUserDataSchema,
-+            form_name=u'In User Profile'
-+        )
-+        # as schema is a generated supermodel,
-+        # needed adapters can only be registered at run time
-+        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-     return schema
+-try:
+-    DEXTERITY_WITH_CONSTRAINS = True
+-    from plone.app.dexterity.behaviors import constrains
+-except ImportError:
+-    DEXTERITY_WITH_CONSTRAINS = False
+-
+-
+ class HiddenProfiles(object):
+     implements(INonInstallable)
+ 
+@@ -112,22 +104,10 @@ def _get_locales_info(portal):
+     return locale.id.language, False, locale
  
  
+-# def _set_language_settings(portal, uses_combined_lanagage):
+-#     """Set the portals language settings from the given lanage codes."""
+-#     language = portal.Language()
+-#     portal_languages = getToolByName(portal, 'portal_languages')
+-#     portal_languages.manage_setLanguageSettings(
+-#         language,
+-#         [language],
+-#         setUseCombinedLanguageCodes=uses_combined_lanagage,
+-#         startNeutral=False)
+-
+-
+-# ??? Why do we only do this calendar setup when content is created?
+-def _setup_calendar(locale):
++def _setup_calendar(portal, locale):
+     """Set the calendar's date system to reflect the default locale"""
+     gregorian_calendar = locale.dates.calendars.get(u'gregorian', None)
+-    portal_calendar = getToolByName(getSite(), "portal_calendar", None)
++    portal_calendar = getToolByName(portal, "portal_calendar", None)
+     if portal_calendar is not None:
+         first = 6
+         if gregorian_calendar is not None:
+@@ -139,8 +119,8 @@ def _setup_calendar(locale):
+         portal_calendar.firstweekday = first
+ 
+ 
+-def _setup_visible_ids(target_language, locale):
+-    portal_properties = getToolByName(getSite(), 'portal_properties')
++def _setup_visible_ids(portal, target_language, locale):
++    portal_properties = getToolByName(portal, 'portal_properties')
+     site_properties = portal_properties.site_properties
+ 
+     # See if we have a URL normalizer
+@@ -159,7 +139,6 @@ def _setup_visible_ids(target_language, locale):
+ 
+ 
+ def _setup_constrains(container, allowed_types):
+-    if DEXTERITY_WITH_CONSTRAINS:
+         behavior = ISelectableConstrainTypes(container)
+         behavior.setConstrainTypesMode(constrains.ENABLED)
+         behavior.setImmediatelyAddableTypes(allowed_types)
+@@ -339,77 +318,21 @@ def configure_members_folder(portal, target_language):
+ 
+ 
+ def step_import_content(context):
+-    """Remove existing AT-content and create DX-content instead."""
+-
++    """Create default content."""
+     if context.readDataFile('plone.app.contenttypes_content.txt') is None:
+         return
+     portal = context.getSite()
+-    # Because the portal doesn't implement __contains__?
+     target_language, is_combined_language, locale = _get_locales_info(portal)
+-
+-    # Set up Language specific information
+-    # _set_language_settings(portal, is_combined_language)
+-    _setup_calendar(locale)
+-    _setup_visible_ids(target_language, locale)
+-    _delete_at_example_content(portal)
+-
+-    # The front-page
+     create_frontpage(portal, target_language)
+-
+-    # News topic
+     create_news_topic(portal, target_language)
+-
+-    # Events topic
+     create_events_topic(portal, target_language)
+-
+-    # configure Members folder
+     configure_members_folder(portal, target_language)
+ 
+ 
+-def _delete_at_example_content(portal):
+-    all_content = portal.portal_catalog()
+-    if all_content:
+-        expected = [
+-            'front-page',
+-            'news',
+-            'aggregator',
+-            'events',
+-            'aggregator',
+-            'Members'
+-        ]
+-        if not [i.id for i in all_content] == expected:
+-            return
+-        to_delete = ['front-page', 'news', 'events', 'Members']
+-        for i in to_delete:
+-            obj = portal[i]
+-            if IDexterityContent.providedBy(obj):
+-                return
+-            modification_date = obj.modification_date.utcdatetime()
+-            creation_date = obj.creation_date.utcdatetime()
+-            delta = modification_date - creation_date
+-            if delta >= timedelta(seconds=1):
+-                return
+-        # None of the default content is dexterity and has been modified.
+-        portal.manage_delObjects(to_delete)
+-
+-
+ def step_setup_various(context):
+     if context.readDataFile('plone.app.contenttypes_default.txt') is None:
+         return
+-#    portal = context.getSite()
+-#     enable_multilingual_behavior(portal)
+-
+-
+-# def enable_multilingual_behavior(portal):
+-#     if not HAS_MULTILINGUAL:
+-#         return
+-#     types_tool = portal.portal_types
+-#     all_ftis = types_tool.listTypeInfo()
+-#     dx_ftis = [x for x in all_ftis if getattr(x, 'behaviors', False)]
+-#     for fti in dx_ftis:
+-#         behaviors = [i for i in fti.behaviors]
+-#         behaviors.extend([
+-#             'plone.app.multilingual.dx.interfaces.IDexterityTranslatable',
+-#         ])
+-#         behaviors = tuple(set(behaviors))
+-#         fti._updateProperty('behaviors', behaviors)
++    portal = context.getSite()
++    target_language, is_combined_language, locale = _get_locales_info(portal)
++    _setup_calendar(portal, locale)
++    _setup_visible_ids(portal, target_language, locale)
+diff --git a/plone/app/contenttypes/tests/test_file.py b/plone/app/contenttypes/tests/test_file.py
+index b31fd86..f1b921b 100644
+--- a/plone/app/contenttypes/tests/test_file.py
++++ b/plone/app/contenttypes/tests/test_file.py
+@@ -69,13 +69,13 @@ def test_adding(self):
+ 
+     def test_view(self):
+         self.portal.invokeFactory('File', 'file')
+-        file = self.portal['file']
+-        file.title = "My File"
+-        file.description = "This is my file."
+-        self.request.set('URL', file.absolute_url())
+-        self.request.set('ACTUAL_URL', file.absolute_url())
++        file1 = self.portal['file']
++        file1.title = "My File"
++        file1.description = "This is my file."
++        self.request.set('URL', file1.absolute_url())
++        self.request.set('ACTUAL_URL', file1.absolute_url())
+         alsoProvides(self.request, IPloneFormLayer)
+-        view = file.restrictedTraverse('@@view')
++        view = file1.restrictedTraverse('@@view')
+ 
+         self.assertTrue(view())
+         self.assertEqual(view.request.response.status, 200)
 
 
