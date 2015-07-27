@@ -1,1465 +1,170 @@
-Repository: plone.app.users
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-07-26T17:03:43+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/2c466902a7f197a9a84db463ae53a2fb5d4fdf33
+Date: 2015-07-26T20:13:35+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/Products.CMFPlone/commit/abc31095e9cd40e816299668ea20b7d813f9582a
 
-refactor; remove utilities
-
-no need for a hook
+Revert removal of portal_quickinstaller.installProducts
 
 Files changed:
-M plone/app/users/browser/configure.zcml
-M plone/app/users/browser/register.py
-M plone/app/users/browser/schemaeditor.py
-M plone/app/users/browser/userdatapanel.py
-M plone/app/users/schema.py
-M plone/app/users/tests/test_exportimport.py
-M plone/app/users/vocabularies.py
-D plone/app/users/browser/schemaprovider.py
+M CHANGES.rst
+M Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+M Products/CMFPlone/controlpanel/browser/quickinstaller.py
 
-diff --git a/plone/app/users/browser/configure.zcml b/plone/app/users/browser/configure.zcml
-index ae9a07a..e508679 100644
---- a/plone/app/users/browser/configure.zcml
-+++ b/plone/app/users/browser/configure.zcml
-@@ -99,12 +99,6 @@
-       factory=".passwordpanel.PasswordPanelAdapter"
-       />
+diff --git a/CHANGES.rst b/CHANGES.rst
+index e4ada32..b289b53 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+ 5.0b4 (unreleased)
+ ----------------
  
--    <utility provides="plone.app.users.schema.IUserDataSchemaProvider"
--             factory="plone.app.users.browser.schemaprovider.UserDataSchemaProvider"/>
--
--    <utility provides="plone.app.users.schema.IRegisterSchemaProvider"
--             factory="plone.app.users.browser.schemaprovider.RegisterSchemaProvider"/>
--
-     <subscriber
-         for="plone.app.users.browser.schemaeditor.IMemberSchemaContext
-              plone.schemaeditor.interfaces.ISchemaModifiedEvent"
-diff --git a/plone/app/users/browser/register.py b/plone/app/users/browser/register.py
-index c9978c1..65364b9 100644
---- a/plone/app/users/browser/register.py
-+++ b/plone/app/users/browser/register.py
-@@ -4,6 +4,7 @@
- from Products.CMFCore.permissions import ManagePortal
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.utils import normalizeString
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-@@ -23,6 +24,7 @@
-     getUtility,
-     queryUtility,
-     getAdapter,
-+    provideAdapter,
-     getMultiAdapter)
- from zope.interface import Interface
- from zope.schema import getFieldNames
-@@ -30,7 +32,6 @@
- 
- from ..schema import (
-     IRegisterSchema,
--    IRegisterSchemaProvider,
-     IAddUserSchema,
-     ICombinedRegisterSchema,
-     IUserDataSchema)
-@@ -38,8 +39,8 @@
-     notifyWidgetActionExecutionError,
-     uuid_userid_generator,
- )
--
- from .account import AccountPanelSchemaAdapter
-+from .schemaeditor import getFromBaseSchema
- 
- from plone.app.users.browser.interfaces import ILoginNameGenerator
- from plone.app.users.browser.interfaces import IUserIdGenerator
-@@ -48,6 +49,14 @@
- RENAME_AFTER_CREATION_ATTEMPTS = 100
- 
- 
-+def getRegisterSchema():
-+    schema = getFromBaseSchema(ICombinedRegisterSchema)
-+    # as schema is a generated supermodel,
-+    # needed adapters can only be registered at run time
-+    provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-+    return schema
++- Fix add-ons to be installed using CMFQuickInstaller (restore support
++  for Extensions/Install.py)
++  [datakurre]
 +
-+
- class BaseRegistrationForm(AutoExtensibleForm, form.Form):
-     """Form to be used as base for Register and Add User forms."""
-     label = u""
-@@ -60,9 +69,9 @@ class BaseRegistrationForm(AutoExtensibleForm, form.Form):
-     # this attribute indicates if user was successfully registered
-     _finishedRegister = False
+ - Rename showEditableBorder to showToolbar and deprecate using
+   disable_border and enable_border for enable_toolbar and disable_toolbar
+   [vangheem]
+diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+index 1d3d1ed..d0ccf1d 100644
+--- a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
++++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+@@ -131,7 +131,7 @@
+                 <form action="install_products" method="post" class="pull-right">
+                    <input type="hidden"
+                            name="install_products:list"
+-                           tal:attributes="value string:profile-${product/install_profile/id};" />
++                           tal:attributes="value pid;" />
+                    <span i18n:translate="label_product_install_action">
+                       <span i18n:name="install_button">
+                          <input class="context"
+diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.py b/Products/CMFPlone/controlpanel/browser/quickinstaller.py
+index ea73ec7..a5ce2f8 100644
+--- a/Products/CMFPlone/controlpanel/browser/quickinstaller.py
++++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.py
+@@ -203,20 +203,14 @@ def __call__(self):
+ class InstallProductsView(BrowserView):
  
--    def __init__(self, *args, **kwargs):
--        super(BaseRegistrationForm, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IRegisterSchemaProvider).getSchema()
-+    @property
-+    def schema(self):
-+        return getRegisterSchema()
- 
-     def _get_security_settings(self):
-         """Return security settings from the registry."""
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index c63b3a3..cb5b05b 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -1,16 +1,19 @@
-+import copy
- import re
- import logging
- import hashlib
- 
--from zope.component import getUtility
-+from zope.component import provideAdapter
- from zope.component.hooks import getSite
- from zope.annotation.interfaces import IAnnotations
- from zope.interface import Interface, implements
- 
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-+from plone.memoize import volatile
- from plone.schemaeditor.browser.schema.traversal import SchemaContext
- from plone.schemaeditor.browser.schema.listing import SchemaListing
- from plone.supermodel.model import Model, finalizeSchemas, SchemaClass
-@@ -20,13 +23,12 @@
- from plone.supermodel import loadString
- from plone.z3cform.layout import FormWrapper
- 
--from plone.app.users.schema import (
--    IUserDataSchemaProvider,
-+from ..schema import (
-+    IUserDataSchema,
-     SCHEMA_ANNOTATION,
-     SCHEMATA_KEY,
- )
- 
--
- CACHE_CONTAINER = {}
- USERS_NAMESPACE = 'http://namespaces.plone.org/supermodel/users'
- USERS_PREFIX = 'users'
-@@ -106,17 +108,28 @@ def copy_schema(schema, filter_serializable=False):
-     return oschema
- 
- 
-+def getCopyOfUserDataSchema():
-+    schema = getFromBaseSchema(IUserDataSchema)
-+    copy = copy_schema(schema, filter_serializable=True)
-+    # as schema is a generated supermodel,
-+    # needed adapters can only be registered at run time
-+    from .userdatapanel import UserDataPanelAdapter
-+    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), copy)
-+    return copy
-+
-+
- class MemberSchemaContext(SchemaContext):
-     implements(IMemberSchemaContext)
- 
-     label = _(u"Edit Member Form Fields")
- 
-     def __init__(self, context, request):
--        schema = getUtility(IUserDataSchemaProvider).getCopyOfSchema()
-         self.fieldsWhichCannotBeDeleted = ['fullname', 'email']
-         self.showSaveDefaults = False
-         self.enableFieldsets = False
-         self.allowedFields = ALLOWED_FIELDS
-+
-+        schema = getCopyOfUserDataSchema()
-         super(MemberSchemaContext, self).__init__(
-             schema,
-             request,
-@@ -277,8 +290,7 @@ def is_serialisable_field(field):
- def serialize_ttw_schema(schema=None):
-     if not schema:
-         schema = get_ttw_edited_schema()
--    bschema = getUtility(IUserDataSchemaProvider).baseSchema
--    bfields = [a for a in bschema]
-+    bfields = [a for a in IUserDataSchema]
-     attrs = {}
-     for name in schema:
-         f = schema[name]
-@@ -310,3 +322,28 @@ def set_schema(string, site=None):
-         site = getSite()
-     annotations = IAnnotations(site)
-     annotations[SCHEMA_ANNOTATION] = string
-+
-+
-+def cache_storage(fun, *args, **kwargs):
-+    return CACHE_CONTAINER
-+
-+
-+def cache_key(fun, *args, **kw):
-+    return "%s-%s" % (model_key(), args)
-+
-+
-+@volatile.cache(cache_key, cache_storage)
-+def getFromBaseSchema(baseSchema):
-+    attrs = copySchemaAttrs(baseSchema)
-+    ttwschema = get_ttw_edited_schema()
-+    if ttwschema:
-+        attrs.update(copySchemaAttrs(ttwschema))
-+    schema = SchemaClass(SCHEMATA_KEY,
-+                         bases=(baseSchema,),
-+                         attrs=attrs)
-+    finalizeSchemas(schema)
-+    return schema
-+
-+
-+def copySchemaAttrs(schema):
-+    return dict([(a, copy.deepcopy(schema[a])) for a in schema])
-diff --git a/plone/app/users/browser/schemaprovider.py b/plone/app/users/browser/schemaprovider.py
-deleted file mode 100644
-index 783c878..0000000
---- a/plone/app/users/browser/schemaprovider.py
-+++ /dev/null
-@@ -1,76 +0,0 @@
--import copy
--from zope.interface import implements
--from zope.component import provideAdapter
--from plone.memoize import volatile
--from plone.supermodel.model import finalizeSchemas, SchemaClass
--from Products.CMFPlone.interfaces import IPloneSiteRoot
--
--from .userdatapanel import UserDataPanelAdapter
--from .account import AccountPanelSchemaAdapter
--from .schemaeditor import copy_schema
--
--from .schemaeditor import (
--    SCHEMATA_KEY,
--    get_ttw_edited_schema,
--    model_key,
--    CACHE_CONTAINER)
--from plone.app.users.schema import (
--    IUserDataSchema,
--    ICombinedRegisterSchema,
--    IUserDataSchemaProvider,
--    IRegisterSchemaProvider)
--
--
--class BaseMemberSchemaProvider(object):
--    """Base mixin class for members schema providers
--    """
--
--    @volatile.cache(lambda *args, **kw: "%s-%s" % (model_key(), args),
--                    lambda *args: CACHE_CONTAINER)
--    def getSchema(self):
+     def __call__(self):
 -        """
+-        Install products by running the default import steps
+-        XXX: is this running all profiles?
 -        """
--        def copySchemaAttrs(schema):
--            return dict([(a, copy.deepcopy(schema[a])) for a in schema])
--
--        attrs = copySchemaAttrs(self.baseSchema)
--        ttwschema = get_ttw_edited_schema()
--        if ttwschema:
--            attrs.update(copySchemaAttrs(ttwschema))
--        schema = SchemaClass(SCHEMATA_KEY,
--                             bases=(self.baseSchema,),
--                             attrs=attrs)
--        finalizeSchemas(schema)
--        return schema
--
--
--class UserDataSchemaProvider(BaseMemberSchemaProvider):
--    implements(IUserDataSchemaProvider)
--    baseSchema = IUserDataSchema
--
--    def getSchema(self):
--        schema = super(UserDataSchemaProvider, self).getSchema()
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
--        return schema
--
--    def getCopyOfSchema(self):
--        schema = self.getSchema()
--        copy = copy_schema(schema, filter_serializable=True)
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), copy)
--        return copy
--
--
--class RegisterSchemaProvider(BaseMemberSchemaProvider):
--    implements(IRegisterSchemaProvider)
--    baseSchema = ICombinedRegisterSchema
--
--    def getSchema(self):
--        schema = super(RegisterSchemaProvider, self).getSchema()
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
--        return schema
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index bbba4c0..282159e 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -1,8 +1,10 @@
- # -*- coding: utf-8 -*-
- from zope.component import getUtility
-+from zope.component import provideAdapter
- from zope.interface import Interface
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.utils import set_own_login_name
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-@@ -11,16 +13,17 @@
- from plone.autoform.interfaces import OMITTED_KEY
- from plone.registry.interfaces import IRegistry
+-        setupTool = getToolByName(self.context, 'portal_setup')
+-        profiles = self.request.get('install_products')
++        qi = getToolByName(self.context, 'portal_quickinstaller')
++        products = self.request.get('install_products')
+         msg_type = 'info'
+-        if profiles:
++        if products:
+             messages = IStatusMessage(self.request)
+-            for profile in profiles:
+-                # TODO: find out where this is and don't run already
+-                # activated profiles
+-                setupTool.runAllImportStepsFromProfile(profile)
+-                msg = _(u'Installed ${product}!', mapping={'product': profile})
++            for product in products:
++                qi.installProducts(products=[product, ])
++                msg = _(u'Installed ${product}!', mapping={'product': product})
+                 messages.addStatusMessage(msg, type=msg_type)
  
--from ..schema import IUserDataSchemaProvider, IUserDataSchema
-+from ..schema import IUserDataSchema
-+from .schemaeditor import getFromBaseSchema
+         purl = getToolByName(self.context, 'portal_url')()
+@@ -225,7 +219,6 @@ def __call__(self):
  
- 
- class UserDataPanelAdapter(AccountPanelSchemaAdapter):
-     """One does not simply set portrait, email might be used to login with.
-     """
- 
--    def __init__(self, *args, **kwargs):
--        super(UserDataPanelAdapter, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IUserDataSchemaProvider).getSchema()
-+    @property
-+    def schema(self):
-+        return getUserDataSchema()
- 
-     def get_email(self):
-         return self._getProperty('email')
-@@ -46,9 +49,10 @@ class UserDataPanel(AccountPanelForm):
-     form_name = _(u'User Data Form')
-     enableCSRFProtection = True
- 
--    def __init__(self, *args, **kwargs):
--        super(UserDataPanel, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IUserDataSchemaProvider).getSchema()
-+    @property
-+    def schema(self):
-+        schema = getUserDataSchema()
-+        return schema
- 
-     def updateFields(self):
-         """Fields are dynamic in this form
-@@ -98,6 +102,14 @@ def __call__(self):
-         return super(UserDataPanel, self).__call__()
- 
- 
-+def getUserDataSchema():
-+    schema = getFromBaseSchema(IUserDataSchema)
-+    # as schema is a generated supermodel,
-+    # needed adapters can only be registered at run time
-+    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-+    return schema
-+
-+
- class UserDataConfiglet(UserDataPanel):
-     """Control panel version of the userdata panel"""
-     template = ViewPageTemplateFile('account-configlet.pt')
-diff --git a/plone/app/users/schema.py b/plone/app/users/schema.py
-index 7e8a3d7..2740523 100644
---- a/plone/app/users/schema.py
-+++ b/plone/app/users/schema.py
-@@ -184,21 +184,6 @@ class IRegistrationSettingsSchema(Interface):
-     )
- 
- 
--class IUserDataSchemaProvider(Interface):
--    """
--    """
--
--    def getSchema():
--        """
--        Return base user schema + TTW Fields
--        """
--
-+class IUserSchemaProvider(Interface):
- 
--class IRegisterSchemaProvider(Interface):
--    """
--    """
--
--    def getSchema():
--        """
--        Return base register schema + TTW Fields
--        """
-+    pass
-diff --git a/plone/app/users/tests/test_exportimport.py b/plone/app/users/tests/test_exportimport.py
-index 2780fac..40a2335 100644
---- a/plone/app/users/tests/test_exportimport.py
-+++ b/plone/app/users/tests/test_exportimport.py
-@@ -2,12 +2,11 @@
- from Products.GenericSetup.tests.common import DummyImportContext
- from Products.GenericSetup.tests.common import DummyExportContext
- from plone.app.testing.bbb import PloneTestCase
--from plone.app.users.schema import IUserDataSchemaProvider
-+from plone.app.users.browser.userdatapanel import getUserDataSchema
- from plone.app.users.setuphandlers import import_schema, export_schema
- from plone.app.users.testing import PLONE_APP_USERS_FUNCTIONAL_TESTING
- from plone.namedfile.field import NamedBlobImage
- from zope import schema
--from zope.component import getUtility
- 
- 
- class TestImport(PloneTestCase):
-@@ -103,7 +102,7 @@ def afterSetUp(self):
-         import_schema(context)
- 
-     def test_import(self):
--        user_schema = getUtility(IUserDataSchemaProvider).getSchema()
-+        user_schema = getUserDataSchema()
-         pm = getToolByName(self.portal, "portal_memberdata")
-         member_properties = pm.propertyIds()
- 
-@@ -163,7 +162,6 @@ def test_import(self):
-         self.assertIn("vegetarian", member_properties)
-         self.assertEqual(pm.getPropertyType('vegetarian'), 'boolean')
- 
--
-     def test_export(self):
-         context = DummyExportContext(self.portal)
-         export_schema(context)
-diff --git a/plone/app/users/vocabularies.py b/plone/app/users/vocabularies.py
-index 62aaa4d..7b9648a 100644
---- a/plone/app/users/vocabularies.py
-+++ b/plone/app/users/vocabularies.py
-@@ -5,14 +5,13 @@
- from Products.CMFPlone.utils import normalizeString
- from Products.CMFPlone.utils import safe_unicode
- from zope.interface import implements
--from zope.component import getUtility
- from zope.schema import getFieldNames
- from zope.schema.interfaces import IVocabularyFactory
- from zope.schema.vocabulary import SimpleVocabulary
- from zope.schema.vocabulary import SimpleTerm
- from zope.site.hooks import getSite
- 
--from .schema import IRegisterSchemaProvider
-+from browser.register import getRegisterSchema
- 
- # Define constants from the Join schema that should be added to the
- # vocab of the join fields setting in usergroupssettings controlpanel.
-@@ -49,8 +48,7 @@ class UserRegistrationFieldsVocabulary(object):
- 
-     def __call__(self, context):
-         # default list of Registration Form fields
--        util = getUtility(IRegisterSchemaProvider)
--        schema = util.getSchema()
-+        schema = getRegisterSchema()
-         values = getFieldNames(schema)
- 
-         # make sure required minimum number of fields is present
+ class UninstallProductsView(BrowserView):
+     def __call__(self):
+-        # XXX: Need to call the uninstall profile
+         qi = getToolByName(self.context, 'portal_quickinstaller')
+         products = self.request.get('uninstall_products')
+         msg_type = 'info'
 
 
-Repository: plone.app.users
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-07-26T17:04:17+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/0476f8dbbd0f73cd6d9be914d678932a60537a1d
+Date: 2015-07-27T09:55:22+02:00
+Author: Roel Bruggink (jaroel) <roel@jaroel.nl>
+Commit: https://github.com/plone/Products.CMFPlone/commit/c137ff73c0a5c54c5721bd1cd5f3adef1160b1c4
 
-get rid of useless registration
+Merge pull request #444 from plone/datakurre-restore-installproducts
 
-Files changed:
-M plone/app/users/browser/configure.zcml
-
-diff --git a/plone/app/users/browser/configure.zcml b/plone/app/users/browser/configure.zcml
-index e508679..68f656e 100644
---- a/plone/app/users/browser/configure.zcml
-+++ b/plone/app/users/browser/configure.zcml
-@@ -88,11 +88,7 @@
-       for="plone.app.layout.navigation.interfaces.INavigationRoot"
-       factory=".personalpreferences.PersonalPreferencesPanelAdapter"
-       />
--    <adapter
--      provides="..schema.IUserDataSchema"
--      for="plone.app.layout.navigation.interfaces.INavigationRoot"
--      factory=".userdatapanel.UserDataPanelAdapter"
--      />
-+
-     <adapter
-       provides=".passwordpanel.IPasswordSchema"
-       for="plone.app.layout.navigation.interfaces.INavigationRoot"
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2015-07-26T17:04:28+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/53345a932edbe4a4de1072f2bc299d85d82a16b8
-
-do not delete portrait if it is already default
+Revert removal of portal_quickinstaller.installProducts
 
 Files changed:
-M plone/app/users/browser/account.py
+M CHANGES.rst
+M Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+M Products/CMFPlone/controlpanel/browser/quickinstaller.py
 
-diff --git a/plone/app/users/browser/account.py b/plone/app/users/browser/account.py
-index 6e75c46..411e335 100644
---- a/plone/app/users/browser/account.py
-+++ b/plone/app/users/browser/account.py
-@@ -38,6 +38,11 @@
-                u"name. Please choose another."))
+diff --git a/CHANGES.rst b/CHANGES.rst
+index e4ada32..b289b53 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+ 5.0b4 (unreleased)
+ ----------------
  
- 
-+def isDefaultPortrait(value, portal):
-+    default_portrait_value = getattr(portal, default_portrait, None)
-+    return aq_inner(value) == aq_inner(default_portrait_value)
++- Fix add-ons to be installed using CMFQuickInstaller (restore support
++  for Extensions/Install.py)
++  [datakurre]
 +
-+
- class AccountPanelSchemaAdapter(object):
-     """Data manager that gets and sets any property mentioned
-        in the schema to the property sheet
-@@ -94,22 +99,26 @@ def __setattr__(self, name, value):
+ - Rename showEditableBorder to showToolbar and deprecate using
+   disable_border and enable_border for enable_toolbar and disable_toolbar
+   [vangheem]
+diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+index 1d3d1ed..d0ccf1d 100644
+--- a/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
++++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.pt
+@@ -131,7 +131,7 @@
+                 <form action="install_products" method="post" class="pull-right">
+                    <input type="hidden"
+                            name="install_products:list"
+-                           tal:attributes="value string:profile-${product/install_profile/id};" />
++                           tal:attributes="value pid;" />
+                    <span i18n:translate="label_product_install_action">
+                       <span i18n:name="install_button">
+                          <input class="context"
+diff --git a/Products/CMFPlone/controlpanel/browser/quickinstaller.py b/Products/CMFPlone/controlpanel/browser/quickinstaller.py
+index ea73ec7..a5ce2f8 100644
+--- a/Products/CMFPlone/controlpanel/browser/quickinstaller.py
++++ b/Products/CMFPlone/controlpanel/browser/quickinstaller.py
+@@ -203,20 +203,14 @@ def __call__(self):
+ class InstallProductsView(BrowserView):
  
-         return self._setProperty(name, value)
- 
-+    @property
-+    def portal(self):
-+        return getToolByName(self.context, 'portal_url').getPortalObject()
-+
-     def get_portrait(self):
-         """If user has default portrait, return none"""
--        portal = getToolByName(self.context, 'portal_url').getPortalObject()
-         mt = getToolByName(self.context, 'portal_membership')
-         value = mt.getPersonalPortrait(self.context.getId())
--        if aq_inner(value) == aq_inner(getattr(portal,
--                                               default_portrait,
--                                               None)):
-+        if isDefaultPortrait(value, self.portal):
-             return None
-         return NamedBlobImage(value.data, contentType=value.content_type,
-                               filename=getattr(value, 'filename', None))
- 
-     def set_portrait(self, value):
-         mt = getToolByName(self.context, 'portal_membership')
-+        member_id = self.context.getId()
-         if value is None:
--            mt.deletePersonalPortrait(str(self.context.getId()))
-+            previous = mt.getPersonalPortrait(member_id)
-+            if not isDefaultPortrait(previous, self.portal):
-+                mt.deletePersonalPortrait(str(member_id))
-         else:
-             portrait_file = value.open()
-             portrait_file.filename = value.filename
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2015-07-26T17:04:39+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/3b53dcc370761b7a672acc08b313466969a0aeae
-
-disable caching of schema
-
-cache key and/or invalidation is broken
-
-it breaks test suite and avoids making some clean up
-
-Files changed:
-M plone/app/users/browser/schemaeditor.py
-
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index cb5b05b..9edaf91 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -332,7 +332,7 @@ def cache_key(fun, *args, **kw):
-     return "%s-%s" % (model_key(), args)
- 
- 
--@volatile.cache(cache_key, cache_storage)
-+# @volatile.cache(cache_key, cache_storage)
- def getFromBaseSchema(baseSchema):
-     attrs = copySchemaAttrs(baseSchema)
-     ttwschema = get_ttw_edited_schema()
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2015-07-26T17:04:47+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/f9216474ca92483042119fc5aa470a37dc232fc5
-
-copy of schema and provideAdapter are useless
-
-were needed because of broken schema cache
-
-Files changed:
-M plone/app/users/browser/schemaeditor.py
-
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index 9edaf91..a43bf5d 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -3,13 +3,11 @@
- import logging
- import hashlib
- 
--from zope.component import provideAdapter
- from zope.component.hooks import getSite
- from zope.annotation.interfaces import IAnnotations
- from zope.interface import Interface, implements
- 
- from Products.CMFPlone import PloneMessageFactory as _
--from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-@@ -93,31 +91,6 @@ class SchemaListingPage(FormWrapper):
-     index = ViewPageTemplateFile('schema_layout.pt')
- 
- 
--def copy_schema(schema, filter_serializable=False):
--    fields = {}
--    for item in schema:
--        if (filter_serializable and not is_serialisable_field(schema[item])):
--            continue
--        fields[item] = schema[item]
--    oschema = SchemaClass(SCHEMATA_KEY, attrs=fields)
--    # copy base tagged values
--    for i in schema.getTaggedValueTags():
--        oschema.setTaggedValue(
--            item, schema.queryTaggedValue(i))
--    finalizeSchemas(oschema)
--    return oschema
--
--
--def getCopyOfUserDataSchema():
--    schema = getFromBaseSchema(IUserDataSchema)
--    copy = copy_schema(schema, filter_serializable=True)
--    # as schema is a generated supermodel,
--    # needed adapters can only be registered at run time
--    from .userdatapanel import UserDataPanelAdapter
--    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), copy)
--    return copy
--
--
- class MemberSchemaContext(SchemaContext):
-     implements(IMemberSchemaContext)
- 
-@@ -129,7 +102,7 @@ def __init__(self, context, request):
-         self.enableFieldsets = False
-         self.allowedFields = ALLOWED_FIELDS
- 
--        schema = getCopyOfUserDataSchema()
-+        schema = getFromBaseSchema(IUserDataSchema)
-         super(MemberSchemaContext, self).__init__(
-             schema,
-             request,
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2015-07-26T17:04:57+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/c351cdec6681d127e9ead6e34f19e24722fbec20
-
-refactor fields filtering
-
-less code
-
-Files changed:
-M plone/app/users/browser/register.py
-M plone/app/users/browser/schemaeditor.py
-M plone/app/users/browser/userdatapanel.py
-M plone/app/users/vocabularies.py
-
-diff --git a/plone/app/users/browser/register.py b/plone/app/users/browser/register.py
-index 65364b9..68bbd76 100644
---- a/plone/app/users/browser/register.py
-+++ b/plone/app/users/browser/register.py
-@@ -50,7 +50,10 @@
- 
- 
- def getRegisterSchema():
--    schema = getFromBaseSchema(ICombinedRegisterSchema)
-+    schema = getFromBaseSchema(
-+        ICombinedRegisterSchema,
-+        form_name=u'On Registration'
-+    )
-     # as schema is a generated supermodel,
-     # needed adapters can only be registered at run time
-     provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-@@ -91,23 +94,6 @@ def updateFields(self):
-         settings = self._get_security_settings()
-         use_email_as_login = settings.use_email_as_login
- 
--        # Filter schema for registration
--        omitted = []
--        default_fields = IUserDataSchema.names() + IRegisterSchema.names()
--        for name in self.schema:
--            # we always preserve default fields
--            if name in default_fields:
--                omit = False
--            else:
--                forms_selection = getattr(
--                    self.schema[name], 'forms_selection', [])
--                if u'On Registration' in forms_selection:
--                    omit = False
--                else:
--                    omit = True
--            omitted.append((Interface, name, omit))
--        self.schema.setTaggedValue(OMITTED_KEY, omitted)
--
-         # Finally, let autoform process the schema and any FormExtenders do
-         # their thing
-         super(BaseRegistrationForm, self).updateFields()
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index a43bf5d..66c3e80 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -11,7 +11,7 @@
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
--from plone.memoize import volatile
-+# from plone.memoize import volatile
- from plone.schemaeditor.browser.schema.traversal import SchemaContext
- from plone.schemaeditor.browser.schema.listing import SchemaListing
- from plone.supermodel.model import Model, finalizeSchemas, SchemaClass
-@@ -23,6 +23,7 @@
- 
- from ..schema import (
-     IUserDataSchema,
-+    IRegisterSchema,
-     SCHEMA_ANNOTATION,
-     SCHEMATA_KEY,
- )
-@@ -306,11 +307,11 @@ def cache_key(fun, *args, **kw):
- 
- 
- # @volatile.cache(cache_key, cache_storage)
--def getFromBaseSchema(baseSchema):
--    attrs = copySchemaAttrs(baseSchema)
-+def getFromBaseSchema(baseSchema, form_name=None):
-+    attrs = copySchemaAttrs(baseSchema, form_name)
-     ttwschema = get_ttw_edited_schema()
-     if ttwschema:
--        attrs.update(copySchemaAttrs(ttwschema))
-+        attrs.update(copySchemaAttrs(ttwschema, form_name))
-     schema = SchemaClass(SCHEMATA_KEY,
-                          bases=(baseSchema,),
-                          attrs=attrs)
-@@ -318,5 +319,21 @@ def getFromBaseSchema(baseSchema):
-     return schema
- 
- 
--def copySchemaAttrs(schema):
--    return dict([(a, copy.deepcopy(schema[a])) for a in schema])
-+def copySchemaAttrs(schema, form_name):
-+    return dict([
-+        (a, copy.deepcopy(schema[a]))
-+        for a in schema
-+        if field_in_form(schema[a], form_name)
-+    ])
-+
-+
-+default_fields = IUserDataSchema.names() + IRegisterSchema.names()
-+
-+
-+def field_in_form(field, form_name=None):
-+    if form_name is None:
-+        return True
-+    if field.__name__ in default_fields:
-+        return True
-+    forms_selection = getattr(field, 'forms_selection', [])
-+    return form_name in forms_selection
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index 282159e..1978aab 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -1,7 +1,6 @@
- # -*- coding: utf-8 -*-
- from zope.component import getUtility
- from zope.component import provideAdapter
--from zope.interface import Interface
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
- from Products.CMFPlone.interfaces import IPloneSiteRoot
-@@ -10,7 +9,6 @@
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from plone.app.users.browser.account import AccountPanelForm
- from plone.app.users.browser.account import AccountPanelSchemaAdapter
--from plone.autoform.interfaces import OMITTED_KEY
- from plone.registry.interfaces import IRegistry
- 
- from ..schema import IUserDataSchema
-@@ -54,31 +52,6 @@ def schema(self):
-         schema = getUserDataSchema()
-         return schema
- 
--    def updateFields(self):
--        """Fields are dynamic in this form
+     def __call__(self):
 -        """
--
--        # Filter schema for user profile
--        omitted = []
--        default_fields = IUserDataSchema.names()
--        for name in self.schema:
--            # we always preserve default fields
--            if name in default_fields:
--                omit = False
--            else:
--                forms_selection = getattr(
--                    self.schema[name], 'forms_selection', [])
--                if u'In User Profile' in forms_selection:
--                    omit = False
--                else:
--                    omit = True
--            omitted.append((Interface, name, omit))
--        self.schema.setTaggedValue(OMITTED_KEY, omitted)
--
--        # Finally, let autoform process the schema and any FormExtenders do
--        # their thing
--        super(AccountPanelForm, self).updateFields()
--
-     @property
-     def description(self):
-         userid = self.request.form.get('userid')
-@@ -103,7 +76,10 @@ def __call__(self):
- 
- 
- def getUserDataSchema():
--    schema = getFromBaseSchema(IUserDataSchema)
-+    schema = getFromBaseSchema(
-+        IUserDataSchema,
-+        form_name=u'In User Profile'
-+    )
-     # as schema is a generated supermodel,
-     # needed adapters can only be registered at run time
-     provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-diff --git a/plone/app/users/vocabularies.py b/plone/app/users/vocabularies.py
-index 7b9648a..9942c1b 100644
---- a/plone/app/users/vocabularies.py
-+++ b/plone/app/users/vocabularies.py
-@@ -11,7 +11,8 @@
- from zope.schema.vocabulary import SimpleTerm
- from zope.site.hooks import getSite
- 
--from browser.register import getRegisterSchema
-+from browser.schemaeditor import getFromBaseSchema
-+from .schema import ICombinedRegisterSchema
- 
- # Define constants from the Join schema that should be added to the
- # vocab of the join fields setting in usergroupssettings controlpanel.
-@@ -48,7 +49,7 @@ class UserRegistrationFieldsVocabulary(object):
- 
-     def __call__(self, context):
-         # default list of Registration Form fields
--        schema = getRegisterSchema()
-+        schema = getFromBaseSchema(ICombinedRegisterSchema)
-         values = getFieldNames(schema)
- 
-         # make sure required minimum number of fields is present
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2015-07-26T22:34:31+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.users/commit/08892f61668e9f9a31b130bcf20fae90cdd51281
-
-Merge pull request #46 from plone/gotcha-cleanup
-
-Remove useless utilities
-
-Simplify adapter registrations
-
-Files changed:
-M plone/app/users/browser/account.py
-M plone/app/users/browser/configure.zcml
-M plone/app/users/browser/register.py
-M plone/app/users/browser/schemaeditor.py
-M plone/app/users/browser/userdatapanel.py
-M plone/app/users/schema.py
-M plone/app/users/tests/test_exportimport.py
-M plone/app/users/vocabularies.py
-D plone/app/users/browser/schemaprovider.py
-
-diff --git a/plone/app/users/browser/account.py b/plone/app/users/browser/account.py
-index 6e75c46..411e335 100644
---- a/plone/app/users/browser/account.py
-+++ b/plone/app/users/browser/account.py
-@@ -38,6 +38,11 @@
-                u"name. Please choose another."))
- 
- 
-+def isDefaultPortrait(value, portal):
-+    default_portrait_value = getattr(portal, default_portrait, None)
-+    return aq_inner(value) == aq_inner(default_portrait_value)
-+
-+
- class AccountPanelSchemaAdapter(object):
-     """Data manager that gets and sets any property mentioned
-        in the schema to the property sheet
-@@ -94,22 +99,26 @@ def __setattr__(self, name, value):
- 
-         return self._setProperty(name, value)
- 
-+    @property
-+    def portal(self):
-+        return getToolByName(self.context, 'portal_url').getPortalObject()
-+
-     def get_portrait(self):
-         """If user has default portrait, return none"""
--        portal = getToolByName(self.context, 'portal_url').getPortalObject()
-         mt = getToolByName(self.context, 'portal_membership')
-         value = mt.getPersonalPortrait(self.context.getId())
--        if aq_inner(value) == aq_inner(getattr(portal,
--                                               default_portrait,
--                                               None)):
-+        if isDefaultPortrait(value, self.portal):
-             return None
-         return NamedBlobImage(value.data, contentType=value.content_type,
-                               filename=getattr(value, 'filename', None))
- 
-     def set_portrait(self, value):
-         mt = getToolByName(self.context, 'portal_membership')
-+        member_id = self.context.getId()
-         if value is None:
--            mt.deletePersonalPortrait(str(self.context.getId()))
-+            previous = mt.getPersonalPortrait(member_id)
-+            if not isDefaultPortrait(previous, self.portal):
-+                mt.deletePersonalPortrait(str(member_id))
-         else:
-             portrait_file = value.open()
-             portrait_file.filename = value.filename
-diff --git a/plone/app/users/browser/configure.zcml b/plone/app/users/browser/configure.zcml
-index ae9a07a..68f656e 100644
---- a/plone/app/users/browser/configure.zcml
-+++ b/plone/app/users/browser/configure.zcml
-@@ -88,23 +88,13 @@
-       for="plone.app.layout.navigation.interfaces.INavigationRoot"
-       factory=".personalpreferences.PersonalPreferencesPanelAdapter"
-       />
--    <adapter
--      provides="..schema.IUserDataSchema"
--      for="plone.app.layout.navigation.interfaces.INavigationRoot"
--      factory=".userdatapanel.UserDataPanelAdapter"
--      />
-+
-     <adapter
-       provides=".passwordpanel.IPasswordSchema"
-       for="plone.app.layout.navigation.interfaces.INavigationRoot"
-       factory=".passwordpanel.PasswordPanelAdapter"
-       />
- 
--    <utility provides="plone.app.users.schema.IUserDataSchemaProvider"
--             factory="plone.app.users.browser.schemaprovider.UserDataSchemaProvider"/>
--
--    <utility provides="plone.app.users.schema.IRegisterSchemaProvider"
--             factory="plone.app.users.browser.schemaprovider.RegisterSchemaProvider"/>
--
-     <subscriber
-         for="plone.app.users.browser.schemaeditor.IMemberSchemaContext
-              plone.schemaeditor.interfaces.ISchemaModifiedEvent"
-diff --git a/plone/app/users/browser/register.py b/plone/app/users/browser/register.py
-index c9978c1..68bbd76 100644
---- a/plone/app/users/browser/register.py
-+++ b/plone/app/users/browser/register.py
-@@ -4,6 +4,7 @@
- from Products.CMFCore.permissions import ManagePortal
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.utils import normalizeString
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-@@ -23,6 +24,7 @@
-     getUtility,
-     queryUtility,
-     getAdapter,
-+    provideAdapter,
-     getMultiAdapter)
- from zope.interface import Interface
- from zope.schema import getFieldNames
-@@ -30,7 +32,6 @@
- 
- from ..schema import (
-     IRegisterSchema,
--    IRegisterSchemaProvider,
-     IAddUserSchema,
-     ICombinedRegisterSchema,
-     IUserDataSchema)
-@@ -38,8 +39,8 @@
-     notifyWidgetActionExecutionError,
-     uuid_userid_generator,
- )
--
- from .account import AccountPanelSchemaAdapter
-+from .schemaeditor import getFromBaseSchema
- 
- from plone.app.users.browser.interfaces import ILoginNameGenerator
- from plone.app.users.browser.interfaces import IUserIdGenerator
-@@ -48,6 +49,17 @@
- RENAME_AFTER_CREATION_ATTEMPTS = 100
- 
- 
-+def getRegisterSchema():
-+    schema = getFromBaseSchema(
-+        ICombinedRegisterSchema,
-+        form_name=u'On Registration'
-+    )
-+    # as schema is a generated supermodel,
-+    # needed adapters can only be registered at run time
-+    provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
-+    return schema
-+
-+
- class BaseRegistrationForm(AutoExtensibleForm, form.Form):
-     """Form to be used as base for Register and Add User forms."""
-     label = u""
-@@ -60,9 +72,9 @@ class BaseRegistrationForm(AutoExtensibleForm, form.Form):
-     # this attribute indicates if user was successfully registered
-     _finishedRegister = False
- 
--    def __init__(self, *args, **kwargs):
--        super(BaseRegistrationForm, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IRegisterSchemaProvider).getSchema()
-+    @property
-+    def schema(self):
-+        return getRegisterSchema()
- 
-     def _get_security_settings(self):
-         """Return security settings from the registry."""
-@@ -82,23 +94,6 @@ def updateFields(self):
-         settings = self._get_security_settings()
-         use_email_as_login = settings.use_email_as_login
- 
--        # Filter schema for registration
--        omitted = []
--        default_fields = IUserDataSchema.names() + IRegisterSchema.names()
--        for name in self.schema:
--            # we always preserve default fields
--            if name in default_fields:
--                omit = False
--            else:
--                forms_selection = getattr(
--                    self.schema[name], 'forms_selection', [])
--                if u'On Registration' in forms_selection:
--                    omit = False
--                else:
--                    omit = True
--            omitted.append((Interface, name, omit))
--        self.schema.setTaggedValue(OMITTED_KEY, omitted)
--
-         # Finally, let autoform process the schema and any FormExtenders do
-         # their thing
-         super(BaseRegistrationForm, self).updateFields()
-diff --git a/plone/app/users/browser/schemaeditor.py b/plone/app/users/browser/schemaeditor.py
-index c63b3a3..66c3e80 100644
---- a/plone/app/users/browser/schemaeditor.py
-+++ b/plone/app/users/browser/schemaeditor.py
-@@ -1,8 +1,8 @@
-+import copy
- import re
- import logging
- import hashlib
- 
--from zope.component import getUtility
- from zope.component.hooks import getSite
- from zope.annotation.interfaces import IAnnotations
- from zope.interface import Interface, implements
-@@ -11,6 +11,7 @@
- from Products.CMFCore.utils import getToolByName
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-+# from plone.memoize import volatile
- from plone.schemaeditor.browser.schema.traversal import SchemaContext
- from plone.schemaeditor.browser.schema.listing import SchemaListing
- from plone.supermodel.model import Model, finalizeSchemas, SchemaClass
-@@ -20,13 +21,13 @@
- from plone.supermodel import loadString
- from plone.z3cform.layout import FormWrapper
- 
--from plone.app.users.schema import (
--    IUserDataSchemaProvider,
-+from ..schema import (
-+    IUserDataSchema,
-+    IRegisterSchema,
-     SCHEMA_ANNOTATION,
-     SCHEMATA_KEY,
- )
- 
--
- CACHE_CONTAINER = {}
- USERS_NAMESPACE = 'http://namespaces.plone.org/supermodel/users'
- USERS_PREFIX = 'users'
-@@ -91,32 +92,18 @@ class SchemaListingPage(FormWrapper):
-     index = ViewPageTemplateFile('schema_layout.pt')
- 
- 
--def copy_schema(schema, filter_serializable=False):
--    fields = {}
--    for item in schema:
--        if (filter_serializable and not is_serialisable_field(schema[item])):
--            continue
--        fields[item] = schema[item]
--    oschema = SchemaClass(SCHEMATA_KEY, attrs=fields)
--    # copy base tagged values
--    for i in schema.getTaggedValueTags():
--        oschema.setTaggedValue(
--            item, schema.queryTaggedValue(i))
--    finalizeSchemas(oschema)
--    return oschema
--
--
- class MemberSchemaContext(SchemaContext):
-     implements(IMemberSchemaContext)
- 
-     label = _(u"Edit Member Form Fields")
- 
-     def __init__(self, context, request):
--        schema = getUtility(IUserDataSchemaProvider).getCopyOfSchema()
-         self.fieldsWhichCannotBeDeleted = ['fullname', 'email']
-         self.showSaveDefaults = False
-         self.enableFieldsets = False
-         self.allowedFields = ALLOWED_FIELDS
-+
-+        schema = getFromBaseSchema(IUserDataSchema)
-         super(MemberSchemaContext, self).__init__(
-             schema,
-             request,
-@@ -277,8 +264,7 @@ def is_serialisable_field(field):
- def serialize_ttw_schema(schema=None):
-     if not schema:
-         schema = get_ttw_edited_schema()
--    bschema = getUtility(IUserDataSchemaProvider).baseSchema
--    bfields = [a for a in bschema]
-+    bfields = [a for a in IUserDataSchema]
-     attrs = {}
-     for name in schema:
-         f = schema[name]
-@@ -310,3 +296,44 @@ def set_schema(string, site=None):
-         site = getSite()
-     annotations = IAnnotations(site)
-     annotations[SCHEMA_ANNOTATION] = string
-+
-+
-+def cache_storage(fun, *args, **kwargs):
-+    return CACHE_CONTAINER
-+
-+
-+def cache_key(fun, *args, **kw):
-+    return "%s-%s" % (model_key(), args)
-+
-+
-+# @volatile.cache(cache_key, cache_storage)
-+def getFromBaseSchema(baseSchema, form_name=None):
-+    attrs = copySchemaAttrs(baseSchema, form_name)
-+    ttwschema = get_ttw_edited_schema()
-+    if ttwschema:
-+        attrs.update(copySchemaAttrs(ttwschema, form_name))
-+    schema = SchemaClass(SCHEMATA_KEY,
-+                         bases=(baseSchema,),
-+                         attrs=attrs)
-+    finalizeSchemas(schema)
-+    return schema
-+
-+
-+def copySchemaAttrs(schema, form_name):
-+    return dict([
-+        (a, copy.deepcopy(schema[a]))
-+        for a in schema
-+        if field_in_form(schema[a], form_name)
-+    ])
-+
-+
-+default_fields = IUserDataSchema.names() + IRegisterSchema.names()
-+
-+
-+def field_in_form(field, form_name=None):
-+    if form_name is None:
-+        return True
-+    if field.__name__ in default_fields:
-+        return True
-+    forms_selection = getattr(field, 'forms_selection', [])
-+    return form_name in forms_selection
-diff --git a/plone/app/users/browser/schemaprovider.py b/plone/app/users/browser/schemaprovider.py
-deleted file mode 100644
-index 783c878..0000000
---- a/plone/app/users/browser/schemaprovider.py
-+++ /dev/null
-@@ -1,76 +0,0 @@
--import copy
--from zope.interface import implements
--from zope.component import provideAdapter
--from plone.memoize import volatile
--from plone.supermodel.model import finalizeSchemas, SchemaClass
--from Products.CMFPlone.interfaces import IPloneSiteRoot
--
--from .userdatapanel import UserDataPanelAdapter
--from .account import AccountPanelSchemaAdapter
--from .schemaeditor import copy_schema
--
--from .schemaeditor import (
--    SCHEMATA_KEY,
--    get_ttw_edited_schema,
--    model_key,
--    CACHE_CONTAINER)
--from plone.app.users.schema import (
--    IUserDataSchema,
--    ICombinedRegisterSchema,
--    IUserDataSchemaProvider,
--    IRegisterSchemaProvider)
--
--
--class BaseMemberSchemaProvider(object):
--    """Base mixin class for members schema providers
--    """
--
--    @volatile.cache(lambda *args, **kw: "%s-%s" % (model_key(), args),
--                    lambda *args: CACHE_CONTAINER)
--    def getSchema(self):
+-        Install products by running the default import steps
+-        XXX: is this running all profiles?
 -        """
--        """
--        def copySchemaAttrs(schema):
--            return dict([(a, copy.deepcopy(schema[a])) for a in schema])
--
--        attrs = copySchemaAttrs(self.baseSchema)
--        ttwschema = get_ttw_edited_schema()
--        if ttwschema:
--            attrs.update(copySchemaAttrs(ttwschema))
--        schema = SchemaClass(SCHEMATA_KEY,
--                             bases=(self.baseSchema,),
--                             attrs=attrs)
--        finalizeSchemas(schema)
--        return schema
--
--
--class UserDataSchemaProvider(BaseMemberSchemaProvider):
--    implements(IUserDataSchemaProvider)
--    baseSchema = IUserDataSchema
--
--    def getSchema(self):
--        schema = super(UserDataSchemaProvider, self).getSchema()
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
--        return schema
--
--    def getCopyOfSchema(self):
--        schema = self.getSchema()
--        copy = copy_schema(schema, filter_serializable=True)
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), copy)
--        return copy
--
--
--class RegisterSchemaProvider(BaseMemberSchemaProvider):
--    implements(IRegisterSchemaProvider)
--    baseSchema = ICombinedRegisterSchema
--
--    def getSchema(self):
--        schema = super(RegisterSchemaProvider, self).getSchema()
--        # as schema is a generated supermodel,
--        # needed adapters can only be registered at run time
--        provideAdapter(AccountPanelSchemaAdapter, (IPloneSiteRoot,), schema)
--        return schema
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index bbba4c0..1978aab 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -1,26 +1,27 @@
- # -*- coding: utf-8 -*-
- from zope.component import getUtility
--from zope.interface import Interface
-+from zope.component import provideAdapter
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPloneSiteRoot
- from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.utils import set_own_login_name
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from plone.app.users.browser.account import AccountPanelForm
- from plone.app.users.browser.account import AccountPanelSchemaAdapter
--from plone.autoform.interfaces import OMITTED_KEY
- from plone.registry.interfaces import IRegistry
+-        setupTool = getToolByName(self.context, 'portal_setup')
+-        profiles = self.request.get('install_products')
++        qi = getToolByName(self.context, 'portal_quickinstaller')
++        products = self.request.get('install_products')
+         msg_type = 'info'
+-        if profiles:
++        if products:
+             messages = IStatusMessage(self.request)
+-            for profile in profiles:
+-                # TODO: find out where this is and don't run already
+-                # activated profiles
+-                setupTool.runAllImportStepsFromProfile(profile)
+-                msg = _(u'Installed ${product}!', mapping={'product': profile})
++            for product in products:
++                qi.installProducts(products=[product, ])
++                msg = _(u'Installed ${product}!', mapping={'product': product})
+                 messages.addStatusMessage(msg, type=msg_type)
  
--from ..schema import IUserDataSchemaProvider, IUserDataSchema
-+from ..schema import IUserDataSchema
-+from .schemaeditor import getFromBaseSchema
+         purl = getToolByName(self.context, 'portal_url')()
+@@ -225,7 +219,6 @@ def __call__(self):
  
- 
- class UserDataPanelAdapter(AccountPanelSchemaAdapter):
-     """One does not simply set portrait, email might be used to login with.
-     """
- 
--    def __init__(self, *args, **kwargs):
--        super(UserDataPanelAdapter, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IUserDataSchemaProvider).getSchema()
-+    @property
-+    def schema(self):
-+        return getUserDataSchema()
- 
-     def get_email(self):
-         return self._getProperty('email')
-@@ -46,34 +47,10 @@ class UserDataPanel(AccountPanelForm):
-     form_name = _(u'User Data Form')
-     enableCSRFProtection = True
- 
--    def __init__(self, *args, **kwargs):
--        super(UserDataPanel, self).__init__(*args, **kwargs)
--        self.schema = getUtility(IUserDataSchemaProvider).getSchema()
--
--    def updateFields(self):
--        """Fields are dynamic in this form
--        """
--
--        # Filter schema for user profile
--        omitted = []
--        default_fields = IUserDataSchema.names()
--        for name in self.schema:
--            # we always preserve default fields
--            if name in default_fields:
--                omit = False
--            else:
--                forms_selection = getattr(
--                    self.schema[name], 'forms_selection', [])
--                if u'In User Profile' in forms_selection:
--                    omit = False
--                else:
--                    omit = True
--            omitted.append((Interface, name, omit))
--        self.schema.setTaggedValue(OMITTED_KEY, omitted)
--
--        # Finally, let autoform process the schema and any FormExtenders do
--        # their thing
--        super(AccountPanelForm, self).updateFields()
-+    @property
-+    def schema(self):
-+        schema = getUserDataSchema()
-+        return schema
- 
-     @property
-     def description(self):
-@@ -98,6 +75,17 @@ def __call__(self):
-         return super(UserDataPanel, self).__call__()
- 
- 
-+def getUserDataSchema():
-+    schema = getFromBaseSchema(
-+        IUserDataSchema,
-+        form_name=u'In User Profile'
-+    )
-+    # as schema is a generated supermodel,
-+    # needed adapters can only be registered at run time
-+    provideAdapter(UserDataPanelAdapter, (IPloneSiteRoot,), schema)
-+    return schema
-+
-+
- class UserDataConfiglet(UserDataPanel):
-     """Control panel version of the userdata panel"""
-     template = ViewPageTemplateFile('account-configlet.pt')
-diff --git a/plone/app/users/schema.py b/plone/app/users/schema.py
-index 7e8a3d7..2740523 100644
---- a/plone/app/users/schema.py
-+++ b/plone/app/users/schema.py
-@@ -184,21 +184,6 @@ class IRegistrationSettingsSchema(Interface):
-     )
- 
- 
--class IUserDataSchemaProvider(Interface):
--    """
--    """
--
--    def getSchema():
--        """
--        Return base user schema + TTW Fields
--        """
--
-+class IUserSchemaProvider(Interface):
- 
--class IRegisterSchemaProvider(Interface):
--    """
--    """
--
--    def getSchema():
--        """
--        Return base register schema + TTW Fields
--        """
-+    pass
-diff --git a/plone/app/users/tests/test_exportimport.py b/plone/app/users/tests/test_exportimport.py
-index 2780fac..40a2335 100644
---- a/plone/app/users/tests/test_exportimport.py
-+++ b/plone/app/users/tests/test_exportimport.py
-@@ -2,12 +2,11 @@
- from Products.GenericSetup.tests.common import DummyImportContext
- from Products.GenericSetup.tests.common import DummyExportContext
- from plone.app.testing.bbb import PloneTestCase
--from plone.app.users.schema import IUserDataSchemaProvider
-+from plone.app.users.browser.userdatapanel import getUserDataSchema
- from plone.app.users.setuphandlers import import_schema, export_schema
- from plone.app.users.testing import PLONE_APP_USERS_FUNCTIONAL_TESTING
- from plone.namedfile.field import NamedBlobImage
- from zope import schema
--from zope.component import getUtility
- 
- 
- class TestImport(PloneTestCase):
-@@ -103,7 +102,7 @@ def afterSetUp(self):
-         import_schema(context)
- 
-     def test_import(self):
--        user_schema = getUtility(IUserDataSchemaProvider).getSchema()
-+        user_schema = getUserDataSchema()
-         pm = getToolByName(self.portal, "portal_memberdata")
-         member_properties = pm.propertyIds()
- 
-@@ -163,7 +162,6 @@ def test_import(self):
-         self.assertIn("vegetarian", member_properties)
-         self.assertEqual(pm.getPropertyType('vegetarian'), 'boolean')
- 
--
-     def test_export(self):
-         context = DummyExportContext(self.portal)
-         export_schema(context)
-diff --git a/plone/app/users/vocabularies.py b/plone/app/users/vocabularies.py
-index 62aaa4d..9942c1b 100644
---- a/plone/app/users/vocabularies.py
-+++ b/plone/app/users/vocabularies.py
-@@ -5,14 +5,14 @@
- from Products.CMFPlone.utils import normalizeString
- from Products.CMFPlone.utils import safe_unicode
- from zope.interface import implements
--from zope.component import getUtility
- from zope.schema import getFieldNames
- from zope.schema.interfaces import IVocabularyFactory
- from zope.schema.vocabulary import SimpleVocabulary
- from zope.schema.vocabulary import SimpleTerm
- from zope.site.hooks import getSite
- 
--from .schema import IRegisterSchemaProvider
-+from browser.schemaeditor import getFromBaseSchema
-+from .schema import ICombinedRegisterSchema
- 
- # Define constants from the Join schema that should be added to the
- # vocab of the join fields setting in usergroupssettings controlpanel.
-@@ -49,8 +49,7 @@ class UserRegistrationFieldsVocabulary(object):
- 
-     def __call__(self, context):
-         # default list of Registration Form fields
--        util = getUtility(IRegisterSchemaProvider)
--        schema = util.getSchema()
-+        schema = getFromBaseSchema(ICombinedRegisterSchema)
-         values = getFieldNames(schema)
- 
-         # make sure required minimum number of fields is present
+ class UninstallProductsView(BrowserView):
+     def __call__(self):
+-        # XXX: Need to call the uninstall profile
+         qi = getToolByName(self.context, 'portal_quickinstaller')
+         products = self.request.get('uninstall_products')
+         msg_type = 'info'
 
 
