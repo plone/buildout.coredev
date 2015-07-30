@@ -1,28 +1,360 @@
-Repository: plone.app.linkintegrity
+Repository: Products.CMFDiffTool
 
 
-Branch: refs/heads/1.5.x
-Date: 2015-07-30T13:49:23+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/5a59ca1509242004784a36095c1e97c431944cc9
+Branch: refs/heads/2.1.x
+Date: 2015-06-30T11:10:32+02:00
+Author: Cédric Messiant (cedricmessiant) <cedricmessiant@ecreall.com>
+Commit: https://github.com/plone/Products.CMFDiffTool/commit/cf7fad4192bd4b49a0263379cca3228b103b90ba
 
-fix test in python2.6
+Fix: Provide diff for dexterity behaviors' fields
 
 Files changed:
-M plone/app/linkintegrity/browser/update.py
+M CHANGES.txt
+M Products/CMFDiffTool/dexteritydiff.py
+M Products/CMFDiffTool/tests/test_dexteritydiff.py
 
-diff --git a/plone/app/linkintegrity/browser/update.py b/plone/app/linkintegrity/browser/update.py
-index 2c92872..6916d49 100644
---- a/plone/app/linkintegrity/browser/update.py
-+++ b/plone/app/linkintegrity/browser/update.py
-@@ -50,7 +50,7 @@ def __call__(self):
-                 mapping={'count': count, 'time': str(duration)},
-             )
-             IStatusMessage(request).add(msg, type='info')
--            msg = 'Updated {} items in {} seconds'.format(count, str(duration))
-+            msg = 'Updated {0} items in {1} seconds'.format(count, str(duration))
-             logger.info(msg)
-             request.RESPONSE.redirect(getToolByName(context, 'portal_url')())
-         elif clicked('cancel'):
+diff --git a/CHANGES.txt b/CHANGES.txt
+index 7e974a8..b4237b5 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.1 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- Provide diff for dexterity behaviors' fields.
++  [cedricmessiant]
+ 
+ 
+ 2.1 (2013-05-26)
+diff --git a/Products/CMFDiffTool/dexteritydiff.py b/Products/CMFDiffTool/dexteritydiff.py
+index 72219e0..bdec37a 100644
+--- a/Products/CMFDiffTool/dexteritydiff.py
++++ b/Products/CMFDiffTool/dexteritydiff.py
+@@ -5,6 +5,7 @@
+ 
+ from plone.app.textfield import RichText
+ from plone.autoform.base import AutoFields
++from plone.dexterity.browser.edit import DefaultEditForm
+ 
+ from Products.CMFDiffTool.TextDiff import AsTextDiff
+ from Products.CMFDiffTool.namedfile import NamedFileBinaryDiff
+@@ -87,27 +88,16 @@ def _diff(self, obj1, obj2):
+ 
+         Return: a sequence of `IDifference` objects.
+         """
+-        (default_schema, additional_schemata) = get_schemas(obj1)
+-        diffs = self._diff_schema(obj1, obj2, default_schema, 'default')
+ 
+-        for schema in additional_schemata:
+-            diffs.extend(self._diff_schema(obj1, obj2, schema, 'metadata'))
++        diffs = []
++        for field, field_name in self._compute_fields_order(obj1):
++            if field_name not in EXCLUDED_FIELDS:
++                schema_name = '.' in field_name and \
++                    field_name.split('.')[0] or 'default'
++                diffs.append(self._diff_field(obj1, obj2, field, schema_name))
+ 
+         return diffs
+ 
+-    def _diff_schema(self, obj1, obj2, schema, schema_name):
+-        """
+-        Compute the differences between 2 objects in respect to the given
+-        schema interface.
+-
+-        Return: a sequence of `IDifference` objects.
+-        """
+-        return [
+-            self._diff_field(obj1, obj2, schema[name], schema_name)
+-            for name in self._compute_fields_order(schema)
+-            if name not in EXCLUDED_FIELDS
+-        ]
+-
+     def _diff_field(self, obj1, obj2, field, schema_name):
+         """
+         Compute the differences between 2 objects in respect to the given
+@@ -165,17 +155,13 @@ def _compute_diff_type(self, field, relation):
+ 
+         return None
+ 
+-    def _compute_fields_order(self, schema):
++    def _compute_fields_order(self, obj):
+         """
+-        Given a `schema` interface compute the field ordering the way
+-        `plone.autoform` does, i.e taking into account `plone.directives.form`
+-        ordering directives.
++        Given a content, compute the field ordering the way the edit form does.
+ 
+-        Return: a list of field names in order.
++        Return: a list of tuples (field, field name) in order.
+         """
+-        auto_fields = AutoFields()
+-        auto_fields.schema = schema
+-        auto_fields.request = getRequest()
+-        auto_fields.mode = INPUT_MODE
+-        auto_fields.updateFieldsFromSchemata()
+-        return auto_fields.fields
++        form = DefaultEditForm(obj, getRequest())
++        form.portal_type = obj.portal_type
++        form.updateFields()
++        return [(form.fields[name].field, name) for name in form.fields]
+diff --git a/Products/CMFDiffTool/tests/test_dexteritydiff.py b/Products/CMFDiffTool/tests/test_dexteritydiff.py
+index 95053f1..736a4dd 100644
+--- a/Products/CMFDiffTool/tests/test_dexteritydiff.py
++++ b/Products/CMFDiffTool/tests/test_dexteritydiff.py
+@@ -89,3 +89,23 @@ def test_should_provide_inline_diff_for_file_list_field(self):
+                 inline_diff = d.inline_diff()
+                 self.assertTrue(inline_diff)
+                 self.assertTrue(obj2.files[0].filename in inline_diff)
++
++    def test_should_provide_diff_for_behaviors_fields(self):
++        self.portal.invokeFactory(
++            testing.TEST_CONTENT_TYPE_ID,
++            'obj1',
++            date=date(2001, 1, 1),
++        )
++        obj1 = self.portal['obj1']
++
++        self.portal.invokeFactory(
++            testing.TEST_CONTENT_TYPE_ID,
++            'obj2',
++            date=date(2001, 1, 2),
++        )
++        obj2 = self.portal['obj2']
++
++        diffs = DexterityCompoundDiff(obj1, obj2, 'any')
++        fields = [d.field for d in diffs]
++        self.assertIn('title', fields)
++        self.assertIn('description', fields)
+
+
+Repository: Products.CMFDiffTool
+
+
+Branch: refs/heads/2.1.x
+Date: 2015-06-30T14:25:46+02:00
+Author: Cédric Messiant (cedricmessiant) <cedricmessiant@ecreall.com>
+Commit: https://github.com/plone/Products.CMFDiffTool/commit/99af735694596ca663741855b0b68041cc19bb0a
+
+Fix EXCLUDED_FIELDS (we now use field 'full' name)
+
+Files changed:
+M Products/CMFDiffTool/dexteritydiff.py
+
+diff --git a/Products/CMFDiffTool/dexteritydiff.py b/Products/CMFDiffTool/dexteritydiff.py
+index bdec37a..934e441 100644
+--- a/Products/CMFDiffTool/dexteritydiff.py
++++ b/Products/CMFDiffTool/dexteritydiff.py
+@@ -57,7 +57,7 @@
+ """
+ 
+ # TODO: provide an easier way to exclude fields.
+-EXCLUDED_FIELDS = ('modification_date', 'changeNote')
++EXCLUDED_FIELDS = ('modification_date', 'IVersionable.changeNote')
+ """Names of fields not to compare."""
+ 
+ 
+
+
+Repository: Products.CMFDiffTool
+
+
+Branch: refs/heads/2.1.x
+Date: 2015-06-30T14:28:08+02:00
+Author: Cédric Messiant (cedricmessiant) <cedricmessiant@ecreall.com>
+Commit: https://github.com/plone/Products.CMFDiffTool/commit/8e20c2b471d6e28ec00fec64c511ef5b5312342e
+
+Fix bug with encoding in TextDiff
+
+Conflicts:
+	CHANGES.txt
+
+Files changed:
+M CHANGES.txt
+M Products/CMFDiffTool/TextDiff.py
+
+diff --git a/CHANGES.txt b/CHANGES.txt
+index b4237b5..2293862 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -7,6 +7,9 @@ Changelog
+ - Provide diff for dexterity behaviors' fields.
+   [cedricmessiant]
+ 
++- Fix bug with encoding in TextDiff.
++  [cedricmessiant]
++
+ 
+ 2.1 (2013-05-26)
+ ----------------
+diff --git a/Products/CMFDiffTool/TextDiff.py b/Products/CMFDiffTool/TextDiff.py
+index 969fa73..0be6ab7 100644
+--- a/Products/CMFDiffTool/TextDiff.py
++++ b/Products/CMFDiffTool/TextDiff.py
+@@ -105,6 +105,6 @@ def _parseField(self, value, filename=None):
+         if translate is not None:
+             value = translate(_(value))
+ 
+-        return TextDiff._parseField(self, str(value), filename)
++        return TextDiff._parseField(self, safe_unicode(value), filename)
+ 
+ InitializeClass(AsTextDiff)
+
+
+Repository: Products.CMFDiffTool
+
+
+Branch: refs/heads/2.1.x
+Date: 2015-07-30T14:32:17+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFDiffTool/commit/5e2e664c4616f608cfa4e87eb79f8efec62f1de5
+
+Merge pull request #7 from plone/fix_diff_for_dexterity_behaviors
+
+Provide diff for dexterity behaviors' fields
+
+Files changed:
+M CHANGES.txt
+M Products/CMFDiffTool/TextDiff.py
+M Products/CMFDiffTool/dexteritydiff.py
+M Products/CMFDiffTool/tests/test_dexteritydiff.py
+
+diff --git a/CHANGES.txt b/CHANGES.txt
+index 7e974a8..2293862 100644
+--- a/CHANGES.txt
++++ b/CHANGES.txt
+@@ -4,7 +4,11 @@ Changelog
+ 2.1.1 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++- Provide diff for dexterity behaviors' fields.
++  [cedricmessiant]
++
++- Fix bug with encoding in TextDiff.
++  [cedricmessiant]
+ 
+ 
+ 2.1 (2013-05-26)
+diff --git a/Products/CMFDiffTool/TextDiff.py b/Products/CMFDiffTool/TextDiff.py
+index 969fa73..0be6ab7 100644
+--- a/Products/CMFDiffTool/TextDiff.py
++++ b/Products/CMFDiffTool/TextDiff.py
+@@ -105,6 +105,6 @@ def _parseField(self, value, filename=None):
+         if translate is not None:
+             value = translate(_(value))
+ 
+-        return TextDiff._parseField(self, str(value), filename)
++        return TextDiff._parseField(self, safe_unicode(value), filename)
+ 
+ InitializeClass(AsTextDiff)
+diff --git a/Products/CMFDiffTool/dexteritydiff.py b/Products/CMFDiffTool/dexteritydiff.py
+index 72219e0..934e441 100644
+--- a/Products/CMFDiffTool/dexteritydiff.py
++++ b/Products/CMFDiffTool/dexteritydiff.py
+@@ -5,6 +5,7 @@
+ 
+ from plone.app.textfield import RichText
+ from plone.autoform.base import AutoFields
++from plone.dexterity.browser.edit import DefaultEditForm
+ 
+ from Products.CMFDiffTool.TextDiff import AsTextDiff
+ from Products.CMFDiffTool.namedfile import NamedFileBinaryDiff
+@@ -56,7 +57,7 @@
+ """
+ 
+ # TODO: provide an easier way to exclude fields.
+-EXCLUDED_FIELDS = ('modification_date', 'changeNote')
++EXCLUDED_FIELDS = ('modification_date', 'IVersionable.changeNote')
+ """Names of fields not to compare."""
+ 
+ 
+@@ -87,27 +88,16 @@ def _diff(self, obj1, obj2):
+ 
+         Return: a sequence of `IDifference` objects.
+         """
+-        (default_schema, additional_schemata) = get_schemas(obj1)
+-        diffs = self._diff_schema(obj1, obj2, default_schema, 'default')
+ 
+-        for schema in additional_schemata:
+-            diffs.extend(self._diff_schema(obj1, obj2, schema, 'metadata'))
++        diffs = []
++        for field, field_name in self._compute_fields_order(obj1):
++            if field_name not in EXCLUDED_FIELDS:
++                schema_name = '.' in field_name and \
++                    field_name.split('.')[0] or 'default'
++                diffs.append(self._diff_field(obj1, obj2, field, schema_name))
+ 
+         return diffs
+ 
+-    def _diff_schema(self, obj1, obj2, schema, schema_name):
+-        """
+-        Compute the differences between 2 objects in respect to the given
+-        schema interface.
+-
+-        Return: a sequence of `IDifference` objects.
+-        """
+-        return [
+-            self._diff_field(obj1, obj2, schema[name], schema_name)
+-            for name in self._compute_fields_order(schema)
+-            if name not in EXCLUDED_FIELDS
+-        ]
+-
+     def _diff_field(self, obj1, obj2, field, schema_name):
+         """
+         Compute the differences between 2 objects in respect to the given
+@@ -165,17 +155,13 @@ def _compute_diff_type(self, field, relation):
+ 
+         return None
+ 
+-    def _compute_fields_order(self, schema):
++    def _compute_fields_order(self, obj):
+         """
+-        Given a `schema` interface compute the field ordering the way
+-        `plone.autoform` does, i.e taking into account `plone.directives.form`
+-        ordering directives.
++        Given a content, compute the field ordering the way the edit form does.
+ 
+-        Return: a list of field names in order.
++        Return: a list of tuples (field, field name) in order.
+         """
+-        auto_fields = AutoFields()
+-        auto_fields.schema = schema
+-        auto_fields.request = getRequest()
+-        auto_fields.mode = INPUT_MODE
+-        auto_fields.updateFieldsFromSchemata()
+-        return auto_fields.fields
++        form = DefaultEditForm(obj, getRequest())
++        form.portal_type = obj.portal_type
++        form.updateFields()
++        return [(form.fields[name].field, name) for name in form.fields]
+diff --git a/Products/CMFDiffTool/tests/test_dexteritydiff.py b/Products/CMFDiffTool/tests/test_dexteritydiff.py
+index 95053f1..736a4dd 100644
+--- a/Products/CMFDiffTool/tests/test_dexteritydiff.py
++++ b/Products/CMFDiffTool/tests/test_dexteritydiff.py
+@@ -89,3 +89,23 @@ def test_should_provide_inline_diff_for_file_list_field(self):
+                 inline_diff = d.inline_diff()
+                 self.assertTrue(inline_diff)
+                 self.assertTrue(obj2.files[0].filename in inline_diff)
++
++    def test_should_provide_diff_for_behaviors_fields(self):
++        self.portal.invokeFactory(
++            testing.TEST_CONTENT_TYPE_ID,
++            'obj1',
++            date=date(2001, 1, 1),
++        )
++        obj1 = self.portal['obj1']
++
++        self.portal.invokeFactory(
++            testing.TEST_CONTENT_TYPE_ID,
++            'obj2',
++            date=date(2001, 1, 2),
++        )
++        obj2 = self.portal['obj2']
++
++        diffs = DexterityCompoundDiff(obj1, obj2, 'any')
++        fields = [d.field for d in diffs]
++        self.assertIn('title', fields)
++        self.assertIn('description', fields)
 
 
