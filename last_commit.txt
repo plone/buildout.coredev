@@ -1,32 +1,2110 @@
-Repository: plone.app.robotframework
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-07-31T10:00:22+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.app.robotframework/commit/a85248244fa3b5c804e137760db3942b6066552d
+Date: 2015-07-31T11:36:44+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.content/commit/a453d731f632899bab1061ec84efb7900c557f38
 
-update KGS date as well
+added explaining comment
 
 Files changed:
-M README.rst
+M plone/app/content/browser/file.py
 
-diff --git a/README.rst b/README.rst
-index 563b403..b2bf469 100644
---- a/README.rst
-+++ b/README.rst
-@@ -21,11 +21,10 @@ Please read the full documentation at `Plone Developer Documentation
- Known good versions
- -------------------
+diff --git a/plone/app/content/browser/file.py b/plone/app/content/browser/file.py
+index 707e27f..de35af5 100644
+--- a/plone/app/content/browser/file.py
++++ b/plone/app/content/browser/file.py
+@@ -35,6 +35,7 @@ def _tus_int(val):
  
+ TUS_ENABLED = False
+ if os.environ.get('TUS_ENABLED'):
++    # tus resumable upload standard, see http://tus.io
+     try:
+         from tus import Tus, Zope2RequestAdapter
+         tus_settings = {}
+
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2015-07-31T11:46:03+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.content/commit/30f43258b127521d94d0623cb26b8abf47e5e88e
+
+Added basic test for folder contents rearrange and item order features.
+
+Files changed:
+A plone/app/content/browser/contents/defaultpage.py
+A plone/app/content/browser/contents/rearrange.py
+M CHANGES.rst
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/configure.zcml
+M plone/app/content/tests/test_folder.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 702be62..5967cf7 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,12 @@ Changelog
+ 3.0.8 (unreleased)
+ ------------------
+ 
++- Added basic test for folder contents "rearrange" and "item order" features.
++  Minor restructuring of actions in own files to have a consistent structure
++  (bbb imports in place). Minor changes in touched area regarding pep8,
++  code-analysis, et al.
++  [jensens]
++
+ - Do not setDefaultPage in rename handler, there is already an subscriber that
+   do so in `Products.CMFDynamicViewFTI`.
+   [jensens]
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 22d8f8e..d37fdca 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -1,17 +1,18 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from Acquisition import aq_inner
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.CMFPlone import utils
+-from Products.CMFPlone.interfaces import IPloneSiteRoot
+-from Products.Five import BrowserView
++from plone.app.content.browser.file import TUS_ENABLED
+ from plone.app.content.browser.interfaces import IFolderContentsView
+ from plone.app.content.interfaces import IStructureAction
+ from plone.app.content.utils import json_dumps
+ from plone.app.content.utils import json_loads
+-from plone.folder.interfaces import IExplicitOrdering
+ from plone.protect.postonly import check as checkpost
+ from plone.uuid.interfaces import IUUID
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone import utils
++from Products.CMFPlone.interfaces import IPloneSiteRoot
++from Products.Five import BrowserView
+ from zope.browsermenu.interfaces import IBrowserMenu
+ from zope.component import getMultiAdapter
+ from zope.component import getUtilitiesFor
+@@ -20,11 +21,19 @@
+ from zope.i18n import translate
+ from zope.interface import implementer
+ 
++import zope.deferredimport
+ 
+-try:
+-    from plone.app.content.browser.file import TUS_ENABLED
+-except ImportError:
+-    TUS_ENABLED = False
++zope.deferredimport.deprecated(
++    # remove in Plone 5.1
++    'Import from plone.app.content.browser.content.defaultpage instead',
++    DefaultPage='plone.app.content.browser.content.defaultpage:SetDefaultPageActionView',  # noqa
++)
++zope.deferredimport.deprecated(
++    # remove in Plone 5.1
++    'Import from plone.app.content.browser.content.rearrange instead',
++    ItemOrder='plone.app.content.browser.content.rearrange:ItemOrderActionView',  # noqa
++    Rearrange='plone.app.content.browser.content.rearrange:RearrangeOrderActionView',  # noqa
++)
+ 
+ 
+ class ContentsBaseAction(BrowserView):
+@@ -79,14 +88,18 @@ def __call__(self):
+             # remove everyone so we know if we missed any
+             selection.remove(brain.UID)
+             obj = brain.getObject()
+-            if self.required_obj_permission:
+-                if not self.mtool.checkPermission(self.required_obj_permission,
+-                                                  obj):
+-                    self.errors.append(_('Permission denied for "${title}"',
+-                                         mapping={
+-                                             'title': self.objectTitle(obj)
+-                                         }))
+-                    continue
++            if (
++                self.required_obj_permission
++                and not self.mtool.checkPermission(
++                    self.required_obj_permission,
++                    obj
++                )
++            ):
++                self.errors.append(_(
++                    'Permission denied for "${title}"',
++                    mapping={'title': self.objectTitle(obj)}
++                ))
++                continue
+             self.action(obj)
+ 
+         self.finish()
+@@ -94,18 +107,24 @@ def __call__(self):
+ 
+     def message(self, missing=[]):
+         if len(missing) > 0:
+-            self.errors.append(_('${items} could not be found', mapping={
+-                'items': str(len(missing))}))
+-        if not self.errors:
+-            msg = self.success_msg
+-        else:
++            self.errors.append(_(
++                '${items} could not be found',
++                mapping={'items': str(len(missing))}
++            ))
++        if self.errors:
+             msg = self.failure_msg
++        else:
++            msg = self.success_msg
+ 
+         translated_msg = translate(msg, context=self.request)
+         if self.errors:
+-            translated_errors = [translate(error, context=self.request)
+-                                 for error in self.errors]
+-            translated_msg = '%s: %s' % (translated_msg, '\n'.join(translated_errors))
++            translated_errors = [
++                translate(error, context=self.request) for error in self.errors
++            ]
++            translated_msg = '{0:s}: {0:s}'.format(
++                translated_msg,
++                '\n'.join(translated_errors)
++            )
+ 
+         return self.json({
+             'status': 'success',
+@@ -144,26 +163,26 @@ def __call__(self):
+             'availableColumns': {
+                 'id': translate(_('ID'), context=self.request),
+                 'Title': translate(_('Title'), context=self.request),
+-                'ModificationDate': translate(_('Last modified'), context=self.request),
+-                'EffectiveDate': translate(_('Publication date'), context=self.request),
+-                'CreationDate': translate(_('Created on'), context=self.request),
+-                'review_state': translate(_('Review state'), context=self.request),
++                'ModificationDate': translate(_('Last modified'), context=self.request),  # noqa
++                'EffectiveDate': translate(_('Publication date'), context=self.request),  # noqa
++                'CreationDate': translate(_('Created on'), context=self.request),  # noqa
++                'review_state': translate(_('Review state'), context=self.request),  # noqa
+                 'Subject': translate(_('Tags'), context=self.request),
+                 'Type': translate(_('Type'), context=self.request),
+                 'is_folderish': translate(_('Folder'), context=self.request),
+-                'exclude_from_nav': translate(_('Excluded from navigation'), context=self.request),
+-                'getObjSize': translate(_('Object Size'), context=self.request),
+-                'last_comment_date': translate(_('Last comment date'), context=self.request),
+-                'total_comments': translate(_('Total comments'), context=self.request),
++                'exclude_from_nav': translate(_('Excluded from navigation'), context=self.request),  # noqa
++                'getObjSize': translate(_('Object Size'), context=self.request),  # noqa
++                'last_comment_date': translate(_('Last comment date'), context=self.request),  # noqa
++                'total_comments': translate(_('Total comments'), context=self.request),  # noqa
+             },
+             'buttons': self.get_actions(),
+             'rearrange': {
+                 'properties': {
+                     'id': translate(_('Id'), context=self.request),
+-                    'sortable_title': translate(_('Title'), context=self.request),
+-                    'modified': translate(_('Last modified'), context=self.request),
+-                    'created': translate(_('Created on'), context=self.request),
+-                    'effective': translate(_('Publication date'), context=self.request),
++                    'sortable_title': translate(_('Title'), context=self.request),  # noqa
++                    'modified': translate(_('Last modified'), context=self.request),  # noqa
++                    'created': translate(_('Created on'), context=self.request),  # noqa
++                    'effective': translate(_('Publication date'), context=self.request),  # noqa
+                     'Type': translate(_('Type'), context=self.request)
+                 },
+                 'url': '%s{path}/@@fc-rearrange' % base_url
+@@ -180,65 +199,6 @@ def __call__(self):
+         return super(FolderContentsView, self).__call__()
+ 
+ 
+-class ItemOrder(ContentsBaseAction):
+-    success_msg = _('Successfully moved item')
+-    failure_msg = _('Error moving item')
 -
- This is the latest known good versions for **plone.app.robotframework** and
- packages related to it.
+-    def getOrdering(self):
+-        if IPloneSiteRoot.providedBy(self.context):
+-            return self.context
+-        else:
+-            ordering = self.context.getOrdering()
+-            if not IExplicitOrdering.providedBy(ordering):
+-                return None
+-            return ordering
+-
+-    def __call__(self):
+-        self.errors = []
+-        self.protect()
+-        id = self.request.form.get('id')
+-        ordering = self.getOrdering()
+-        delta = self.request.form['delta']
+-        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
+-        if delta == 'top':
+-            ordering.moveObjectsToTop([id])
+-        elif delta == 'bottom':
+-            ordering.moveObjectsToBottom([id])
+-        else:
+-            delta = int(delta)
+-            if subset_ids:
+-                position_id = [(ordering.getObjectPosition(i), i)
+-                               for i in subset_ids]
+-                position_id.sort()
+-                if subset_ids != [i for position, i in position_id]:
+-                    self.errors.append(_('Client/server ordering mismatch'))
+-                    return self.message()
+-
+-            if not hasattr(ordering, 'moveObjectsByDelta'):
+-                self.errors.append(_('This folder does not support ordering'))
+-            else:
+-                ordering.moveObjectsByDelta([id], delta)
+-        return self.message()
+-
+-
+-class SetDefaultPage(ContentsBaseAction):
+-    success_msg = _(u'Default page set successfully')
+-    failure_msg = _(u'Failed to set default page')
+-
+-    def __call__(self):
+-        id = self.request.form.get('id')
+-        self.errors = []
+-
+-        if id not in self.context.objectIds():
+-            self.errors.append(
+-                _(u'There is no object with short name '
+-                  u'${name} in this folder.',
+-                  mapping={u'name': id}))
+-        else:
+-            self.context.setDefaultPage(id)
+-        return self.message()
+-
+-
+ class ContextInfo(BrowserView):
  
--Updated: 2015-07-30
-+Updated: 2015-07-31
+     attributes = ['UID', 'Title', 'Type', 'path', 'review_state',
+@@ -258,7 +218,7 @@ def __call__(self):
+             title = item.get('title', '')
+             factories.append({
+                 'id': item.get('id'),
+-                'title': title and translate(title, context=self.request) or '',
++                'title': title and translate(title, context=self.request) or '',  # noqa
+                 'action': item.get('action')
+                 })
  
- .. code:: ini
+@@ -298,33 +258,3 @@ def __call__(self):
+             'breadcrumbs': [c for c in reversed(crumbs)],
+             'object': item
+         })
+-
+-
+-def getOrdering(context):
+-    if IPloneSiteRoot.providedBy(context):
+-        return context
+-    else:
+-        ordering = context.getOrdering()
+-        if not IExplicitOrdering.providedBy(ordering):
+-            return None
+-        return ordering
+-
+-
+-class Rearrange(ContentsBaseAction):
+-    def __call__(self):
+-        self.protect()
+-        self.errors = []
+-        ordering = getOrdering(self.context)
+-        if ordering:
+-            catalog = getToolByName(self.context, 'portal_catalog')
+-            brains = catalog(path={
+-                'query': '/'.join(self.context.getPhysicalPath()),
+-                'depth': 1
+-            }, sort_on=self.request.form.get('rearrange_on'))
+-            if self.request.form.get('reversed') == 'true':
+-                brains = [b for b in reversed(brains)]
+-            for idx, brain in enumerate(brains):
+-                ordering.moveObjectToPosition(brain.id, idx)
+-        else:
+-            self.errors.append(_(u'cannot rearrange folder'))
+-        return self.message()
+diff --git a/plone/app/content/browser/contents/configure.zcml b/plone/app/content/browser/contents/configure.zcml
+index bdffd59..d6773cb 100644
+--- a/plone/app/content/browser/contents/configure.zcml
++++ b/plone/app/content/browser/contents/configure.zcml
+@@ -14,13 +14,6 @@
  
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-itemOrder"
+-    class=".ItemOrder"
+-    permission="cmf.ModifyPortalContent"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-contextInfo"
+     class=".ContextInfo"
+     permission="cmf.ListFolderContents"
+@@ -29,14 +22,21 @@
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-setDefaultPage"
+-    class=".SetDefaultPage"
++    class=".defaultpage.SetDefaultPageActionView"
++    permission="cmf.ModifyPortalContent"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-itemOrder"
++    class=".rearrange.ItemOrderActionView"
+     permission="cmf.ModifyPortalContent"
+     />
+ 
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-rearrange"
+-    class=".Rearrange"
++    class=".rearrange.RearrangeActionView"
+     permission="cmf.ModifyPortalContent"
+     />
+ 
+diff --git a/plone/app/content/browser/contents/defaultpage.py b/plone/app/content/browser/contents/defaultpage.py
+new file mode 100644
+index 0000000..2445c7b
+--- /dev/null
++++ b/plone/app/content/browser/contents/defaultpage.py
+@@ -0,0 +1,21 @@
++# -*- coding: utf-8 -*-
++from Products.CMFPlone import PloneMessageFactory as _
++from plone.app.content.browser.contents import ContentsBaseAction
++
++
++class SetDefaultPageActionView(ContentsBaseAction):
++    success_msg = _(u'Default page set successfully')
++    failure_msg = _(u'Failed to set default page')
++
++    def __call__(self):
++        id = self.request.form.get('id')
++        self.errors = []
++
++        if id not in self.context.objectIds():
++            self.errors.append(
++                _(u'There is no object with short name '
++                  u'${name} in this folder.',
++                  mapping={u'name': id}))
++        else:
++            self.context.setDefaultPage(id)
++        return self.message()
+diff --git a/plone/app/content/browser/contents/rearrange.py b/plone/app/content/browser/contents/rearrange.py
+new file mode 100644
+index 0000000..e062beb
+--- /dev/null
++++ b/plone/app/content/browser/contents/rearrange.py
+@@ -0,0 +1,84 @@
++# -*- coding: utf-8 -*-
++from Products.CMFPlone import PloneMessageFactory as _
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.folder.interfaces import IExplicitOrdering
++from plone.app.content.utils import json_loads
++from Products.CMFPlone.interfaces import IPloneSiteRoot
++from Products.CMFCore.utils import getToolByName
++
++
++class OrderContentsBaseAction(ContentsBaseAction):
++
++    def getOrdering(self):
++        if IPloneSiteRoot.providedBy(self.context):
++            return self.context
++        ordering = self.context.getOrdering()
++        if not IExplicitOrdering.providedBy(ordering):
++            return None
++        return ordering
++
++
++class ItemOrderActionView(OrderContentsBaseAction):
++    success_msg = _('Successfully moved item')
++    failure_msg = _('Error moving item')
++
++    def __call__(self):
++        self.errors = []
++        self.protect()
++        id = self.request.form.get('id')
++        ordering = self.getOrdering()
++
++        if ordering is None:
++            self.errors.append(_('This folder does not support ordering'))
++            return self.message()
++
++        delta = self.request.form['delta']
++
++        if delta == 'top':
++            ordering.moveObjectsToTop([id])
++            return self.message()
++
++        if delta == 'bottom':
++            ordering.moveObjectsToBottom([id])
++            return self.message()
++
++        delta = int(delta)
++        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
++        if subset_ids:
++            position_id = [
++                (ordering.getObjectPosition(i), i) for i in subset_ids
++            ]
++            position_id.sort()
++            if subset_ids != [i for position, i in position_id]:
++                self.errors.append(_('Client/server ordering mismatch'))
++                return self.message()
++
++        ordering.moveObjectsByDelta([id], delta)
++        return self.message()
++
++
++class RearrangeActionView(OrderContentsBaseAction):
++    success_msg = _('Successfully rearranged folder')
++    failure_msg = _(u'Can not rearrange folder')
++
++    def __call__(self):
++        self.protect()
++        self.errors = []
++        ordering = self.getOrdering()
++        if ordering:
++            catalog = getToolByName(self.context, 'portal_catalog')
++            query = {
++                'path': {
++                    'query': '/'.join(self.context.getPhysicalPath()),
++                    'depth': 1
++                },
++                'sort_on': self.request.form.get('rearrange_on')
++            }
++            brains = catalog(**query)
++            if self.request.form.get('reversed') == 'true':
++                brains = [b for b in reversed(brains)]
++            for idx, brain in enumerate(brains):
++                ordering.moveObjectToPosition(brain.id, idx)
++        else:
++            self.errors.append(_(u'Not explicit orderable'))
++        return self.message()
+diff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py
+index 59064e7..3e4989e 100644
+--- a/plone/app/content/tests/test_folder.py
++++ b/plone/app/content/tests/test_folder.py
+@@ -1,15 +1,15 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
+-from Products.CMFCore.utils import getToolByName
+ from plone.app.content.testing import PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+ from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+-from plone.app.testing import TEST_USER_ID
+-from plone.app.testing import TEST_USER_NAME
+ from plone.app.testing import login
+ from plone.app.testing import setRoles
++from plone.app.testing import TEST_USER_ID
++from plone.app.testing import TEST_USER_NAME
+ from plone.dexterity.fti import DexterityFTI
+ from plone.protect.authenticator import createToken
+ from plone.uuid.interfaces import IUUID
++from Products.CMFCore.utils import getToolByName
+ from Testing.makerequest import makerequest
+ from zope.annotation.interfaces import IAttributeAnnotatable
+ from zope.interface import alsoProvides
+@@ -60,7 +60,7 @@ def setUp(self):
+ class PropertiesDXTest(DXBaseTest):
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['effectiveDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -68,7 +68,7 @@ def testEffective(self):
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['expirationDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -76,28 +76,28 @@ def testExpires(self):
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testSetDexterityExcludeFromNav(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['exclude-from-nav'] = 'yes'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.exclude_from_nav, True)
+ 
+     def testRights(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['copyright'] = 'foobar'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.rights, 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['contributors'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.contributors, ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['creators'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -111,14 +111,14 @@ class PropertiesArchetypesTest(BaseTest):
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+ 
+     def testExcludeFromNav(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['exclude-from-nav'] = 'yes'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.getExcludeFromNav(), True)
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['effectiveDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -127,7 +127,7 @@ def testEffective(self):
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['expirationDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -136,21 +136,21 @@ def testExpires(self):
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testRights(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['copyright'] = 'foobar'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Rights(), 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['contributors'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Contributors(), ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['creators'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -162,7 +162,7 @@ class WorkflowTest(BaseTest):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+     def testStateChange(self):
+-        from plone.app.content.browser.contents.workflow import WorkflowActionView
++        from plone.app.content.browser.contents.workflow import WorkflowActionView  # noqa
+         self.request.form['transition'] = 'publish'
+         view = WorkflowActionView(self.portal.page, self.request)
+         view()
+@@ -261,7 +261,11 @@ def test_delete_wrong_object_by_acquisition(self):
+         page_id = self.portal.page.id
+         f1 = self.portal.invokeFactory('Folder', id="f1", title="folder one")
+         # created a nested page with the same id as the one at the site root
+-        p1 = self.portal[f1].invokeFactory('Document', id=page_id, title="page")
++        p1 = self.portal[f1].invokeFactory(
++            'Document',
++            id=page_id,
++            title="page"
++        )
+         self.assertEquals(p1, page_id)
+         request2 = self.make_request()
+ 
+@@ -289,3 +293,137 @@ def test_delete_wrong_object_by_acquisition(self):
+ class DeleteATTest(DeleteDXTest):
+ 
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
++
++
++class RearrangeDXTest(BaseTest):
++    """Verify rearrange feature from the folder contents view"""
++
++    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        login(self.portal, TEST_USER_NAME)
++        setRoles(self.portal, TEST_USER_ID, ['Manager'])
++
++        self.portal.invokeFactory(
++            'Folder',
++            id="basefolder",
++            title="Folder Base"
++        )
++        self.bf = self.portal.basefolder
++        self.bf.reindexObject()
++        for idx in range(0, 5):
++            newid = "f{0:}".format(idx)
++            self.bf.invokeFactory(
++                'Folder',
++                id=newid,
++                # title in reverse order
++                title="Folder {0:}".format(4-idx)
++            )
++            self.bf[newid].reindexObject()
++
++        self.env = {'HTTP_ACCEPT_LANGUAGE': 'en', 'REQUEST_METHOD': 'POST'}
++        self.request = makerequest(self.layer['app']).REQUEST
++        self.request.environ.update(self.env)
++        self.request.form = {
++            'selection': '["' + IUUID(self.bf) + '"]',
++            '_authenticator': createToken(),
++            'folder': '/basefolder'
++        }
++        self.request.REQUEST_METHOD = 'POST'
++
++    def test_initial_order(self):
++        # just to be sure preconditions are fine
++        #
++        # initial ids are forward
++        # and titles are set reversed!
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f2', 'Folder 2'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++    def test_rearrange_by_title(self):
++        from plone.app.content.browser.contents.rearrange import RearrangeActionView  # noqa
++        self.request.form.update({
++            'rearrange_on': 'sortable_title',
++        })
++        view = RearrangeActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f4', 'Folder 0'),
++                ('f3', 'Folder 1'),
++                ('f2', 'Folder 2'),
++                ('f1', 'Folder 3'),
++                ('f0', 'Folder 4'),
++            ],
++        )
++
++    def test_item_order_move_to_top(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': 'top',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f2', 'Folder 2'),
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++    def test_item_order_move_to_bottom(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': 'bottom',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++                ('f2', 'Folder 2'),
++            ]
++        )
++
++    def test_item_order_move_by_delta(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': '-1',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f2', 'Folder 2'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++
++class RearrangeATTest(RearrangeDXTest):
++
++    layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+diff --git a/setup.py b/setup.py
+index 92fa68a..2865089 100644
+--- a/setup.py
++++ b/setup.py
+@@ -30,23 +30,24 @@
+     zip_safe=False,
+     extras_require=dict(
+         test=[
+-            'plone.app.testing',
+             'plone.app.contenttypes',
++            'plone.app.testing',
+         ]
+     ),
+     install_requires=[
+         'Acquisition',
+-        'Products.CMFCore>=2.2.0dev',
+-        'Products.CMFDynamicViewFTI',  # required for cmf.ModifyViewTemplate
+-        'Products.CMFPlone',
+-        'Zope2',
+         'plone.app.widgets>=2.0.0.dev0',
+         'plone.batching',
+         'plone.i18n',
+         'plone.memoize',
++        'plone.protect',
++        'Products.CMFCore>=2.2.0dev',
++        'Products.CMFDynamicViewFTI',  # required for cmf.ModifyViewTemplate
++        'Products.CMFPlone',
+         'setuptools',
+         'zope.component',
+         'zope.container',
++        'zope.deferredimport',
+         'zope.event',
+         'zope.i18n',
+         'zope.i18nmessageid',
+@@ -55,6 +56,6 @@
+         'zope.publisher',
+         'zope.schema',
+         'zope.viewlet',
+-        'plone.protect'
++        'Zope2',
+     ],
+ )
+
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2015-07-31T11:49:30+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.content/commit/35f51e484e61a6634ec6b64f7098f4e8d7608c04
+
+while at it: sort imports and zca-decorators
+
+Files changed:
+M plone/app/content/browser/contents/copy.py
+M plone/app/content/browser/contents/cut.py
+M plone/app/content/browser/contents/defaultpage.py
+M plone/app/content/browser/contents/delete.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/browser/contents/properties.py
+M plone/app/content/browser/contents/rearrange.py
+M plone/app/content/browser/contents/rename.py
+M plone/app/content/browser/contents/tags.py
+M plone/app/content/browser/contents/workflow.py
+
+diff --git a/plone/app/content/browser/contents/copy.py b/plone/app/content/browser/contents/copy.py
+index bca22de..4586974 100644
+--- a/plone/app/content/browser/contents/copy.py
++++ b/plone/app/content/browser/contents/copy.py
+@@ -1,19 +1,19 @@
+ # -*- coding: utf-8 -*-
+-from OFS.CopySupport import CopyError
++from cgi import escape
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
++from OFS.CopySupport import CopyError
+ from OFS.CopySupport import eNotSupported
+ from OFS.Moniker import Moniker
+-from Products.CMFPlone import PloneMessageFactory as _
+-from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class CopyAction(object):
+-    implements(IStructureAction)
+ 
+     order = 2
+ 
+diff --git a/plone/app/content/browser/contents/cut.py b/plone/app/content/browser/contents/cut.py
+index b960a70..30057c7 100644
+--- a/plone/app/content/browser/contents/cut.py
++++ b/plone/app/content/browser/contents/cut.py
+@@ -1,20 +1,20 @@
+ # -*- coding: utf-8 -*-
+-from OFS.CopySupport import CopyError
++from cgi import escape
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
++from OFS.CopySupport import CopyError
+ from OFS.CopySupport import eNotSupported
+ from OFS.Moniker import Moniker
+-from Products.CMFPlone import PloneMessageFactory as _
+-from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
+ from webdav.Lockable import ResourceLockedError
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class CutAction(object):
+-    implements(IStructureAction)
+ 
+     order = 1
+ 
+diff --git a/plone/app/content/browser/contents/defaultpage.py b/plone/app/content/browser/contents/defaultpage.py
+index 2445c7b..1a8355d 100644
+--- a/plone/app/content/browser/contents/defaultpage.py
++++ b/plone/app/content/browser/contents/defaultpage.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+-from Products.CMFPlone import PloneMessageFactory as _
+ from plone.app.content.browser.contents import ContentsBaseAction
++from Products.CMFPlone import PloneMessageFactory as _
+ 
+ 
+ class SetDefaultPageActionView(ContentsBaseAction):
+diff --git a/plone/app/content/browser/contents/delete.py b/plone/app/content/browser/contents/delete.py
+index d01d6bc..cc9740d 100644
+--- a/plone/app/content/browser/contents/delete.py
++++ b/plone/app/content/browser/contents/delete.py
+@@ -1,16 +1,16 @@
+ # -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from AccessControl.Permissions import delete_objects
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class DeleteAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/delete.pt')
+     order = 4
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 8ac83c3..0f5206d 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -1,16 +1,16 @@
+ # -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+-from Products.CMFPlone import PloneMessageFactory as _
+-from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from ZODB.POSException import ConflictError
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class PasteAction(object):
+-    implements(IStructureAction)
+ 
+     order = 3
+ 
+diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
+index b018327..095a315 100644
+--- a/plone/app/content/browser/contents/properties.py
++++ b/plone/app/content/browser/contents/properties.py
+@@ -1,17 +1,17 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+ from plone.dexterity.interfaces import IDexterityContent
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class PropertiesAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/properties.pt')
+     order = 8
+diff --git a/plone/app/content/browser/contents/rearrange.py b/plone/app/content/browser/contents/rearrange.py
+index e062beb..d12a670 100644
+--- a/plone/app/content/browser/contents/rearrange.py
++++ b/plone/app/content/browser/contents/rearrange.py
+@@ -1,10 +1,10 @@
+ # -*- coding: utf-8 -*-
+-from Products.CMFPlone import PloneMessageFactory as _
+ from plone.app.content.browser.contents import ContentsBaseAction
+-from plone.folder.interfaces import IExplicitOrdering
+ from plone.app.content.utils import json_loads
+-from Products.CMFPlone.interfaces import IPloneSiteRoot
++from plone.folder.interfaces import IExplicitOrdering
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone.interfaces import IPloneSiteRoot
+ 
+ 
+ class OrderContentsBaseAction(ContentsBaseAction):
+diff --git a/plone/app/content/browser/contents/rename.py b/plone/app/content/browser/contents/rename.py
+index 38806b3..80a6b7b 100644
+--- a/plone/app/content/browser/contents/rename.py
++++ b/plone/app/content/browser/contents/rename.py
+@@ -2,23 +2,23 @@
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from ZODB.POSException import ConflictError
+-from plone.app.content.browser.contents import ContentsBaseAction
+-from plone.app.content.interfaces import IStructureAction
+ from zope.component import getMultiAdapter
+ from zope.container.interfaces import INameChooser
+ from zope.event import notify
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ from zope.lifecycleevent import ObjectModifiedEvent
+ import transaction
+ 
+ 
++@implementer(IStructureAction)
+ class RenameAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/rename.pt')
+     order = 5
+diff --git a/plone/app/content/browser/contents/tags.py b/plone/app/content/browser/contents/tags.py
+index 5d10b9d..d582f13 100644
+--- a/plone/app/content/browser/contents/tags.py
++++ b/plone/app/content/browser/contents/tags.py
+@@ -1,15 +1,15 @@
+ # -*- coding: utf-8 -*-
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class TagsAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/tags.pt')
+     order = 6
+diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py
+index 0b18a31..3c82590 100644
+--- a/plone/app/content/browser/contents/workflow.py
++++ b/plone/app/content/browser/contents/workflow.py
+@@ -1,18 +1,18 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from ZODB.POSException import ConflictError
+-from plone.app.content.browser.contents import ContentsBaseAction
+-from plone.app.content.interfaces import IStructureAction
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class WorkflowAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/workflow.pt')
+     order = 7
+
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2015-07-31T10:28:42-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.content/commit/3f8b1bc72baa78cc9e323e67033659dcb2b5cd37
+
+Merge pull request #47 from plone/jensens-rearrange-testing
+
+Add test for folder contents rearrange feature
+
+Files changed:
+A plone/app/content/browser/contents/defaultpage.py
+A plone/app/content/browser/contents/rearrange.py
+M CHANGES.rst
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/configure.zcml
+M plone/app/content/browser/contents/copy.py
+M plone/app/content/browser/contents/cut.py
+M plone/app/content/browser/contents/delete.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/browser/contents/properties.py
+M plone/app/content/browser/contents/rename.py
+M plone/app/content/browser/contents/tags.py
+M plone/app/content/browser/contents/workflow.py
+M plone/app/content/browser/file.py
+M plone/app/content/tests/test_folder.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 702be62..5967cf7 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,12 @@ Changelog
+ 3.0.8 (unreleased)
+ ------------------
+ 
++- Added basic test for folder contents "rearrange" and "item order" features.
++  Minor restructuring of actions in own files to have a consistent structure
++  (bbb imports in place). Minor changes in touched area regarding pep8,
++  code-analysis, et al.
++  [jensens]
++
+ - Do not setDefaultPage in rename handler, there is already an subscriber that
+   do so in `Products.CMFDynamicViewFTI`.
+   [jensens]
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 22d8f8e..d37fdca 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -1,17 +1,18 @@
++# -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from Acquisition import aq_inner
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.CMFPlone import utils
+-from Products.CMFPlone.interfaces import IPloneSiteRoot
+-from Products.Five import BrowserView
++from plone.app.content.browser.file import TUS_ENABLED
+ from plone.app.content.browser.interfaces import IFolderContentsView
+ from plone.app.content.interfaces import IStructureAction
+ from plone.app.content.utils import json_dumps
+ from plone.app.content.utils import json_loads
+-from plone.folder.interfaces import IExplicitOrdering
+ from plone.protect.postonly import check as checkpost
+ from plone.uuid.interfaces import IUUID
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone import utils
++from Products.CMFPlone.interfaces import IPloneSiteRoot
++from Products.Five import BrowserView
+ from zope.browsermenu.interfaces import IBrowserMenu
+ from zope.component import getMultiAdapter
+ from zope.component import getUtilitiesFor
+@@ -20,11 +21,19 @@
+ from zope.i18n import translate
+ from zope.interface import implementer
+ 
++import zope.deferredimport
+ 
+-try:
+-    from plone.app.content.browser.file import TUS_ENABLED
+-except ImportError:
+-    TUS_ENABLED = False
++zope.deferredimport.deprecated(
++    # remove in Plone 5.1
++    'Import from plone.app.content.browser.content.defaultpage instead',
++    DefaultPage='plone.app.content.browser.content.defaultpage:SetDefaultPageActionView',  # noqa
++)
++zope.deferredimport.deprecated(
++    # remove in Plone 5.1
++    'Import from plone.app.content.browser.content.rearrange instead',
++    ItemOrder='plone.app.content.browser.content.rearrange:ItemOrderActionView',  # noqa
++    Rearrange='plone.app.content.browser.content.rearrange:RearrangeOrderActionView',  # noqa
++)
+ 
+ 
+ class ContentsBaseAction(BrowserView):
+@@ -79,14 +88,18 @@ def __call__(self):
+             # remove everyone so we know if we missed any
+             selection.remove(brain.UID)
+             obj = brain.getObject()
+-            if self.required_obj_permission:
+-                if not self.mtool.checkPermission(self.required_obj_permission,
+-                                                  obj):
+-                    self.errors.append(_('Permission denied for "${title}"',
+-                                         mapping={
+-                                             'title': self.objectTitle(obj)
+-                                         }))
+-                    continue
++            if (
++                self.required_obj_permission
++                and not self.mtool.checkPermission(
++                    self.required_obj_permission,
++                    obj
++                )
++            ):
++                self.errors.append(_(
++                    'Permission denied for "${title}"',
++                    mapping={'title': self.objectTitle(obj)}
++                ))
++                continue
+             self.action(obj)
+ 
+         self.finish()
+@@ -94,18 +107,24 @@ def __call__(self):
+ 
+     def message(self, missing=[]):
+         if len(missing) > 0:
+-            self.errors.append(_('${items} could not be found', mapping={
+-                'items': str(len(missing))}))
+-        if not self.errors:
+-            msg = self.success_msg
+-        else:
++            self.errors.append(_(
++                '${items} could not be found',
++                mapping={'items': str(len(missing))}
++            ))
++        if self.errors:
+             msg = self.failure_msg
++        else:
++            msg = self.success_msg
+ 
+         translated_msg = translate(msg, context=self.request)
+         if self.errors:
+-            translated_errors = [translate(error, context=self.request)
+-                                 for error in self.errors]
+-            translated_msg = '%s: %s' % (translated_msg, '\n'.join(translated_errors))
++            translated_errors = [
++                translate(error, context=self.request) for error in self.errors
++            ]
++            translated_msg = '{0:s}: {0:s}'.format(
++                translated_msg,
++                '\n'.join(translated_errors)
++            )
+ 
+         return self.json({
+             'status': 'success',
+@@ -144,26 +163,26 @@ def __call__(self):
+             'availableColumns': {
+                 'id': translate(_('ID'), context=self.request),
+                 'Title': translate(_('Title'), context=self.request),
+-                'ModificationDate': translate(_('Last modified'), context=self.request),
+-                'EffectiveDate': translate(_('Publication date'), context=self.request),
+-                'CreationDate': translate(_('Created on'), context=self.request),
+-                'review_state': translate(_('Review state'), context=self.request),
++                'ModificationDate': translate(_('Last modified'), context=self.request),  # noqa
++                'EffectiveDate': translate(_('Publication date'), context=self.request),  # noqa
++                'CreationDate': translate(_('Created on'), context=self.request),  # noqa
++                'review_state': translate(_('Review state'), context=self.request),  # noqa
+                 'Subject': translate(_('Tags'), context=self.request),
+                 'Type': translate(_('Type'), context=self.request),
+                 'is_folderish': translate(_('Folder'), context=self.request),
+-                'exclude_from_nav': translate(_('Excluded from navigation'), context=self.request),
+-                'getObjSize': translate(_('Object Size'), context=self.request),
+-                'last_comment_date': translate(_('Last comment date'), context=self.request),
+-                'total_comments': translate(_('Total comments'), context=self.request),
++                'exclude_from_nav': translate(_('Excluded from navigation'), context=self.request),  # noqa
++                'getObjSize': translate(_('Object Size'), context=self.request),  # noqa
++                'last_comment_date': translate(_('Last comment date'), context=self.request),  # noqa
++                'total_comments': translate(_('Total comments'), context=self.request),  # noqa
+             },
+             'buttons': self.get_actions(),
+             'rearrange': {
+                 'properties': {
+                     'id': translate(_('Id'), context=self.request),
+-                    'sortable_title': translate(_('Title'), context=self.request),
+-                    'modified': translate(_('Last modified'), context=self.request),
+-                    'created': translate(_('Created on'), context=self.request),
+-                    'effective': translate(_('Publication date'), context=self.request),
++                    'sortable_title': translate(_('Title'), context=self.request),  # noqa
++                    'modified': translate(_('Last modified'), context=self.request),  # noqa
++                    'created': translate(_('Created on'), context=self.request),  # noqa
++                    'effective': translate(_('Publication date'), context=self.request),  # noqa
+                     'Type': translate(_('Type'), context=self.request)
+                 },
+                 'url': '%s{path}/@@fc-rearrange' % base_url
+@@ -180,65 +199,6 @@ def __call__(self):
+         return super(FolderContentsView, self).__call__()
+ 
+ 
+-class ItemOrder(ContentsBaseAction):
+-    success_msg = _('Successfully moved item')
+-    failure_msg = _('Error moving item')
+-
+-    def getOrdering(self):
+-        if IPloneSiteRoot.providedBy(self.context):
+-            return self.context
+-        else:
+-            ordering = self.context.getOrdering()
+-            if not IExplicitOrdering.providedBy(ordering):
+-                return None
+-            return ordering
+-
+-    def __call__(self):
+-        self.errors = []
+-        self.protect()
+-        id = self.request.form.get('id')
+-        ordering = self.getOrdering()
+-        delta = self.request.form['delta']
+-        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
+-        if delta == 'top':
+-            ordering.moveObjectsToTop([id])
+-        elif delta == 'bottom':
+-            ordering.moveObjectsToBottom([id])
+-        else:
+-            delta = int(delta)
+-            if subset_ids:
+-                position_id = [(ordering.getObjectPosition(i), i)
+-                               for i in subset_ids]
+-                position_id.sort()
+-                if subset_ids != [i for position, i in position_id]:
+-                    self.errors.append(_('Client/server ordering mismatch'))
+-                    return self.message()
+-
+-            if not hasattr(ordering, 'moveObjectsByDelta'):
+-                self.errors.append(_('This folder does not support ordering'))
+-            else:
+-                ordering.moveObjectsByDelta([id], delta)
+-        return self.message()
+-
+-
+-class SetDefaultPage(ContentsBaseAction):
+-    success_msg = _(u'Default page set successfully')
+-    failure_msg = _(u'Failed to set default page')
+-
+-    def __call__(self):
+-        id = self.request.form.get('id')
+-        self.errors = []
+-
+-        if id not in self.context.objectIds():
+-            self.errors.append(
+-                _(u'There is no object with short name '
+-                  u'${name} in this folder.',
+-                  mapping={u'name': id}))
+-        else:
+-            self.context.setDefaultPage(id)
+-        return self.message()
+-
+-
+ class ContextInfo(BrowserView):
+ 
+     attributes = ['UID', 'Title', 'Type', 'path', 'review_state',
+@@ -258,7 +218,7 @@ def __call__(self):
+             title = item.get('title', '')
+             factories.append({
+                 'id': item.get('id'),
+-                'title': title and translate(title, context=self.request) or '',
++                'title': title and translate(title, context=self.request) or '',  # noqa
+                 'action': item.get('action')
+                 })
+ 
+@@ -298,33 +258,3 @@ def __call__(self):
+             'breadcrumbs': [c for c in reversed(crumbs)],
+             'object': item
+         })
+-
+-
+-def getOrdering(context):
+-    if IPloneSiteRoot.providedBy(context):
+-        return context
+-    else:
+-        ordering = context.getOrdering()
+-        if not IExplicitOrdering.providedBy(ordering):
+-            return None
+-        return ordering
+-
+-
+-class Rearrange(ContentsBaseAction):
+-    def __call__(self):
+-        self.protect()
+-        self.errors = []
+-        ordering = getOrdering(self.context)
+-        if ordering:
+-            catalog = getToolByName(self.context, 'portal_catalog')
+-            brains = catalog(path={
+-                'query': '/'.join(self.context.getPhysicalPath()),
+-                'depth': 1
+-            }, sort_on=self.request.form.get('rearrange_on'))
+-            if self.request.form.get('reversed') == 'true':
+-                brains = [b for b in reversed(brains)]
+-            for idx, brain in enumerate(brains):
+-                ordering.moveObjectToPosition(brain.id, idx)
+-        else:
+-            self.errors.append(_(u'cannot rearrange folder'))
+-        return self.message()
+diff --git a/plone/app/content/browser/contents/configure.zcml b/plone/app/content/browser/contents/configure.zcml
+index bdffd59..d6773cb 100644
+--- a/plone/app/content/browser/contents/configure.zcml
++++ b/plone/app/content/browser/contents/configure.zcml
+@@ -14,13 +14,6 @@
+ 
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+-    name="fc-itemOrder"
+-    class=".ItemOrder"
+-    permission="cmf.ModifyPortalContent"
+-    />
+-
+-  <browser:page
+-    for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-contextInfo"
+     class=".ContextInfo"
+     permission="cmf.ListFolderContents"
+@@ -29,14 +22,21 @@
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-setDefaultPage"
+-    class=".SetDefaultPage"
++    class=".defaultpage.SetDefaultPageActionView"
++    permission="cmf.ModifyPortalContent"
++    />
++
++  <browser:page
++    for="Products.CMFCore.interfaces._content.IFolderish"
++    name="fc-itemOrder"
++    class=".rearrange.ItemOrderActionView"
+     permission="cmf.ModifyPortalContent"
+     />
+ 
+   <browser:page
+     for="Products.CMFCore.interfaces._content.IFolderish"
+     name="fc-rearrange"
+-    class=".Rearrange"
++    class=".rearrange.RearrangeActionView"
+     permission="cmf.ModifyPortalContent"
+     />
+ 
+diff --git a/plone/app/content/browser/contents/copy.py b/plone/app/content/browser/contents/copy.py
+index bca22de..4586974 100644
+--- a/plone/app/content/browser/contents/copy.py
++++ b/plone/app/content/browser/contents/copy.py
+@@ -1,19 +1,19 @@
+ # -*- coding: utf-8 -*-
+-from OFS.CopySupport import CopyError
++from cgi import escape
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
++from OFS.CopySupport import CopyError
+ from OFS.CopySupport import eNotSupported
+ from OFS.Moniker import Moniker
+-from Products.CMFPlone import PloneMessageFactory as _
+-from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class CopyAction(object):
+-    implements(IStructureAction)
+ 
+     order = 2
+ 
+diff --git a/plone/app/content/browser/contents/cut.py b/plone/app/content/browser/contents/cut.py
+index b960a70..30057c7 100644
+--- a/plone/app/content/browser/contents/cut.py
++++ b/plone/app/content/browser/contents/cut.py
+@@ -1,20 +1,20 @@
+ # -*- coding: utf-8 -*-
+-from OFS.CopySupport import CopyError
++from cgi import escape
+ from OFS.CopySupport import _cb_encode
+ from OFS.CopySupport import cookie_path
++from OFS.CopySupport import CopyError
+ from OFS.CopySupport import eNotSupported
+ from OFS.Moniker import Moniker
+-from Products.CMFPlone import PloneMessageFactory as _
+-from cgi import escape
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
+ from webdav.Lockable import ResourceLockedError
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class CutAction(object):
+-    implements(IStructureAction)
+ 
+     order = 1
+ 
+diff --git a/plone/app/content/browser/contents/defaultpage.py b/plone/app/content/browser/contents/defaultpage.py
+new file mode 100644
+index 0000000..1a8355d
+--- /dev/null
++++ b/plone/app/content/browser/contents/defaultpage.py
+@@ -0,0 +1,21 @@
++# -*- coding: utf-8 -*-
++from plone.app.content.browser.contents import ContentsBaseAction
++from Products.CMFPlone import PloneMessageFactory as _
++
++
++class SetDefaultPageActionView(ContentsBaseAction):
++    success_msg = _(u'Default page set successfully')
++    failure_msg = _(u'Failed to set default page')
++
++    def __call__(self):
++        id = self.request.form.get('id')
++        self.errors = []
++
++        if id not in self.context.objectIds():
++            self.errors.append(
++                _(u'There is no object with short name '
++                  u'${name} in this folder.',
++                  mapping={u'name': id}))
++        else:
++            self.context.setDefaultPage(id)
++        return self.message()
+diff --git a/plone/app/content/browser/contents/delete.py b/plone/app/content/browser/contents/delete.py
+index d01d6bc..cc9740d 100644
+--- a/plone/app/content/browser/contents/delete.py
++++ b/plone/app/content/browser/contents/delete.py
+@@ -1,16 +1,16 @@
+ # -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+ from AccessControl.Permissions import delete_objects
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class DeleteAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/delete.pt')
+     order = 4
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 8ac83c3..0f5206d 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -1,16 +1,16 @@
+ # -*- coding: utf-8 -*-
+ from AccessControl import Unauthorized
+-from Products.CMFPlone import PloneMessageFactory as _
+-from ZODB.POSException import ConflictError
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from ZODB.POSException import ConflictError
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class PasteAction(object):
+-    implements(IStructureAction)
+ 
+     order = 3
+ 
+diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
+index b018327..095a315 100644
+--- a/plone/app/content/browser/contents/properties.py
++++ b/plone/app/content/browser/contents/properties.py
+@@ -1,17 +1,17 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
+ from plone.dexterity.interfaces import IDexterityContent
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class PropertiesAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/properties.pt')
+     order = 8
+diff --git a/plone/app/content/browser/contents/rearrange.py b/plone/app/content/browser/contents/rearrange.py
+new file mode 100644
+index 0000000..d12a670
+--- /dev/null
++++ b/plone/app/content/browser/contents/rearrange.py
+@@ -0,0 +1,84 @@
++# -*- coding: utf-8 -*-
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.utils import json_loads
++from plone.folder.interfaces import IExplicitOrdering
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone.interfaces import IPloneSiteRoot
++
++
++class OrderContentsBaseAction(ContentsBaseAction):
++
++    def getOrdering(self):
++        if IPloneSiteRoot.providedBy(self.context):
++            return self.context
++        ordering = self.context.getOrdering()
++        if not IExplicitOrdering.providedBy(ordering):
++            return None
++        return ordering
++
++
++class ItemOrderActionView(OrderContentsBaseAction):
++    success_msg = _('Successfully moved item')
++    failure_msg = _('Error moving item')
++
++    def __call__(self):
++        self.errors = []
++        self.protect()
++        id = self.request.form.get('id')
++        ordering = self.getOrdering()
++
++        if ordering is None:
++            self.errors.append(_('This folder does not support ordering'))
++            return self.message()
++
++        delta = self.request.form['delta']
++
++        if delta == 'top':
++            ordering.moveObjectsToTop([id])
++            return self.message()
++
++        if delta == 'bottom':
++            ordering.moveObjectsToBottom([id])
++            return self.message()
++
++        delta = int(delta)
++        subset_ids = json_loads(self.request.form.get('subset_ids', '[]'))
++        if subset_ids:
++            position_id = [
++                (ordering.getObjectPosition(i), i) for i in subset_ids
++            ]
++            position_id.sort()
++            if subset_ids != [i for position, i in position_id]:
++                self.errors.append(_('Client/server ordering mismatch'))
++                return self.message()
++
++        ordering.moveObjectsByDelta([id], delta)
++        return self.message()
++
++
++class RearrangeActionView(OrderContentsBaseAction):
++    success_msg = _('Successfully rearranged folder')
++    failure_msg = _(u'Can not rearrange folder')
++
++    def __call__(self):
++        self.protect()
++        self.errors = []
++        ordering = self.getOrdering()
++        if ordering:
++            catalog = getToolByName(self.context, 'portal_catalog')
++            query = {
++                'path': {
++                    'query': '/'.join(self.context.getPhysicalPath()),
++                    'depth': 1
++                },
++                'sort_on': self.request.form.get('rearrange_on')
++            }
++            brains = catalog(**query)
++            if self.request.form.get('reversed') == 'true':
++                brains = [b for b in reversed(brains)]
++            for idx, brain in enumerate(brains):
++                ordering.moveObjectToPosition(brain.id, idx)
++        else:
++            self.errors.append(_(u'Not explicit orderable'))
++        return self.message()
+diff --git a/plone/app/content/browser/contents/rename.py b/plone/app/content/browser/contents/rename.py
+index 38806b3..80a6b7b 100644
+--- a/plone/app/content/browser/contents/rename.py
++++ b/plone/app/content/browser/contents/rename.py
+@@ -2,23 +2,23 @@
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from ZODB.POSException import ConflictError
+-from plone.app.content.browser.contents import ContentsBaseAction
+-from plone.app.content.interfaces import IStructureAction
+ from zope.component import getMultiAdapter
+ from zope.container.interfaces import INameChooser
+ from zope.event import notify
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ from zope.lifecycleevent import ObjectModifiedEvent
+ import transaction
+ 
+ 
++@implementer(IStructureAction)
+ class RenameAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/rename.pt')
+     order = 5
+diff --git a/plone/app/content/browser/contents/tags.py b/plone/app/content/browser/contents/tags.py
+index 5d10b9d..d582f13 100644
+--- a/plone/app/content/browser/contents/tags.py
++++ b/plone/app/content/browser/contents/tags.py
+@@ -1,15 +1,15 @@
+ # -*- coding: utf-8 -*-
+-from Products.CMFPlone import PloneMessageFactory as _
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from plone.app.content.browser.contents import ContentsBaseAction
+ from plone.app.content.interfaces import IStructureAction
++from Products.CMFPlone import PloneMessageFactory as _
++from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.component.hooks import getSite
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class TagsAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/tags.pt')
+     order = 6
+diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py
+index 0b18a31..3c82590 100644
+--- a/plone/app/content/browser/contents/workflow.py
++++ b/plone/app/content/browser/contents/workflow.py
+@@ -1,18 +1,18 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
++from plone.app.content.browser.contents import ContentsBaseAction
++from plone.app.content.interfaces import IStructureAction
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from ZODB.POSException import ConflictError
+-from plone.app.content.browser.contents import ContentsBaseAction
+-from plone.app.content.interfaces import IStructureAction
+ from zope.i18n import translate
+-from zope.interface import implements
++from zope.interface import implementer
+ 
+ 
++@implementer(IStructureAction)
+ class WorkflowAction(object):
+-    implements(IStructureAction)
+ 
+     template = ViewPageTemplateFile('templates/workflow.pt')
+     order = 7
+diff --git a/plone/app/content/browser/file.py b/plone/app/content/browser/file.py
+index 707e27f..de35af5 100644
+--- a/plone/app/content/browser/file.py
++++ b/plone/app/content/browser/file.py
+@@ -35,6 +35,7 @@ def _tus_int(val):
+ 
+ TUS_ENABLED = False
+ if os.environ.get('TUS_ENABLED'):
++    # tus resumable upload standard, see http://tus.io
+     try:
+         from tus import Tus, Zope2RequestAdapter
+         tus_settings = {}
+diff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py
+index 59064e7..3e4989e 100644
+--- a/plone/app/content/tests/test_folder.py
++++ b/plone/app/content/tests/test_folder.py
+@@ -1,15 +1,15 @@
+ # -*- coding: utf-8 -*-
+ from DateTime import DateTime
+-from Products.CMFCore.utils import getToolByName
+ from plone.app.content.testing import PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+ from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+-from plone.app.testing import TEST_USER_ID
+-from plone.app.testing import TEST_USER_NAME
+ from plone.app.testing import login
+ from plone.app.testing import setRoles
++from plone.app.testing import TEST_USER_ID
++from plone.app.testing import TEST_USER_NAME
+ from plone.dexterity.fti import DexterityFTI
+ from plone.protect.authenticator import createToken
+ from plone.uuid.interfaces import IUUID
++from Products.CMFCore.utils import getToolByName
+ from Testing.makerequest import makerequest
+ from zope.annotation.interfaces import IAttributeAnnotatable
+ from zope.interface import alsoProvides
+@@ -60,7 +60,7 @@ def setUp(self):
+ class PropertiesDXTest(DXBaseTest):
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['effectiveDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -68,7 +68,7 @@ def testEffective(self):
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['expirationDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -76,28 +76,28 @@ def testExpires(self):
+                           DateTime('1999/01/01 09:00'))
+ 
+     def testSetDexterityExcludeFromNav(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['exclude-from-nav'] = 'yes'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.exclude_from_nav, True)
+ 
+     def testRights(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['copyright'] = 'foobar'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.rights, 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['contributors'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.contributors, ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['creators'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -111,14 +111,14 @@ class PropertiesArchetypesTest(BaseTest):
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+ 
+     def testExcludeFromNav(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['exclude-from-nav'] = 'yes'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.getExcludeFromNav(), True)
+ 
+     def testEffective(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['effectiveDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -127,7 +127,7 @@ def testEffective(self):
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testExpires(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['expirationDate'] = '1999/01/01 09:00'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -136,21 +136,21 @@ def testExpires(self):
+             DateTime('1999/01/01 09:00').toZone('UTC'))
+ 
+     def testRights(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['copyright'] = 'foobar'
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Rights(), 'foobar')
+ 
+     def testContributors(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['contributors'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+         self.assertEquals(self.portal.page.Contributors(), ('one', 'two'))
+ 
+     def testCreators(self):
+-        from plone.app.content.browser.contents.properties import PropertiesActionView
++        from plone.app.content.browser.contents.properties import PropertiesActionView  # noqa
+         self.request.form['creators'] = self.userList
+         view = PropertiesActionView(self.portal.page, self.request)
+         view()
+@@ -162,7 +162,7 @@ class WorkflowTest(BaseTest):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+     def testStateChange(self):
+-        from plone.app.content.browser.contents.workflow import WorkflowActionView
++        from plone.app.content.browser.contents.workflow import WorkflowActionView  # noqa
+         self.request.form['transition'] = 'publish'
+         view = WorkflowActionView(self.portal.page, self.request)
+         view()
+@@ -261,7 +261,11 @@ def test_delete_wrong_object_by_acquisition(self):
+         page_id = self.portal.page.id
+         f1 = self.portal.invokeFactory('Folder', id="f1", title="folder one")
+         # created a nested page with the same id as the one at the site root
+-        p1 = self.portal[f1].invokeFactory('Document', id=page_id, title="page")
++        p1 = self.portal[f1].invokeFactory(
++            'Document',
++            id=page_id,
++            title="page"
++        )
+         self.assertEquals(p1, page_id)
+         request2 = self.make_request()
+ 
+@@ -289,3 +293,137 @@ def test_delete_wrong_object_by_acquisition(self):
+ class DeleteATTest(DeleteDXTest):
+ 
+     layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
++
++
++class RearrangeDXTest(BaseTest):
++    """Verify rearrange feature from the folder contents view"""
++
++    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        login(self.portal, TEST_USER_NAME)
++        setRoles(self.portal, TEST_USER_ID, ['Manager'])
++
++        self.portal.invokeFactory(
++            'Folder',
++            id="basefolder",
++            title="Folder Base"
++        )
++        self.bf = self.portal.basefolder
++        self.bf.reindexObject()
++        for idx in range(0, 5):
++            newid = "f{0:}".format(idx)
++            self.bf.invokeFactory(
++                'Folder',
++                id=newid,
++                # title in reverse order
++                title="Folder {0:}".format(4-idx)
++            )
++            self.bf[newid].reindexObject()
++
++        self.env = {'HTTP_ACCEPT_LANGUAGE': 'en', 'REQUEST_METHOD': 'POST'}
++        self.request = makerequest(self.layer['app']).REQUEST
++        self.request.environ.update(self.env)
++        self.request.form = {
++            'selection': '["' + IUUID(self.bf) + '"]',
++            '_authenticator': createToken(),
++            'folder': '/basefolder'
++        }
++        self.request.REQUEST_METHOD = 'POST'
++
++    def test_initial_order(self):
++        # just to be sure preconditions are fine
++        #
++        # initial ids are forward
++        # and titles are set reversed!
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f2', 'Folder 2'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++    def test_rearrange_by_title(self):
++        from plone.app.content.browser.contents.rearrange import RearrangeActionView  # noqa
++        self.request.form.update({
++            'rearrange_on': 'sortable_title',
++        })
++        view = RearrangeActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f4', 'Folder 0'),
++                ('f3', 'Folder 1'),
++                ('f2', 'Folder 2'),
++                ('f1', 'Folder 3'),
++                ('f0', 'Folder 4'),
++            ],
++        )
++
++    def test_item_order_move_to_top(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': 'top',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f2', 'Folder 2'),
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++    def test_item_order_move_to_bottom(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': 'bottom',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++                ('f2', 'Folder 2'),
++            ]
++        )
++
++    def test_item_order_move_by_delta(self):
++        from plone.app.content.browser.contents.rearrange import ItemOrderActionView  # noqa
++        self.request.form.update({
++            'id': 'f2',
++            'delta': '-1',
++        })
++        view = ItemOrderActionView(self.bf, self.request)
++        view()
++        self.assertEqual(
++            [(c[0], c[1].Title()) for c in self.bf.contentItems()],
++            [
++                ('f0', 'Folder 4'),
++                ('f2', 'Folder 2'),
++                ('f1', 'Folder 3'),
++                ('f3', 'Folder 1'),
++                ('f4', 'Folder 0'),
++            ]
++        )
++
++
++class RearrangeATTest(RearrangeDXTest):
++
++    layer = PLONE_APP_CONTENT_AT_INTEGRATION_TESTING
+diff --git a/setup.py b/setup.py
+index 92fa68a..2865089 100644
+--- a/setup.py
++++ b/setup.py
+@@ -30,23 +30,24 @@
+     zip_safe=False,
+     extras_require=dict(
+         test=[
+-            'plone.app.testing',
+             'plone.app.contenttypes',
++            'plone.app.testing',
+         ]
+     ),
+     install_requires=[
+         'Acquisition',
+-        'Products.CMFCore>=2.2.0dev',
+-        'Products.CMFDynamicViewFTI',  # required for cmf.ModifyViewTemplate
+-        'Products.CMFPlone',
+-        'Zope2',
+         'plone.app.widgets>=2.0.0.dev0',
+         'plone.batching',
+         'plone.i18n',
+         'plone.memoize',
++        'plone.protect',
++        'Products.CMFCore>=2.2.0dev',
++        'Products.CMFDynamicViewFTI',  # required for cmf.ModifyViewTemplate
++        'Products.CMFPlone',
+         'setuptools',
+         'zope.component',
+         'zope.container',
++        'zope.deferredimport',
+         'zope.event',
+         'zope.i18n',
+         'zope.i18nmessageid',
+@@ -55,6 +56,6 @@
+         'zope.publisher',
+         'zope.schema',
+         'zope.viewlet',
+-        'plone.protect'
++        'Zope2',
+     ],
+ )
 
 
