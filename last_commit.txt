@@ -2,29 +2,336 @@ Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-08-17T11:43:46+02:00
+Date: 2015-08-17T15:41:21+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/7ffcc9f4ebe02b019b4068c073e0ac5803149930
+Commit: https://github.com/plone/plone.app.contenttypes/commit/08d2f51aed1f23c4be6f361a02c9fffdbc5b463f
 
-only build 1.1.x and master
+test migration and custom_migration plus pep8
 
 Files changed:
-M .travis.yml
+M plone/app/contenttypes/migration/custom_migration.py
+M plone/app/contenttypes/migration/field_migrators.py
+M plone/app/contenttypes/migration/migration.py
+M plone/app/contenttypes/testing.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_custom.py
 
-diff --git a/.travis.yml b/.travis.yml
-index 4220a5a..5bcb019 100644
---- a/.travis.yml
-+++ b/.travis.yml
-@@ -4,6 +4,10 @@ cache:
-   pip: true
-   directories:
-     - $HOME/buildout-cache
-+branches:
-+  only:
-+    - master
-+    - 1.1.x
- python:
-   - 2.7
- before_install:
+diff --git a/plone/app/contenttypes/migration/custom_migration.py b/plone/app/contenttypes/migration/custom_migration.py
+index b26680b..f3ae23b 100644
+--- a/plone/app/contenttypes/migration/custom_migration.py
++++ b/plone/app/contenttypes/migration/custom_migration.py
+@@ -238,8 +238,12 @@ def migrate(self, dry_run=False):
+                 safe_at = at_typename.replace('_space_', '')
+                 dx_key = 'dx_%s__for__%s' % (safe_dx, safe_at)
+                 for at_field in form[at_typename]:
++                    if form.get(dx_key) is None:
++                        # No field-mappings
++                        continue
+                     dx_field = form[dx_key][form[at_typename].index(at_field)]
+                     if not dx_field:
++                        # Do not migrate field
+                         continue
+                     at_field_name, at_field_type = at_field.split('__type__')
+                     dx_field_name, dx_field_type = dx_field.split('__type__')
+diff --git a/plone/app/contenttypes/migration/field_migrators.py b/plone/app/contenttypes/migration/field_migrators.py
+index b4c8492..1600a58 100644
+--- a/plone/app/contenttypes/migration/field_migrators.py
++++ b/plone/app/contenttypes/migration/field_migrators.py
+@@ -96,7 +96,7 @@ def migrate_blobimagefield(src_obj, dst_obj, src_fieldname, dst_fieldname):
+     """
+     migrate an image field.
+     Actually this field needs only to copy the existing NamedBlobImage instance
+-    to the new dst_obj, but we do i little more in detail and create new fields.
++    to the new dst_obj, but we do some more in detail and create new fields.
+     """
+     old_image = getattr(src_obj, src_fieldname)
+     if old_image == '':
+diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
+index d9e6e95..a0a846d 100644
+--- a/plone/app/contenttypes/migration/migration.py
++++ b/plone/app/contenttypes/migration/migration.py
+@@ -369,6 +369,7 @@ def last_migrate_layout(self):
+         if old_layout in LISTING_VIEW_MAPPING:
+             self.new.setLayout(LISTING_VIEW_MAPPING[old_layout])
+ 
++
+ def migrate_collections(portal):
+     return migrate(portal, CollectionMigrator)
+ 
+diff --git a/plone/app/contenttypes/testing.py b/plone/app/contenttypes/testing.py
+index d312241..e8407ae 100644
+--- a/plone/app/contenttypes/testing.py
++++ b/plone/app/contenttypes/testing.py
+@@ -145,6 +145,11 @@ def setUpPloneSite(self, portal):
+     bases=(PLONE_APP_CONTENTTYPES_FIXTURE,),
+     name="PloneAppContenttypes:Functional"
+ )
++PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_FIXTURE = PloneAppContenttypesMigration()  # noqa
++PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING = FunctionalTesting(
++    bases=(PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_FIXTURE,),
++    name="PloneAppContenttypes:Migration_Functional"
++)
+ PLONE_APP_CONTENTTYPES_ROBOT_TESTING = FunctionalTesting(
+     bases=(
+         PLONE_APP_CONTENTTYPES_FIXTURE,
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index 41031c6..90476dc 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -15,6 +15,7 @@
+ from plone.app.contenttypes.migration.utils import restore_references
+ from plone.app.contenttypes.migration.utils import store_references
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
++from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+ from plone.app.contenttypes.testing import set_browserlayer
+ from plone.app.referenceablebehavior.referenceable import IReferenceable
+@@ -46,6 +47,7 @@
+ import json
+ import os.path
+ import time
++import transaction
+ import unittest2 as unittest
+ 
+ 
+@@ -1972,3 +1974,124 @@ def test_dxmigration_migrate_check_migration_successful_message(self):
+         self.browser.getControl('Update').click()
+         self.assertIn(
+             self.good_info_message_template.format(1), self.browser.contents)
++
++
++class MigrationFunctionalTests(unittest.TestCase):
++
++    layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
++
++    def setUp(self):
++        app = self.layer['app']
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++        self.request['ACTUAL_URL'] = self.portal.absolute_url()
++        self.request['URL'] = self.portal.absolute_url()
++        self.catalog = getToolByName(self.portal, "portal_catalog")
++        self.portal.acl_users.userFolderAddUser('admin',
++                                                'secret',
++                                                ['Manager'],
++                                                [])
++        login(self.portal, 'admin')
++        self.portal.portal_workflow.setDefaultChain(
++            "simple_publication_workflow")
++        self.portal_url = self.portal.absolute_url()
++
++        self.browser = Browser(app)
++        self.browser.handleErrors = False
++        self.browser.addHeader(
++            'Authorization',
++            'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,)
++        )
++
++    def tearDown(self):
++        try:
++            applyProfile(self.portal, 'plone.app.contenttypes:uninstall')
++        except KeyError:
++            pass
++
++    def test_pac_installer_cancel(self):
++        qi = self.portal.portal_quickinstaller
++        portal_types = self.portal.portal_types
++        self.browser.open('%s/@@pac_installer' % self.portal_url)
++        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.browser.getControl('Cancel').click()
++        self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
++        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertEqual(self.browser.url, self.portal_url)
++
++    def test_pac_installer_without_content(self):
++        qi = self.portal.portal_quickinstaller
++        portal_types = self.portal.portal_types
++        self.browser.open('%s/@@pac_installer' % self.portal_url)
++        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
++        self.assertIn('proceed to the migration-form?', self.browser.contents)
++        self.browser.getControl('Install').click()
++        self.assertTrue(IDexterityFTI.providedBy(portal_types['Document']))
++        self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
++        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertIn('Migration control panel', self.browser.contents)
++        self.assertIn('No content to migrate.', self.browser.contents)
++
++    def test_pac_installer_with_content(self):
++        # add some at content:
++        self.portal.invokeFactory('Document', 'doc1')
++        transaction.commit()
++        qi = self.portal.portal_quickinstaller
++        portal_types = self.portal.portal_types
++        self.browser.open('%s/@@pac_installer' % self.portal_url)
++        self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
++        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertIn('proceed to the migration-form?', self.browser.contents)
++        self.browser.getControl('Install').click()
++        self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
++        self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
++        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertIn('Migration control panel', self.browser.contents)
++        self.assertIn('You currently have <span class="strong">1</span> archetypes objects to be migrated.', self.browser.contents)  # noqa
++
++    def test_atct_migration_form(self):
++        # setup session
++        # taken from Products.Sessions.tests.testSessionDataManager._populate
++        tf_name = 'temp_folder'
++        idmgr_name = 'browser_id_manager'
++        toc_name = 'temp_transient_container'
++        sdm_name = 'session_data_manager'
++        from Products.Sessions.BrowserIdManager import BrowserIdManager
++        from Products.Sessions.SessionDataManager import SessionDataManager
++        from Products.TemporaryFolder.TemporaryFolder import MountedTemporaryFolder  # noqa
++        from Products.Transience.Transience import TransientObjectContainer
++        bidmgr = BrowserIdManager(idmgr_name)
++        tf = MountedTemporaryFolder(tf_name, title="Temporary Folder")
++        toc = TransientObjectContainer(
++            toc_name,
++            title='Temporary Transient Object Container',
++            timeout_mins=20)
++        session_data_manager = SessionDataManager(
++            id=sdm_name,
++            path=tf_name+'/'+toc_name,
++            title='Session Data Manager',
++            requestName='TESTOFSESSION')
++        self.portal._setObject(idmgr_name, bidmgr)
++        self.portal._setObject(sdm_name, session_data_manager)
++        self.portal._setObject(tf_name, tf)
++        transaction.commit()
++        self.portal.temp_folder._setObject(toc_name, toc)
++
++        # add some at content:
++        self.portal.invokeFactory('Document', 'doc1')
++        transaction.commit()
++        qi = self.portal.portal_quickinstaller
++        portal_types = self.portal.portal_types
++        from zExceptions import NotFound
++        self.assertRaises(NotFound, self.browser.open, '%s/@@atct_migrator' % self.portal_url)  # noqa
++        self.browser.open('%s/@@pac_installer' % self.portal_url)
++        self.browser.getControl('Install').click()
++        self.assertIn('You currently have <span class="strong">1</span> archetypes objects to be migrated.', self.browser.contents)  # noqa
++
++        self.browser.getControl(name='form.widgets.content_types:list').value = ['Document']  # noqa
++        self.assertEqual(self.browser.getControl(name='form.widgets.migrate_references:list').value, ['selected'])  # noqa
++        self.browser.getControl(name='form.buttons.migrate').click()
++        self.assertIn('Congratulations! You migrated from Archetypes to Dexterity.', self.browser.contents)  # noqa
++        msg = "<td>ATDocument</td>\n      <td>Document</td>\n      <td>1</td>"
++        self.assertIn(msg, self.browser.contents)
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index 9052771..b56c767 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -1,4 +1,5 @@
+ # -*- coding: utf-8 -*-
++from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.utils import safe_unicode
+ from datetime import datetime
+ from plone.app.contenttypes.migration.field_migrators import migrate_filefield
+@@ -6,14 +7,20 @@
+ from plone.app.contenttypes.migration.field_migrators import \
+     migrate_simplefield
+ from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+-from plone.app.contenttypes.testing import \
+-    PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
++from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
++from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
++from plone.app.testing import SITE_OWNER_NAME
++from plone.app.testing import SITE_OWNER_PASSWORD
+ from plone.app.testing import TEST_USER_ID
+ from plone.app.testing import applyProfile
++from plone.app.testing import applyProfile
++from plone.app.testing import login
+ from plone.app.testing import setRoles
++from plone.testing.z2 import Browser
+ 
+ import pytz
+ import os.path
++import transaction
+ import unittest2 as unittest
+ 
+ 
+@@ -395,3 +402,80 @@ def test_migrate_atevent_to_dxevent(self):
+             os.environ['TZ'] = oldTZ
+         else:
+             del os.environ['TZ']
++
++
++class CustomMigrationFunctionalTests(unittest.TestCase):
++
++    layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
++
++    def setUp(self):
++        app = self.layer['app']
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++        self.request['ACTUAL_URL'] = self.portal.absolute_url()
++        self.request['URL'] = self.portal.absolute_url()
++        self.catalog = getToolByName(self.portal, "portal_catalog")
++        self.portal.acl_users.userFolderAddUser('admin',
++                                                'secret',
++                                                ['Manager'],
++                                                [])
++        login(self.portal, 'admin')
++        self.portal.portal_workflow.setDefaultChain(
++            "simple_publication_workflow")
++        self.portal_url = self.portal.absolute_url()
++
++        self.browser = Browser(app)
++        self.browser.handleErrors = False
++        self.browser.addHeader(
++            'Authorization',
++            'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,)
++        )
++
++    def tearDown(self):
++        try:
++            applyProfile(self.portal, 'plone.app.contenttypes:uninstall')
++        except KeyError:
++            pass
++
++    def test_custom_migration_form(self):
++        """Basic test for the custom_migration form.
++        Field-mapping only works with javascript enabled so we migrate
++        only the content but not the fields.
++        """
++        # add some at content
++        self.portal.invokeFactory('Document', 'doc1')
++        self.portal.invokeFactory('Event', 'event1')
++        self.portal.event1.setTitle(u'Ein Törmin')
++        self.portal.event1.setDescription(u'Wänn?')
++        self.portal.doc1.setTitle(u'Ein Döcument')
++        self.portal.doc1.setDescription(u'Sö was')
++        transaction.commit()
++        self.browser.open('%s/@@pac_installer' % self.portal_url)
++        self.browser.getControl('Install').click()
++        # open custom-migration-form
++        self.browser.open('%s/@@custom_migration' % self.portal_url)
++        results = self.browser.contents
++        self.assertIn('Custom types migration control panel', results)
++        self.assertIn('<input type="hidden" name="Document:list" value="text__type__Products.Archetypes.Field.TextField" />', results)  # noqa
++        self.assertEqual(self.browser.getControl(name='dx_select_Document').value, [''])  # noqa
++        # chose to migrate to Link
++        self.browser.getControl(name='dx_select_Document').value = ['Link']
++        self.assertIn('<input type="hidden" name="Event:list" value="startDate__type__Products.Archetypes.Field.DateTimeField" />', results)  # noqa
++        # chose to migrate to Link
++        self.browser.getControl(name='dx_select_Event').value = ['Link']
++        # run migration
++        self.browser.getControl(name='form.button.Migrate').click()
++        results = self.browser.contents
++        self.assertIn('Migration applied succesfully for 1 "Document" items.', results)  # noqa
++        self.assertIn('Migration applied succesfully for 1 "Event" items.', results)  # noqa
++        self.assertIn('No content to migrate.', results)
++        link1 = self.portal['doc1']
++        self.assertEqual(link1.portal_type, 'Link')
++        self.assertEqual(link1.title, u'Ein D\xf6cument')
++        self.assertEqual(link1.description, u'S\xf6 was')
++        self.assertEqual(self.portal['event1'].portal_type, 'Link')
++        # we did not migrate the fields so lets find out if it is a real Link
++        link1.remote_url = 'http://www.starzel.de'
++        view = link1()
++        self.assertIn(u'<h1 class="documentFirstHeading">Ein D\xf6cument</h1>', view)  # noqa
++        self.assertIn(u'The link address is:</span>\n            <a href="http://www.starzel.de">http://www.starzel.de</a>', view)  # noqa
 
 
