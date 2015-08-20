@@ -1,117 +1,468 @@
-Repository: plone.app.theming
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-08-20T15:18:29+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.theming/commit/a330304362d9ee10be0cc3c6e86357804168de88
+Date: 2015-08-20T11:14:29+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.content/commit/347a2a1e2f532ff43840625bc75299dd294bf05d
 
-Update changelog.
+fix https://github.com/plone/Products.CMFPlone/issues/829
 
 Files changed:
-M CHANGES.rst
+M plone/app/content/browser/actions.py
+M plone/app/content/tests/test_actions.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index c3e88e0..06a0b04 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,6 +4,9 @@ Changelog
- 1.2.8 (unreleased)
- ------------------
+diff --git a/plone/app/content/browser/actions.py b/plone/app/content/browser/actions.py
+index a761ccb..90b7fa1 100644
+--- a/plone/app/content/browser/actions.py
++++ b/plone/app/content/browser/actions.py
+@@ -124,6 +124,11 @@ class RenameForm(form.Form):
+                     u'Each item has a Short Name and a Title, which you can ' +
+                     u'change by entering the new details below.')
  
-+- change link from plone.org to plone.com.
-+  [tkimnguyen]
++    def view_url(self):
++        context_state = getMultiAdapter(
++            (self.context, self.request), name='plone_context_state')
++        return context_state.view_url()
 +
- - fix toolbar on control panel
-   [vangheem]
+     @button.buttonAndHandler(_(u'Rename'), name='Rename')
+     def handle_rename(self, action):
+         data, errors = self.extractData()
+@@ -161,12 +166,12 @@ def handle_rename(self, action):
+             _(u"Renamed '${oldid}' to '${newid}'.", mapping={
+                 u'oldid': oldid, u'newid': newid}))
  
+-        self.request.response.redirect(self.context.absolute_url())
++        self.request.response.redirect(self.view_url())
+ 
+     @button.buttonAndHandler(_(u'label_cancel', default=u'Cancel'),
+                              name='Cancel')
+     def handle_cancel(self, action):
+-        self.request.response.redirect(self.context.absolute_url())
++        self.request.response.redirect(self.view_url())
+ 
+ 
+ class ObjectCutView(LockingBase):
+@@ -185,6 +190,12 @@ def canonical_object_url(self):
+             (self.context, self.request), name='plone_context_state')
+         return context_state.canonical_object_url()
+ 
++    @property
++    def view_url(self):
++        context_state = getMultiAdapter(
++            (self.context, self.request), name='plone_context_state')
++        return context_state.view_url()
++
+     def do_redirect(self, url, message=None, message_type='info',
+                     raise_exception=None):
+         if message is not None:
+@@ -196,19 +207,19 @@ def do_redirect(self, url, message=None, message_type='info',
+ 
+     def do_action(self):
+         if self.is_locked:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is locked and cannot be cut.',
+                                         mapping={'title': self.title, }))
+ 
+         try:
+             self.parent.manage_cutObjects(self.context.getId(), self.request)
+         except CopyError:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is not moveable.',
+                                         mapping={'title': self.title}))
+ 
+         return self.do_redirect(
+-            self.canonical_object_url,
++            self.view_url,
+             _(u'${title} cut.', mapping={'title': self.title}),
+             'info'
+         )
+@@ -229,11 +240,11 @@ def do_action(self):
+         try:
+             self.parent.manage_copyObjects(self.context.getId(), self.request)
+         except CopyError:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is not copyable.',
+                                         mapping={'title': self.title}))
+ 
+-        return self.do_redirect(self.canonical_object_url,
++        return self.do_redirect(self.view_url,
+                                 _(u'${title} copied.',
+                                     mapping={'title': self.title}))
+ 
+diff --git a/plone/app/content/tests/test_actions.py b/plone/app/content/tests/test_actions.py
+index 9206fc6..4424e59 100644
+--- a/plone/app/content/tests/test_actions.py
++++ b/plone/app/content/tests/test_actions.py
+@@ -171,6 +171,32 @@ def test_rename_form(self):
+         self.portal.manage_delObjects(ids='f2')
+         transaction.commit()
+ 
++    def test_rename_form_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++        logout()
++
++        # We need zope2.CopyOrMove permission to rename content
++        self.browser.open(document1.absolute_url() + '/object_rename')
++        self.browser.getControl(name='form.widgets.new_id').value = 'f2'
++        self.browser.getControl(name='form.widgets.new_title').value = 'F2'
++        self.browser.getControl(name='form.buttons.Rename').click()
++        self.assertEqual(document1.getId(), 'f2')
++        self.assertEqual(document1.Title(), 'F2')
++        self.assertEqual(self.browser.url, document1.absolute_url() + '/view')
++
++        login(self.portal, TEST_USER_NAME)
++        self.portal.manage_delObjects(ids='f1')
++        transaction.commit()
++
+     def test_create_safe_id_on_renaming(self):
+         logout()
+         folder = self.portal['f1']
+@@ -219,6 +245,29 @@ def test_rename_form_cancel(self):
+         self.assertEqual(folder.getId(), _id)
+         self.assertEqual(folder.Title(), _title)
+ 
++    def test_rename_form_cancel_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        _id = document1.getId()
++        _title = document1.Title()
++
++        self.browser.open(document1.absolute_url() + '/object_rename')
++        self.browser.getControl(name='form.buttons.Cancel').click()
++        transaction.commit()
++
++        self.assertEqual(self.browser.url, document1.absolute_url() + '/view')
++        self.assertEqual(document1.getId(), _id)
++        self.assertEqual(document1.Title(), _title)
++
+     def _get_token(self, context):
+         authenticator = getMultiAdapter(
+             (context, self.request), name='authenticator')
+@@ -243,6 +292,34 @@ def test_object_cut_view(self):
+         self.assertIn(
+             '{0:s} cut.'.format(folder.Title()), self.browser.contents)
+ 
++    def test_object_cut_view_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        # We need pass an authenticator token to prevent Unauthorized
++        self.assertRaises(
++            Unauthorized,
++            self.browser.open,
++            '{0:s}/object_cut'.format(document1.absolute_url())
++        )
++
++        # We need to have Copy or Move permission to cut an object
++        self.browser.open('{0:s}/object_cut?_authenticator={1:s}'.format(
++            document1.absolute_url(), self._get_token(document1)))
++
++        self.assertIn('__cp', self.browser.cookies)
++        self.assertIn(
++            '{0:s} cut.'.format(document1.Title()), self.browser.contents)
++        self.assertEqual(document1.absolute_url() + '/view', self.browser.url)
++
+     def test_object_copy_view(self):
+         folder = self.portal['f1']
+ 
+@@ -260,6 +337,33 @@ def test_object_copy_view(self):
+         self.assertIn(
+             '{0:s} copied.'.format(folder.Title()), self.browser.contents)
+ 
++    def test_object_copy_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        # We need pass an authenticator token to prevent Unauthorized
++        self.assertRaises(
++            Unauthorized,
++            self.browser.open,
++            '{0:s}/object_copy'.format(document1.absolute_url())
++        )
++
++        self.browser.open('{0:s}/object_copy?_authenticator={1:s}'.format(
++            document1.absolute_url(), self._get_token(document1)))
++
++        self.assertIn('__cp', self.browser.cookies)
++        self.assertIn(
++            '{0:s} copied.'.format(document1.Title()), self.browser.contents)
++        self.assertEqual(document1.absolute_url() + '/view', self.browser.url)
++
+     def test_object_cut_and_paste(self):
+         folder = self.portal['f1']
+         self.portal.invokeFactory(type_name='Document', id='d1', title='A Doc')
 
 
-Repository: plone.app.theming
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2015-08-20T15:18:38+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.theming/commit/842dae1a3587b4a49fc33920361453fdca605d65
+Date: 2015-08-20T09:29:44-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.content/commit/a38f30bc33298dc80206e27c460cc58c9ec664fb
 
-Preparing release 1.2.8
+Merge pull request #50 from plone/respect_view_method
 
-Files changed:
-M CHANGES.rst
-M setup.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 06a0b04..530be26 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--1.2.8 (unreleased)
-+1.2.8 (2015-08-20)
- ------------------
- 
- - change link from plone.org to plone.com.
-diff --git a/setup.py b/setup.py
-index e748bd5..5ef2833 100644
---- a/setup.py
-+++ b/setup.py
-@@ -3,7 +3,7 @@
- from setuptools import setup
- import os
- 
--version = '1.2.8.dev0'
-+version = '1.2.8'
- 
- longdescription = open("README.rst").read()
- longdescription += "\n\n"
-
-
-Repository: plone.app.theming
-
-
-Branch: refs/heads/master
-Date: 2015-08-20T15:19:12+02:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.app.theming/commit/537a64fe335826bc47ff2eff150cfed13c1c5386
-
-Back to development: 1.2.9
+Respect view-methods in rename, copy and cut
 
 Files changed:
-M CHANGES.rst
-M setup.py
+M plone/app/content/browser/actions.py
+M plone/app/content/tests/test_actions.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 530be26..efc178f 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,6 +1,12 @@
- Changelog
- =========
+diff --git a/plone/app/content/browser/actions.py b/plone/app/content/browser/actions.py
+index a761ccb..90b7fa1 100644
+--- a/plone/app/content/browser/actions.py
++++ b/plone/app/content/browser/actions.py
+@@ -124,6 +124,11 @@ class RenameForm(form.Form):
+                     u'Each item has a Short Name and a Title, which you can ' +
+                     u'change by entering the new details below.')
  
-+1.2.9 (unreleased)
-+------------------
++    def view_url(self):
++        context_state = getMultiAdapter(
++            (self.context, self.request), name='plone_context_state')
++        return context_state.view_url()
 +
-+- Nothing changed yet.
+     @button.buttonAndHandler(_(u'Rename'), name='Rename')
+     def handle_rename(self, action):
+         data, errors = self.extractData()
+@@ -161,12 +166,12 @@ def handle_rename(self, action):
+             _(u"Renamed '${oldid}' to '${newid}'.", mapping={
+                 u'oldid': oldid, u'newid': newid}))
+ 
+-        self.request.response.redirect(self.context.absolute_url())
++        self.request.response.redirect(self.view_url())
+ 
+     @button.buttonAndHandler(_(u'label_cancel', default=u'Cancel'),
+                              name='Cancel')
+     def handle_cancel(self, action):
+-        self.request.response.redirect(self.context.absolute_url())
++        self.request.response.redirect(self.view_url())
+ 
+ 
+ class ObjectCutView(LockingBase):
+@@ -185,6 +190,12 @@ def canonical_object_url(self):
+             (self.context, self.request), name='plone_context_state')
+         return context_state.canonical_object_url()
+ 
++    @property
++    def view_url(self):
++        context_state = getMultiAdapter(
++            (self.context, self.request), name='plone_context_state')
++        return context_state.view_url()
 +
+     def do_redirect(self, url, message=None, message_type='info',
+                     raise_exception=None):
+         if message is not None:
+@@ -196,19 +207,19 @@ def do_redirect(self, url, message=None, message_type='info',
+ 
+     def do_action(self):
+         if self.is_locked:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is locked and cannot be cut.',
+                                         mapping={'title': self.title, }))
+ 
+         try:
+             self.parent.manage_cutObjects(self.context.getId(), self.request)
+         except CopyError:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is not moveable.',
+                                         mapping={'title': self.title}))
+ 
+         return self.do_redirect(
+-            self.canonical_object_url,
++            self.view_url,
+             _(u'${title} cut.', mapping={'title': self.title}),
+             'info'
+         )
+@@ -229,11 +240,11 @@ def do_action(self):
+         try:
+             self.parent.manage_copyObjects(self.context.getId(), self.request)
+         except CopyError:
+-            return self.do_redirect(self.canonical_object_url,
++            return self.do_redirect(self.view_url,
+                                     _(u'${title} is not copyable.',
+                                         mapping={'title': self.title}))
+ 
+-        return self.do_redirect(self.canonical_object_url,
++        return self.do_redirect(self.view_url,
+                                 _(u'${title} copied.',
+                                     mapping={'title': self.title}))
+ 
+diff --git a/plone/app/content/tests/test_actions.py b/plone/app/content/tests/test_actions.py
+index 9206fc6..4424e59 100644
+--- a/plone/app/content/tests/test_actions.py
++++ b/plone/app/content/tests/test_actions.py
+@@ -171,6 +171,32 @@ def test_rename_form(self):
+         self.portal.manage_delObjects(ids='f2')
+         transaction.commit()
+ 
++    def test_rename_form_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
 +
- 1.2.8 (2015-08-20)
- ------------------
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++        logout()
++
++        # We need zope2.CopyOrMove permission to rename content
++        self.browser.open(document1.absolute_url() + '/object_rename')
++        self.browser.getControl(name='form.widgets.new_id').value = 'f2'
++        self.browser.getControl(name='form.widgets.new_title').value = 'F2'
++        self.browser.getControl(name='form.buttons.Rename').click()
++        self.assertEqual(document1.getId(), 'f2')
++        self.assertEqual(document1.Title(), 'F2')
++        self.assertEqual(self.browser.url, document1.absolute_url() + '/view')
++
++        login(self.portal, TEST_USER_NAME)
++        self.portal.manage_delObjects(ids='f1')
++        transaction.commit()
++
+     def test_create_safe_id_on_renaming(self):
+         logout()
+         folder = self.portal['f1']
+@@ -219,6 +245,29 @@ def test_rename_form_cancel(self):
+         self.assertEqual(folder.getId(), _id)
+         self.assertEqual(folder.Title(), _title)
  
-diff --git a/setup.py b/setup.py
-index 5ef2833..79715df 100644
---- a/setup.py
-+++ b/setup.py
-@@ -3,7 +3,7 @@
- from setuptools import setup
- import os
++    def test_rename_form_cancel_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        _id = document1.getId()
++        _title = document1.Title()
++
++        self.browser.open(document1.absolute_url() + '/object_rename')
++        self.browser.getControl(name='form.buttons.Cancel').click()
++        transaction.commit()
++
++        self.assertEqual(self.browser.url, document1.absolute_url() + '/view')
++        self.assertEqual(document1.getId(), _id)
++        self.assertEqual(document1.Title(), _title)
++
+     def _get_token(self, context):
+         authenticator = getMultiAdapter(
+             (context, self.request), name='authenticator')
+@@ -243,6 +292,34 @@ def test_object_cut_view(self):
+         self.assertIn(
+             '{0:s} cut.'.format(folder.Title()), self.browser.contents)
  
--version = '1.2.8'
-+version = '1.2.9.dev0'
++    def test_object_cut_view_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        # We need pass an authenticator token to prevent Unauthorized
++        self.assertRaises(
++            Unauthorized,
++            self.browser.open,
++            '{0:s}/object_cut'.format(document1.absolute_url())
++        )
++
++        # We need to have Copy or Move permission to cut an object
++        self.browser.open('{0:s}/object_cut?_authenticator={1:s}'.format(
++            document1.absolute_url(), self._get_token(document1)))
++
++        self.assertIn('__cp', self.browser.cookies)
++        self.assertIn(
++            '{0:s} cut.'.format(document1.Title()), self.browser.contents)
++        self.assertEqual(document1.absolute_url() + '/view', self.browser.url)
++
+     def test_object_copy_view(self):
+         folder = self.portal['f1']
  
- longdescription = open("README.rst").read()
- longdescription += "\n\n"
+@@ -260,6 +337,33 @@ def test_object_copy_view(self):
+         self.assertIn(
+             '{0:s} copied.'.format(folder.Title()), self.browser.contents)
+ 
++    def test_object_copy_with_view_action(self):
++        # can't be bothered to register blobs, instead we add documents to
++        # typesUseViewActionInListings
++        props = self.portal.portal_properties.site_properties
++        props.manage_changeProperties(
++            typesUseViewActionInListings=['Image', 'File', 'Document'])
++
++        folder = self.portal['f1']
++        folder.invokeFactory('Document', 'document1')
++        document1 = folder['document1']
++        transaction.commit()
++
++        # We need pass an authenticator token to prevent Unauthorized
++        self.assertRaises(
++            Unauthorized,
++            self.browser.open,
++            '{0:s}/object_copy'.format(document1.absolute_url())
++        )
++
++        self.browser.open('{0:s}/object_copy?_authenticator={1:s}'.format(
++            document1.absolute_url(), self._get_token(document1)))
++
++        self.assertIn('__cp', self.browser.cookies)
++        self.assertIn(
++            '{0:s} copied.'.format(document1.Title()), self.browser.contents)
++        self.assertEqual(document1.absolute_url() + '/view', self.browser.url)
++
+     def test_object_cut_and_paste(self):
+         folder = self.portal['f1']
+         self.portal.invokeFactory(type_name='Document', id='d1', title='A Doc')
 
 
