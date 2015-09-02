@@ -1,28 +1,250 @@
-Repository: Products.CMFPlone
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-09-01T23:40:58-05:00
+Date: 2015-09-01T23:05:57-05:00
 Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/ede24b43c8cd1db4775aabc496b3c294376a32ea
+Commit: https://github.com/plone/plone.app.contenttypes/commit/ffb01ca966fd8531a8ee85a0051d6aaf848166b3
 
-set strictImports to false
+Handle languages better for content that is create when site is generated fixes https://github.com/plone/Products.CMFPlone/issues/754
 
 Files changed:
-M Products/CMFPlone/_scripts/_generate_gruntfile.py
+M CHANGES.rst
+M plone/app/contenttypes/setuphandlers.py
 
-diff --git a/Products/CMFPlone/_scripts/_generate_gruntfile.py b/Products/CMFPlone/_scripts/_generate_gruntfile.py
-index 75307f1..fa76f49 100644
---- a/Products/CMFPlone/_scripts/_generate_gruntfile.py
-+++ b/Products/CMFPlone/_scripts/_generate_gruntfile.py
-@@ -120,7 +120,7 @@
-                     strictMath: false,
-                     sourceMap: true,
-                     outputSourceFiles: true,
--                    strictImports: true,
-+                    strictImports: false,
-                     sourceMapURL: "{sourcemap_url}",
-                     sourceMapBasepath: "{base_path}",
-                     relativeUrls: true,
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 51f0b20..66899c0 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 1.2b5 (unreleased)
+ ------------------
+ 
++- Handle languages better for content that is create when site is generated
++  [vangheem]
++
+ - In ``FolderView`` based views, don't include the ``portal_types`` query, if
+   ``object_provides`` is set in the ``results`` method keyword arguments. Fixes
+   a case, where no Album Images were shown, when portal_state's
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index 56b7e3a..7d36217 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -6,12 +6,12 @@
+ from Products.CMFPlone.interfaces.constrains import ISelectableConstrainTypes
+ from Products.CMFPlone.utils import _createObjectByType
+ from Products.CMFPlone.utils import bodyfinder
++from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.app.dexterity.behaviors import constrains
+ from plone.app.textfield.value import RichTextValue
+ from plone.dexterity.fti import IDexterityFTI
+ from plone.dexterity.utils import createContent
+ from plone.i18n.normalizer.interfaces import IURLNormalizer
+-from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.portlets.interfaces import ILocalPortletAssignmentManager
+ from plone.portlets.interfaces import IPortletManager
+ from plone.registry.interfaces import IRegistry
+@@ -23,6 +23,7 @@
+ from zope.container.interfaces import INameChooser
+ from zope.i18n.interfaces import ITranslationDomain
+ from zope.i18n.locales import locales
++from zope.i18n.locales.provider import LoadLocaleError
+ from zope.interface import implements
+ 
+ 
+@@ -96,13 +97,17 @@ def _get_locales_info(portal):
+     reg = queryUtility(IRegistry, context=portal)
+     language = reg['plone.default_language']
+     parts = (language.split('-') + [None, None])[:3]
+-    locale = locales.getLocale(*parts)
+ 
+-    # If we get a territory, we enable the combined language codes
+-    if locale.id.territory:
+-        return locale.id.language + '_' + locale.id.territory, True, locale
++    try:
++        locale = locales.getLocale(*parts)
+ 
+-    return locale.id.language, False, locale
++        # If we get a territory, we enable the combined language codes
++        if locale.id.territory:
++            return locale.id.language + '_' + locale.id.territory, True, locale
++        return locale.id.language, False, locale
++    except LoadLocaleError:
++        # default to *some* language so we don't error out
++        return language, False, locales.getLocale('en')
+ 
+ 
+ def _setup_calendar(portal, locale):
+@@ -127,7 +132,7 @@ def _setup_visible_ids(portal, target_language, locale):
+     # See if we have a URL normalizer
+     normalizer = queryUtility(IURLNormalizer, name=target_language)
+     if normalizer is None:
+-        normalizer = queryUtility(IURLNormalizer, name=target_language)
++        normalizer = queryUtility(IURLNormalizer)
+ 
+     # If we get a script other than Latn we enable visible_ids
+     if locale.id.script is not None:
+@@ -162,7 +167,7 @@ def create_frontpage(portal, target_language):
+         content = createContent('Document', id=frontpage_id,
+                                 title=title,
+                                 description=description,
+-                                language=target_language
++                                language=target_language.replace('_', '-').lower()
+                                 )
+         content = addContentToContainer(portal, content)
+         front_text = None
+@@ -204,7 +209,7 @@ def create_news_topic(portal, target_language):
+         container = createContent('Folder', id=news_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         _createObjectByType('Collection', container,
+                             id='aggregator', title=title,
+@@ -249,7 +254,7 @@ def create_events_topic(portal, target_language):
+         container = createContent('Folder', id=events_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         _createObjectByType('Collection', container,
+                             id='aggregator', title=title,
+@@ -294,7 +299,7 @@ def configure_members_folder(portal, target_language):
+         container = createContent('Folder', id=members_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         container.setOrdering('unordered')
+         container.reindexObject()
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2015-09-02T07:33:48+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/35a70d352174d5f2371cc0db9bcb7c959fff1a97
+
+Merge pull request #264 from plone/langauge-site-creation
+
+Handle languages better for content that is create when site is generated
+
+Files changed:
+M CHANGES.rst
+M plone/app/contenttypes/setuphandlers.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 51f0b20..66899c0 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 1.2b5 (unreleased)
+ ------------------
+ 
++- Handle languages better for content that is create when site is generated
++  [vangheem]
++
+ - In ``FolderView`` based views, don't include the ``portal_types`` query, if
+   ``object_provides`` is set in the ``results`` method keyword arguments. Fixes
+   a case, where no Album Images were shown, when portal_state's
+diff --git a/plone/app/contenttypes/setuphandlers.py b/plone/app/contenttypes/setuphandlers.py
+index 56b7e3a..7d36217 100644
+--- a/plone/app/contenttypes/setuphandlers.py
++++ b/plone/app/contenttypes/setuphandlers.py
+@@ -6,12 +6,12 @@
+ from Products.CMFPlone.interfaces.constrains import ISelectableConstrainTypes
+ from Products.CMFPlone.utils import _createObjectByType
+ from Products.CMFPlone.utils import bodyfinder
++from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.app.dexterity.behaviors import constrains
+ from plone.app.textfield.value import RichTextValue
+ from plone.dexterity.fti import IDexterityFTI
+ from plone.dexterity.utils import createContent
+ from plone.i18n.normalizer.interfaces import IURLNormalizer
+-from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.portlets.interfaces import ILocalPortletAssignmentManager
+ from plone.portlets.interfaces import IPortletManager
+ from plone.registry.interfaces import IRegistry
+@@ -23,6 +23,7 @@
+ from zope.container.interfaces import INameChooser
+ from zope.i18n.interfaces import ITranslationDomain
+ from zope.i18n.locales import locales
++from zope.i18n.locales.provider import LoadLocaleError
+ from zope.interface import implements
+ 
+ 
+@@ -96,13 +97,17 @@ def _get_locales_info(portal):
+     reg = queryUtility(IRegistry, context=portal)
+     language = reg['plone.default_language']
+     parts = (language.split('-') + [None, None])[:3]
+-    locale = locales.getLocale(*parts)
+ 
+-    # If we get a territory, we enable the combined language codes
+-    if locale.id.territory:
+-        return locale.id.language + '_' + locale.id.territory, True, locale
++    try:
++        locale = locales.getLocale(*parts)
+ 
+-    return locale.id.language, False, locale
++        # If we get a territory, we enable the combined language codes
++        if locale.id.territory:
++            return locale.id.language + '_' + locale.id.territory, True, locale
++        return locale.id.language, False, locale
++    except LoadLocaleError:
++        # default to *some* language so we don't error out
++        return language, False, locales.getLocale('en')
+ 
+ 
+ def _setup_calendar(portal, locale):
+@@ -127,7 +132,7 @@ def _setup_visible_ids(portal, target_language, locale):
+     # See if we have a URL normalizer
+     normalizer = queryUtility(IURLNormalizer, name=target_language)
+     if normalizer is None:
+-        normalizer = queryUtility(IURLNormalizer, name=target_language)
++        normalizer = queryUtility(IURLNormalizer)
+ 
+     # If we get a script other than Latn we enable visible_ids
+     if locale.id.script is not None:
+@@ -162,7 +167,7 @@ def create_frontpage(portal, target_language):
+         content = createContent('Document', id=frontpage_id,
+                                 title=title,
+                                 description=description,
+-                                language=target_language
++                                language=target_language.replace('_', '-').lower()
+                                 )
+         content = addContentToContainer(portal, content)
+         front_text = None
+@@ -204,7 +209,7 @@ def create_news_topic(portal, target_language):
+         container = createContent('Folder', id=news_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         _createObjectByType('Collection', container,
+                             id='aggregator', title=title,
+@@ -249,7 +254,7 @@ def create_events_topic(portal, target_language):
+         container = createContent('Folder', id=events_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         _createObjectByType('Collection', container,
+                             id='aggregator', title=title,
+@@ -294,7 +299,7 @@ def configure_members_folder(portal, target_language):
+         container = createContent('Folder', id=members_id,
+                                   title=title,
+                                   description=description,
+-                                  language=target_language)
++                                  language=target_language.replace('_', '-').lower())
+         container = addContentToContainer(portal, container)
+         container.setOrdering('unordered')
+         container.reindexObject()
 
 
