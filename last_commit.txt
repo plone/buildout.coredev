@@ -1,102 +1,343 @@
-Repository: plone.app.layout
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-09-06T15:25:02-05:00
+Date: 2015-09-03T16:01:31-05:00
 Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/b147ff375dd3afb811be70346cfd09bfb4654def
+Commit: https://github.com/plone/Products.CMFPlone/commit/01acb14aa82d89dc0f5585c5131037180a26e9d1
 
-Be more defensive in getting registry settings so upgraded
-  schema does not cause errors
+pre-cook legacy bundle so we do not do write on read
 
 Files changed:
-M CHANGES.rst
-M plone/app/layout/analytics/view.py
-M plone/app/layout/globals/portal.py
-M plone/app/layout/viewlets/common.py
-M plone/app/layout/viewlets/toolbar.py
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+M Products/CMFPlone/resources/exportimport/resourceregistry.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 48bc83b..3a096e6 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,9 @@ Changelog
- 2.5.11 (unreleased)
- -------------------
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index 69acf68..de24d68 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -1,23 +1,25 @@
+ # -*- coding:utf-8
+ from datetime import datetime
++import json
++import re
++from urlparse import urlparse
++
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
++from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
++from Products.CMFPlone.resources import add_bundle_on_request
+ from Products.CMFPlone.resources.browser.configjs import RequireJsView
++from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
++from Products.statusmessages.interfaces import IStatusMessage
+ from plone.memoize.view import memoize
++from plone.registry import field
+ from plone.registry.interfaces import IRegistry
++from plone.registry.record import Record
+ from plone.resource.interfaces import IResourceDirectory
+-from urlparse import urlparse
++import posixpath
+ from zExceptions import NotFound
+ from zope.component import getUtility
+-import json
+-import re
+-from Products.CMFPlone.resources import add_bundle_on_request
+-from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
+-from plone.registry import field
+-from plone.registry.record import Record
+-from Products.statusmessages.interfaces import IStatusMessage
+-import posixpath
  
--- Nothing changed yet.
-+- Be more defensive in getting registry settings so upgraded
-+  schema does not cause errors
-+  [vangheem]
+ 
+ CSS_URL_REGEX = re.compile('url\(([^)]+)\)')
+@@ -219,6 +221,7 @@ def save_registry(self):
+         # changed or not so we need to just set the last import date
+         # back so it gets re-built
+         self.registry.records['plone.resources.last_legacy_import'].value = datetime.now()
++        cookWhenChangingSettings(self.context)
+ 
+         return json.dumps({
+             'success': True
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index 5e1e760..cff2b93 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -1,6 +1,7 @@
+ import logging
+ 
+ from Products.CMFPlone.interfaces.resources import IResourceRegistry
++from Products.CMFPlone.interfaces.resources import IBundleRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
+ from StringIO import StringIO
+ from cssmin import cssmin
+@@ -19,12 +20,21 @@
+ logger = logging.getLogger('Products.CMFPlone')
  
  
- 2.5.10 (2015-08-20)
-diff --git a/plone/app/layout/analytics/view.py b/plone/app/layout/analytics/view.py
-index 002edab..6294f53 100644
---- a/plone/app/layout/analytics/view.py
-+++ b/plone/app/layout/analytics/view.py
-@@ -25,7 +25,10 @@ def update(self):
-     def render(self):
-         """render the webstats snippet"""
-         registry = getUtility(IRegistry)
--        site_settings = registry.forInterface(ISiteSchema, prefix="plone")
--        if site_settings.webstats_js:
--            return site_settings.webstats_js
--        return ''
-+        site_settings = registry.forInterface(ISiteSchema, prefix="plone", check=False)
-+        try:
-+            if site_settings.webstats_js:
-+                return site_settings.webstats_js
-+            return ''
-+        except AttributeError:
-+            return ''
-diff --git a/plone/app/layout/globals/portal.py b/plone/app/layout/globals/portal.py
-index 4a42b6e..aecf393 100644
---- a/plone/app/layout/globals/portal.py
-+++ b/plone/app/layout/globals/portal.py
-@@ -32,7 +32,7 @@ def portal(self):
-     @memoize_contextless
-     def portal_title(self):
-         registry = getUtility(IRegistry)
--        settings = registry.forInterface(ISiteSchema, prefix="plone")
-+        settings = registry.forInterface(ISiteSchema, prefix="plone", check=False)
-         return settings.site_title
+-def cookWhenChangingSettings(context, bundle):
++def cookWhenChangingSettings(context, bundle=None):
+     """When our settings are changed, re-cook the not compilable bundles
+     """
+     registry = getUtility(IRegistry)
+     resources = registry.collectionOfInterface(
+         IResourceRegistry, prefix="plone.resources", check=False)
++    if bundle is None:
++        # default to cooking legacy bundle
++        bundles = registry.collectionOfInterface(
++            IBundleRegistry, prefix="plone.bundles", check=False)
++        if 'plone-legacy' in bundles:
++            bundle = bundles['plone-legacy']
++        else:
++            bundle = bundles.setdefault('plone-legacy')
++            bundle.resources = []
  
-     @memoize_contextless
-diff --git a/plone/app/layout/viewlets/common.py b/plone/app/layout/viewlets/common.py
-index 0c166c6..0693fc7 100644
---- a/plone/app/layout/viewlets/common.py
-+++ b/plone/app/layout/viewlets/common.py
-@@ -70,7 +70,7 @@ class TitleViewlet(ViewletBase):
-     @memoize
-     def site_title_setting(self):
-         registry = getUtility(IRegistry)
--        site_settings = registry.forInterface(ISiteSchema, prefix="plone")
-+        site_settings = registry.forInterface(ISiteSchema, prefix="plone", check=False)
-         return site_settings.site_title
+     # Let's join all css and js
+     css_file = ""
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index f130da2..6fc3a37 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -1,6 +1,7 @@
+-from Products.CMFPlone.resources.browser.resource import ResourceView
+ from urlparse import urlparse
++
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
++from Products.CMFPlone.resources.browser.resource import ResourceView
  
-     @property
-@@ -184,7 +184,7 @@ def update(self):
-         self.navigation_root_title = self.portal_state.navigation_root_title()
  
-         registry = getUtility(IRegistry)
--        settings = registry.forInterface(ISiteSchema, prefix="plone")
-+        settings = registry.forInterface(ISiteSchema, prefix="plone", check=False)
-         self.logo_title = settings.site_title
-         self.img_src = getSiteLogo(self.portal_state.portal())
+ class ScriptsView(ResourceView):
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index 66e92bc..577f020 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -1,6 +1,7 @@
++from urlparse import urlparse
++
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.CMFPlone.resources.browser.resource import ResourceView
+-from urlparse import urlparse
  
-diff --git a/plone/app/layout/viewlets/toolbar.py b/plone/app/layout/viewlets/toolbar.py
-index cbda321..29c89b6 100644
---- a/plone/app/layout/viewlets/toolbar.py
-+++ b/plone/app/layout/viewlets/toolbar.py
-@@ -29,7 +29,7 @@ def get_personal_bar(self):
  
-     def get_toolbar_logo(self):
-         registry = getUtility(IRegistry)
--        settings = registry.forInterface(ISiteSchema, prefix='plone')
-+        settings = registry.forInterface(ISiteSchema, prefix='plone', check=False)
-         portal_url = self.portal_state.portal_url()
-         try:
-             logo = settings.toolbar_logo
+ class StylesView(ResourceView):
+diff --git a/Products/CMFPlone/resources/exportimport/resourceregistry.py b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+index 5801667..25ddcfe 100644
+--- a/Products/CMFPlone/resources/exportimport/resourceregistry.py
++++ b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+@@ -1,9 +1,11 @@
++from datetime import datetime
++
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
++from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.GenericSetup.interfaces import IBody
+ from Products.GenericSetup.utils import XMLAdapterBase
+-from datetime import datetime
+ from plone.i18n.normalizer.interfaces import IIDNormalizer
+ from zope.component import queryMultiAdapter
+ from zope.component import queryUtility
+@@ -153,4 +155,5 @@ def _importNode(self, node):
+         if 'plone.resources.last_legacy_import' in self.registry.records:  # noqa
+             self.registry.records[
+                 'plone.resources.last_legacy_import'
+-            ].value = datetime.now()
+\ No newline at end of file
++            ].value = datetime.now()
++            cookWhenChangingSettings(self.context, legacy)
+\ No newline at end of file
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2015-09-05T18:07:24-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/c76a549661af1f36cbd0e410628dcf6e0eb2e020
+
+handle AssertionError when zope.globalrequest is not configured
+
+Files changed:
+M Products/CMFPlone/resources/exportimport/resourceregistry.py
+
+diff --git a/Products/CMFPlone/resources/exportimport/resourceregistry.py b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+index 25ddcfe..6848ca2 100644
+--- a/Products/CMFPlone/resources/exportimport/resourceregistry.py
++++ b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+@@ -156,4 +156,8 @@ def _importNode(self, node):
+             self.registry.records[
+                 'plone.resources.last_legacy_import'
+             ].value = datetime.now()
+-            cookWhenChangingSettings(self.context, legacy)
+\ No newline at end of file
++            try:
++                cookWhenChangingSettings(self.context, legacy)
++            except AssertionError:
++                # zope.globalrequest might be setup, don't error out
++                pass
+\ No newline at end of file
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2015-09-06T15:44:22-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/9e507e5e1612f62904c48000a18054fc47150501
+
+Merge pull request #860 from plone/pre-cook-legacy-bundle
+
+pre-cook legacy bundle so we do not do write on read
+
+Files changed:
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+M Products/CMFPlone/resources/exportimport/resourceregistry.py
+
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index 69acf68..de24d68 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -1,23 +1,25 @@
+ # -*- coding:utf-8
+ from datetime import datetime
++import json
++import re
++from urlparse import urlparse
++
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
++from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
++from Products.CMFPlone.resources import add_bundle_on_request
+ from Products.CMFPlone.resources.browser.configjs import RequireJsView
++from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
++from Products.statusmessages.interfaces import IStatusMessage
+ from plone.memoize.view import memoize
++from plone.registry import field
+ from plone.registry.interfaces import IRegistry
++from plone.registry.record import Record
+ from plone.resource.interfaces import IResourceDirectory
+-from urlparse import urlparse
++import posixpath
+ from zExceptions import NotFound
+ from zope.component import getUtility
+-import json
+-import re
+-from Products.CMFPlone.resources import add_bundle_on_request
+-from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
+-from plone.registry import field
+-from plone.registry.record import Record
+-from Products.statusmessages.interfaces import IStatusMessage
+-import posixpath
+ 
+ 
+ CSS_URL_REGEX = re.compile('url\(([^)]+)\)')
+@@ -219,6 +221,7 @@ def save_registry(self):
+         # changed or not so we need to just set the last import date
+         # back so it gets re-built
+         self.registry.records['plone.resources.last_legacy_import'].value = datetime.now()
++        cookWhenChangingSettings(self.context)
+ 
+         return json.dumps({
+             'success': True
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index 5e1e760..cff2b93 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -1,6 +1,7 @@
+ import logging
+ 
+ from Products.CMFPlone.interfaces.resources import IResourceRegistry
++from Products.CMFPlone.interfaces.resources import IBundleRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
+ from StringIO import StringIO
+ from cssmin import cssmin
+@@ -19,12 +20,21 @@
+ logger = logging.getLogger('Products.CMFPlone')
+ 
+ 
+-def cookWhenChangingSettings(context, bundle):
++def cookWhenChangingSettings(context, bundle=None):
+     """When our settings are changed, re-cook the not compilable bundles
+     """
+     registry = getUtility(IRegistry)
+     resources = registry.collectionOfInterface(
+         IResourceRegistry, prefix="plone.resources", check=False)
++    if bundle is None:
++        # default to cooking legacy bundle
++        bundles = registry.collectionOfInterface(
++            IBundleRegistry, prefix="plone.bundles", check=False)
++        if 'plone-legacy' in bundles:
++            bundle = bundles['plone-legacy']
++        else:
++            bundle = bundles.setdefault('plone-legacy')
++            bundle.resources = []
+ 
+     # Let's join all css and js
+     css_file = ""
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index f130da2..6fc3a37 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -1,6 +1,7 @@
+-from Products.CMFPlone.resources.browser.resource import ResourceView
+ from urlparse import urlparse
++
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
++from Products.CMFPlone.resources.browser.resource import ResourceView
+ 
+ 
+ class ScriptsView(ResourceView):
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index 66e92bc..577f020 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -1,6 +1,7 @@
++from urlparse import urlparse
++
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.CMFPlone.resources.browser.resource import ResourceView
+-from urlparse import urlparse
+ 
+ 
+ class StylesView(ResourceView):
+diff --git a/Products/CMFPlone/resources/exportimport/resourceregistry.py b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+index 5801667..6848ca2 100644
+--- a/Products/CMFPlone/resources/exportimport/resourceregistry.py
++++ b/Products/CMFPlone/resources/exportimport/resourceregistry.py
+@@ -1,9 +1,11 @@
++from datetime import datetime
++
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.interfaces import IBundleRegistry
+ from Products.CMFPlone.interfaces import IResourceRegistry
++from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.GenericSetup.interfaces import IBody
+ from Products.GenericSetup.utils import XMLAdapterBase
+-from datetime import datetime
+ from plone.i18n.normalizer.interfaces import IIDNormalizer
+ from zope.component import queryMultiAdapter
+ from zope.component import queryUtility
+@@ -153,4 +155,9 @@ def _importNode(self, node):
+         if 'plone.resources.last_legacy_import' in self.registry.records:  # noqa
+             self.registry.records[
+                 'plone.resources.last_legacy_import'
+-            ].value = datetime.now()
+\ No newline at end of file
++            ].value = datetime.now()
++            try:
++                cookWhenChangingSettings(self.context, legacy)
++            except AssertionError:
++                # zope.globalrequest might be setup, don't error out
++                pass
+\ No newline at end of file
 
 
