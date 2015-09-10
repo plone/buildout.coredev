@@ -1,110 +1,228 @@
-Repository: plone.app.upgrade
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-09-10T20:48:52+02:00
+Date: 2015-09-10T20:50:33+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/c77e9d96bb4df6ecbd05519c284068ec53311922
+Commit: https://github.com/plone/Products.CMFPlone/commit/682878a61f3698c2bf6d21cff45abba9dfcd86b4
 
-migrate search_results_description_length
+add search_results_description_length to registry and use in livesearch
 
 Files changed:
-M plone/app/upgrade/v50/betas.py
-M plone/app/upgrade/v50/profiles/to_rc2/registry.xml
+M Products/CMFPlone/browser/ploneview.py
+M Products/CMFPlone/browser/search.py
+M Products/CMFPlone/interfaces/controlpanel.py
 
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 7592674..969777b 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -3,6 +3,7 @@
- from Products.CMFPlone.interfaces import IMailSchema
- from Products.CMFPlone.interfaces import IMarkupSchema
- from Products.CMFPlone.interfaces import ISecuritySchema
-+from Products.CMFPlone.interfaces import ISearchSchema
- from Products.CMFPlone.interfaces import ISiteSchema
- from Products.CMFPlone.interfaces import IUserGroupsSettingsSchema
- from Products.CMFPlone.interfaces import ILanguageSchema
-@@ -410,3 +411,13 @@ def to50rc2(context):
-         if portal.hasProperty(p):
-             portal._delProperty(p)
+diff --git a/Products/CMFPlone/browser/ploneview.py b/Products/CMFPlone/browser/ploneview.py
+index bea2e4d..315f198 100644
+--- a/Products/CMFPlone/browser/ploneview.py
++++ b/Products/CMFPlone/browser/ploneview.py
+@@ -136,6 +136,8 @@ def normalizeString(self, text):
+     def cropText(self, text, length, ellipsis='...'):
+         """Crop text on a word boundary
+         """
++        if not length:
++            return text
+         converted = False
+         if not isinstance(text, unicode):
+             text = utils.safe_unicode(text)
+@@ -281,7 +283,7 @@ def getIcon(self, item):
+         """Returns an object which implements the IContentIcon interface and
+         provides the informations necessary to render an icon. The item
+         parameter needs to be adaptable to IContentIcon. Icons can be disabled
+-        globally or just for anonymous users with the icon_visibility site 
++        globally or just for anonymous users with the icon_visibility site
+         setting.
+         """
+         context = aq_inner(self.context)
+diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py
+index f8980b3..5680714 100644
+--- a/Products/CMFPlone/browser/search.py
++++ b/Products/CMFPlone/browser/search.py
+@@ -1,15 +1,17 @@
+ # -*- coding: utf-8 -*-
  
-+    # Migrate settings from portal_properties to the configuration registry
-+    pprop = getToolByName(portal, 'portal_properties')
-+    site_properties = pprop['site_properties']
+ from DateTime import DateTime
+-from plone.app.contentlisting.interfaces import IContentListing
+ from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.browser.navtree import getNavigationRoot
+ from Products.CMFPlone.PloneBatch import Batch
++from Products.CMFPlone.browser.navtree import getNavigationRoot
+ from Products.ZCTextIndex.ParseTree import ParseError
++from ZTUtils import make_query
++from plone.app.contentlisting.interfaces import IContentListing
++from plone.registry.interfaces import IRegistry
+ from zope.component import getMultiAdapter
++from zope.component import queryUtility
+ from zope.i18nmessageid import MessageFactory
+ from zope.publisher.browser import BrowserView
+-from ZTUtils import make_query
+ 
+ import json
+ 
+@@ -203,11 +205,15 @@ def __call__(self):
+         results = self.results(batch=False, use_content_listing=False)
+         batch = Batch(results, per_page, start=(page - 1) * per_page)
+ 
++        registry = queryUtility(IRegistry)
++        length = registry['plone.search_results_description_length']
++        plone_view = getMultiAdapter(
++            (self.context, self.request), name='plone')
+         for item in batch:
+             items.append({
+                 'id': item.UID,
+                 'title': item.Title,
+-                'description': item.Description,
++                'description': plone_view.cropText(item.Description, length),
+                 'url': item.getURL(),
+                 'state': item.review_state
+             })
+diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
+index 1c30b86..911f867 100644
+--- a/Products/CMFPlone/interfaces/controlpanel.py
++++ b/Products/CMFPlone/interfaces/controlpanel.py
+@@ -877,6 +877,13 @@ class ISearchSchema(Interface):
+             source="plone.app.vocabularies.PortalTypes"
+         ),
+     )
 +
-+    if site_properties.hasProperty('search_results_description_length'):
-+        registry = getUtility(IRegistry)
-+        settings = registry.forInterface(ISearchSchema, prefix='plone')
-+        value = site_properties.getProperty(
-+            'search_results_description_length', 160)
-+        settings.search_results_description_length = value
-diff --git a/plone/app/upgrade/v50/profiles/to_rc2/registry.xml b/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-index 534327c..1b93620 100644
---- a/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-@@ -2,4 +2,6 @@
- <registry>
-   <records interface="Products.CMFPlone.interfaces.ISiteSchema"
-            prefix="plone" />
-+  <records interface="Products.CMFPlone.interfaces.ISearchSchema"
-+           prefix="plone" />
- </registry>
-\ No newline at end of file
++    search_results_description_length = schema.Int(
++        title=_(u"Crop the item description in search result listings "
++                u"after a number of characters."),
++        required=False,
++        default=160,
++    )
+ # TODO: These need to get moved into ATCT setup profile.
+ # 'ATBooleanCriterion',
+ # 'ATDateCriteria',
 
 
-Repository: plone.app.upgrade
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-09-10T20:55:26+02:00
+Date: 2015-09-10T20:50:33+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/a236cc7bd2950708832c300c542e906b8d8881c6
+Commit: https://github.com/plone/Products.CMFPlone/commit/3fce2a07b9ccb9885431f59db131769c1ac2f3ee
 
-Merge pull request #48 from plone/search_results_description_length
-
-migrate search_results_description_length
+Use None if there is no search_results_description_length
 
 Files changed:
-M plone/app/upgrade/v50/betas.py
-M plone/app/upgrade/v50/profiles/to_rc2/registry.xml
+M Products/CMFPlone/browser/search.py
 
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 7592674..969777b 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -3,6 +3,7 @@
- from Products.CMFPlone.interfaces import IMailSchema
- from Products.CMFPlone.interfaces import IMarkupSchema
- from Products.CMFPlone.interfaces import ISecuritySchema
-+from Products.CMFPlone.interfaces import ISearchSchema
- from Products.CMFPlone.interfaces import ISiteSchema
- from Products.CMFPlone.interfaces import IUserGroupsSettingsSchema
- from Products.CMFPlone.interfaces import ILanguageSchema
-@@ -410,3 +411,13 @@ def to50rc2(context):
-         if portal.hasProperty(p):
-             portal._delProperty(p)
+diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py
+index 5680714..868ded0 100644
+--- a/Products/CMFPlone/browser/search.py
++++ b/Products/CMFPlone/browser/search.py
+@@ -206,7 +206,7 @@ def __call__(self):
+         batch = Batch(results, per_page, start=(page - 1) * per_page)
  
-+    # Migrate settings from portal_properties to the configuration registry
-+    pprop = getToolByName(portal, 'portal_properties')
-+    site_properties = pprop['site_properties']
+         registry = queryUtility(IRegistry)
+-        length = registry['plone.search_results_description_length']
++        length = registry.get('plone.search_results_description_length')
+         plone_view = getMultiAdapter(
+             (self.context, self.request), name='plone')
+         for item in batch:
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2015-09-10T20:56:25+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/Products.CMFPlone/commit/7415b51baba242e9bb937bd90d6e6db987c36f92
+
+Merge pull request #909 from plone/search_results_description_length
+
+add search_results_description_length to registry and use in livesearch
+
+Files changed:
+M Products/CMFPlone/browser/ploneview.py
+M Products/CMFPlone/browser/search.py
+M Products/CMFPlone/interfaces/controlpanel.py
+
+diff --git a/Products/CMFPlone/browser/ploneview.py b/Products/CMFPlone/browser/ploneview.py
+index bea2e4d..315f198 100644
+--- a/Products/CMFPlone/browser/ploneview.py
++++ b/Products/CMFPlone/browser/ploneview.py
+@@ -136,6 +136,8 @@ def normalizeString(self, text):
+     def cropText(self, text, length, ellipsis='...'):
+         """Crop text on a word boundary
+         """
++        if not length:
++            return text
+         converted = False
+         if not isinstance(text, unicode):
+             text = utils.safe_unicode(text)
+@@ -281,7 +283,7 @@ def getIcon(self, item):
+         """Returns an object which implements the IContentIcon interface and
+         provides the informations necessary to render an icon. The item
+         parameter needs to be adaptable to IContentIcon. Icons can be disabled
+-        globally or just for anonymous users with the icon_visibility site 
++        globally or just for anonymous users with the icon_visibility site
+         setting.
+         """
+         context = aq_inner(self.context)
+diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py
+index f8980b3..868ded0 100644
+--- a/Products/CMFPlone/browser/search.py
++++ b/Products/CMFPlone/browser/search.py
+@@ -1,15 +1,17 @@
+ # -*- coding: utf-8 -*-
+ 
+ from DateTime import DateTime
+-from plone.app.contentlisting.interfaces import IContentListing
+ from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.browser.navtree import getNavigationRoot
+ from Products.CMFPlone.PloneBatch import Batch
++from Products.CMFPlone.browser.navtree import getNavigationRoot
+ from Products.ZCTextIndex.ParseTree import ParseError
++from ZTUtils import make_query
++from plone.app.contentlisting.interfaces import IContentListing
++from plone.registry.interfaces import IRegistry
+ from zope.component import getMultiAdapter
++from zope.component import queryUtility
+ from zope.i18nmessageid import MessageFactory
+ from zope.publisher.browser import BrowserView
+-from ZTUtils import make_query
+ 
+ import json
+ 
+@@ -203,11 +205,15 @@ def __call__(self):
+         results = self.results(batch=False, use_content_listing=False)
+         batch = Batch(results, per_page, start=(page - 1) * per_page)
+ 
++        registry = queryUtility(IRegistry)
++        length = registry.get('plone.search_results_description_length')
++        plone_view = getMultiAdapter(
++            (self.context, self.request), name='plone')
+         for item in batch:
+             items.append({
+                 'id': item.UID,
+                 'title': item.Title,
+-                'description': item.Description,
++                'description': plone_view.cropText(item.Description, length),
+                 'url': item.getURL(),
+                 'state': item.review_state
+             })
+diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
+index 1c30b86..911f867 100644
+--- a/Products/CMFPlone/interfaces/controlpanel.py
++++ b/Products/CMFPlone/interfaces/controlpanel.py
+@@ -877,6 +877,13 @@ class ISearchSchema(Interface):
+             source="plone.app.vocabularies.PortalTypes"
+         ),
+     )
 +
-+    if site_properties.hasProperty('search_results_description_length'):
-+        registry = getUtility(IRegistry)
-+        settings = registry.forInterface(ISearchSchema, prefix='plone')
-+        value = site_properties.getProperty(
-+            'search_results_description_length', 160)
-+        settings.search_results_description_length = value
-diff --git a/plone/app/upgrade/v50/profiles/to_rc2/registry.xml b/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-index 534327c..1b93620 100644
---- a/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc2/registry.xml
-@@ -2,4 +2,6 @@
- <registry>
-   <records interface="Products.CMFPlone.interfaces.ISiteSchema"
-            prefix="plone" />
-+  <records interface="Products.CMFPlone.interfaces.ISearchSchema"
-+           prefix="plone" />
- </registry>
-\ No newline at end of file
++    search_results_description_length = schema.Int(
++        title=_(u"Crop the item description in search result listings "
++                u"after a number of characters."),
++        required=False,
++        default=160,
++    )
+ # TODO: These need to get moved into ATCT setup profile.
+ # 'ATBooleanCriterion',
+ # 'ATDateCriteria',
 
 
