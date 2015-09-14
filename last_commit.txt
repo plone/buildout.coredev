@@ -1,307 +1,467 @@
-Repository: plone.api
+Repository: Products.CMFEditions
 
 
 Branch: refs/heads/master
-Date: 2015-09-12T01:09:53+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.api/commit/1d29da3b2dea65d154c6773754d57a52b6c438fd
+Date: 2015-09-09T10:24:21+02:00
+Author: tschorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.CMFEditions/commit/0f1485250c1320583fc9becc957486a12a70cd89
 
-Fixed api.content.find with combination of depth and path.
-
-Path is no longer ignored then.
+use unrestricted catalog search for storage statistics
 
 Files changed:
-M docs/CHANGES.rst
-M src/plone/api/content.py
-M src/plone/api/tests/test_content.py
+M Products/CMFEditions/ZVCStorageTool.py
+M Products/CMFEditions/tests/test_ZVCStorageTool.py
 
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index a1700ef..f0eee27 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -4,7 +4,9 @@ Changelog
- 1.4.6 (unreleased)
- ------------------
+diff --git a/Products/CMFEditions/ZVCStorageTool.py b/Products/CMFEditions/ZVCStorageTool.py
+index 0152c96..02676a0 100644
+--- a/Products/CMFEditions/ZVCStorageTool.py
++++ b/Products/CMFEditions/ZVCStorageTool.py
+@@ -665,7 +665,7 @@ def zmi_getStorageStatistics(self):
+             if shadowStorage is not None:
+                 size, sizeState = shadowStorage.getSize()
+ 
+-            workingCopy = hidhandler.queryObject(hid)
++            workingCopy = hidhandler.unrestrictedQueryObject(hid)
+             if workingCopy is not None:
+                 url = workingCopy.absolute_url()
+                 path = url[portal_paths_len:]
+diff --git a/Products/CMFEditions/tests/test_ZVCStorageTool.py b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+index e937f52..6acec0b 100755
+--- a/Products/CMFEditions/tests/test_ZVCStorageTool.py
++++ b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+@@ -23,7 +23,7 @@
+ """Test the standard archivist
+ 
+ """
+-
++from DateTime.DateTime import DateTime
+ from Products.CMFEditions.tests.base import CMFEditionsBaseTestCase
+ 
+ from zope.interface.verify import verifyObject
+@@ -43,6 +43,18 @@
+ class DummyOM(ObjectManager):
+     pass
+ 
++class CMFDummy(Dummy):
++
++    def __init__(self, id, cmfuid, effective=None, expires=None):
++        super(CMFDummy, self).__init__()
++        self.id = id
++        self.cmf_uid = cmfuid
++        self.effective = effective if effective is not None else self.modification_date
++        self.expires = expires
++
++    def getPortalTypeName(self):
++        return 'Dummy'
++
+ class TestZVCStorageTool(CMFEditionsBaseTestCase):
+ 
+     def afterSetUp(self):
+@@ -446,6 +458,84 @@ def test14_getHistoryMetadata(self):
+         self.assertEqual(history.retrieve(2)['metadata']['sys_metadata']['comment'], "saved v3")
+         self.assertEqual(history.retrieve(3)['metadata']['sys_metadata']['comment'], "saved v4")
+ 
++    def test15_storageStatistics(self):
++        self.maxDiff = None
++        portal_storage = self.portal.portal_historiesstorage
++
++        cmf_uid = 1
++        obj1 = CMFDummy('obj', cmf_uid)
++        obj1.text = 'v1 of text'
++        portal_storage.register(cmf_uid, ObjectData(obj1), metadata=self.buildMetadata('saved v1'))
++
++        obj2 = CMFDummy('obj', cmf_uid)
++        obj2.text = 'v2 of text'
++        portal_storage.save(cmf_uid, ObjectData(obj2), metadata=self.buildMetadata('saved v2'))
++
++        obj3 = CMFDummy('obj', cmf_uid)
++        obj3.text = 'v3 of text'
++        portal_storage.save(cmf_uid, ObjectData(obj3), metadata=self.buildMetadata('saved v3'))
++
++        obj4 = CMFDummy('obj', cmf_uid)
++        obj4.text = 'v4 of text'
++        self.portal._setObject('obj', obj4)
++        self.portal.portal_catalog.indexObject(self.portal.obj)
++        portal_storage.save(cmf_uid, ObjectData(obj4), metadata=self.buildMetadata('saved v4'))
++
++        cmf_uid = 2
++        tomorrow = DateTime() + 1
++        obj5 = CMFDummy('tomorrow', cmf_uid, effective=tomorrow)
++        self.portal._setObject('tomorrow', obj5)
++        self.portal.portal_catalog.indexObject(self.portal.tomorrow)
++        portal_storage.register(cmf_uid, ObjectData(obj5), metadata=self.buildMetadata('effective tomorrow'))
++
++        cmf_uid = 3
++        yesterday = DateTime() - 1
++        obj5 = CMFDummy('yesterday', cmf_uid, expires=yesterday)
++        self.portal._setObject('yesterday', obj5)
++        self.portal.portal_catalog.indexObject(self.portal.yesterday)
++        portal_storage.register(cmf_uid, ObjectData(obj5), metadata=self.buildMetadata('expired yesterday'))
++
++        got = portal_storage.zmi_getStorageStatistics()
++        expected = {'deleted': [], 
++                    'summaries': {
++                        'totalHistories': 3, 
++                        'deletedVersions': 0, 
++                        'existingVersions': 6, 
++                        'deletedHistories': 0, 
++                        'time': '0.00', 
++                        'totalVersions': 6, 
++                        'existingAverage': '2.0', 
++                        'existingHistories': 3, 
++                        'deletedAverage': 'n/a', 
++                        'totalAverage': '2.0'}, 
++                    'existing': [
++                        {
++                            'url': 'http://nohost/plone/obj', 
++                            'history_id': 1, 
++                            'length': 4, 
++                            'path': '/obj', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 1718
++                        }, {
++                            'url': 'http://nohost/plone/tomorrow', 
++                            'history_id': 2, 
++                            'length': 1, 
++                            'path': '/tomorrow', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 514
++                        }, {
++                            'url': 'http://nohost/plone/yesterday', 
++                            'history_id': 3, 
++                            'length': 1, 
++                            'path': '/yesterday', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 516
++                        }]}
++        self.assertEqual(expected, got)
++
+ 
+ class TestMemoryStorage(TestZVCStorageTool):
+ 
+@@ -453,3 +543,8 @@ def installStorageTool(self):
+         # install the memory storage
+         tool = MemoryStorage()
+         setattr(self.portal, tool.getId(), tool)
++
++    def test15_storageStatistics(self):
++        """ MemoryStorage does not implement zmi_getStorageStatistics
++        """
++        pass
+
+
+Repository: Products.CMFEditions
+
+
+Branch: refs/heads/master
+Date: 2015-09-09T10:24:53+02:00
+Author: tschorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.CMFEditions/commit/4e3cd52be3d371e6a50e6649df298e30fbf568fa
+
+more testing
+
+Files changed:
+M Products/CMFEditions/tests/test_ZVCStorageTool.py
+
+diff --git a/Products/CMFEditions/tests/test_ZVCStorageTool.py b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+index 6acec0b..fdf4265 100755
+--- a/Products/CMFEditions/tests/test_ZVCStorageTool.py
++++ b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+@@ -484,30 +484,40 @@ def test15_storageStatistics(self):
+         cmf_uid = 2
+         tomorrow = DateTime() + 1
+         obj5 = CMFDummy('tomorrow', cmf_uid, effective=tomorrow)
++        obj5.allowedRolesAndUsers = ['Anonymous']
+         self.portal._setObject('tomorrow', obj5)
+         self.portal.portal_catalog.indexObject(self.portal.tomorrow)
+         portal_storage.register(cmf_uid, ObjectData(obj5), metadata=self.buildMetadata('effective tomorrow'))
+ 
+         cmf_uid = 3
+         yesterday = DateTime() - 1
+-        obj5 = CMFDummy('yesterday', cmf_uid, expires=yesterday)
+-        self.portal._setObject('yesterday', obj5)
++        obj6 = CMFDummy('yesterday', cmf_uid, expires=yesterday)
++        obj6.allowedRolesAndUsers = ['Anonymous']
++        self.portal._setObject('yesterday', obj6)
+         self.portal.portal_catalog.indexObject(self.portal.yesterday)
+-        portal_storage.register(cmf_uid, ObjectData(obj5), metadata=self.buildMetadata('expired yesterday'))
++        portal_storage.register(cmf_uid, ObjectData(obj6), metadata=self.buildMetadata('expired yesterday'))
++
++        cmf_uid = 4
++        obj7 = CMFDummy('public', cmf_uid)
++        obj7.text = 'visible for everyone'
++        obj7.allowedRolesAndUsers = ['Anonymous']
++        self.portal._setObject('public', obj7)
++        self.portal.portal_catalog.indexObject(self.portal.public)
++        portal_storage.register(cmf_uid, ObjectData(obj7), metadata=self.buildMetadata('saved public'))
+ 
+         got = portal_storage.zmi_getStorageStatistics()
+         expected = {'deleted': [], 
+                     'summaries': {
+-                        'totalHistories': 3, 
++                        'totalHistories': 4, 
+                         'deletedVersions': 0, 
+-                        'existingVersions': 6, 
++                        'existingVersions': 7, 
+                         'deletedHistories': 0, 
+                         'time': '0.00', 
+-                        'totalVersions': 6, 
+-                        'existingAverage': '2.0', 
+-                        'existingHistories': 3, 
++                        'totalVersions': 7, 
++                        'existingAverage': '1.8', 
++                        'existingHistories': 4, 
+                         'deletedAverage': 'n/a', 
+-                        'totalAverage': '2.0'}, 
++                        'totalAverage': '1.8'}, 
+                     'existing': [
+                         {
+                             'url': 'http://nohost/plone/obj', 
+@@ -524,7 +534,7 @@ def test15_storageStatistics(self):
+                             'path': '/tomorrow', 
+                             'sizeState': 'approximate', 
+                             'portal_type': 'Dummy', 
+-                            'size': 514
++                            'size': 555
+                         }, {
+                             'url': 'http://nohost/plone/yesterday', 
+                             'history_id': 3, 
+@@ -532,7 +542,15 @@ def test15_storageStatistics(self):
+                             'path': '/yesterday', 
+                             'sizeState': 'approximate', 
+                             'portal_type': 'Dummy', 
+-                            'size': 516
++                            'size': 557
++                        }, {
++                            'url': 'http://nohost/plone/public', 
++                            'history_id': 4, 
++                            'length': 1, 
++                            'path': '/public', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 557
+                         }]}
+         self.assertEqual(expected, got)
+ 
+
+
+Repository: Products.CMFEditions
+
+
+Branch: refs/heads/master
+Date: 2015-09-09T13:10:55+02:00
+Author: tschorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.CMFEditions/commit/a970aa064ce05b31625f44b8b229ffbd2f3f67b3
+
+update changelog
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 67dc8c7..3064ecd 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,7 @@ Changelog
+ 2.2.15 (unreleased)
+ -------------------
  
 -- Nothing changed yet.
-+- Fixed `api.content.find` with combination of depth and path.  Path
-+  is no longer ignored then.
-+  [maurits]
++- use unrestricted search for storage statistics [tschorr]
  
  
- 1.4.5 (2015-09-09)
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 193395c..243fe8b 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -572,10 +572,12 @@ def find(context=None, depth=None, **kwargs):
-     Specifing the search depth is supported using the `depth` argument.
-     >>> find(depth=1)
- 
--    Using `depth` needs a context for it's path. If no context is passed, the
--    portal root is used.
-+    Using `depth` needs a context for it's path. If no context and no
-+    path is passed, the portal root is used.
-     >>> find(context=portal, depth=1, portal_type='Document')
-     - or -
-+    >>> find(depth=1, path='/plone/folder', portal_type='Document')
-+    - or -
-     >>> find(depth=1, portal_type='Document')
- 
-     The path can be queried directly, too:
-@@ -595,14 +597,19 @@ def find(context=None, depth=None, **kwargs):
-     query.update(**kwargs)
- 
-     # Passing a context or depth overrides the existing path query
--    if context or depth:
-+    # Save the original path to maybe restore it.
-+    orig_path = query.get('path')
-+    if context or depth is not None:
-         query['path'] = {}
- 
-     # Limit search depth
-     if depth is not None:
-         # If we don't have a context, we'll assume the portal root.
--        if context is None:
-+        if context is None and not orig_path:
-             context = portal.get()
-+        else:
-+            # Restore the original path
-+            query['path']['query'] = orig_path
-         query['path']['depth'] = depth
- 
-     if context is not None:
-diff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py
-index 37d89fd..05437eb 100644
---- a/src/plone/api/tests/test_content.py
-+++ b/src/plone/api/tests/test_content.py
-@@ -754,6 +754,20 @@ def test_find_depth(self):
-             context=self.portal.about, depth=0, portal_type='Document')
-         self.assertEqual(len(documents), 0)
- 
-+        # Limit search depth with explicit path
-+        documents = api.content.find(
-+            path='/'.join(self.portal.about.getPhysicalPath()),
-+            depth=1, portal_type='Document')
-+        self.assertEqual(len(documents), 2)
-+        documents = api.content.find(
-+            path='/'.join(self.portal.about.getPhysicalPath()),
-+            depth=0, portal_type='Document')
-+        self.assertEqual(len(documents), 0)
-+        documents = api.content.find(
-+            path='/'.join(self.portal.events.getPhysicalPath()),
-+            depth=1, portal_type='Document')
-+        self.assertEqual(len(documents), 0)
-+
-     def test_find_interface(self):
-         # Find documents by interface or it's identifier
-         identifier = IContentish.__identifier__
+ 2.2.14 (2015-08-13)
 
 
-Repository: plone.api
+Repository: Products.CMFEditions
 
 
 Branch: refs/heads/master
-Date: 2015-09-12T01:40:23+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.api/commit/0d45a5b12bd227d484064133362bdf9f3edde200
+Date: 2015-09-14T11:07:47+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFEditions/commit/e33382c3d77da7a219c4c58f6539b22aa0d7b668
 
-Do not crash on content.find with depth and path dict.
+Merge pull request #30 from tschorr/storage_statistics_pr
 
-This is an awkward spelling, but if a call with a path dict works and
-adding a depth to that calls makes it fail, then this is not nice.
-
-Files changed:
-M src/plone/api/content.py
-M src/plone/api/tests/test_content.py
-
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 243fe8b..43ea912 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -596,11 +596,17 @@ def find(context=None, depth=None, **kwargs):
-     query = {}
-     query.update(**kwargs)
- 
--    # Passing a context or depth overrides the existing path query
--    # Save the original path to maybe restore it.
-+    # Save the original path to maybe restore it later.
-     orig_path = query.get('path')
-+    if isinstance(orig_path, dict):
-+        orig_path = orig_path.get('query')
-+
-+    # Passing a context or depth overrides the existing path query,
-+    # for now.
-     if context or depth is not None:
--        query['path'] = {}
-+        # Make the path a dictionary, unless it already is.
-+        if not isinstance(orig_path, dict):
-+            query['path'] = {}
- 
-     # Limit search depth
-     if depth is not None:
-diff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py
-index 05437eb..211daba 100644
---- a/src/plone/api/tests/test_content.py
-+++ b/src/plone/api/tests/test_content.py
-@@ -797,6 +797,24 @@ def test_find_dict(self):
-         documents = api.content.find(**query)
-         self.assertEqual(len(documents), 0)
- 
-+        # This is a bit awkward, but it is nice if this does not crash.
-+        query = {
-+            'depth': 2,
-+            'portal_type': 'Document',
-+            'path': {'query': path}
-+            }
-+        documents = api.content.find(**query)
-+        self.assertEqual(len(documents), 2)
-+
-+        path = '/'.join(self.portal.events.getPhysicalPath())
-+        query = {
-+            'depth': 2,
-+            'portal_type': 'Document',
-+            'path': {'query': path}
-+            }
-+        documents = api.content.find(**query)
-+        self.assertEqual(len(documents), 0)
-+
-     def test_get_state(self):
-         """Test retrieving the workflow state of a content item."""
- 
-
-
-Repository: plone.api
-
-
-Branch: refs/heads/master
-Date: 2015-09-14T08:02:13+01:00
-Author: Adam Forsythe-Cheasley (adamcheasley) <adam@netsight.co.uk>
-Commit: https://github.com/plone/plone.api/commit/d7f585654fa0a54c26b5d5900cd2b4cdfffd45fc
-
-Merge pull request #276 from plone/maurits-fix-content-find-path-depth
-
-Fix content.find with both path and depth
+use unrestricted catalog search for storage statistics
 
 Files changed:
-M docs/CHANGES.rst
-M src/plone/api/content.py
-M src/plone/api/tests/test_content.py
+M CHANGES.rst
+M Products/CMFEditions/ZVCStorageTool.py
+M Products/CMFEditions/tests/test_ZVCStorageTool.py
 
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index a1700ef..f0eee27 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -4,7 +4,9 @@ Changelog
- 1.4.6 (unreleased)
- ------------------
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 67dc8c7..3064ecd 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,7 @@ Changelog
+ 2.2.15 (unreleased)
+ -------------------
  
 -- Nothing changed yet.
-+- Fixed `api.content.find` with combination of depth and path.  Path
-+  is no longer ignored then.
-+  [maurits]
++- use unrestricted search for storage statistics [tschorr]
  
  
- 1.4.5 (2015-09-09)
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 193395c..43ea912 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -572,10 +572,12 @@ def find(context=None, depth=None, **kwargs):
-     Specifing the search depth is supported using the `depth` argument.
-     >>> find(depth=1)
+ 2.2.14 (2015-08-13)
+diff --git a/Products/CMFEditions/ZVCStorageTool.py b/Products/CMFEditions/ZVCStorageTool.py
+index 0152c96..02676a0 100644
+--- a/Products/CMFEditions/ZVCStorageTool.py
++++ b/Products/CMFEditions/ZVCStorageTool.py
+@@ -665,7 +665,7 @@ def zmi_getStorageStatistics(self):
+             if shadowStorage is not None:
+                 size, sizeState = shadowStorage.getSize()
  
--    Using `depth` needs a context for it's path. If no context is passed, the
--    portal root is used.
-+    Using `depth` needs a context for it's path. If no context and no
-+    path is passed, the portal root is used.
-     >>> find(context=portal, depth=1, portal_type='Document')
-     - or -
-+    >>> find(depth=1, path='/plone/folder', portal_type='Document')
-+    - or -
-     >>> find(depth=1, portal_type='Document')
+-            workingCopy = hidhandler.queryObject(hid)
++            workingCopy = hidhandler.unrestrictedQueryObject(hid)
+             if workingCopy is not None:
+                 url = workingCopy.absolute_url()
+                 path = url[portal_paths_len:]
+diff --git a/Products/CMFEditions/tests/test_ZVCStorageTool.py b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+index e937f52..fdf4265 100755
+--- a/Products/CMFEditions/tests/test_ZVCStorageTool.py
++++ b/Products/CMFEditions/tests/test_ZVCStorageTool.py
+@@ -23,7 +23,7 @@
+ """Test the standard archivist
  
-     The path can be queried directly, too:
-@@ -594,15 +596,26 @@ def find(context=None, depth=None, **kwargs):
-     query = {}
-     query.update(**kwargs)
+ """
+-
++from DateTime.DateTime import DateTime
+ from Products.CMFEditions.tests.base import CMFEditionsBaseTestCase
  
--    # Passing a context or depth overrides the existing path query
--    if context or depth:
--        query['path'] = {}
-+    # Save the original path to maybe restore it later.
-+    orig_path = query.get('path')
-+    if isinstance(orig_path, dict):
-+        orig_path = orig_path.get('query')
+ from zope.interface.verify import verifyObject
+@@ -43,6 +43,18 @@
+ class DummyOM(ObjectManager):
+     pass
+ 
++class CMFDummy(Dummy):
 +
-+    # Passing a context or depth overrides the existing path query,
-+    # for now.
-+    if context or depth is not None:
-+        # Make the path a dictionary, unless it already is.
-+        if not isinstance(orig_path, dict):
-+            query['path'] = {}
- 
-     # Limit search depth
-     if depth is not None:
-         # If we don't have a context, we'll assume the portal root.
--        if context is None:
-+        if context is None and not orig_path:
-             context = portal.get()
-+        else:
-+            # Restore the original path
-+            query['path']['query'] = orig_path
-         query['path']['depth'] = depth
- 
-     if context is not None:
-diff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py
-index 37d89fd..211daba 100644
---- a/src/plone/api/tests/test_content.py
-+++ b/src/plone/api/tests/test_content.py
-@@ -754,6 +754,20 @@ def test_find_depth(self):
-             context=self.portal.about, depth=0, portal_type='Document')
-         self.assertEqual(len(documents), 0)
- 
-+        # Limit search depth with explicit path
-+        documents = api.content.find(
-+            path='/'.join(self.portal.about.getPhysicalPath()),
-+            depth=1, portal_type='Document')
-+        self.assertEqual(len(documents), 2)
-+        documents = api.content.find(
-+            path='/'.join(self.portal.about.getPhysicalPath()),
-+            depth=0, portal_type='Document')
-+        self.assertEqual(len(documents), 0)
-+        documents = api.content.find(
-+            path='/'.join(self.portal.events.getPhysicalPath()),
-+            depth=1, portal_type='Document')
-+        self.assertEqual(len(documents), 0)
++    def __init__(self, id, cmfuid, effective=None, expires=None):
++        super(CMFDummy, self).__init__()
++        self.id = id
++        self.cmf_uid = cmfuid
++        self.effective = effective if effective is not None else self.modification_date
++        self.expires = expires
 +
-     def test_find_interface(self):
-         # Find documents by interface or it's identifier
-         identifier = IContentish.__identifier__
-@@ -783,6 +797,24 @@ def test_find_dict(self):
-         documents = api.content.find(**query)
-         self.assertEqual(len(documents), 0)
- 
-+        # This is a bit awkward, but it is nice if this does not crash.
-+        query = {
-+            'depth': 2,
-+            'portal_type': 'Document',
-+            'path': {'query': path}
-+            }
-+        documents = api.content.find(**query)
-+        self.assertEqual(len(documents), 2)
++    def getPortalTypeName(self):
++        return 'Dummy'
 +
-+        path = '/'.join(self.portal.events.getPhysicalPath())
-+        query = {
-+            'depth': 2,
-+            'portal_type': 'Document',
-+            'path': {'query': path}
-+            }
-+        documents = api.content.find(**query)
-+        self.assertEqual(len(documents), 0)
-+
-     def test_get_state(self):
-         """Test retrieving the workflow state of a content item."""
+ class TestZVCStorageTool(CMFEditionsBaseTestCase):
  
+     def afterSetUp(self):
+@@ -446,6 +458,102 @@ def test14_getHistoryMetadata(self):
+         self.assertEqual(history.retrieve(2)['metadata']['sys_metadata']['comment'], "saved v3")
+         self.assertEqual(history.retrieve(3)['metadata']['sys_metadata']['comment'], "saved v4")
+ 
++    def test15_storageStatistics(self):
++        self.maxDiff = None
++        portal_storage = self.portal.portal_historiesstorage
++
++        cmf_uid = 1
++        obj1 = CMFDummy('obj', cmf_uid)
++        obj1.text = 'v1 of text'
++        portal_storage.register(cmf_uid, ObjectData(obj1), metadata=self.buildMetadata('saved v1'))
++
++        obj2 = CMFDummy('obj', cmf_uid)
++        obj2.text = 'v2 of text'
++        portal_storage.save(cmf_uid, ObjectData(obj2), metadata=self.buildMetadata('saved v2'))
++
++        obj3 = CMFDummy('obj', cmf_uid)
++        obj3.text = 'v3 of text'
++        portal_storage.save(cmf_uid, ObjectData(obj3), metadata=self.buildMetadata('saved v3'))
++
++        obj4 = CMFDummy('obj', cmf_uid)
++        obj4.text = 'v4 of text'
++        self.portal._setObject('obj', obj4)
++        self.portal.portal_catalog.indexObject(self.portal.obj)
++        portal_storage.save(cmf_uid, ObjectData(obj4), metadata=self.buildMetadata('saved v4'))
++
++        cmf_uid = 2
++        tomorrow = DateTime() + 1
++        obj5 = CMFDummy('tomorrow', cmf_uid, effective=tomorrow)
++        obj5.allowedRolesAndUsers = ['Anonymous']
++        self.portal._setObject('tomorrow', obj5)
++        self.portal.portal_catalog.indexObject(self.portal.tomorrow)
++        portal_storage.register(cmf_uid, ObjectData(obj5), metadata=self.buildMetadata('effective tomorrow'))
++
++        cmf_uid = 3
++        yesterday = DateTime() - 1
++        obj6 = CMFDummy('yesterday', cmf_uid, expires=yesterday)
++        obj6.allowedRolesAndUsers = ['Anonymous']
++        self.portal._setObject('yesterday', obj6)
++        self.portal.portal_catalog.indexObject(self.portal.yesterday)
++        portal_storage.register(cmf_uid, ObjectData(obj6), metadata=self.buildMetadata('expired yesterday'))
++
++        cmf_uid = 4
++        obj7 = CMFDummy('public', cmf_uid)
++        obj7.text = 'visible for everyone'
++        obj7.allowedRolesAndUsers = ['Anonymous']
++        self.portal._setObject('public', obj7)
++        self.portal.portal_catalog.indexObject(self.portal.public)
++        portal_storage.register(cmf_uid, ObjectData(obj7), metadata=self.buildMetadata('saved public'))
++
++        got = portal_storage.zmi_getStorageStatistics()
++        expected = {'deleted': [], 
++                    'summaries': {
++                        'totalHistories': 4, 
++                        'deletedVersions': 0, 
++                        'existingVersions': 7, 
++                        'deletedHistories': 0, 
++                        'time': '0.00', 
++                        'totalVersions': 7, 
++                        'existingAverage': '1.8', 
++                        'existingHistories': 4, 
++                        'deletedAverage': 'n/a', 
++                        'totalAverage': '1.8'}, 
++                    'existing': [
++                        {
++                            'url': 'http://nohost/plone/obj', 
++                            'history_id': 1, 
++                            'length': 4, 
++                            'path': '/obj', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 1718
++                        }, {
++                            'url': 'http://nohost/plone/tomorrow', 
++                            'history_id': 2, 
++                            'length': 1, 
++                            'path': '/tomorrow', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 555
++                        }, {
++                            'url': 'http://nohost/plone/yesterday', 
++                            'history_id': 3, 
++                            'length': 1, 
++                            'path': '/yesterday', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 557
++                        }, {
++                            'url': 'http://nohost/plone/public', 
++                            'history_id': 4, 
++                            'length': 1, 
++                            'path': '/public', 
++                            'sizeState': 'approximate', 
++                            'portal_type': 'Dummy', 
++                            'size': 557
++                        }]}
++        self.assertEqual(expected, got)
++
+ 
+ class TestMemoryStorage(TestZVCStorageTool):
+ 
+@@ -453,3 +561,8 @@ def installStorageTool(self):
+         # install the memory storage
+         tool = MemoryStorage()
+         setattr(self.portal, tool.getId(), tool)
++
++    def test15_storageStatistics(self):
++        """ MemoryStorage does not implement zmi_getStorageStatistics
++        """
++        pass
 
 
