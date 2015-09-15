@@ -1,59 +1,233 @@
-Repository: plone.app.upgrade
+Repository: plone.namedfile
 
 
-Branch: refs/heads/master
-Date: 2015-09-14T12:45:30-05:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/741f9e5996f12dff31189a0abed917b22769056a
+Branch: refs/heads/2.0.x
+Date: 2015-09-15T14:39:25+12:00
+Author: ezvirtual () <ezvirtual@thevirtual.co.nz>
+Commit: https://github.com/plone/plone.namedfile/commit/a7ccfca34ab85ad792eac26337051a4688a46acf
 
-fix upgrade possibly missing attribute
+Add functionality to automatic rotate images based on exif data &amp; subscribers for archetypes and dexterity image types on object created or modified
 
 Files changed:
-M plone/app/upgrade/v50/betas.py
+A plone/namedfile/image_exif_rotation.py
+A plone/namedfile/subscribers.zcml
+M plone/namedfile/configure.zcml
+M setup.py
 
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 7b1273d..5bab165 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -1,19 +1,24 @@
- # -*- coding: utf-8 -*-
-+import logging
+diff --git a/plone/namedfile/configure.zcml b/plone/namedfile/configure.zcml
+index ca1f816..a9b9832 100644
+--- a/plone/namedfile/configure.zcml
++++ b/plone/namedfile/configure.zcml
+@@ -10,14 +10,15 @@
+         class=".browser.Download"
+         permission="zope2.View"
+         />
+-    
 +
-+from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.interfaces import ILanguageSchema
- from Products.CMFPlone.interfaces import IMailSchema
- from Products.CMFPlone.interfaces import IMarkupSchema
--from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.interfaces import ISearchSchema
-+from Products.CMFPlone.interfaces import ISecuritySchema
- from Products.CMFPlone.interfaces import ISiteSchema
- from Products.CMFPlone.interfaces import IUserGroupsSettingsSchema
--from Products.CMFPlone.interfaces import ILanguageSchema
-+from Products.CMFPlone.interfaces.controlpanel import IImagingSchema
- from plone.app.linkintegrity.upgrades import migrate_linkintegrity_relations
- from plone.app.upgrade.utils import loadMigrationProfile
- from plone.registry.interfaces import IRegistry
- from zope.component import getUtility
- from zope.component.hooks import getSite
--from Products.CMFCore.interfaces import ISiteRoot
--from Products.CMFPlone.interfaces.controlpanel import IImagingSchema
+     <browser:page
+         name="display-file"
+         for="*"
+         class=".browser.DisplayFile"
+         permission="zope2.View"
+         />
+-    
++
++    <include file="subscribers.zcml" />
+     <include file="z3c-blobfile.zcml" />
+     <include zcml:condition="installed plone.supermodel" file="handler.zcml" />
+     <include zcml:condition="installed plone.rfc822" file="marshaler.zcml" />
+diff --git a/plone/namedfile/image_exif_rotation.py b/plone/namedfile/image_exif_rotation.py
+new file mode 100644
+index 0000000..1a460d8
+--- /dev/null
++++ b/plone/namedfile/image_exif_rotation.py
+@@ -0,0 +1,123 @@
++from StringIO import StringIO
++import PIL.Image
++import exifread as exif
 +
 +
-+logger = logging.getLogger('plone.app.upgrade')
- 
- 
- def to50beta1(context):
-@@ -459,5 +464,8 @@ def to50rc3(context):
-     for p in properties_to_migrate:
-         if site_properties.hasProperty(p):
-             value = site_properties.getProperty(p)
--            registry['plone.%s' % p] = value
--            site_properties._delProperty(p)
-+            try:
-+                registry['plone.%s' % p] = value
-+                site_properties._delProperty(p)
-+            except KeyError:
-+                logger.warn('could not upgrade %s property' % p)
++FLIP_LEFT_RIGHT = 0
++FLIP_TOP_BOTTOM = 1
++ROTATE_90 = 2
++ROTATE_180 = 3
++ROTATE_270 = 4
++TRANSPOSE_MAP = {
++    FLIP_LEFT_RIGHT: (u'Flip around vertical axis'),
++    FLIP_TOP_BOTTOM: (u'Flip around horizontal axis'),
++    ROTATE_270: (u'Rotate 90 clockwise'),
++    ROTATE_180: (u'Rotate 180'),
++    ROTATE_90: (u'Rotate 90 counterclockwise'),
++
++}
++AUTO_ROTATE_MAP = {
++    0: None,
++    90: ROTATE_270,
++    180: ROTATE_180,
++    270: ROTATE_90,
++}
++MIRROR_ROTATE_MAP = {
++    0: None,
++    90: ROTATE_270,
++    180: ROTATE_180,
++    270: ROTATE_90,
++}
++
++ROTATION = {'Horizontal (normal)': 1,
++            'Mirrored horizontal': 2,
++            'Rotated 180': 3,
++            'Mirrored vertical': 4,
++            'Mirrored horizontal then rotated 90 CCW': 5,
++            'Rotated 90 CW': 6,
++            'Mirrored horizontal then rotated 90 CW': 7,
++            'Rotated 90 CCW': 8}
++
++
++def exif_rotation(self, event):
++    if self.portal_type == 'Image':
++        if self.image:
++
++            mirror, rotation = get_exif_orientation(self)
++            transform = None
++            if rotation:
++                transform = AUTO_ROTATE_MAP.get(rotation, None)
++                if transform is not None:
++                    transform_image(self, transform)
++
++
++def get_exif(self):
++    exif_data = exif.process_file(StringIO(self.image.data), debug=False)
++    # remove some unwanted elements like thumbnails
++    for key in ('JPEGThumbnail', 'TIFFThumbnail', 'MakerNote JPEGThumbnail'):
++        if key in exif_data:
++            del exif_data[key]
++    return exif_data
++
++
++def get_exif_orientation(self):
++    """Get the rotation and mirror orientation from the EXIF data
++
++    Some cameras are storing the informations about rotation and mirror in
++    the exif data. It can be used for autorotation.
++    """
++    exif = get_exif(self)
++
++    mirror = 0
++    rotation = 0
++    code = exif.get('Image Orientation', None)
++
++    if code is None:
++        return (mirror, rotation)
++
++    try:
++        code = int(code)
++    except AttributeError:
++        code = ROTATION[str(code)]
++    except ValueError:
++        code = ROTATION[code]
++
++    if code in (2, 4, 5, 7):
++        mirror = 1
++    if code in (1, 2):
++        rotation = 0
++    elif code in (3, 4):
++        rotation = 180
++    elif code in (5, 6):
++        rotation = 90
++    elif code in (7, 8):
++        rotation = 270
++
++    return (mirror, rotation)
++
++
++def transform_image(self, method, REQUEST=None):
++    """
++    Transform an Image:
++        FLIP_LEFT_RIGHT
++        FLIP_TOP_BOTTOM
++        ROTATE_90 (rotate counterclockwise)
++        ROTATE_180
++        ROTATE_270 (rotate clockwise)
++    """
++
++    image = self.image.data
++    image2 = StringIO()
++
++    if image is not None:
++        method = int(method)
++
++        img = PIL.Image.open(StringIO(self.image.data))
++        del image
++        fmt = img.format
++        img = img.transpose(method)
++        img.save(image2, fmt, quality=88)
++
++        self.image.data = image2.getvalue()
++
++        self.reindexObject()
+diff --git a/plone/namedfile/subscribers.zcml b/plone/namedfile/subscribers.zcml
+new file mode 100644
+index 0000000..afae452
+--- /dev/null
++++ b/plone/namedfile/subscribers.zcml
+@@ -0,0 +1,46 @@
++<configure
++    xmlns="http://namespaces.zope.org/zope"
++    xmlns:zcml="http://namespaces.zope.org/zcml"
++    xmlns:browser="http://namespaces.zope.org/browser"
++    i18n_domain="plone.namedfile">
++
++<!-- Handling for Archetypes images -->
++  <subscriber zcml:condition="installed Products.ATContentTypes"
++      for="Products.ATContentTypes.interfaces.image.IImageContent
++         zope.lifecycleevent.IObjectCreatedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    />
++
++  <subscriber zcml:condition="installed Products.ATContentTypes"
++      for="Products.ATContentTypes.interfaces.image.IImageContent
++         zope.lifecycleevent.IObjectModifiedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    />
++
++<!-- Handling for dexterity images -->
++  <subscriber zcml:condition="installed plone.app.contenttypes"
++      for="plone.app.contenttypes.content.IImage
++         zope.lifecycleevent.IObjectCreatedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    />
++
++  <subscriber zcml:condition="installed plone.app.contenttypes"
++      for="plone.app.contenttypes.content.IImage
++         zope.lifecycleevent.IObjectModifiedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    />
++
++<!-- Handling for dexterity types that include an image field -->
++  <subscriber
++      for="plone.namedfile.interfaces.IImageScaleTraversable
++         zope.lifecycleevent.IObjectAddedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    /> 
++
++  <subscriber
++      for="plone.namedfile.interfaces.IImageScaleTraversable
++         zope.lifecycleevent.IObjectModifiedEvent"
++      handler=".image_exif_rotation.exif_rotation"
++    /> 
++
++</configure>
+diff --git a/setup.py b/setup.py
+index c78ffb2..9bc7362 100644
+--- a/setup.py
++++ b/setup.py
+@@ -33,6 +33,7 @@
+       include_package_data=True,
+       zip_safe=False,
+       install_requires=[
++          'exifread',
+           'setuptools',
+           'zope.browserpage',
+           'zope.component',
 
 
