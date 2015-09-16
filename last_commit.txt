@@ -2,26 +2,621 @@ Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-09-17T00:11:26+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a588a17b552ede6c597c93cba15f376d70c46461
+Date: 2015-09-16T16:03:01+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/150d2430980ff4ae21a055424fb8e45e39a0af0f
 
-Allow merging CHANGES.rst with union strategy.
-
-Should cause fewer merge conflicts.
-See issue #1008.
-
-[ci skip]
+remove unused code to create NavTree
 
 Files changed:
-A .gitattributes
+M CHANGES.rst
+M Products/CMFPlone/PloneTool.py
+M Products/CMFPlone/browser/configure.zcml
+M Products/CMFPlone/browser/navigation.py
+M Products/CMFPlone/tests/testNavigationView.py
+M Products/CMFPlone/utils.py
 
-diff --git a/.gitattributes b/.gitattributes
-new file mode 100644
-index 0000000..6f9ff67
---- /dev/null
-+++ b/.gitattributes
-@@ -0,0 +1 @@
-+CHANGES.rst merge=union
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 1408076..b5217a4 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+ 5.0rc3 (unreleased)
+ -------------------
+ 
++- remove unused code to create NavTree probably left from Plone 3.0 times 
++  and since a while handled by plone.app.portlets.
++  [jensens]
++
+ - Implement new feed syndication using `NewsML 1 <http://iptc.org/standards/newsml-1/>`_,
+   an IPTC standard that provides a media-type-independent, structural framework for multi-media news.
+   [frapell, jpgimenez, tcurvelo, rodfersou]
+diff --git a/Products/CMFPlone/PloneTool.py b/Products/CMFPlone/PloneTool.py
+index af23d92..7ca7f32 100644
+--- a/Products/CMFPlone/PloneTool.py
++++ b/Products/CMFPlone/PloneTool.py
+@@ -520,14 +520,6 @@ def typesToList(self):
+         return utils.typesToList(self)
+ 
+     @security.public
+-    def createNavTree(self, context, sitemap=None, request=None):
+-        """Returns a structure that can be used by navigation_tree_slot.
+-        """
+-        if request is None:
+-            request = self.REQUEST
+-        return utils.createNavTree(context, request)
+-
+-    @security.public
+     def createBreadCrumbs(self, context, request=None):
+         """Returns a structure for the portal breadcumbs.
+         """
+diff --git a/Products/CMFPlone/browser/configure.zcml b/Products/CMFPlone/browser/configure.zcml
+index 135b240..23717cb 100644
+--- a/Products/CMFPlone/browser/configure.zcml
++++ b/Products/CMFPlone/browser/configure.zcml
+@@ -56,14 +56,6 @@
+ 
+   <browser:page
+       for="*"
+-      name="navtree_builder_view"
+-      class=".navigation.CatalogNavigationTree"
+-      permission="zope.Public"
+-      allowed_attributes="navigationTree"
+-      />
+-
+-  <browser:page
+-      for="*"
+       name="sitemap_builder_view"
+       class=".navigation.CatalogSiteMap"
+       permission="zope.Public"
+diff --git a/Products/CMFPlone/browser/navigation.py b/Products/CMFPlone/browser/navigation.py
+index 283d6a8..8af53d6 100644
+--- a/Products/CMFPlone/browser/navigation.py
++++ b/Products/CMFPlone/browser/navigation.py
+@@ -1,29 +1,22 @@
++# -*- coding: utf-8 -*-
++from Acquisition import aq_base
+ from Acquisition import aq_inner
+-from zope.interface import implements
+-from zope.component import getMultiAdapter
+-from zope.component import getUtility
+-
++from plone.app.layout.navigation.interfaces import INavtreeStrategy
++from plone.app.layout.navigation.navtree import buildFolderTree
++from plone.app.layout.navigation.root import getNavigationRoot
+ from plone.registry.interfaces import IRegistry
+-from Products.CMFPlone.interfaces import INavigationSchema
+-
+-from Acquisition import aq_base
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import utils
+-from Products.Five import BrowserView
+-
+ from Products.CMFPlone.browser.interfaces import INavigationBreadcrumbs
+ from Products.CMFPlone.browser.interfaces import INavigationTabs
+-from Products.CMFPlone.browser.interfaces import INavigationTree
+ from Products.CMFPlone.browser.interfaces import ISiteMap
++from Products.CMFPlone.browser.navtree import SitemapQueryBuilder
+ from Products.CMFPlone.interfaces import IHideFromBreadcrumbs
+-
+-from Products.CMFPlone.browser.navtree \
+-    import NavtreeQueryBuilder, SitemapQueryBuilder
+-
+-from plone.app.layout.navigation.interfaces import INavtreeStrategy
+-
+-from plone.app.layout.navigation.root import getNavigationRoot
+-from plone.app.layout.navigation.navtree import buildFolderTree
++from Products.CMFPlone.interfaces import INavigationSchema
++from Products.Five import BrowserView
++from zope.component import getMultiAdapter
++from zope.component import getUtility
++from zope.interface import implementer
+ 
+ 
+ def get_url(item):
+@@ -53,62 +46,15 @@ def get_view_url(context):
+     item_url = get_url(context)
+     name = get_id(context)
+ 
+-    if hasattr(context, 'portal_type') and context.portal_type in view_action_types:
++    if getattr(context, 'portal_type', {}) in view_action_types:
+         item_url += '/view'
+         name += '/view'
+ 
+     return name, item_url
+ 
+ 
+-class CatalogNavigationTree(BrowserView):
+-    implements(INavigationTree)
+-
+-    def navigationTreeRootPath(self):
+-        context = aq_inner(self.context)
+-
+-        portal_properties = getToolByName(context, 'portal_properties')
+-
+-        navtree_properties = getattr(portal_properties, 'navtree_properties')
+-
+-        currentFolderOnlyInNavtree = \
+-            navtree_properties.getProperty('currentFolderOnlyInNavtree', False)
+-        if currentFolderOnlyInNavtree:
+-            if context.restrictedTraverse('@@plone').isStructuralFolder():
+-                return '/'.join(context.getPhysicalPath())
+-            else:
+-                return '/'.join(utils.parent(context).getPhysicalPath())
+-
+-        rootPath = getNavigationRoot(context)
+-
+-        # Adjust for topLevel
+-        topLevel = navtree_properties.getProperty('topLevel', None)
+-        if topLevel is not None and topLevel > 0:
+-            contextPath = '/'.join(context.getPhysicalPath())
+-            if not contextPath.startswith(rootPath):
+-                return None
+-            contextSubPathElements = contextPath[len(rootPath) + 1:].split('/')
+-            if len(contextSubPathElements) < topLevel:
+-                return None
+-            rootPath = rootPath \
+-                        + '/' \
+-                        + '/'.join(contextSubPathElements[:topLevel])
+-
+-        return rootPath
+-
+-    def navigationTree(self):
+-        context = aq_inner(self.context)
+-
+-        queryBuilder = NavtreeQueryBuilder(context)
+-        query = queryBuilder()
+-
+-        strategy = getMultiAdapter((context, self), INavtreeStrategy)
+-
+-        return buildFolderTree(context, obj=context,
+-                               query=query, strategy=strategy)
+-
+-
++@implementer(ISiteMap)
+ class CatalogSiteMap(BrowserView):
+-    implements(ISiteMap)
+ 
+     def siteMap(self):
+         context = aq_inner(self.context)
+@@ -122,8 +68,8 @@ def siteMap(self):
+                                query=query, strategy=strategy)
+ 
+ 
++@implementer(INavigationTabs)
+ class CatalogNavigationTabs(BrowserView):
+-    implements(INavigationTabs)
+ 
+     def _getNavQuery(self):
+         context = self.context
+@@ -226,8 +172,8 @@ def get_link_url(item):
+         return result
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class CatalogNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         context = aq_inner(self.context)
+@@ -268,8 +214,8 @@ def breadcrumbs(self):
+         return result
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class PhysicalNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         context = aq_inner(self.context)
+@@ -279,9 +225,10 @@ def breadcrumbs(self):
+         name, item_url = get_view_url(context)
+ 
+         if container is None:
+-            return ({'absolute_url': item_url,
+-                     'Title': utils.pretty_title_or_id(context, context), },
+-                   )
++            return ({
++                'absolute_url': item_url,
++                'Title': utils.pretty_title_or_id(context, context),
++            },)
+ 
+         view = getMultiAdapter((container, request), name='breadcrumbs_view')
+         base = tuple(view.breadcrumbs())
+@@ -299,16 +246,16 @@ def breadcrumbs(self):
+         # don't show default pages in breadcrumbs or pages above the navigation
+         # root
+         if not utils.isDefaultPage(context, request) \
+-                and not rootPath.startswith(itemPath):
+-            base += ({'absolute_url': item_url,
+-                      'Title': utils.pretty_title_or_id(context, context), },
+-                    )
+-
++           and not rootPath.startswith(itemPath):
++            base += ({
++                'absolute_url': item_url,
++                'Title': utils.pretty_title_or_id(context, context), },
++            )
+         return base
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class RootPhysicalNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         # XXX Root never gets included, it's hardcoded as 'Home' in
+diff --git a/Products/CMFPlone/tests/testNavigationView.py b/Products/CMFPlone/tests/testNavigationView.py
+index 57b4386..d7cbb63 100644
+--- a/Products/CMFPlone/tests/testNavigationView.py
++++ b/Products/CMFPlone/tests/testNavigationView.py
+@@ -5,9 +5,10 @@
+ 
+ from Products.CMFPlone.tests import PloneTestCase
+ from Products.CMFPlone.tests import dummy
+-from Products.CMFPlone.tests.utils import validateCSSIdentifier, folder_position
++from Products.CMFPlone.tests.utils import validateCSSIdentifier
++from Products.CMFPlone.tests.utils import folder_position
+ 
+-from Products.CMFPlone.browser.navigation import CatalogNavigationTree
++#from Products.CMFPlone.browser.navigation import CatalogNavigationTree
+ from Products.CMFPlone.browser.navigation import CatalogSiteMap
+ from Products.CMFPlone.browser.navigation import CatalogNavigationTabs
+ from Products.CMFPlone.browser.navigation import CatalogNavigationBreadcrumbs
+@@ -360,10 +361,6 @@ def testStateFiltering(self):
+         self.assertEqual(len(tree['children']), 2)
+ 
+ 
+-class TestCatalogNavTree(TestBaseNavTree):
+-        view_class = CatalogNavigationTree
+-
+-
+ class TestSiteMap(PloneTestCase.PloneTestCase):
+     """Tests for the sitemap view implementations. This base test is a little
+         geared toward a catalog based implementation for now.
+@@ -577,7 +574,7 @@ def testStateFiltering(self):
+         self.portal._delObject('news')
+         self.portal._delObject('events')
+         workflow = self.portal.portal_workflow
+-        
++
+         registry = getUtility(IRegistry)
+         navigation_settings = registry.forInterface(
+             INavigationSchema,
+@@ -799,7 +796,6 @@ def test_suite():
+     from unittest import TestSuite, makeSuite
+     suite = TestSuite()
+     suite.addTest(makeSuite(TestCatalogPortalTabs))
+-    suite.addTest(makeSuite(TestCatalogNavTree))
+     suite.addTest(makeSuite(TestSiteMap))
+     suite.addTest(makeSuite(TestCatalogBreadCrumbs))
+     suite.addTest(makeSuite(TestPhysicalBreadCrumbs))
+diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
+index ab60a98..276e52a 100644
+--- a/Products/CMFPlone/utils.py
++++ b/Products/CMFPlone/utils.py
+@@ -83,11 +83,6 @@ def createBreadCrumbs(context, request):
+     return view.breadcrumbs()
+ 
+ 
+-def createNavTree(context, request, sitemap=False):
+-    view = getMultiAdapter((context, request), name='navtree_builder_view')
+-    return view.navigationTree()
+-
+-
+ def createSiteMap(context, request, sitemap=False):
+     view = getMultiAdapter((context, request), name='sitemap_builder_view')
+     return view.siteMap()
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2015-09-17T00:15:43+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/63aa15191f67c7817c94c69454d1083407f4bb33
+
+Merge remote-tracking branch 'origin/jensens-remove-unused-navtree-code'
+
+Files changed:
+M CHANGES.rst
+M Products/CMFPlone/PloneTool.py
+M Products/CMFPlone/browser/configure.zcml
+M Products/CMFPlone/browser/navigation.py
+M Products/CMFPlone/tests/testNavigationView.py
+M Products/CMFPlone/utils.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 9c97440..11f2f56 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,6 +14,10 @@ Changelog
+ - Fix #991: improve contrast for pending state in tollbar.
+   [pabo3000]
+ 
++- remove unused code to create NavTree probably left from Plone 3.0 times 
++  and since a while handled by plone.app.portlets.
++  [jensens]
++
+ - Implement new feed syndication using `NewsML 1 <http://iptc.org/standards/newsml-1/>`_,
+   an IPTC standard that provides a media-type-independent, structural framework for multi-media news.
+   [frapell, jpgimenez, tcurvelo, rodfersou]
+diff --git a/Products/CMFPlone/PloneTool.py b/Products/CMFPlone/PloneTool.py
+index af23d92..7ca7f32 100644
+--- a/Products/CMFPlone/PloneTool.py
++++ b/Products/CMFPlone/PloneTool.py
+@@ -520,14 +520,6 @@ def typesToList(self):
+         return utils.typesToList(self)
+ 
+     @security.public
+-    def createNavTree(self, context, sitemap=None, request=None):
+-        """Returns a structure that can be used by navigation_tree_slot.
+-        """
+-        if request is None:
+-            request = self.REQUEST
+-        return utils.createNavTree(context, request)
+-
+-    @security.public
+     def createBreadCrumbs(self, context, request=None):
+         """Returns a structure for the portal breadcumbs.
+         """
+diff --git a/Products/CMFPlone/browser/configure.zcml b/Products/CMFPlone/browser/configure.zcml
+index 1e6ea67..c1bec77 100644
+--- a/Products/CMFPlone/browser/configure.zcml
++++ b/Products/CMFPlone/browser/configure.zcml
+@@ -56,14 +56,6 @@
+ 
+   <browser:page
+       for="*"
+-      name="navtree_builder_view"
+-      class=".navigation.CatalogNavigationTree"
+-      permission="zope.Public"
+-      allowed_attributes="navigationTree"
+-      />
+-
+-  <browser:page
+-      for="*"
+       name="sitemap_builder_view"
+       class=".navigation.CatalogSiteMap"
+       permission="zope.Public"
+diff --git a/Products/CMFPlone/browser/navigation.py b/Products/CMFPlone/browser/navigation.py
+index 283d6a8..8af53d6 100644
+--- a/Products/CMFPlone/browser/navigation.py
++++ b/Products/CMFPlone/browser/navigation.py
+@@ -1,29 +1,22 @@
++# -*- coding: utf-8 -*-
++from Acquisition import aq_base
+ from Acquisition import aq_inner
+-from zope.interface import implements
+-from zope.component import getMultiAdapter
+-from zope.component import getUtility
+-
++from plone.app.layout.navigation.interfaces import INavtreeStrategy
++from plone.app.layout.navigation.navtree import buildFolderTree
++from plone.app.layout.navigation.root import getNavigationRoot
+ from plone.registry.interfaces import IRegistry
+-from Products.CMFPlone.interfaces import INavigationSchema
+-
+-from Acquisition import aq_base
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import utils
+-from Products.Five import BrowserView
+-
+ from Products.CMFPlone.browser.interfaces import INavigationBreadcrumbs
+ from Products.CMFPlone.browser.interfaces import INavigationTabs
+-from Products.CMFPlone.browser.interfaces import INavigationTree
+ from Products.CMFPlone.browser.interfaces import ISiteMap
++from Products.CMFPlone.browser.navtree import SitemapQueryBuilder
+ from Products.CMFPlone.interfaces import IHideFromBreadcrumbs
+-
+-from Products.CMFPlone.browser.navtree \
+-    import NavtreeQueryBuilder, SitemapQueryBuilder
+-
+-from plone.app.layout.navigation.interfaces import INavtreeStrategy
+-
+-from plone.app.layout.navigation.root import getNavigationRoot
+-from plone.app.layout.navigation.navtree import buildFolderTree
++from Products.CMFPlone.interfaces import INavigationSchema
++from Products.Five import BrowserView
++from zope.component import getMultiAdapter
++from zope.component import getUtility
++from zope.interface import implementer
+ 
+ 
+ def get_url(item):
+@@ -53,62 +46,15 @@ def get_view_url(context):
+     item_url = get_url(context)
+     name = get_id(context)
+ 
+-    if hasattr(context, 'portal_type') and context.portal_type in view_action_types:
++    if getattr(context, 'portal_type', {}) in view_action_types:
+         item_url += '/view'
+         name += '/view'
+ 
+     return name, item_url
+ 
+ 
+-class CatalogNavigationTree(BrowserView):
+-    implements(INavigationTree)
+-
+-    def navigationTreeRootPath(self):
+-        context = aq_inner(self.context)
+-
+-        portal_properties = getToolByName(context, 'portal_properties')
+-
+-        navtree_properties = getattr(portal_properties, 'navtree_properties')
+-
+-        currentFolderOnlyInNavtree = \
+-            navtree_properties.getProperty('currentFolderOnlyInNavtree', False)
+-        if currentFolderOnlyInNavtree:
+-            if context.restrictedTraverse('@@plone').isStructuralFolder():
+-                return '/'.join(context.getPhysicalPath())
+-            else:
+-                return '/'.join(utils.parent(context).getPhysicalPath())
+-
+-        rootPath = getNavigationRoot(context)
+-
+-        # Adjust for topLevel
+-        topLevel = navtree_properties.getProperty('topLevel', None)
+-        if topLevel is not None and topLevel > 0:
+-            contextPath = '/'.join(context.getPhysicalPath())
+-            if not contextPath.startswith(rootPath):
+-                return None
+-            contextSubPathElements = contextPath[len(rootPath) + 1:].split('/')
+-            if len(contextSubPathElements) < topLevel:
+-                return None
+-            rootPath = rootPath \
+-                        + '/' \
+-                        + '/'.join(contextSubPathElements[:topLevel])
+-
+-        return rootPath
+-
+-    def navigationTree(self):
+-        context = aq_inner(self.context)
+-
+-        queryBuilder = NavtreeQueryBuilder(context)
+-        query = queryBuilder()
+-
+-        strategy = getMultiAdapter((context, self), INavtreeStrategy)
+-
+-        return buildFolderTree(context, obj=context,
+-                               query=query, strategy=strategy)
+-
+-
++@implementer(ISiteMap)
+ class CatalogSiteMap(BrowserView):
+-    implements(ISiteMap)
+ 
+     def siteMap(self):
+         context = aq_inner(self.context)
+@@ -122,8 +68,8 @@ def siteMap(self):
+                                query=query, strategy=strategy)
+ 
+ 
++@implementer(INavigationTabs)
+ class CatalogNavigationTabs(BrowserView):
+-    implements(INavigationTabs)
+ 
+     def _getNavQuery(self):
+         context = self.context
+@@ -226,8 +172,8 @@ def get_link_url(item):
+         return result
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class CatalogNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         context = aq_inner(self.context)
+@@ -268,8 +214,8 @@ def breadcrumbs(self):
+         return result
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class PhysicalNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         context = aq_inner(self.context)
+@@ -279,9 +225,10 @@ def breadcrumbs(self):
+         name, item_url = get_view_url(context)
+ 
+         if container is None:
+-            return ({'absolute_url': item_url,
+-                     'Title': utils.pretty_title_or_id(context, context), },
+-                   )
++            return ({
++                'absolute_url': item_url,
++                'Title': utils.pretty_title_or_id(context, context),
++            },)
+ 
+         view = getMultiAdapter((container, request), name='breadcrumbs_view')
+         base = tuple(view.breadcrumbs())
+@@ -299,16 +246,16 @@ def breadcrumbs(self):
+         # don't show default pages in breadcrumbs or pages above the navigation
+         # root
+         if not utils.isDefaultPage(context, request) \
+-                and not rootPath.startswith(itemPath):
+-            base += ({'absolute_url': item_url,
+-                      'Title': utils.pretty_title_or_id(context, context), },
+-                    )
+-
++           and not rootPath.startswith(itemPath):
++            base += ({
++                'absolute_url': item_url,
++                'Title': utils.pretty_title_or_id(context, context), },
++            )
+         return base
+ 
+ 
++@implementer(INavigationBreadcrumbs)
+ class RootPhysicalNavigationBreadcrumbs(BrowserView):
+-    implements(INavigationBreadcrumbs)
+ 
+     def breadcrumbs(self):
+         # XXX Root never gets included, it's hardcoded as 'Home' in
+diff --git a/Products/CMFPlone/tests/testNavigationView.py b/Products/CMFPlone/tests/testNavigationView.py
+index 57b4386..d7cbb63 100644
+--- a/Products/CMFPlone/tests/testNavigationView.py
++++ b/Products/CMFPlone/tests/testNavigationView.py
+@@ -5,9 +5,10 @@
+ 
+ from Products.CMFPlone.tests import PloneTestCase
+ from Products.CMFPlone.tests import dummy
+-from Products.CMFPlone.tests.utils import validateCSSIdentifier, folder_position
++from Products.CMFPlone.tests.utils import validateCSSIdentifier
++from Products.CMFPlone.tests.utils import folder_position
+ 
+-from Products.CMFPlone.browser.navigation import CatalogNavigationTree
++#from Products.CMFPlone.browser.navigation import CatalogNavigationTree
+ from Products.CMFPlone.browser.navigation import CatalogSiteMap
+ from Products.CMFPlone.browser.navigation import CatalogNavigationTabs
+ from Products.CMFPlone.browser.navigation import CatalogNavigationBreadcrumbs
+@@ -360,10 +361,6 @@ def testStateFiltering(self):
+         self.assertEqual(len(tree['children']), 2)
+ 
+ 
+-class TestCatalogNavTree(TestBaseNavTree):
+-        view_class = CatalogNavigationTree
+-
+-
+ class TestSiteMap(PloneTestCase.PloneTestCase):
+     """Tests for the sitemap view implementations. This base test is a little
+         geared toward a catalog based implementation for now.
+@@ -577,7 +574,7 @@ def testStateFiltering(self):
+         self.portal._delObject('news')
+         self.portal._delObject('events')
+         workflow = self.portal.portal_workflow
+-        
++
+         registry = getUtility(IRegistry)
+         navigation_settings = registry.forInterface(
+             INavigationSchema,
+@@ -799,7 +796,6 @@ def test_suite():
+     from unittest import TestSuite, makeSuite
+     suite = TestSuite()
+     suite.addTest(makeSuite(TestCatalogPortalTabs))
+-    suite.addTest(makeSuite(TestCatalogNavTree))
+     suite.addTest(makeSuite(TestSiteMap))
+     suite.addTest(makeSuite(TestCatalogBreadCrumbs))
+     suite.addTest(makeSuite(TestPhysicalBreadCrumbs))
+diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
+index ab60a98..276e52a 100644
+--- a/Products/CMFPlone/utils.py
++++ b/Products/CMFPlone/utils.py
+@@ -83,11 +83,6 @@ def createBreadCrumbs(context, request):
+     return view.breadcrumbs()
+ 
+ 
+-def createNavTree(context, request, sitemap=False):
+-    view = getMultiAdapter((context, request), name='navtree_builder_view')
+-    return view.navigationTree()
+-
+-
+ def createSiteMap(context, request, sitemap=False):
+     view = getMultiAdapter((context, request), name='sitemap_builder_view')
+     return view.siteMap()
 
 
