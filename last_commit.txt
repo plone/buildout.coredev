@@ -1,63 +1,137 @@
-Repository: plone.app.iterate
+Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2015-09-20T02:44:21+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.iterate/commit/233c3d4f2238c01c61521aa00ed7cf5f50346ff3
+Date: 2015-09-19T20:18:48-07:00
+Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
+Commit: https://github.com/plone/plone.dexterity/commit/c096200c8fba7fed585696d8ba5fc5aece0aa382
 
-Fixed test to pass with recent plone.app.content change.
-
-This requires the cmf.ModifyPortalContent permission for the
-content_status_history page.
+Don't check type constraints in AddForm.update() if request provides IDeferSecurityChecks.  Refs
+ #40.
 
 Files changed:
-M CHANGES.rst
-M plone/app/iterate/tests/browser.rst
+M plone/dexterity/browser/add.py
+M plone/dexterity/tests/test_views.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 8bddaaa..0c7eb86 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,10 @@ Changelog
- 3.1.2 (unreleased)
- ------------------
+diff --git a/plone/dexterity/browser/add.py b/plone/dexterity/browser/add.py
+index c5d4fe6..5909fa5 100644
+--- a/plone/dexterity/browser/add.py
++++ b/plone/dexterity/browser/add.py
+@@ -11,6 +11,7 @@
+ from plone.dexterity.utils import addContentToContainer
+ from plone.dexterity.utils import getAdditionalSchemata
+ from plone.z3cform import layout
++from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form import button
+ from z3c.form import form
+ from zope.component import createObject
+@@ -118,12 +119,14 @@ def handleCancel(self, action):
+         notify(AddCancelledEvent(self.context))
  
--- Nothing changed yet.
-+- Fixed test to pass with recent plone.app.content change
-+  that requires the cmf.ModifyPortalContent permission for the
-+  content_status_history page.
-+  [maurits]
+     def update(self):
+-        allowed_ids = [fti.getId() for fti in self.context.allowedContentTypes()]
+-        if self.portal_type not in allowed_ids:
+-            raise ValueError(
+-                'Subobject type disallowed by IConstrainTypes adapter: %s'
+-                % self.portal_type
+-            )
++        if not IDeferSecurityCheck.providedBy(self.request):
++            allowed_ids = [fti.getId() for fti in
++                           self.context.allowedContentTypes()]
++            if self.portal_type not in allowed_ids:
++                raise ValueError(
++                    'Subobject type disallowed by IConstrainTypes adapter: %s'
++                    % self.portal_type
++                )
+         super(DefaultAddForm, self).update()
+         # fire the edit begun only if no action was executed
+         if len(self.actions.executedActions) == 0:
+diff --git a/plone/dexterity/tests/test_views.py b/plone/dexterity/tests/test_views.py
+index ce100e6..cd78d8c 100644
+--- a/plone/dexterity/tests/test_views.py
++++ b/plone/dexterity/tests/test_views.py
+@@ -19,6 +19,7 @@
+ from plone.dexterity.interfaces import IEditFinishedEvent
+ from plone.dexterity.schema import SCHEMA_CACHE
+ from plone.mocktestcase import MockTestCase
++from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form.action import Actions
+ from z3c.form.field import FieldWidgets
+ from z3c.form.interfaces import IActions
+@@ -390,6 +391,74 @@ def test_fires_add_begun_event(self):
+         view.portal_type = fti_mock.getId()
+         view.update()
  
++
++    def test_update_checks_allowed_types(self):
++
++        # Context and request
++
++        context_mock = self.create_dummy(
++            portal_type=u'testtype',
++            allowedContentTypes=lambda: [])
++        request_mock = TestRequest()
++
++        # FTI
++
++        fti_mock = self.mocker.proxy(DexterityFTI(u"testtype"))
++        self.expect(fti_mock.lookupSchema()).result(ISchema)
++        self.mocker.count(0, 100)
++        self.mock_utility(fti_mock, IDexterityFTI, name=u"testtype")
++
++        self.mock_adapter(
++            FieldWidgets,
++            IWidgets,
++            (Interface, Interface, Interface)
++        )
++
++        self.mock_adapter(Actions, IActions, (Interface, Interface, Interface))
++
++        # Form
++        self.mocker.replay()
++
++        view = DefaultAddForm(context_mock, request_mock)
++        view.portal_type = fti_mock.getId()
++        self.assertRaises(ValueError, view.update)
++
++    def test_update_ignores_type_check_if_security_check_deferred(self):
++
++        # Context and request
++
++        context_mock = self.create_dummy(
++            portal_type=u'testtype',
++            allowedContentTypes=lambda: [])
++        request_mock = TestRequest()
++        alsoProvides(request_mock, IDeferSecurityCheck)
++
++        # FTI
++
++        fti_mock = self.mocker.proxy(DexterityFTI(u"testtype"))
++        self.expect(fti_mock.lookupSchema()).result(ISchema)
++        self.mocker.count(0, 100)
++        self.mock_utility(fti_mock, IDexterityFTI, name=u"testtype")
++
++        self.mock_adapter(
++            FieldWidgets,
++            IWidgets,
++            (Interface, Interface, Interface)
++        )
++
++        self.mock_adapter(Actions, IActions, (Interface, Interface, Interface))
++
++        # Form
++        self.mocker.replay()
++
++        view = DefaultAddForm(context_mock, request_mock)
++        view.portal_type = fti_mock.getId()
++        try:
++            view.update()
++        except ValueError:
++            self.fail("Update raised Unauthorized with security checks "
++                      "deferred")
++
+     def test_fires_add_cancelled_event(self):
  
- 3.1.1 (2015-08-20)
-diff --git a/plone/app/iterate/tests/browser.rst b/plone/app/iterate/tests/browser.rst
-index 6814c29..6c3d9c5 100644
---- a/plone/app/iterate/tests/browser.rst
-+++ b/plone/app/iterate/tests/browser.rst
-@@ -107,15 +107,20 @@ therefore our Editor lacks permissions to modify the original::
-     ...
-     LinkNotFoundError
- 
--The Editor could, however, retract the original to gain permissions
--again and check in (and then possibly request for review)::
-+The Editor could, however, ask someone to retract the original so he
-+gains permissions again and check in (and then possibly request for
-+review)::
- 
-     >>> browser = z2.Browser(app)
--    >>> browser.addHeader('Authorization', 'Basic editor:secret')
-+    >>> browser.addHeader('Authorization',
-+    ...                   'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD))
-     >>> browser.open(portal.absolute_url() + '/hello-world')
-     >>> browser.getLink("Published").click()
-     >>> browser.getControl("Retract").click()
-     >>> browser.getControl("Save").click()
-+    >>> browser = z2.Browser(app)
-+    >>> browser.addHeader('Authorization', 'Basic editor:secret')
-+    >>> browser.open(portal.absolute_url() + '/hello-world')
-     >>> browser.getLink("working copy").click()
-     >>> browser.getLink("Check in").click()
-     >>> browser.getControl("Check in").click()
+         # Context and request
 
 
