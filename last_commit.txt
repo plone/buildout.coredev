@@ -1,45 +1,119 @@
-Repository: plone.app.contenttypes
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2015-09-20T00:57:54+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/5388887828573d09738560409fed7b5c6acbefd8
+Date: 2015-09-20T02:15:21+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/1ff71cad9a4b22182b200ea71fad7edc4c08caa2
 
-Do not raise an exception for items where @@full_view_item throws an
-exception. Instead hide the object.
+When creating site, reapply all profiles.
+
+Until GenericSetup 1.7.7 this is the only strategy available.
+GS 1.7.8 (unreleased) offers more strategies, with as default to upgrade
+already applied profiles.  Somehow we rely on reapplying all profiles.
+Without this, plone.app.discussion misses its workflow settings.
+And plone.api tests give a ComponentLookupError for the IMimeTypesRegistryTool.
+
+We now override the strategy when this is possible.
 
 Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/browser/templates/full_view.pt
+M Products/CMFPlone/factory.py
+M Products/CMFPlone/setuphandlers.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 11a98b5..a4201ec 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,6 +4,10 @@ Changelog
- 1.2.3 (unreleased)
- ------------------
+diff --git a/Products/CMFPlone/factory.py b/Products/CMFPlone/factory.py
+index 1c4c8b6..8f5a0be 100644
+--- a/Products/CMFPlone/factory.py
++++ b/Products/CMFPlone/factory.py
+@@ -7,7 +7,12 @@
+ from zope.event import notify
+ from zope.interface import implements
+ from zope.site.hooks import setSite
+-
++try:
++    # GenericSetup 1.7.8 and higher
++    from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
++    DEPENDENCY_STRATEGY_REAPPLY  # pyflakes
++except ImportError:
++    DEPENDENCY_STRATEGY_REAPPLY = None
  
-+- Do not raise an exception for items where @@full_view_item throws an
-+  exception. Instead hide the object.
-+  [pbauer]
-+
- - Do not raise errors when IPrimaryFieldInfo(obj) fails (e.g. when the
-   Schema-Cache is gone).
-   Fixes https://github.com/plone/Products.CMFPlone/issues/839
-diff --git a/plone/app/contenttypes/browser/templates/full_view.pt b/plone/app/contenttypes/browser/templates/full_view.pt
-index 2366c33..07cf017 100644
---- a/plone/app/contenttypes/browser/templates/full_view.pt
-+++ b/plone/app/contenttypes/browser/templates/full_view.pt
-@@ -14,7 +14,7 @@
-     <metal:entries fill-slot="entries">
-       <metal:block use-macro="context/@@listing_view/macros/entries">
-         <metal:entry fill-slot="entry">
--          <div tal:define="obj item/getObject;" tal:replace="structure obj/@@full_view_item" />
-+          <div tal:define="obj item/getObject;" tal:replace="structure obj/@@full_view_item | nothing" />
-         </metal:entry>
-       </metal:block>
-     </metal:entries>
+ _TOOL_ID = 'portal_setup'
+ _DEFAULT_PROFILE = 'Products.CMFPlone:plone'
+@@ -86,7 +91,18 @@ def addPloneSite(context, site_id, title='Plone site', description='',
+     setSite(site)
+ 
+     setup_tool.setBaselineContext('profile-%s' % profile_id)
+-    setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
++    # TODO: we somehow rely on reapplying all profiles, instead of
++    # being happy with upgrades.
++    if DEPENDENCY_STRATEGY_REAPPLY is None:
++        # Older GenericSetup.  Reapply is the default.  No alternative
++        # strategy can be given.
++        setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
++    else:
++        # Newer GenericSetup.  Upgrade is the default.  We want to
++        # reapply.
++        setup_tool.runAllImportStepsFromProfile(
++            'profile-%s' % profile_id,
++            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
+ 
+     reg = queryUtility(IRegistry, context=site)
+     reg['plone.portal_timezone'] = portal_timezone
+@@ -95,9 +111,13 @@ def addPloneSite(context, site_id, title='Plone site', description='',
+     reg['plone.available_languages'] = [default_language]
+ 
+     if setup_content:
+-        setup_tool.runAllImportStepsFromProfile(
+-            'profile-%s' % content_profile_id)
+-
++        if DEPENDENCY_STRATEGY_REAPPLY is None:
++            setup_tool.runAllImportStepsFromProfile(
++                'profile-%s' % content_profile_id)
++        else:
++            setup_tool.runAllImportStepsFromProfile(
++                'profile-%s' % content_profile_id,
++                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
+ 
+     props = dict(
+         title=title,
+@@ -108,7 +128,13 @@ def addPloneSite(context, site_id, title='Plone site', description='',
+     site.manage_changeProperties(**props)
+ 
+     for extension_id in extension_ids:
+-        setup_tool.runAllImportStepsFromProfile('profile-%s' % extension_id)
++        if DEPENDENCY_STRATEGY_REAPPLY is None:
++            setup_tool.runAllImportStepsFromProfile(
++                'profile-%s' % extension_id)
++        else:
++            setup_tool.runAllImportStepsFromProfile(
++                'profile-%s' % extension_id,
++                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
+ 
+     if snapshot is True:
+         setup_tool.createSnapshot('initial_configuration')
+diff --git a/Products/CMFPlone/setuphandlers.py b/Products/CMFPlone/setuphandlers.py
+index 05c46f1..822e368 100644
+--- a/Products/CMFPlone/setuphandlers.py
++++ b/Products/CMFPlone/setuphandlers.py
+@@ -177,8 +177,19 @@ def importFinalSteps(context):
+     setProfileVersion(site)
+ 
+     # Install our dependencies
++    # TODO: we somehow rely on reapplying all profiles, instead of
++    # being happy with upgrades.
+     st = getToolByName(site, "portal_setup")
+-    st.runAllImportStepsFromProfile("profile-Products.CMFPlone:dependencies")
++    try:
++        # GenericSetup 1.7.8 and higher
++        from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
++    except ImportError:
++        st.runAllImportStepsFromProfile(
++            "profile-Products.CMFPlone:dependencies")
++    else:
++        st.runAllImportStepsFromProfile(
++            "profile-Products.CMFPlone:dependencies",
++            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
+ 
+     assignTitles(site)
+     replace_local_role_manager(site)
 
 
