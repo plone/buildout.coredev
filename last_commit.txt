@@ -1,148 +1,200 @@
-Repository: Products.CMFPlone
+Repository: Products.CMFQuickInstallerTool
 
 
 Branch: refs/heads/master
-Date: 2015-09-18T11:24:58+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/9b8b897bdf3f878c9a30beb5165e81f18976f808
+Date: 2015-09-19T00:49:17+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/3df1d69c00185cb668da5f56f58aab75274a26ac
 
-Improve wording in navigation controlpanel
+When uninstalling a product, mark its install profile as unknown.
+
+Then portal_setup also regards it as not installed.
 
 Files changed:
-M Products/CMFPlone/interfaces/controlpanel.py
+M CHANGES.rst
+M Products/CMFQuickInstallerTool/QuickInstallerTool.py
+M Products/CMFQuickInstallerTool/tests/install.txt
 
-diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
-index d433a33..d429755 100644
---- a/Products/CMFPlone/interfaces/controlpanel.py
-+++ b/Products/CMFPlone/interfaces/controlpanel.py
-@@ -787,9 +787,8 @@ class INavigationSchema(Interface):
-         title=_(u"Automatically generate tabs"),
-         description=_(
-             u"By default, all items created at the root level will "
--            u"add to the global section navigation. You can turn this off "
--            u"if you prefer manually constructing this part of the "
--            u"navigation."),
-+            u"appear as tabs. You can turn this off if you prefer manually "
-+            u"constructing this part of the navigation."),
-         default=True,
-         required=False)
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 9370d9f..9ff400b 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,9 @@ Changelog
+ 3.0.12 (unreleased)
+ -------------------
  
-@@ -797,17 +796,17 @@ class INavigationSchema(Interface):
-         title=_(u"Generate tabs for items other than folders."),
-         description=_(
-             u"By default, any content item in the root of the portal will "
--            u"be shown as a global section. If you turn this option off, "
--            u"only folders will be shown. This only has an effect if "
--            u"'Automatically generate tabs' is enabled."),
-+            u"appear as a tab. If you turn this option off, only folders "
-+            u"will be shown. This only has an effect if 'Automatically "
-+            u"generate tabs' is enabled."),
-         default=True,
-         required=False)
+-- Nothing changed yet.
++- When uninstalling a product, mark its install profile as
++  ``unknown``, so ``portal_setup`` also regards it as not installed.
++  [maurits]
  
-     displayed_types = schema.Tuple(
-         title=_(u"Displayed content types"),
-         description=_(
--            u"The content types that should be shown in the navigation and "
--            u"site map."),
-+            u"The content types that should be shown in the navigation "
-+            u"and sitemap."),
-         required=False,
-         default=(
-             'Image',
-@@ -826,7 +825,7 @@ class INavigationSchema(Interface):
-         title=_(u"Filter on workflow state"),
-         description=_(
-             u"The workflow states that should be shown in the navigation "
--            u"tree and the site map."),
-+            u"and the site map."),
-         default=False,
-         required=False)
  
+ 3.0.11 (2015-08-22)
+diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
+index 60944bf..937c1f6 100644
+--- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
++++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
+@@ -737,11 +737,28 @@ def uninstallProducts(
+         """
+         if products is None:
+             products = []
++        portal_setup = getToolByName(self, 'portal_setup')
+         for pid in products:
+             prod = getattr(self, pid)
+             prod.uninstall(cascade=cascade, reinstall=reinstall)
+             if not reinstall:
+                 self.manage_delObjects(pid)
++                profile = self.getInstallProfile(pid)
++                if profile is not None:
++                    # Mark profile as uninstalled/unknown.
++                    profile_id = profile['id']
++                    # XXX We want to use unsetLastVersionForProfile,
++                    # but that requires a merge and release of this
++                    # GenericSetup pull request:
++                    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++                    # portal_setup.unsetLastVersionForProfile(profile_id)
++                    # Instead we must copy and set the
++                    # (non-persistent) profile upgrade versions.
++                    prof_versions = portal_setup._profile_upgrade_versions.copy()
++                    if profile_id not in prof_versions:
++                        continue
++                    del prof_versions[profile_id]
++                    portal_setup._profile_upgrade_versions = prof_versions
+ 
+         if REQUEST:
+             return REQUEST.RESPONSE.redirect(REQUEST['HTTP_REFERER'])
+diff --git a/Products/CMFQuickInstallerTool/tests/install.txt b/Products/CMFQuickInstallerTool/tests/install.txt
+index e091d85..34ff46c 100644
+--- a/Products/CMFQuickInstallerTool/tests/install.txt
++++ b/Products/CMFQuickInstallerTool/tests/install.txt
+@@ -57,6 +57,14 @@ Now we have an InstalledProduct instance in the QI tool:
+ Uninstall the product again
+ ---------------------------
+ 
++First pretend the profile has a version:
++
++  >>> setup = getToolByName(portal, 'portal_setup')
++  >>> profile_id = qi.getInstallProfile('QITest')['id']
++  >>> setup.setLastVersionForProfile(profile_id, '42')
++
++Now uninstall the product:
++
+   >>> qi.uninstallProducts(products=['QITest'])
+ 
+ And we no longer have an InstalledProduct instance in the QI tool:
+@@ -67,7 +75,12 @@ And we no longer have an InstalledProduct instance in the QI tool:
+   >>> qi.isProductInstalled('QITest')
+   False
+ 
+-  >>> setup = getToolByName(portal, 'portal_setup')
++The portal_setup no longer knows its installed profile version, as we
++have cleaned that up:
++
++  >>> setup.getLastVersionForProfile(profile_id)
++  'unknown'
++
+   >>> logs = [i for i in setup.objectIds() if 'QITest' in i]
+   >>> for i in logs:
+   ...     setup._delObject(i)
 
 
-Repository: Products.CMFPlone
+Repository: Products.CMFQuickInstallerTool
 
 
 Branch: refs/heads/master
-Date: 2015-09-18T11:29:49+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/1af3075edd72627575c21f3980ccbc8fb389d6ab
-
-add space
-
-Files changed:
-M Products/CMFPlone/interfaces/controlpanel.py
-
-diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
-index d429755..05db084 100644
---- a/Products/CMFPlone/interfaces/controlpanel.py
-+++ b/Products/CMFPlone/interfaces/controlpanel.py
-@@ -805,8 +805,8 @@ class INavigationSchema(Interface):
-     displayed_types = schema.Tuple(
-         title=_(u"Displayed content types"),
-         description=_(
--            u"The content types that should be shown in the navigation "
--            u"and sitemap."),
-+            u"The content types that should be shown in the navigation and "
-+            u"site map."),
-         required=False,
-         default=(
-             'Image',
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-09-21T14:20:57+02:00
+Date: 2015-09-21T22:14:27+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/5cea1f6647301f53e15bd7ebd69dc8d2d8677965
+Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/9f65091b9a82e345d27a45c3fd454eabaaa3fb3d
 
-Merge pull request #1022 from plone/wording_nav_controlpanel
+Merge pull request #12 from plone/maurits-profile-cleanup-on-uninstall
 
-Improve wording in navigation controlpanel
+When uninstalling a product, mark its install profile as unknown.
 
 Files changed:
-M Products/CMFPlone/interfaces/controlpanel.py
+M CHANGES.rst
+M Products/CMFQuickInstallerTool/QuickInstallerTool.py
+M Products/CMFQuickInstallerTool/tests/install.txt
 
-diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
-index 39105c1..d2fd954 100644
---- a/Products/CMFPlone/interfaces/controlpanel.py
-+++ b/Products/CMFPlone/interfaces/controlpanel.py
-@@ -787,9 +787,8 @@ class INavigationSchema(Interface):
-         title=_(u"Automatically generate tabs"),
-         description=_(
-             u"By default, all items created at the root level will "
--            u"add to the global section navigation. You can turn this off "
--            u"if you prefer manually constructing this part of the "
--            u"navigation."),
-+            u"appear as tabs. You can turn this off if you prefer manually "
-+            u"constructing this part of the navigation."),
-         default=True,
-         required=False)
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 9370d9f..9ff400b 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,9 @@ Changelog
+ 3.0.12 (unreleased)
+ -------------------
  
-@@ -797,9 +796,9 @@ class INavigationSchema(Interface):
-         title=_(u"Generate tabs for items other than folders."),
-         description=_(
-             u"By default, any content item in the root of the portal will "
--            u"be shown as a global section. If you turn this option off, "
--            u"only folders will be shown. This only has an effect if "
--            u"'Automatically generate tabs' is enabled."),
-+            u"appear as a tab. If you turn this option off, only folders "
-+            u"will be shown. This only has an effect if 'Automatically "
-+            u"generate tabs' is enabled."),
-         default=True,
-         required=False)
+-- Nothing changed yet.
++- When uninstalling a product, mark its install profile as
++  ``unknown``, so ``portal_setup`` also regards it as not installed.
++  [maurits]
  
-@@ -860,7 +859,7 @@ class INavigationSchema(Interface):
-         title=_(u"Filter on workflow state"),
-         description=_(
-             u"The workflow states that should be shown in the navigation "
--            u"tree and the site map."),
-+            u"and the site map."),
-         default=False,
-         required=False)
  
+ 3.0.11 (2015-08-22)
+diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
+index 60944bf..937c1f6 100644
+--- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
++++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
+@@ -737,11 +737,28 @@ def uninstallProducts(
+         """
+         if products is None:
+             products = []
++        portal_setup = getToolByName(self, 'portal_setup')
+         for pid in products:
+             prod = getattr(self, pid)
+             prod.uninstall(cascade=cascade, reinstall=reinstall)
+             if not reinstall:
+                 self.manage_delObjects(pid)
++                profile = self.getInstallProfile(pid)
++                if profile is not None:
++                    # Mark profile as uninstalled/unknown.
++                    profile_id = profile['id']
++                    # XXX We want to use unsetLastVersionForProfile,
++                    # but that requires a merge and release of this
++                    # GenericSetup pull request:
++                    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++                    # portal_setup.unsetLastVersionForProfile(profile_id)
++                    # Instead we must copy and set the
++                    # (non-persistent) profile upgrade versions.
++                    prof_versions = portal_setup._profile_upgrade_versions.copy()
++                    if profile_id not in prof_versions:
++                        continue
++                    del prof_versions[profile_id]
++                    portal_setup._profile_upgrade_versions = prof_versions
+ 
+         if REQUEST:
+             return REQUEST.RESPONSE.redirect(REQUEST['HTTP_REFERER'])
+diff --git a/Products/CMFQuickInstallerTool/tests/install.txt b/Products/CMFQuickInstallerTool/tests/install.txt
+index e091d85..34ff46c 100644
+--- a/Products/CMFQuickInstallerTool/tests/install.txt
++++ b/Products/CMFQuickInstallerTool/tests/install.txt
+@@ -57,6 +57,14 @@ Now we have an InstalledProduct instance in the QI tool:
+ Uninstall the product again
+ ---------------------------
+ 
++First pretend the profile has a version:
++
++  >>> setup = getToolByName(portal, 'portal_setup')
++  >>> profile_id = qi.getInstallProfile('QITest')['id']
++  >>> setup.setLastVersionForProfile(profile_id, '42')
++
++Now uninstall the product:
++
+   >>> qi.uninstallProducts(products=['QITest'])
+ 
+ And we no longer have an InstalledProduct instance in the QI tool:
+@@ -67,7 +75,12 @@ And we no longer have an InstalledProduct instance in the QI tool:
+   >>> qi.isProductInstalled('QITest')
+   False
+ 
+-  >>> setup = getToolByName(portal, 'portal_setup')
++The portal_setup no longer knows its installed profile version, as we
++have cleaned that up:
++
++  >>> setup.getLastVersionForProfile(profile_id)
++  'unknown'
++
+   >>> logs = [i for i in setup.objectIds() if 'QITest' in i]
+   >>> for i in logs:
+   ...     setup._delObject(i)
 
 
