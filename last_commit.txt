@@ -1,411 +1,50 @@
-Repository: Products.CMFPlone
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-09-22T02:03:56+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/d3b604a69ad02152d9aa5131b8f596c4d9c87e0d
-
-Purge profile upgrade versions from when applying our default profile.
-
-This signals that nothing has been installed yet, so depencies will
-get reapplied instead of possibly upgraded.  This could cause problems
-mostly in tests.
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/factory.py
-M Products/CMFPlone/setuphandlers.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 142b859..774bb01 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -11,6 +11,12 @@ Changelog
- - Fix traceback style (closes `#1053`_).
-   [rodfersou]
- 
-+- Purge profile upgrade versions from portal_setup when applying our
-+  default CMFPlone:plone profile.  This signals that nothing has been
-+  installed yet, so depencies will get reapplied instead of possibly
-+  upgraded.  This could cause problems mostly in tests.  Closes
-+  `#1041`_.
-+  [maurits]
- 
- 
- 5.0rc3 (2015-09-21)
-@@ -850,4 +856,5 @@ Changelog
- .. _`#991`: https://github.com/plone/Products.CMFPlone/issues/991
- .. _`#996`: https://github.com/plone/Products.CMFPlone/issues/996
- .. _`#1015`: https://github.com/plone/Products.CMFPlone/issues/1015
-+.. _`#1041`: https://github.com/plone/Products.CMFPlone/issues/1041
- .. _`#1053`: https://github.com/plone/Products.CMFPlone/issues/1053
-diff --git a/Products/CMFPlone/factory.py b/Products/CMFPlone/factory.py
-index 2eb30d9..c37b42a 100644
---- a/Products/CMFPlone/factory.py
-+++ b/Products/CMFPlone/factory.py
-@@ -7,12 +7,6 @@
- from zope.event import notify
- from zope.interface import implements
- from zope.site.hooks import setSite
--try:
--    # GenericSetup 1.7.8 and higher
--    from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
--    DEPENDENCY_STRATEGY_REAPPLY  # pyflakes
--except ImportError:
--    DEPENDENCY_STRATEGY_REAPPLY = None
- 
- _TOOL_ID = 'portal_setup'
- _DEFAULT_PROFILE = 'Products.CMFPlone:plone'
-@@ -96,18 +90,7 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     setSite(site)
- 
-     setup_tool.setBaselineContext('profile-%s' % profile_id)
--    # TODO: we somehow rely on reapplying all profiles, instead of
--    # being happy with upgrades.
--    if DEPENDENCY_STRATEGY_REAPPLY is None:
--        # Older GenericSetup.  Reapply is the default.  No alternative
--        # strategy can be given.
--        setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
--    else:
--        # Newer GenericSetup.  Upgrade is the default.  We want to
--        # reapply.
--        setup_tool.runAllImportStepsFromProfile(
--            'profile-%s' % profile_id,
--            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+    setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
- 
-     reg = queryUtility(IRegistry, context=site)
-     reg['plone.portal_timezone'] = portal_timezone
-@@ -116,13 +99,8 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     reg['plone.available_languages'] = [default_language]
- 
-     if setup_content:
--        if DEPENDENCY_STRATEGY_REAPPLY is None:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % content_profile_id)
--        else:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % content_profile_id,
--                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+        setup_tool.runAllImportStepsFromProfile(
-+            'profile-%s' % content_profile_id)
- 
-     props = dict(
-         title=title,
-@@ -133,13 +111,8 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     site.manage_changeProperties(**props)
- 
-     for extension_id in extension_ids:
--        if DEPENDENCY_STRATEGY_REAPPLY is None:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % extension_id)
--        else:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % extension_id,
--                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+        setup_tool.runAllImportStepsFromProfile(
-+            'profile-%s' % extension_id)
- 
-     if snapshot is True:
-         setup_tool.createSnapshot('initial_configuration')
-diff --git a/Products/CMFPlone/setuphandlers.py b/Products/CMFPlone/setuphandlers.py
-index 4f2e107..6a49752 100644
---- a/Products/CMFPlone/setuphandlers.py
-+++ b/Products/CMFPlone/setuphandlers.py
-@@ -113,6 +113,14 @@ def addCacheForResourceRegistry(portal):
-         reg.ZCacheable_setEnabled(1)
- 
- 
-+def purgeProfileVersions(portal):
-+    """
-+    Purge profile dependency versions.
-+    """
-+    setup = getToolByName(portal, 'portal_setup')
-+    setup._profile_upgrade_versions = {}
-+
-+
- def setProfileVersion(portal):
-     """
-     Set profile version.
-@@ -176,22 +184,27 @@ def importFinalSteps(context):
-     if context.readDataFile('plone-final.txt') is None:
-         return
-     site = context.getSite()
-+
-+    # Unset all profile upgrade versions in portal_setup.  Our default
-+    # profile should only be applied when creating a new site, so this
-+    # list of versions should be empty.  But some tests apply it too.
-+    # This should not be done as it should not be needed.  The profile
-+    # is a base profile, which means all import steps are run in purge
-+    # mode.  So for example an extra workflow added by
-+    # plone.app.discussion is purged.  When plone.app.discussion is
-+    # still in the list of profile upgrade versions, with the default
-+    # dependency strategy it will not be reapplied again, which leaves
-+    # you with a site that misses stuff.  So: when applying our
-+    # default profile, start with a clean slate in these versions.
-+    purgeProfileVersions(site)
-+
-+    # Set out default profile version.
-     setProfileVersion(site)
- 
-     # Install our dependencies
--    # TODO: we somehow rely on reapplying all profiles, instead of
--    # being happy with upgrades.
-     st = getToolByName(site, "portal_setup")
--    try:
--        # GenericSetup 1.7.8 and higher
--        from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
--    except ImportError:
--        st.runAllImportStepsFromProfile(
--            "profile-Products.CMFPlone:dependencies")
--    else:
--        st.runAllImportStepsFromProfile(
--            "profile-Products.CMFPlone:dependencies",
--            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+    st.runAllImportStepsFromProfile(
-+        "profile-Products.CMFPlone:dependencies")
- 
-     assignTitles(site)
-     replace_local_role_manager(site)
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-09-22T02:03:57+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/2c3fb2386aa7327821742414ae966ae9e7edc20d
-
-Let plone-final import step also depend on the workflow step.
-
-Otherwise the plone-final step installs plone.app.discussion with an
-extra workflow, and then our own workflow step throws it away again.
-
-Closes #1041.
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/exportimport/configure.zcml
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 774bb01..d918baf 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -11,6 +11,12 @@ Changelog
- - Fix traceback style (closes `#1053`_).
-   [rodfersou]
- 
-+- Let plone-final import step also depend on the workflow step.
-+  Otherwise the plone-final step installs plone.app.discussion with an
-+  extra workflow, and then our own workflow step throws it away again.
-+  Closes `#1041`_.
-+  [maurits]
-+
- - Purge profile upgrade versions from portal_setup when applying our
-   default CMFPlone:plone profile.  This signals that nothing has been
-   installed yet, so depencies will get reapplied instead of possibly
-diff --git a/Products/CMFPlone/exportimport/configure.zcml b/Products/CMFPlone/exportimport/configure.zcml
-index a8c151e..46c28ff 100644
---- a/Products/CMFPlone/exportimport/configure.zcml
-+++ b/Products/CMFPlone/exportimport/configure.zcml
-@@ -74,6 +74,7 @@
-    <depends name="viewlets" />
-    <depends name="controlpanel" />
-    <depends name="propertiestool" />
-+   <depends name="workflow" />
-   </genericsetup:importStep>
- 
-   <genericsetup:importStep
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-09-22T08:31:30+02:00
+Date: 2015-09-22T11:01:49+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/c70e4a2c7965375de3292b6671c41627e27dc465
+Commit: https://github.com/plone/plone.app.upgrade/commit/5e7fcd0a8ee81e960fcf7ccc83a85de24d28065e
 
-Merge pull request #1062 from plone/maurits-purge-profile-versions
-
-Purge profile versions. Let plone-final depend on workflow step.
+fix missing plone.email_charset in migration from rc2 to rc3
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/exportimport/configure.zcml
-M Products/CMFPlone/factory.py
-M Products/CMFPlone/setuphandlers.py
+M plone/app/upgrade/v50/profiles/to_rc3/registry.xml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 142b859..d918baf 100644
+index 58e52b9..ff81b1b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -11,6 +11,18 @@ Changelog
- - Fix traceback style (closes `#1053`_).
-   [rodfersou]
+@@ -4,7 +4,8 @@ Changelog
+ 1.3.17 (unreleased)
+ -------------------
  
-+- Let plone-final import step also depend on the workflow step.
-+  Otherwise the plone-final step installs plone.app.discussion with an
-+  extra workflow, and then our own workflow step throws it away again.
-+  Closes `#1041`_.
-+  [maurits]
-+
-+- Purge profile upgrade versions from portal_setup when applying our
-+  default CMFPlone:plone profile.  This signals that nothing has been
-+  installed yet, so depencies will get reapplied instead of possibly
-+  upgraded.  This could cause problems mostly in tests.  Closes
-+  `#1041`_.
-+  [maurits]
+-- Nothing changed yet.
++- Fix missing plone.email_charset when upgrading from 5.0rc2 -> 5.0rc3.
++  [pbauer]
  
  
- 5.0rc3 (2015-09-21)
-@@ -850,4 +862,5 @@ Changelog
- .. _`#991`: https://github.com/plone/Products.CMFPlone/issues/991
- .. _`#996`: https://github.com/plone/Products.CMFPlone/issues/996
- .. _`#1015`: https://github.com/plone/Products.CMFPlone/issues/1015
-+.. _`#1041`: https://github.com/plone/Products.CMFPlone/issues/1041
- .. _`#1053`: https://github.com/plone/Products.CMFPlone/issues/1053
-diff --git a/Products/CMFPlone/exportimport/configure.zcml b/Products/CMFPlone/exportimport/configure.zcml
-index a8c151e..46c28ff 100644
---- a/Products/CMFPlone/exportimport/configure.zcml
-+++ b/Products/CMFPlone/exportimport/configure.zcml
-@@ -74,6 +74,7 @@
-    <depends name="viewlets" />
-    <depends name="controlpanel" />
-    <depends name="propertiestool" />
-+   <depends name="workflow" />
-   </genericsetup:importStep>
- 
-   <genericsetup:importStep
-diff --git a/Products/CMFPlone/factory.py b/Products/CMFPlone/factory.py
-index 2eb30d9..c37b42a 100644
---- a/Products/CMFPlone/factory.py
-+++ b/Products/CMFPlone/factory.py
-@@ -7,12 +7,6 @@
- from zope.event import notify
- from zope.interface import implements
- from zope.site.hooks import setSite
--try:
--    # GenericSetup 1.7.8 and higher
--    from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
--    DEPENDENCY_STRATEGY_REAPPLY  # pyflakes
--except ImportError:
--    DEPENDENCY_STRATEGY_REAPPLY = None
- 
- _TOOL_ID = 'portal_setup'
- _DEFAULT_PROFILE = 'Products.CMFPlone:plone'
-@@ -96,18 +90,7 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     setSite(site)
- 
-     setup_tool.setBaselineContext('profile-%s' % profile_id)
--    # TODO: we somehow rely on reapplying all profiles, instead of
--    # being happy with upgrades.
--    if DEPENDENCY_STRATEGY_REAPPLY is None:
--        # Older GenericSetup.  Reapply is the default.  No alternative
--        # strategy can be given.
--        setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
--    else:
--        # Newer GenericSetup.  Upgrade is the default.  We want to
--        # reapply.
--        setup_tool.runAllImportStepsFromProfile(
--            'profile-%s' % profile_id,
--            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+    setup_tool.runAllImportStepsFromProfile('profile-%s' % profile_id)
- 
-     reg = queryUtility(IRegistry, context=site)
-     reg['plone.portal_timezone'] = portal_timezone
-@@ -116,13 +99,8 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     reg['plone.available_languages'] = [default_language]
- 
-     if setup_content:
--        if DEPENDENCY_STRATEGY_REAPPLY is None:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % content_profile_id)
--        else:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % content_profile_id,
--                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+        setup_tool.runAllImportStepsFromProfile(
-+            'profile-%s' % content_profile_id)
- 
-     props = dict(
-         title=title,
-@@ -133,13 +111,8 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     site.manage_changeProperties(**props)
- 
-     for extension_id in extension_ids:
--        if DEPENDENCY_STRATEGY_REAPPLY is None:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % extension_id)
--        else:
--            setup_tool.runAllImportStepsFromProfile(
--                'profile-%s' % extension_id,
--                dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+        setup_tool.runAllImportStepsFromProfile(
-+            'profile-%s' % extension_id)
- 
-     if snapshot is True:
-         setup_tool.createSnapshot('initial_configuration')
-diff --git a/Products/CMFPlone/setuphandlers.py b/Products/CMFPlone/setuphandlers.py
-index 4f2e107..6a49752 100644
---- a/Products/CMFPlone/setuphandlers.py
-+++ b/Products/CMFPlone/setuphandlers.py
-@@ -113,6 +113,14 @@ def addCacheForResourceRegistry(portal):
-         reg.ZCacheable_setEnabled(1)
- 
- 
-+def purgeProfileVersions(portal):
-+    """
-+    Purge profile dependency versions.
-+    """
-+    setup = getToolByName(portal, 'portal_setup')
-+    setup._profile_upgrade_versions = {}
-+
-+
- def setProfileVersion(portal):
-     """
-     Set profile version.
-@@ -176,22 +184,27 @@ def importFinalSteps(context):
-     if context.readDataFile('plone-final.txt') is None:
-         return
-     site = context.getSite()
-+
-+    # Unset all profile upgrade versions in portal_setup.  Our default
-+    # profile should only be applied when creating a new site, so this
-+    # list of versions should be empty.  But some tests apply it too.
-+    # This should not be done as it should not be needed.  The profile
-+    # is a base profile, which means all import steps are run in purge
-+    # mode.  So for example an extra workflow added by
-+    # plone.app.discussion is purged.  When plone.app.discussion is
-+    # still in the list of profile upgrade versions, with the default
-+    # dependency strategy it will not be reapplied again, which leaves
-+    # you with a site that misses stuff.  So: when applying our
-+    # default profile, start with a clean slate in these versions.
-+    purgeProfileVersions(site)
-+
-+    # Set out default profile version.
-     setProfileVersion(site)
- 
-     # Install our dependencies
--    # TODO: we somehow rely on reapplying all profiles, instead of
--    # being happy with upgrades.
-     st = getToolByName(site, "portal_setup")
--    try:
--        # GenericSetup 1.7.8 and higher
--        from Products.GenericSetup.tool import DEPENDENCY_STRATEGY_REAPPLY
--    except ImportError:
--        st.runAllImportStepsFromProfile(
--            "profile-Products.CMFPlone:dependencies")
--    else:
--        st.runAllImportStepsFromProfile(
--            "profile-Products.CMFPlone:dependencies",
--            dependency_strategy=DEPENDENCY_STRATEGY_REAPPLY)
-+    st.runAllImportStepsFromProfile(
-+        "profile-Products.CMFPlone:dependencies")
- 
-     assignTitles(site)
-     replace_local_role_manager(site)
+ 1.3.16 (2015-09-20)
+diff --git a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
+index 12af84e..295043f 100644
+--- a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
++++ b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
+@@ -1,11 +1,13 @@
+ <?xml version="1.0"?>
+ <registry>
+-  <records interface="Products.CMFPlone.interfaces.ISiteSchema"
+-           prefix="plone" />
+   <records interface="Products.CMFPlone.interfaces.ILinkSchema"
+            prefix="plone" />
+   <records interface="Products.CMFPlone.interfaces.INavigationSchema"
+            prefix="plone" />
++  <records interface="Products.CMFPlone.interfaces.IMailSchema"
++           prefix="plone" />
++  <records interface="Products.CMFPlone.interfaces.ISiteSchema"
++           prefix="plone" />
+   <records interface="Products.CMFPlone.interfaces.ITypesSchema"
+            prefix="plone" />
+   <records interface="plone.app.iterate.interfaces.IIterateSettings"
 
 
