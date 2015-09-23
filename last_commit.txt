@@ -1,892 +1,378 @@
-Repository: plone.protect
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2015-09-21T23:19:41-05:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.protect/commit/70b58a3fdb3034be5bb41c1d9540806c168537bd
+Date: 2015-09-22T09:43:57+02:00
+Author: Patrick Gerken (do3cc) <do3cc@patrick-gerken.de>
+Commit: https://github.com/plone/plone.app.portlets/commit/6e8f590ded025afe2ccb88ed2e3a3b6dcc20c7ae
 
-get auto-csrf protection working on the zope root
+feat(logging): Log more error cases with rss feeds
 
 Files changed:
 M CHANGES.rst
-M plone/protect/authenticator.py
-M plone/protect/auto.py
-M plone/protect/subscribers.py
-M plone/protect/tests/testAuto.py
-M plone/protect/utils.py
+M plone/app/portlets/portlets/rss.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 37f8d6a..e10e034 100644
+index 25c7fc3..dbf2063 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 3.0.9 (unreleased)
- ------------------
+@@ -111,7 +111,10 @@ Changelog
+   [thet]
  
--- Nothing changed yet.
-+- get auto-csrf protection working on the zope root
-+  [vangheem]
- 
- 
- 3.0.8 (2015-09-20)
-diff --git a/plone/protect/authenticator.py b/plone/protect/authenticator.py
-index 066f812..2267ba7 100644
---- a/plone/protect/authenticator.py
-+++ b/plone/protect/authenticator.py
-@@ -42,8 +42,9 @@ def _is_equal(val1, val2):
-     return result == 0
+ - Use plone_layout for getIcon.
+-  [pbauer]
++- Log exceptions while parsing rss feeds. Get logged as info since
++  this often caused by factor out of control of site owners and
++  because the problem is handled in the UI
++  [do3cc]
  
  
--def _getKeyring(username):
--    manager = getUtility(IKeyManager)
-+def _getKeyring(username, manager=None):
-+    if manager is None:
-+        manager = getUtility(IKeyManager)
-     if username == ANONYMOUS_USER:
-         try:
-             ring = manager[u'_anon']
-@@ -59,7 +60,7 @@ def _getKeyring(username):
-     return ring
- 
- 
--def _verify_request(request, extra='', name='_authenticator'):
-+def _verify_request(request, extra='', name='_authenticator', manager=None):
-     auth = request.get(name)
-     if auth is None:
-         auth = request.getHeader('X-CSRF-TOKEN')
-@@ -70,7 +71,7 @@ def _verify_request(request, extra='', name='_authenticator'):
-         auth = auth[0]
- 
-     user = _getUserName()
--    ring = _getKeyring(user)
-+    ring = _getKeyring(user, manager=manager)
- 
-     for key in ring:
-         if key is None:
-@@ -85,9 +86,9 @@ def _verify_request(request, extra='', name='_authenticator'):
- _verify = _verify_request
- 
- 
--def createToken(extra=''):
-+def createToken(extra='', manager=None):
-     user = _getUserName()
--    ring = _getKeyring(user)
-+    ring = _getKeyring(user, manager=manager)
-     secret = ring.random()
-     return hmac.new(secret, user + extra, sha).hexdigest()
- 
-@@ -106,9 +107,9 @@ def verify(self, extra='', name="_authenticator"):
-         return _verify_request(self.request, extra=extra, name=name)
- 
- 
--def check(request, extra='', name="_authenticator"):
-+def check(request, extra='', name="_authenticator", manager=None):
-     if isinstance(request, HTTPRequest):
--        if not _verify_request(request, extra=extra, name=name):
-+        if not _verify_request(request, extra=extra, name=name, manager=manager):
-             raise Forbidden('Form authenticator is invalid.')
- 
- 
-diff --git a/plone/protect/auto.py b/plone/protect/auto.py
-index 6374558..c27051b 100644
---- a/plone/protect/auto.py
-+++ b/plone/protect/auto.py
-@@ -7,7 +7,6 @@
- 
- from AccessControl import getSecurityManager
- from Acquisition import aq_parent
--from OFS.interfaces import IApplication
- from lxml import etree
- from plone.keyring.interfaces import IKeyManager
- from plone.portlets.interfaces import IPortletAssignment
-@@ -16,40 +15,28 @@
- from plone.protect.authenticator import isAnonymousUser
- from plone.protect.interfaces import IConfirmView
- from plone.protect.interfaces import IDisableCSRFProtection
-+from plone.protect.utils import SAFE_WRITE_KEY
-+from plone.protect.utils import getRoot
-+from plone.protect.utils import getRootKeyManager
-+from plone.protect.utils import safeWrite  # noqa b/w compat import
- from plone.transformchain.interfaces import ITransform
- from repoze.xmliter.utils import getHTMLSerializer
- import transaction
-+import types
- from zExceptions import Forbidden
- from zope.component import ComponentLookupError
- from zope.component import adapts
- from zope.component import getUtility
- from zope.component.hooks import getSite
--from zope.globalrequest import getRequest
- from zope.interface import implements, Interface
- 
- LOGGER = logging.getLogger('plone.protect')
- 
--SAFE_WRITE_KEY = 'plone.protect.safe_oids'
- 
- X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
- CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false') == 'true'
- 
- 
--def safeWrite(obj, request=None):
--    if request is None:
--        request = getRequest()
--    if request is None:
--        LOGGER.debug('could not mark object as a safe write')
--        return
--    if SAFE_WRITE_KEY not in request.environ:
--        request.environ[SAFE_WRITE_KEY] = []
--    try:
--        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
--            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
--    except AttributeError:
--        LOGGER.debug('object you attempted to mark safe does not have an oid')
--
--
- class ProtectTransform(object):
-     """
-     XXX Need to be extremely careful with everything we do in here
-@@ -103,6 +90,7 @@ def transformUnicode(self, result, encoding):
-     def transformIterable(self, result, encoding):
-         """Apply the transform if required
-         """
-+
-         # before anything, do the clickjacking protection
-         self.request.response.setHeader('X-Frame-Options', X_FRAME_OPTIONS)
- 
-@@ -130,7 +118,8 @@ def transformIterable(self, result, encoding):
-         try:
-             self.key_manager = getUtility(IKeyManager)
-         except ComponentLookupError:
--            pass
-+            root = getRoot(context)
-+            self.key_manager = getRootKeyManager(root)
- 
-         if self.site is None and self.key_manager is None:
-             # key manager not installed and no site object.
-@@ -146,6 +135,8 @@ def transformIterable(self, result, encoding):
- 
-     def getContext(self):
-         published = self.request.get('PUBLISHED')
-+        if isinstance(published, types.MethodType):
-+            return published.im_self
-         return aq_parent(published)
- 
-     def check(self):
-@@ -176,16 +167,11 @@ def _check(self):
-                 not IDisableCSRFProtection.providedBy(self.request):
-             # Okay, we're writing here, we need to protect!
+ 3.0.2 (2014-10-23)
+diff --git a/plone/app/portlets/portlets/rss.py b/plone/app/portlets/portlets/rss.py
+index 485cbb6..514fb5c 100644
+--- a/plone/app/portlets/portlets/rss.py
++++ b/plone/app/portlets/portlets/rss.py
+@@ -162,6 +162,8 @@ def _retrieveFeed(self):
+                                        ACCEPTED_FEEDPARSER_EXCEPTIONS)):
+                 self._loaded = True  # we tried at least but have a failed load
+                 self._failed = True
++                logger.info('failed to update RSS feed %s', 
++                            d.get('bozo_exception', None))
+                 return False
              try:
--                check(self.request)
-+                check(self.request, manager=self.key_manager)
-                 return True
-             except ComponentLookupError:
--                # okay, it's possible we're at the zope root and the KeyManager
--                # hasn't been installed yet. Let's check and carry on
--                # if this is the case
--                if IApplication.providedBy(self.getContext()):
--                    LOGGER.info('skipping csrf protection on zope root until '
--                                'keymanager gets installed')
--                    return True
-+                LOGGER.info('Can not find key manager for CSRF protection. '
-+                            'This should not happen.')
-                 raise
-             except Forbidden:
-                 # XXX
-@@ -250,7 +236,7 @@ def transform(self, result):
-         root = result.tree.getroot()
-         url = urlparse(self.request.URL)
-         try:
--            token = createToken()
-+            token = createToken(manager=self.key_manager)
-         except ComponentLookupError:
-             if self.site is not None:
-                 LOGGER.warn('Keyring not found on site. This should not happen', exc_info=True)
-@@ -282,18 +268,3 @@ def transform(self, result):
-                 form.append(hidden)
- 
-         return result
--
--    def __call__(self, result, encoding):
--        if CSRF_DISABLED:
--            return result
--        if isinstance(result, unicode):
--            newResult = self.transformUnicode(result, encoding)
--        elif isinstance(result, str):
--            newResult = self.transformBytes(result, encoding)
--        else:
--            newResult = self.transformIterable(result, encoding)
--
--        if newResult is not None:
--            result = newResult
--
--        return result
-diff --git a/plone/protect/subscribers.py b/plone/protect/subscribers.py
-index 8b02f92..2589ca7 100644
---- a/plone/protect/subscribers.py
-+++ b/plone/protect/subscribers.py
-@@ -1,16 +1,19 @@
--from Acquisition import aq_parent
-+import logging
-+import time
-+
-+from Products.PluggableAuthService.interfaces.events import IUserLoggedInEvent
- from plone.keyring.interfaces import IKeyManager
- from plone.protect.interfaces import IDisableCSRFProtection
--from Products.PluggableAuthService.interfaces.events import IUserLoggedInEvent
- from zope.component import ComponentLookupError
- from zope.component import adapter
- from zope.component import getUtility
--from zope.component import getSiteManager
- from zope.component.hooks import getSite
-+from zope.globalrequest import getRequest
- from zope.interface import alsoProvides
-+from plone.protect.utils import getRootKeyManager
-+from plone.protect.utils import getRoot
-+
- 
--import time
--import logging
- LOGGER = logging.getLogger('plone.protect')
- 
- _ring_rotation_schedules = (
-@@ -38,20 +41,16 @@ def onUserLogsIn(event):
-     since we already write to the database when a user logs in,
-     let's check for key rotation here
-     """
--    try:
--        # disable csrf protection on login requests
--        req = event.object.REQUEST
--        alsoProvides(req, IDisableCSRFProtection)
--    except AttributeError:
--        req = None
-+    # disable csrf protection on login requests
-+    req = getRequest()
-+    alsoProvides(req, IDisableCSRFProtection)
- 
-     try:
-         manager = getUtility(IKeyManager)
-         _rotate(manager)
-         # also check rotation of zope root keyring
--        app = aq_parent(getSite())
--        sm = getSiteManager(app)
--        manager = sm.getUtility(IKeyManager)
-+        root = getRoot(getSite())
-+        manager = getRootKeyManager(root)
-         if manager:
-             _rotate(manager)
-     except ComponentLookupError:
-@@ -59,4 +58,4 @@ def onUserLogsIn(event):
-             url = req.URL
-         else:
-             url = ''
--        LOGGER.warn('cannot find key manager for url %s' % url)
-+        LOGGER.warn('cannot find key manager for url %s' % url)
-\ No newline at end of file
-diff --git a/plone/protect/tests/testAuto.py b/plone/protect/tests/testAuto.py
-index bbaedbf..33f19e5 100644
---- a/plone/protect/tests/testAuto.py
-+++ b/plone/protect/tests/testAuto.py
-@@ -1,5 +1,7 @@
- from plone.app.testing import TEST_USER_NAME
- from plone.app.testing import TEST_USER_PASSWORD
-+from plone.app.testing import SITE_OWNER_NAME
-+from plone.app.testing import SITE_OWNER_PASSWORD
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.keyring.interfaces import IKeyManager
-@@ -15,23 +17,9 @@
- from zope.component import getUtility
- 
- 
--class AutoCSRFProtectTests(unittest.TestCase):
-+class _BaseAutoTest(object):
-     layer = PROTECT_FUNCTIONAL_TESTING
- 
--    def setUp(self):
--        self.portal = self.layer['portal']
--        self.browser = Browser(self.layer['app'])
--        self.request = self.layer['request']
--        login(self.portal, TEST_USER_NAME)
--        self.open('login_form')
--        self.browser.getControl(name='__ac_name').value = TEST_USER_NAME
--        self.browser.getControl(
--            name='__ac_password').value = TEST_USER_PASSWORD
--        self.browser.getControl(name='submit').click()
--
--    def open(self, path):
--        self.browser.open(self.portal.absolute_url() + '/' + path)
--
-     def test_adds_csrf_protection_input(self):
-         self.open('test-unprotected')
-         self.assertTrue('name="_authenticator"' in self.browser.contents)
-@@ -96,6 +84,23 @@ def test_forbidden_raised_if_auth_failure(self):
-         self.browser.getControl('submit1').click()
-         self.assertFalse(hasattr(self.portal, "foo"))
- 
-+
-+class AutoCSRFProtectTests(unittest.TestCase, _BaseAutoTest):
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.browser = Browser(self.layer['app'])
-+        self.request = self.layer['request']
-+        login(self.portal, TEST_USER_NAME)
-+        self.browser.open(self.portal.absolute_url() + '/login_form')
-+        self.browser.getControl(name='__ac_name').value = TEST_USER_NAME
-+        self.browser.getControl(
-+            name='__ac_password').value = TEST_USER_PASSWORD
-+        self.browser.getControl(name='submit').click()
-+
-+    def open(self, path):
-+        self.browser.open(self.portal.absolute_url() + '/' + path)
-+
-     def test_CSRF_header(self):
-         self.request.environ['HTTP_X_CSRF_TOKEN'] = createToken()
-         view = AuthenticatorView(None, self.request)
-@@ -117,6 +122,19 @@ def test_only_add_auth_when_user_logged_in(self):
-             pass
- 
- 
-+class TestRoot(unittest.TestCase, _BaseAutoTest):
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.browser = Browser(self.layer['app'])
-+        self.request = self.layer['request']
-+        self.browser.addHeader(
-+            'Authorization', 'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,))
-+
-+    def open(self, path):
-+        self.browser.open(self.portal.aq_parent.absolute_url() + '/' + path)
-+
-+
- class AutoRotateTests(unittest.TestCase):
-     layer = PROTECT_FUNCTIONAL_TESTING
- 
-diff --git a/plone/protect/utils.py b/plone/protect/utils.py
-index 738cc67..8476fb9 100644
---- a/plone/protect/utils.py
-+++ b/plone/protect/utils.py
-@@ -1,8 +1,15 @@
-+import inspect
-+import logging
-+from Acquisition import aq_parent
- from AccessControl.requestmethod import _buildFacade
-+from plone.keyring.keymanager import KeyManager
- from plone.protect.authenticator import createToken
- from zope.globalrequest import getRequest
- 
--import inspect
-+from OFS.interfaces import IApplication
-+
-+SAFE_WRITE_KEY = 'plone.protect.safe_oids'
-+LOGGER = logging.getLogger('plone.protect')
- 
- _default = []
- 
-@@ -59,7 +66,7 @@ def _curried(*args, **kw):
-         return facade_globs[name]
- 
- 
--def addTokenToUrl(url, req=None):
-+def addTokenToUrl(url, req=None, manager=None):
-     if not url:
-         return url
-     if req is None:
-@@ -70,7 +77,7 @@ def addTokenToUrl(url, req=None):
-     if '_auth_token' not in req.environ:
-         # let's cache this value since this could be called
-         # many times for one request
--        req.environ['_auth_token'] = createToken()
-+        req.environ['_auth_token'] = createToken(manager=manager)
-     token = req.environ['_auth_token']
- 
-     if '_authenticator' not in url:
-@@ -80,3 +87,36 @@ def addTokenToUrl(url, req=None):
-             url += '&'
-         url += '_authenticator=' + token
-     return url
-+
-+
-+def getRootKeyManager(root):
-+    if not IApplication.providedBy(root):
-+        return
-+    try:
-+        manager = root._key_manager
-+    except AttributeError:
-+        manager = root._key_manager = KeyManager()
-+        safeWrite(root._key_manager)
-+        safeWrite(root)
-+    return manager
-+
-+
-+def getRoot(context):
-+    while not IApplication.providedBy(context) and context is not None:
-+        context = aq_parent(context)
-+    return context
-+
-+
-+def safeWrite(obj, request=None):
-+    if request is None:
-+        request = getRequest()
-+    if request is None:
-+        LOGGER.debug('could not mark object as a safe write')
-+        return
-+    if SAFE_WRITE_KEY not in request.environ:
-+        request.environ[SAFE_WRITE_KEY] = []
-+    try:
-+        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
-+            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
-+    except AttributeError:
-+        LOGGER.debug('object you attempted to mark safe does not have an oid')
-\ No newline at end of file
+                 self._title = d.feed.title
 
 
-Repository: plone.protect
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2015-09-22T13:52:11-05:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.protect/commit/7979ee6d74c59068290e28f2be73c435db834c5a
+Date: 2015-09-22T09:44:43+02:00
+Author: Patrick Gerken (do3cc) <do3cc@patrick-gerken.de>
+Commit: https://github.com/plone/plone.app.portlets/commit/7746069c62b6c3ae8446a6e7ee6887ff936c6a97
 
-Merge pull request #16 from plone/zope-root-auto-csrf
-
-get auto-csrf protection working on the zope root
+Add caching
 
 Files changed:
 M CHANGES.rst
-M plone/protect/authenticator.py
-M plone/protect/auto.py
-M plone/protect/subscribers.py
-M plone/protect/tests/testAuto.py
-M plone/protect/utils.py
+M plone/app/portlets/portlets/rss.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 37f8d6a..e10e034 100644
+index dbf2063..9c2b1f5 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 3.0.9 (unreleased)
+@@ -4,6 +4,19 @@ Changelog
+ 3.1.2 (unreleased)
  ------------------
  
--- Nothing changed yet.
-+- get auto-csrf protection working on the zope root
-+  [vangheem]
++- Log exceptions while parsing rss feeds. Get logged as info since
++  this often caused by factor out of control of site owners and
++  because the problem is handled in the UI
++  [do3cc]
++
++- Remove hard coded 10 minute delay if retrieving a feed failed once.
++  Either you don't need your feeds ultra fast, then you can create
++  a longer time, or you need them fast and don't want this hidden delayq
++  [do3cc]
++
++- Add caching functionality from feedparser.
++  [do3cc]
++
+ - Use ``is_default_page`` instead of ``check_default_page_via_view``. 
+   [fulv]
+ 
+@@ -70,7 +83,7 @@ Changelog
  
  
- 3.0.8 (2015-09-20)
-diff --git a/plone/protect/authenticator.py b/plone/protect/authenticator.py
-index 066f812..2267ba7 100644
---- a/plone/protect/authenticator.py
-+++ b/plone/protect/authenticator.py
-@@ -42,8 +42,9 @@ def _is_equal(val1, val2):
-     return result == 0
+ 3.0.6 (2015-06-05)
+-------------------
++-----------------
  
+ - Convert manage-portlets.js into a pattern and make improvements on
+   using the manage portlets infrastructure
+@@ -111,11 +124,7 @@ Changelog
+   [thet]
  
--def _getKeyring(username):
--    manager = getUtility(IKeyManager)
-+def _getKeyring(username, manager=None):
-+    if manager is None:
-+        manager = getUtility(IKeyManager)
-     if username == ANONYMOUS_USER:
+ - Use plone_layout for getIcon.
+-- Log exceptions while parsing rss feeds. Get logged as info since
+-  this often caused by factor out of control of site owners and
+-  because the problem is handled in the UI
+-  [do3cc]
+-
++  [pbauer]
+ 
+ 3.0.2 (2014-10-23)
+ ------------------
+diff --git a/plone/app/portlets/portlets/rss.py b/plone/app/portlets/portlets/rss.py
+index 514fb5c..f65aeca 100644
+--- a/plone/app/portlets/portlets/rss.py
++++ b/plone/app/portlets/portlets/rss.py
+@@ -68,9 +68,6 @@ class RSSFeed(object):
+     """an RSS feed"""
+     implements(IFeed)
+ 
+-    # TODO: discuss whether we want an increasing update time here, probably not though
+-    FAILURE_DELAY = 10  # time in minutes after which we retry to load it after a failure
+-
+     def __init__(self, url, timeout):
+         self.url = url
+         self.timeout = timeout
+@@ -82,6 +79,8 @@ def __init__(self, url, timeout):
+         self._failed = False    # does it fail at the last update?
+         self._last_update_time_in_minutes = 0  # when was the feed last updated?
+         self._last_update_time = None  # time as DateTime or Nonw
++        self._etag = None
++        self._last_modified = None
+ 
+     @property
+     def last_update_time_in_minutes(self):
+@@ -119,7 +118,7 @@ def update(self):
          try:
-             ring = manager[u'_anon']
-@@ -59,7 +60,7 @@ def _getKeyring(username):
-     return ring
- 
- 
--def _verify_request(request, extra='', name='_authenticator'):
-+def _verify_request(request, extra='', name='_authenticator', manager=None):
-     auth = request.get(name)
-     if auth is None:
-         auth = request.getHeader('X-CSRF-TOKEN')
-@@ -70,7 +71,7 @@ def _verify_request(request, extra='', name='_authenticator'):
-         auth = auth[0]
- 
-     user = _getUserName()
--    ring = _getKeyring(user)
-+    ring = _getKeyring(user, manager=manager)
- 
-     for key in ring:
-         if key is None:
-@@ -85,9 +86,9 @@ def _verify_request(request, extra='', name='_authenticator'):
- _verify = _verify_request
- 
- 
--def createToken(extra=''):
-+def createToken(extra='', manager=None):
-     user = _getUserName()
--    ring = _getKeyring(user)
-+    ring = _getKeyring(user, manager=manager)
-     secret = ring.random()
-     return hmac.new(secret, user + extra, sha).hexdigest()
- 
-@@ -106,9 +107,9 @@ def verify(self, extra='', name="_authenticator"):
-         return _verify_request(self.request, extra=extra, name=name)
- 
- 
--def check(request, extra='', name="_authenticator"):
-+def check(request, extra='', name="_authenticator", manager=None):
-     if isinstance(request, HTTPRequest):
--        if not _verify_request(request, extra=extra, name=name):
-+        if not _verify_request(request, extra=extra, name=name, manager=manager):
-             raise Forbidden('Form authenticator is invalid.')
- 
- 
-diff --git a/plone/protect/auto.py b/plone/protect/auto.py
-index 6374558..c27051b 100644
---- a/plone/protect/auto.py
-+++ b/plone/protect/auto.py
-@@ -7,7 +7,6 @@
- 
- from AccessControl import getSecurityManager
- from Acquisition import aq_parent
--from OFS.interfaces import IApplication
- from lxml import etree
- from plone.keyring.interfaces import IKeyManager
- from plone.portlets.interfaces import IPortletAssignment
-@@ -16,40 +15,28 @@
- from plone.protect.authenticator import isAnonymousUser
- from plone.protect.interfaces import IConfirmView
- from plone.protect.interfaces import IDisableCSRFProtection
-+from plone.protect.utils import SAFE_WRITE_KEY
-+from plone.protect.utils import getRoot
-+from plone.protect.utils import getRootKeyManager
-+from plone.protect.utils import safeWrite  # noqa b/w compat import
- from plone.transformchain.interfaces import ITransform
- from repoze.xmliter.utils import getHTMLSerializer
- import transaction
-+import types
- from zExceptions import Forbidden
- from zope.component import ComponentLookupError
- from zope.component import adapts
- from zope.component import getUtility
- from zope.component.hooks import getSite
--from zope.globalrequest import getRequest
- from zope.interface import implements, Interface
- 
- LOGGER = logging.getLogger('plone.protect')
- 
--SAFE_WRITE_KEY = 'plone.protect.safe_oids'
- 
- X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
- CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false') == 'true'
- 
- 
--def safeWrite(obj, request=None):
--    if request is None:
--        request = getRequest()
--    if request is None:
--        LOGGER.debug('could not mark object as a safe write')
--        return
--    if SAFE_WRITE_KEY not in request.environ:
--        request.environ[SAFE_WRITE_KEY] = []
--    try:
--        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
--            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
--    except AttributeError:
--        LOGGER.debug('object you attempted to mark safe does not have an oid')
--
--
- class ProtectTransform(object):
-     """
-     XXX Need to be extremely careful with everything we do in here
-@@ -103,6 +90,7 @@ def transformUnicode(self, result, encoding):
-     def transformIterable(self, result, encoding):
-         """Apply the transform if required
-         """
+             # check for failure and retry
+             if self.update_failed:
+-                if (self.last_update_time_in_minutes + self.FAILURE_DELAY) < now:
++                if (self.last_update_time_in_minutes) < now:
+                     return self._retrieveFeed()
+                 else:
+                     return False
+@@ -156,7 +155,12 @@ def _retrieveFeed(self):
+         if url != '':
+             self._last_update_time_in_minutes = time.time() / 60
+             self._last_update_time = DateTime()
+-            d = feedparser.parse(url)
++            kwargs = {}
++            if self._last_modified:
++                kwargs['modified'] = self._last_modified
++            if self._etag:
++                kwargs['etag'] = self._etag
++            d = feedparser.parse(url, **kwargs)
+             if (getattr(d, 'bozo', 0) == 1
+                     and not isinstance(d.get('bozo_exception'),
+                                        ACCEPTED_FEEDPARSER_EXCEPTIONS)):
+@@ -165,22 +169,31 @@ def _retrieveFeed(self):
+                 logger.info('failed to update RSS feed %s', 
+                             d.get('bozo_exception', None))
+                 return False
+-            try:
+-                self._title = d.feed.title
+-            except AttributeError:
+-                self._title = ""
+-            self._items = []
+-            try:
+-                self._siteurl = d.feed.link
+-            except AttributeError:
+-                self._siteurl = ""
+-            for item in d['items']:
++            
++            #  If the response was 304, nothing changed!
++            #  Don't change anything...
++            if d.status != 304:
++                self._etag = getattr(d, 'etag', None)
++                self._modified = getattr(d, 'modified', None)
 +
-         # before anything, do the clickjacking protection
-         self.request.response.setHeader('X-Frame-Options', X_FRAME_OPTIONS)
++                try:
++                    self._title = d.feed.title
++                except AttributeError:
++                    self._title = ""
+                 try:
+-                    itemdict = self._buildItemDict(item)
++                    self._siteurl = d.feed.link
+                 except AttributeError:
+-                    continue
++                    self._siteurl = ""
++            
++                self._items = []
++                for item in d['items']:
++                    try:
++                        itemdict = self._buildItemDict(item)
++                    except AttributeError:
++                        continue
++  
++                    self._items.append(itemdict)
  
-@@ -130,7 +118,8 @@ def transformIterable(self, result, encoding):
+-                self._items.append(itemdict)
+             self._loaded = True
+             self._failed = False
+             return True
+
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2015-09-22T09:44:43+02:00
+Author: Patrick Gerken (do3cc) <patrick.gerken@zumtobelgroup.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/18c14a9d9c5bcc49741bd6c6e863160392bc3c02
+
+Fix rebase mistakes
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 9c2b1f5..5c8c632 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -83,7 +83,7 @@ Changelog
+ 
+ 
+ 3.0.6 (2015-06-05)
+------------------
++------------------
+ 
+ - Convert manage-portlets.js into a pattern and make improvements on
+   using the manage portlets infrastructure
+@@ -126,6 +126,7 @@ Changelog
+ - Use plone_layout for getIcon.
+   [pbauer]
+ 
++
+ 3.0.2 (2014-10-23)
+ ------------------
+ 
+@@ -1351,3 +1352,4 @@ Changelog
+ 
+ - Initial implementation.
+   [optilude]
++
+
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2015-09-23T10:57:50+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.portlets/commit/a7d00a2ca3299b9cd6f2781b6d1bd70b9edfcc54
+
+Merge pull request #44 from do3cc/caching
+
+Use caching headers while getting rss, remove unconfigurable additional delay on errors
+
+Files changed:
+M CHANGES.rst
+M plone/app/portlets/portlets/rss.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 25c7fc3..5c8c632 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,19 @@ Changelog
+ 3.1.2 (unreleased)
+ ------------------
+ 
++- Log exceptions while parsing rss feeds. Get logged as info since
++  this often caused by factor out of control of site owners and
++  because the problem is handled in the UI
++  [do3cc]
++
++- Remove hard coded 10 minute delay if retrieving a feed failed once.
++  Either you don't need your feeds ultra fast, then you can create
++  a longer time, or you need them fast and don't want this hidden delayq
++  [do3cc]
++
++- Add caching functionality from feedparser.
++  [do3cc]
++
+ - Use ``is_default_page`` instead of ``check_default_page_via_view``. 
+   [fulv]
+ 
+@@ -1339,3 +1352,4 @@ Changelog
+ 
+ - Initial implementation.
+   [optilude]
++
+diff --git a/plone/app/portlets/portlets/rss.py b/plone/app/portlets/portlets/rss.py
+index 485cbb6..f65aeca 100644
+--- a/plone/app/portlets/portlets/rss.py
++++ b/plone/app/portlets/portlets/rss.py
+@@ -68,9 +68,6 @@ class RSSFeed(object):
+     """an RSS feed"""
+     implements(IFeed)
+ 
+-    # TODO: discuss whether we want an increasing update time here, probably not though
+-    FAILURE_DELAY = 10  # time in minutes after which we retry to load it after a failure
+-
+     def __init__(self, url, timeout):
+         self.url = url
+         self.timeout = timeout
+@@ -82,6 +79,8 @@ def __init__(self, url, timeout):
+         self._failed = False    # does it fail at the last update?
+         self._last_update_time_in_minutes = 0  # when was the feed last updated?
+         self._last_update_time = None  # time as DateTime or Nonw
++        self._etag = None
++        self._last_modified = None
+ 
+     @property
+     def last_update_time_in_minutes(self):
+@@ -119,7 +118,7 @@ def update(self):
          try:
-             self.key_manager = getUtility(IKeyManager)
-         except ComponentLookupError:
--            pass
-+            root = getRoot(context)
-+            self.key_manager = getRootKeyManager(root)
- 
-         if self.site is None and self.key_manager is None:
-             # key manager not installed and no site object.
-@@ -146,6 +135,8 @@ def transformIterable(self, result, encoding):
- 
-     def getContext(self):
-         published = self.request.get('PUBLISHED')
-+        if isinstance(published, types.MethodType):
-+            return published.im_self
-         return aq_parent(published)
- 
-     def check(self):
-@@ -176,16 +167,11 @@ def _check(self):
-                 not IDisableCSRFProtection.providedBy(self.request):
-             # Okay, we're writing here, we need to protect!
-             try:
--                check(self.request)
-+                check(self.request, manager=self.key_manager)
-                 return True
-             except ComponentLookupError:
--                # okay, it's possible we're at the zope root and the KeyManager
--                # hasn't been installed yet. Let's check and carry on
--                # if this is the case
--                if IApplication.providedBy(self.getContext()):
--                    LOGGER.info('skipping csrf protection on zope root until '
--                                'keymanager gets installed')
--                    return True
-+                LOGGER.info('Can not find key manager for CSRF protection. '
-+                            'This should not happen.')
-                 raise
-             except Forbidden:
-                 # XXX
-@@ -250,7 +236,7 @@ def transform(self, result):
-         root = result.tree.getroot()
-         url = urlparse(self.request.URL)
-         try:
--            token = createToken()
-+            token = createToken(manager=self.key_manager)
-         except ComponentLookupError:
-             if self.site is not None:
-                 LOGGER.warn('Keyring not found on site. This should not happen', exc_info=True)
-@@ -282,18 +268,3 @@ def transform(self, result):
-                 form.append(hidden)
- 
-         return result
--
--    def __call__(self, result, encoding):
--        if CSRF_DISABLED:
--            return result
--        if isinstance(result, unicode):
--            newResult = self.transformUnicode(result, encoding)
--        elif isinstance(result, str):
--            newResult = self.transformBytes(result, encoding)
--        else:
--            newResult = self.transformIterable(result, encoding)
--
--        if newResult is not None:
--            result = newResult
--
--        return result
-diff --git a/plone/protect/subscribers.py b/plone/protect/subscribers.py
-index 8b02f92..2589ca7 100644
---- a/plone/protect/subscribers.py
-+++ b/plone/protect/subscribers.py
-@@ -1,16 +1,19 @@
--from Acquisition import aq_parent
-+import logging
-+import time
+             # check for failure and retry
+             if self.update_failed:
+-                if (self.last_update_time_in_minutes + self.FAILURE_DELAY) < now:
++                if (self.last_update_time_in_minutes) < now:
+                     return self._retrieveFeed()
+                 else:
+                     return False
+@@ -156,29 +155,45 @@ def _retrieveFeed(self):
+         if url != '':
+             self._last_update_time_in_minutes = time.time() / 60
+             self._last_update_time = DateTime()
+-            d = feedparser.parse(url)
++            kwargs = {}
++            if self._last_modified:
++                kwargs['modified'] = self._last_modified
++            if self._etag:
++                kwargs['etag'] = self._etag
++            d = feedparser.parse(url, **kwargs)
+             if (getattr(d, 'bozo', 0) == 1
+                     and not isinstance(d.get('bozo_exception'),
+                                        ACCEPTED_FEEDPARSER_EXCEPTIONS)):
+                 self._loaded = True  # we tried at least but have a failed load
+                 self._failed = True
++                logger.info('failed to update RSS feed %s', 
++                            d.get('bozo_exception', None))
+                 return False
+-            try:
+-                self._title = d.feed.title
+-            except AttributeError:
+-                self._title = ""
+-            self._items = []
+-            try:
+-                self._siteurl = d.feed.link
+-            except AttributeError:
+-                self._siteurl = ""
+-            for item in d['items']:
++            
++            #  If the response was 304, nothing changed!
++            #  Don't change anything...
++            if d.status != 304:
++                self._etag = getattr(d, 'etag', None)
++                self._modified = getattr(d, 'modified', None)
 +
-+from Products.PluggableAuthService.interfaces.events import IUserLoggedInEvent
- from plone.keyring.interfaces import IKeyManager
- from plone.protect.interfaces import IDisableCSRFProtection
--from Products.PluggableAuthService.interfaces.events import IUserLoggedInEvent
- from zope.component import ComponentLookupError
- from zope.component import adapter
- from zope.component import getUtility
--from zope.component import getSiteManager
- from zope.component.hooks import getSite
-+from zope.globalrequest import getRequest
- from zope.interface import alsoProvides
-+from plone.protect.utils import getRootKeyManager
-+from plone.protect.utils import getRoot
-+
++                try:
++                    self._title = d.feed.title
++                except AttributeError:
++                    self._title = ""
+                 try:
+-                    itemdict = self._buildItemDict(item)
++                    self._siteurl = d.feed.link
+                 except AttributeError:
+-                    continue
++                    self._siteurl = ""
++            
++                self._items = []
++                for item in d['items']:
++                    try:
++                        itemdict = self._buildItemDict(item)
++                    except AttributeError:
++                        continue
++  
++                    self._items.append(itemdict)
  
--import time
--import logging
- LOGGER = logging.getLogger('plone.protect')
- 
- _ring_rotation_schedules = (
-@@ -38,20 +41,16 @@ def onUserLogsIn(event):
-     since we already write to the database when a user logs in,
-     let's check for key rotation here
-     """
--    try:
--        # disable csrf protection on login requests
--        req = event.object.REQUEST
--        alsoProvides(req, IDisableCSRFProtection)
--    except AttributeError:
--        req = None
-+    # disable csrf protection on login requests
-+    req = getRequest()
-+    alsoProvides(req, IDisableCSRFProtection)
- 
-     try:
-         manager = getUtility(IKeyManager)
-         _rotate(manager)
-         # also check rotation of zope root keyring
--        app = aq_parent(getSite())
--        sm = getSiteManager(app)
--        manager = sm.getUtility(IKeyManager)
-+        root = getRoot(getSite())
-+        manager = getRootKeyManager(root)
-         if manager:
-             _rotate(manager)
-     except ComponentLookupError:
-@@ -59,4 +58,4 @@ def onUserLogsIn(event):
-             url = req.URL
-         else:
-             url = ''
--        LOGGER.warn('cannot find key manager for url %s' % url)
-+        LOGGER.warn('cannot find key manager for url %s' % url)
-\ No newline at end of file
-diff --git a/plone/protect/tests/testAuto.py b/plone/protect/tests/testAuto.py
-index bbaedbf..33f19e5 100644
---- a/plone/protect/tests/testAuto.py
-+++ b/plone/protect/tests/testAuto.py
-@@ -1,5 +1,7 @@
- from plone.app.testing import TEST_USER_NAME
- from plone.app.testing import TEST_USER_PASSWORD
-+from plone.app.testing import SITE_OWNER_NAME
-+from plone.app.testing import SITE_OWNER_PASSWORD
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.keyring.interfaces import IKeyManager
-@@ -15,23 +17,9 @@
- from zope.component import getUtility
- 
- 
--class AutoCSRFProtectTests(unittest.TestCase):
-+class _BaseAutoTest(object):
-     layer = PROTECT_FUNCTIONAL_TESTING
- 
--    def setUp(self):
--        self.portal = self.layer['portal']
--        self.browser = Browser(self.layer['app'])
--        self.request = self.layer['request']
--        login(self.portal, TEST_USER_NAME)
--        self.open('login_form')
--        self.browser.getControl(name='__ac_name').value = TEST_USER_NAME
--        self.browser.getControl(
--            name='__ac_password').value = TEST_USER_PASSWORD
--        self.browser.getControl(name='submit').click()
--
--    def open(self, path):
--        self.browser.open(self.portal.absolute_url() + '/' + path)
--
-     def test_adds_csrf_protection_input(self):
-         self.open('test-unprotected')
-         self.assertTrue('name="_authenticator"' in self.browser.contents)
-@@ -96,6 +84,23 @@ def test_forbidden_raised_if_auth_failure(self):
-         self.browser.getControl('submit1').click()
-         self.assertFalse(hasattr(self.portal, "foo"))
- 
-+
-+class AutoCSRFProtectTests(unittest.TestCase, _BaseAutoTest):
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.browser = Browser(self.layer['app'])
-+        self.request = self.layer['request']
-+        login(self.portal, TEST_USER_NAME)
-+        self.browser.open(self.portal.absolute_url() + '/login_form')
-+        self.browser.getControl(name='__ac_name').value = TEST_USER_NAME
-+        self.browser.getControl(
-+            name='__ac_password').value = TEST_USER_PASSWORD
-+        self.browser.getControl(name='submit').click()
-+
-+    def open(self, path):
-+        self.browser.open(self.portal.absolute_url() + '/' + path)
-+
-     def test_CSRF_header(self):
-         self.request.environ['HTTP_X_CSRF_TOKEN'] = createToken()
-         view = AuthenticatorView(None, self.request)
-@@ -117,6 +122,19 @@ def test_only_add_auth_when_user_logged_in(self):
-             pass
- 
- 
-+class TestRoot(unittest.TestCase, _BaseAutoTest):
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.browser = Browser(self.layer['app'])
-+        self.request = self.layer['request']
-+        self.browser.addHeader(
-+            'Authorization', 'Basic %s:%s' % (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,))
-+
-+    def open(self, path):
-+        self.browser.open(self.portal.aq_parent.absolute_url() + '/' + path)
-+
-+
- class AutoRotateTests(unittest.TestCase):
-     layer = PROTECT_FUNCTIONAL_TESTING
- 
-diff --git a/plone/protect/utils.py b/plone/protect/utils.py
-index 738cc67..8476fb9 100644
---- a/plone/protect/utils.py
-+++ b/plone/protect/utils.py
-@@ -1,8 +1,15 @@
-+import inspect
-+import logging
-+from Acquisition import aq_parent
- from AccessControl.requestmethod import _buildFacade
-+from plone.keyring.keymanager import KeyManager
- from plone.protect.authenticator import createToken
- from zope.globalrequest import getRequest
- 
--import inspect
-+from OFS.interfaces import IApplication
-+
-+SAFE_WRITE_KEY = 'plone.protect.safe_oids'
-+LOGGER = logging.getLogger('plone.protect')
- 
- _default = []
- 
-@@ -59,7 +66,7 @@ def _curried(*args, **kw):
-         return facade_globs[name]
- 
- 
--def addTokenToUrl(url, req=None):
-+def addTokenToUrl(url, req=None, manager=None):
-     if not url:
-         return url
-     if req is None:
-@@ -70,7 +77,7 @@ def addTokenToUrl(url, req=None):
-     if '_auth_token' not in req.environ:
-         # let's cache this value since this could be called
-         # many times for one request
--        req.environ['_auth_token'] = createToken()
-+        req.environ['_auth_token'] = createToken(manager=manager)
-     token = req.environ['_auth_token']
- 
-     if '_authenticator' not in url:
-@@ -80,3 +87,36 @@ def addTokenToUrl(url, req=None):
-             url += '&'
-         url += '_authenticator=' + token
-     return url
-+
-+
-+def getRootKeyManager(root):
-+    if not IApplication.providedBy(root):
-+        return
-+    try:
-+        manager = root._key_manager
-+    except AttributeError:
-+        manager = root._key_manager = KeyManager()
-+        safeWrite(root._key_manager)
-+        safeWrite(root)
-+    return manager
-+
-+
-+def getRoot(context):
-+    while not IApplication.providedBy(context) and context is not None:
-+        context = aq_parent(context)
-+    return context
-+
-+
-+def safeWrite(obj, request=None):
-+    if request is None:
-+        request = getRequest()
-+    if request is None:
-+        LOGGER.debug('could not mark object as a safe write')
-+        return
-+    if SAFE_WRITE_KEY not in request.environ:
-+        request.environ[SAFE_WRITE_KEY] = []
-+    try:
-+        if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
-+            request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
-+    except AttributeError:
-+        LOGGER.debug('object you attempted to mark safe does not have an oid')
-\ No newline at end of file
+-                self._items.append(itemdict)
+             self._loaded = True
+             self._failed = False
+             return True
 
 
