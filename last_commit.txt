@@ -1,183 +1,196 @@
-Repository: plone.app.iterate
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-09-24T22:15:26-05:00
+Date: 2015-09-24T21:46:45-05:00
 Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.iterate/commit/c95d465c372f56c62838a204e7804e6ce9981bd0
+Commit: https://github.com/plone/plone.app.upgrade/commit/ef0e85bc813954d1cbc6a9d49ae8d8aeb3415255
 
-Fix metadata storage for dexterity checkouts
+Add migration for TinyMCE settings
 
 Files changed:
+A plone/app/upgrade/v50/final.py
+A plone/app/upgrade/v50/profiles/to_500/registry.xml
 M CHANGES.rst
-M plone/app/iterate/browser/checkout.pt
-M plone/app/iterate/browser/checkout.py
-M plone/app/iterate/browser/info_baseline.pt
-M plone/app/iterate/dexterity/interfaces.py
-M plone/app/iterate/dexterity/policy.py
-M plone/app/iterate/dexterity/relation.py
-M plone/app/iterate/subscribers/metadata.py
+M plone/app/upgrade/v50/configure.zcml
+M plone/app/upgrade/v50/profiles.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index b9fb76a..b5322fa 100644
+index 8747bba..b01dd43 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 3.1.3 (unreleased)
- ------------------
+@@ -4,6 +4,9 @@ Changelog
+ 1.3.18 (unreleased)
+ -------------------
  
--- Nothing changed yet.
-+- Fix metadata storage for dexterity checkouts
++- Add migration for TinyMCE settings
 +  [vangheem]
- 
- 
- 3.1.2 (2015-09-20)
-diff --git a/plone/app/iterate/browser/checkout.pt b/plone/app/iterate/browser/checkout.pt
-index fd32589..ceb8e53 100644
---- a/plone/app/iterate/browser/checkout.pt
-+++ b/plone/app/iterate/browser/checkout.pt
-@@ -1,4 +1,11 @@
--<html metal:use-macro="context/@@standard_macros/page" i18n:domain="plone">
-+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
-+    xmlns:tal="http://xml.zope.org/namespaces/tal"
-+    xmlns:metal="http://xml.zope.org/namespaces/metal"
-+    xmlns:i18n="http://xml.zope.org/namespaces/i18n"
-+    lang="en"
-+    metal:use-macro="context/main_template/macros/master"
-+    i18n:domain="plone">
-+<body>
- 
- <div id="content" metal:fill-slot="body">
- 
-diff --git a/plone/app/iterate/browser/checkout.py b/plone/app/iterate/browser/checkout.py
-index 31e5ad2..f88a5ff 100644
---- a/plone/app/iterate/browser/checkout.py
-+++ b/plone/app/iterate/browser/checkout.py
-@@ -57,7 +57,7 @@ def __call__(self):
- 
-         # We want to redirect to a specific template, else we might
-         # end up downloading a file
--        if self.request.form.has_key('form.button.Checkout'):
-+        if 'form.button.Checkout' in self.request.form:
-             control = getMultiAdapter((context, self.request), name=u"iterate_control")
-             if not control.checkout_allowed():
-                 raise CheckoutException(u"Not allowed")
-@@ -67,7 +67,8 @@ def __call__(self):
-             try:
-                 locator = [c['locator'] for c in self.containers() if c['name'] == location][0]
-             except IndexError:
--                IStatusMessage(self.request).addStatusMessage(_("Cannot find checkout location"), type='stop')
-+                IStatusMessage(self.request).addStatusMessage(_("Cannot find checkout location"),
-+                                                              type='error')
-                 view_url = context.restrictedTraverse("@@plone_context_state").view_url()
-                 self.request.response.redirect(view_url)
-                 return
-@@ -81,7 +82,7 @@ def __call__(self):
-             IStatusMessage(self.request).addStatusMessage(_("Check-out created"), type='info')
-             view_url = wc.restrictedTraverse("@@plone_context_state").view_url()
-             self.request.response.redirect(view_url)
--        elif self.request.form.has_key('form.button.Cancel'):
-+        elif 'form.button.Cancel' in self.request.form:
-             view_url = context.restrictedTraverse("@@plone_context_state").view_url()
-             self.request.response.redirect(view_url)
-         else:
-diff --git a/plone/app/iterate/browser/info_baseline.pt b/plone/app/iterate/browser/info_baseline.pt
-index e7e2799..4738777 100644
---- a/plone/app/iterate/browser/info_baseline.pt
-+++ b/plone/app/iterate/browser/info_baseline.pt
-@@ -1,4 +1,4 @@
--<div class="portalMessage info"
-+<div class="portalMessage warning"
-      tal:define="working_copy view/working_copy;
-                  isAnon context/@@plone_portal_state/anonymous;"
-      i18n:domain="plone"
-diff --git a/plone/app/iterate/dexterity/interfaces.py b/plone/app/iterate/dexterity/interfaces.py
-index 0798744..e937076 100644
---- a/plone/app/iterate/dexterity/interfaces.py
-+++ b/plone/app/iterate/dexterity/interfaces.py
-@@ -4,8 +4,7 @@
- 
- 
- class IStagingRelationValue(IRelationValue):
--    iterate_properties = Attribute('Iterate information')
--
-+    pass
- 
- class IDexterityIterateAware(IIterateAware):
-     pass
-\ No newline at end of file
-diff --git a/plone/app/iterate/dexterity/policy.py b/plone/app/iterate/dexterity/policy.py
-index fa8b191..3e2a694 100644
---- a/plone/app/iterate/dexterity/policy.py
-+++ b/plone/app/iterate/dexterity/policy.py
-@@ -1,8 +1,9 @@
- from plone.app import iterate
- from plone.app.iterate.dexterity.utils import get_baseline
-+from plone.app.iterate.dexterity.utils import get_checkout_relation
- from plone.app.iterate.dexterity.utils import get_relations
- from plone.app.iterate.dexterity.utils import get_working_copy
--from plone.app.iterate.dexterity.utils import get_checkout_relation
-+from plone.app.iterate.util import get_storage
- from zope import component
- from zope.event import notify
- from zope.interface import implements
-@@ -58,6 +59,6 @@ def getWorkingCopy(self):
- 
-     def getProperties(self, obj, default=None):
-         try:
--            return get_checkout_relation(obj).iterate_properties
-+            return get_storage(get_checkout_relation(obj), default=default)
-         except AttributeError:
-             return default
-\ No newline at end of file
-diff --git a/plone/app/iterate/dexterity/relation.py b/plone/app/iterate/dexterity/relation.py
-index 7267d10..547710e 100644
---- a/plone/app/iterate/dexterity/relation.py
-+++ b/plone/app/iterate/dexterity/relation.py
-@@ -1,6 +1,3 @@
--from Products.CMFCore.interfaces import ISiteRoot
--from Products.CMFCore.utils import getToolByName
--from persistent.dict import PersistentDict
- from plone.app.iterate.dexterity.interfaces import IStagingRelationValue
- from z3c.relationfield import relation
- from zc.relation.interfaces import ICatalog
-@@ -8,7 +5,6 @@
- from zope.component import getUtility
- from zope.interface import implements
- 
--
- try:
-     from zope.intid.interfaces import IIntIds
- except ImportError:
-@@ -31,11 +27,3 @@ def get_relations_of(cls, obj, from_attribute=None):
-             condition = lambda r: r.from_attribute == from_attribute and not r.is_broken()
-             items = filter(condition, items)
-         return items
--
--    def __init__(self, to_id):
--        super(StagingRelationValue, self).__init__(to_id)
--        self.iterate_properties = PersistentDict()
--        # remember the creator
--        portal = getUtility(ISiteRoot)
--        mstool = getToolByName(portal, 'portal_membership')
--        self.creator = mstool.getAuthenticatedMember().getId()
-diff --git a/plone/app/iterate/subscribers/metadata.py b/plone/app/iterate/subscribers/metadata.py
-index a93ac4c..8001899 100644
---- a/plone/app/iterate/subscribers/metadata.py
-+++ b/plone/app/iterate/subscribers/metadata.py
-@@ -28,10 +28,10 @@
- from plone.app.iterate.util import get_storage
- from plone.app.iterate.interfaces import keys
- 
--def handleCheckout( event ):
 +
-+def handleCheckout(event):
-     # no cleanup since we annotate the relation and rely on its lifecycle.
--    storage = get_storage( event.relation )
-+    storage = get_storage(event.relation)
-     user = getSecurityManager().getUser()
-     storage[keys.checkout_user] = user.getId()
-     storage[keys.checkout_time] = DateTime()
--
+ - Fix migration of typesUseViewActionInListings to registry.
+   [pbauer]
+ 
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 7ea58de..5f10cc4 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -200,4 +200,17 @@
+ 
+     </gs:upgradeSteps>
+ 
++    <gs:upgradeSteps
++        source="5010"
++        destination="5011"
++        profile="Products.CMFPlone:plone">
++
++       <gs:upgradeStep
++           title="Run to500 upgrade profile"
++           description=""
++           handler=".final.to500"
++           />
++
++    </gs:upgradeSteps>
++
+ </configure>
+diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
+new file mode 100644
+index 0000000..c9518e0
+--- /dev/null
++++ b/plone/app/upgrade/v50/final.py
+@@ -0,0 +1,6 @@
++from plone.app.upgrade.utils import loadMigrationProfile
++
++
++def to500(context):
++    """5.0rc3 -> 5.0.0"""
++    loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to500')
+\ No newline at end of file
+diff --git a/plone/app/upgrade/v50/profiles.zcml b/plone/app/upgrade/v50/profiles.zcml
+index 869c086..b34ff4c 100644
+--- a/plone/app/upgrade/v50/profiles.zcml
++++ b/plone/app/upgrade/v50/profiles.zcml
+@@ -84,4 +84,12 @@
+       provides="Products.GenericSetup.interfaces.EXTENSION"
+       />
+ 
++  <genericsetup:registerProfile
++      name="to500"
++      title="Upgrade profile for Plone 5010 to Plone 5.0.0"
++      description=""
++      directory="profiles/to_500"
++      for="Products.CMFPlone.interfaces.IMigratingPloneSiteRoot"
++      provides="Products.GenericSetup.interfaces.EXTENSION"
++      />
+ </configure>
+diff --git a/plone/app/upgrade/v50/profiles/to_500/registry.xml b/plone/app/upgrade/v50/profiles/to_500/registry.xml
+new file mode 100644
+index 0000000..b367867
+--- /dev/null
++++ b/plone/app/upgrade/v50/profiles/to_500/registry.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0"?>
++<registry>
++  <records interface="Products.CMFPlone.interfaces.ITinyMCESchema"
++           prefix="plone" />
++</registry>
+\ No newline at end of file
+
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2015-09-24T22:44:25-05:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.upgrade/commit/0bb8ead3e97833003408881ef06642a37329dc3a
+
+Merge pull request #53 from plone/upgrade-tinymce-500
+
+Add migration for TinyMCE settings
+
+Files changed:
+A plone/app/upgrade/v50/final.py
+A plone/app/upgrade/v50/profiles/to_500/registry.xml
+M CHANGES.rst
+M plone/app/upgrade/v50/configure.zcml
+M plone/app/upgrade/v50/profiles.zcml
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 8747bba..b01dd43 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,6 +4,9 @@ Changelog
+ 1.3.18 (unreleased)
+ -------------------
+ 
++- Add migration for TinyMCE settings
++  [vangheem]
++
+ - Fix migration of typesUseViewActionInListings to registry.
+   [pbauer]
+ 
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 7ea58de..5f10cc4 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -200,4 +200,17 @@
+ 
+     </gs:upgradeSteps>
+ 
++    <gs:upgradeSteps
++        source="5010"
++        destination="5011"
++        profile="Products.CMFPlone:plone">
++
++       <gs:upgradeStep
++           title="Run to500 upgrade profile"
++           description=""
++           handler=".final.to500"
++           />
++
++    </gs:upgradeSteps>
++
+ </configure>
+diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
+new file mode 100644
+index 0000000..c9518e0
+--- /dev/null
++++ b/plone/app/upgrade/v50/final.py
+@@ -0,0 +1,6 @@
++from plone.app.upgrade.utils import loadMigrationProfile
++
++
++def to500(context):
++    """5.0rc3 -> 5.0.0"""
++    loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to500')
+\ No newline at end of file
+diff --git a/plone/app/upgrade/v50/profiles.zcml b/plone/app/upgrade/v50/profiles.zcml
+index 869c086..b34ff4c 100644
+--- a/plone/app/upgrade/v50/profiles.zcml
++++ b/plone/app/upgrade/v50/profiles.zcml
+@@ -84,4 +84,12 @@
+       provides="Products.GenericSetup.interfaces.EXTENSION"
+       />
+ 
++  <genericsetup:registerProfile
++      name="to500"
++      title="Upgrade profile for Plone 5010 to Plone 5.0.0"
++      description=""
++      directory="profiles/to_500"
++      for="Products.CMFPlone.interfaces.IMigratingPloneSiteRoot"
++      provides="Products.GenericSetup.interfaces.EXTENSION"
++      />
+ </configure>
+diff --git a/plone/app/upgrade/v50/profiles/to_500/registry.xml b/plone/app/upgrade/v50/profiles/to_500/registry.xml
+new file mode 100644
+index 0000000..b367867
+--- /dev/null
++++ b/plone/app/upgrade/v50/profiles/to_500/registry.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0"?>
++<registry>
++  <records interface="Products.CMFPlone.interfaces.ITinyMCESchema"
++           prefix="plone" />
++</registry>
+\ No newline at end of file
 
 
