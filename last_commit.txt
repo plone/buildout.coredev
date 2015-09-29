@@ -1,108 +1,965 @@
-Repository: plonetheme.sunburst
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-09-24T19:36:07-03:00
-Author: hvelarde (hvelarde) <hector.velarde@gmail.com>
-Commit: https://github.com/plone/plonetheme.sunburst/commit/fa64a652efc5ce4bf1706fa2b324160e147b7ac4
+Date: 2015-09-21T22:58:19+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/e95cef0eca66f3f8046a6aa1e6ec5bfd8f5f7786
 
-Remove Chrome Frame from X-UA-Compatible HTTP header as it's deprecated
+Cleanup profiles and products.
 
-See: https://blog.chromium.org/2013/06/retiring-chrome-frame.html
+1. Unmark installed profiles that are no longer available.
+
+2. If non installable profiles (really: hidden profiles) have been
+installed in GS, mark their products as installed in the QI.  This
+does not work when also that *product* is marked as non installable,
+because in normal operation (outside of plone.app.upgrade) this does
+not happen either.
+
+3. Remove uninstalled products from QI and mark their installed
+profile version as unknown.
 
 Files changed:
 M CHANGES.rst
-M plonetheme/sunburst/skins/sunburst_templates/main_template.pt
+M plone/app/upgrade/v43/final.py
+M plone/app/upgrade/v43/tests.py
+M plone/app/upgrade/v50/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index af8e132..94e7d0c 100644
+index 58e52b9..36b27ac 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -5,7 +5,8 @@ Changelog
- 1.5.2 (unreleased)
- ------------------
+@@ -4,7 +4,19 @@ Changelog
+ 1.3.17 (unreleased)
+ -------------------
  
 -- Nothing changed yet.
-+- Remove Chrome Frame from ``X-UA-Compatible`` HTTP header as it's deprecated.
-+  [hvelarde]
++- Cleanup uninstalled products.  Remove uninstalled products from QI
++  and mark their installed profile version as unknown.
++  [maurits]
++
++- If non installable profiles (really: hidden profiles) have been
++  installed in GS, mark their products as installed in the QI.  This
++  does not work when also that *product* is marked as non installable,
++  because in normal operation (outside of plone.app.upgrade) this does
++  not happen either.
++  [maurits]
++
++- Unmark installed profiles that are no longer available.
++  [maurits]
  
  
- 1.5.1 (2014-07-10)
-@@ -48,7 +49,7 @@ Changelog
- 1.4.4 (2013-06-13)
- ------------------
+ 1.3.16 (2015-09-20)
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index b14e380..ff653f8 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -1,6 +1,8 @@
+ import logging
+ from Products.CMFCore.utils import getToolByName
++from Products.GenericSetup import EXTENSION
  
--- fix green line showing under current select for green bar items in Firefox, 
-+- fix green line showing under current select for green bar items in Firefox,
-   Checked in Firefox, Chrome and IE8.
-   [gbastien, vangheem]
++from zope.component import getAllUtilitiesRegisteredFor
+ from zope.component import queryUtility
+ from plone.contentrules.engine.interfaces import IRuleStorage
+ from plone.contentrules.engine.assignments import check_rules_with_dotted_name_moved
+@@ -53,3 +55,204 @@ def addShowInactiveCriteria(context):
  
-diff --git a/plonetheme/sunburst/skins/sunburst_templates/main_template.pt b/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-index eb39e25..0d5cba2 100644
---- a/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-+++ b/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-@@ -13,7 +13,7 @@
-         site_properties nocall:context/portal_properties/site_properties;
-         ajax_load request/ajax_load | nothing;
-         ajax_include_head request/ajax_include_head | nothing;
--        dummy python:request.RESPONSE.setHeader('X-UA-Compatible', 'IE=edge,chrome=1');"
-+        dummy python:request.RESPONSE.setHeader('X-UA-Compatible', 'IE=edge');"
-     tal:attributes="lang lang;">
+ def improveSyndication(context):
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v43:to435')
++
++
++def unmarkUnavailableProfiles(context):
++    """Unmark installed profiles that are no longer available.
++    """
++    setup = context
++    available = [profile['id'] for profile in setup.listProfileInfo()]
++    # XXX We want to use unsetLastVersionForProfile,
++    # but that requires a merge and release of this
++    # GenericSetup pull request:
++    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++    # portal_setup.unsetLastVersionForProfile(profile_id)
++    # Instead we must copy and set the
++    # (non-persistent) profile upgrade versions.
++    prof_versions = setup._profile_upgrade_versions.copy()
++    to_remove = [profile_id for profile_id in prof_versions
++                 if profile_id not in available]
++    if not to_remove:
++        return
++    for profile_id in to_remove:
++        logger.info('Setting installed version of profile %s as unknown.',
++                    profile_id)
++        del prof_versions[profile_id]
++    # save the new dictionary
++    setup._profile_upgrade_versions = prof_versions
++
++
++def markProductsInstalledForUninstallableProfiles(context):
++    """Cleanup uninstalled products.
++
++    QI 3.0.8 (Plone 4.3.5 / 5.0b1) no longer prevents INonInstallable
++    profiles from being recorded as QI installed products, because
++    really they are auto-installed products, not non-installable ones.
++
++    This means we should do some migration.
++
++    Go through all INonInstallable profiles, check if the profile was
++    applied and mark it as installed in QI.  This might mark too many
++    of these as installed, but so be it.
++
++    But: there are also INonInstallable products.  These are ignored
++    by the QI events.  So if the non installable profile of a non
++    installable product gets applied, the product is still NOT marked
++    as installed in the QI.  So we should not do that here either, but
++    that goes fine because we use the same logic.
++
++    In Plone 5.0, these packages fall under both categories:
++
++    [
++    'Archetypes',
++    'CMFDiffTool',
++    'CMFEditions',
++    'CMFFormController',
++    'CMFPlone',
++    'CMFQuickInstallerTool',
++    'MimetypesRegistry',
++    'NuPlone',
++    'PasswordResetTool',
++    'PloneLanguageTool',
++    'PlonePAS',
++    'PortalTransforms',
++    'borg.localrole',
++    'plone.app.blob',
++    'plone.app.collection',
++    'plone.app.dexterity',
++    'plone.app.discussion',
++    'plone.app.event',
++    'plone.app.folder',
++    'plone.app.imaging',
++    'plone.app.querystring',
++    'plone.app.registry',
++    'plone.app.theming',
++    'plone.formwidget.recurrence',
++    'plone.keyring',
++    'plone.outputfilters',
++    'plone.portlet.collection',
++    'plone.portlet.static',
++    'plone.protect',
++    'plone.resource',
++    ]
++
++    These only fall under non installable profiles:
++
++    [
++    'plone.app.contenttypes',
++    'plone.app.multilingual',
++    'plone.app.versioningbehavior',
++    'plone.browserlayer',
++    ]
++
++    BTW, plone.browserlayer does not even have a profile...
++
++    These only fall under non installable products:
++
++    [
++    'CMFDefault',
++    'CMFPlone.migrations',
++    'CMFTopic',
++    'CMFUid',
++    'DCWorkflow',
++    'plone.app.caching',
++    'plone.app.intid',
++    'plone.app.referenceablebehavior',
++    'plone.app.relationfield',
++    'plone.app.upgrade.v25',
++    'plone.app.upgrade.v30',
++    'plone.app.upgrade.v31',
++    'plone.app.upgrade.v32',
++    'plone.app.upgrade.v33',
++    'plone.app.upgrade.v40',
++    'plone.app.upgrade.v41',
++    'plone.app.upgrade.v42',
++    'plone.app.upgrade.v43',
++    'plone.app.widgets',
++    'plone.app.z3cform',
++    'plonetheme.barceloneta',
++    'wicked.at',
++    ]
++    """
++    from Products.CMFPlone.interfaces import INonInstallable
++    setup = context
++    qi = getToolByName(context, 'portal_quickinstaller')
++    # Get list of profiles that are marked as not installable.
++    profile_ids = []
++    utils = getAllUtilitiesRegisteredFor(INonInstallable)
++    for util in utils:
++        profile_ids.extend(util.getNonInstallableProfiles())
++    # If non installable profiles (really: hidden profiles) have been
++    # installed in GS, mark their products as installed in the QI.
++    for profile_id in profile_ids:
++        if setup.getLastVersionForProfile(profile_id) == 'unknown':
++            # not installed
++            continue
++        # Profile was installed.  Mark its corresponding product as
++        # installed too.
++        try:
++            profile = setup.getProfileInfo(profile_id)
++        except KeyError:
++            # Profile was installed at some point, but is no longer
++            # available.  Should have been caught by the
++            # unmarkUnavailableProfiles upgrade step, but let's be
++            # careful.
++            continue
++        product_id = profile['product']
++        if qi.isProductInstalled(product_id):
++            # all is well
++            continue
++        version = qi.getProductVersion(product_id)
++        qi.notifyInstalled(
++            product_id,
++            locked=False,
++            logmsg="Marked as installed by plone.app.upgrade",
++            settings={},
++            installedversion=version,
++            status='installed',
++            error=False,
++        )
++
++
++def cleanupUninstalledProducts(context):
++    """Cleanup uninstalled products.
++
++    QI 3.0.7 (Plone 4.3.4 / 5.0a3) removes the InstalledProduct
++    instance when a product is uninstalled, because leaving the
++    instance around can prevent settings from being stored properly
++    on subsequent installation of the product.
++
++    QI 3.0.12 (unreleased, maybe Plone 4.3.7 / 5.0rc3), marks
++    install profiles as unknown when uninstalling a product, so
++    portal_setup also regards it as not installed.
++
++    This means we should do some migration.
++
++    Go through all InstalledProduct items in the QI and remove any
++    that are not installed.  And unset their last profile versions in
++    GS too.
++    """
++    setup = context
++    qi = getToolByName(context, 'portal_quickinstaller')
++    for prod in qi.objectValues():
++        if prod.isInstalled():
++            continue
++        product_id = prod.id
++        qi.manage_delObjects(product_id)
++        profile = qi.getInstallProfile(product_id)
++        if profile is None:
++            continue
++        # Mark profile as uninstalled/unknown.
++        profile_id = profile['id']
++        # XXX We want to use unsetLastVersionForProfile,
++        # but that requires a merge and release of this
++        # GenericSetup pull request:
++        # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++        # portal_setup.unsetLastVersionForProfile(profile_id)
++        # Instead we must copy and set the
++        # (non-persistent) profile upgrade versions.
++        prof_versions = setup._profile_upgrade_versions.copy()
++        if profile_id not in prof_versions:
++            continue
++        del prof_versions[profile_id]
++        setup._profile_upgrade_versions = prof_versions
+diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
+index 2263331..0b33ed4 100644
+--- a/plone/app/upgrade/v43/tests.py
++++ b/plone/app/upgrade/v43/tests.py
+@@ -1,11 +1,16 @@
+ from zope.component import getAdapters, queryMultiAdapter
++from zope.component import getSiteManager
+ from zope.contentprovider.interfaces import IContentProvider
++from zope.interface import implements
+ from zope.viewlet.interfaces import IViewlet
  
-     <metal:cache use-macro="context/global_cache_settings/macros/cacheheaders">
+ from plone.app.upgrade.tests.base import MigrationTest
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import INonInstallable
+ from Products.CMFPlone.utils import getFSVersionTuple
++from Products.GenericSetup import profile_registry
++from Products.GenericSetup.interfaces import EXTENSION
+ 
+ import alphas
+ 
+@@ -148,3 +153,125 @@ def testAddDefaultPlonePasswordPolicy(self):
+         relevantStep['step'].handler(portal)
+         # now it has been added...
+         self.assertTrue('password_policy' in portal.acl_users.objectIds())
++
++
++class TestQIandGS(MigrationTest):
++
++    def testUnmarkUnavailableProfiles(self):
++        from plone.app.upgrade.v43.final import unmarkUnavailableProfiles
++        setup = getToolByName(self.portal, 'portal_setup')
++        profile_id = 'dummyxyz:default'
++        # Pretend that this profile was installed at some point.
++        setup.setLastVersionForProfile(profile_id, '1.0')
++        self.assertTrue(profile_id in setup._profile_upgrade_versions)
++        # The profile is not known to portal_setup: it is not
++        # registered in zcml.  So our cleanup function gets rid of it.
++        unmarkUnavailableProfiles(setup)
++        self.assertFalse(profile_id in setup._profile_upgrade_versions)
++
++    def testMarkProductsInstalledForUninstallableProfiles(self):
++        from plone.app.upgrade.v43.final import \
++            markProductsInstalledForUninstallableProfiles
++
++        # Register a profile.
++        product_id = 'my.test.package'
++        profile_id = '{0}:default'.format(product_id)
++        profile_registry.registerProfile(
++            'default', 'title', 'description', '/my/path',
++            product=product_id, profile_type=EXTENSION)
++
++        # Hide the profile.
++        class HiddenProfiles(object):
++            implements(INonInstallable)
++
++            def getNonInstallableProfiles(self):
++                return [profile_id]
++
++        sm = getSiteManager()
++        sm.registerUtility(factory=HiddenProfiles, name='my.test.package')
++
++        # Check that nothing is installed at first.
++        setup = getToolByName(self.portal, 'portal_setup')
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), 'unknown')
++        qi = getToolByName(self.portal, 'portal_quickinstaller')
++        self.assertFalse(qi.isProductInstalled(product_id))
++
++        # Call our upgrade function.  This should have no effect,
++        # because the profile is not installed.
++        markProductsInstalledForUninstallableProfiles(setup)
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), 'unknown')
++        self.assertFalse(qi.isProductInstalled(product_id))
++
++        # Now fake that the profile is installed and try again.
++        setup.setLastVersionForProfile(profile_id, '1.0')
++        markProductsInstalledForUninstallableProfiles(setup)
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), ('1', '0'))
++        self.assertTrue(qi.isProductInstalled(product_id))
++
++        # Cleanup test.
++        profile_registry.unregisterProfile('default', product_id)
++
++    def testCleanupUninstalledProducts(self):
++        from plone.app.upgrade.v43.final import cleanupUninstalledProducts
++        qi = getToolByName(self.portal, 'portal_quickinstaller')
++        setup = getToolByName(self.portal, 'portal_setup')
++        # Register three profiles.  I wanted to take 'new' as product
++        # id, but there is already a python module 'new', so that goes
++        # wrong.
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='newproduct', profile_type=EXTENSION)
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='installed', profile_type=EXTENSION)
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='uninstalled', profile_type=EXTENSION)
++        # Mark as installed.
++        setup.setLastVersionForProfile('newproduct:default', '1')
++        setup.setLastVersionForProfile('installed:default', '1')
++        setup.setLastVersionForProfile('uninstalled:default', '1')
++        # Notify of installation of three products.
++        qi.notifyInstalled('newproduct', status='new')
++        qi.notifyInstalled('installed', status='installed')
++        qi.notifyInstalled('uninstalled', status='uninstalled')
++        # The status differs, so QI does not think all are actually
++        # installed.
++        self.assertFalse(qi.isProductInstalled('newproduct'))
++        self.assertTrue(qi.isProductInstalled('installed'))
++        self.assertFalse(qi.isProductInstalled('uninstalled'))
++        # But all three have an object in the QI.
++        self.assertTrue('newproduct' in qi)
++        self.assertTrue('installed' in qi)
++        self.assertTrue('uninstalled' in qi)
++        # And all three have a version in GS.
++        self.assertEqual(
++            setup.getLastVersionForProfile('newproduct:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('installed:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('uninstalled:default'), ('1',))
++        # Call our cleanup function.
++        cleanupUninstalledProducts(setup)
++        # Same results for isProductInstalled.
++        self.assertFalse(qi.isProductInstalled('newproduct'))
++        self.assertTrue(qi.isProductInstalled('installed'))
++        self.assertFalse(qi.isProductInstalled('uninstalled'))
++        # The two not installed items are removed.
++        self.assertFalse('newproduct' in qi)
++        self.assertTrue('installed' in qi)
++        self.assertFalse('uninstalled' in qi)
++        # Those twee are unknown in GS.
++        self.assertEqual(
++            setup.getLastVersionForProfile('newproduct:default'), 'unknown')
++        self.assertEqual(
++            setup.getLastVersionForProfile('installed:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('uninstalled:default'), 'unknown')
++        # Cleanup test.
++        profile_registry.unregisterProfile('default', 'newproduct')
++        profile_registry.unregisterProfile('default', 'installed')
++        profile_registry.unregisterProfile('default', 'uninstalled')
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 7ea58de..a24b56f 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -198,6 +198,24 @@
+            handler=".betas.to50rc3"
+            />
+ 
++       <gs:upgradeStep
++           title="Unmark installed profiles that are no longer available."
++           description="This removes no longer interesting info."
++           handler="plone.app.upgrade.v43.final.unmarkUnavailableProfiles"
++           />
++
++       <gs:upgradeStep
++           title="Mark products as installed for installed uninstallable profiles"
++           description="The profiles were meant to be hidden, not uninstallable."
++           handler="plone.app.upgrade.v43.final.markProductsInstalledForUninstallableProfiles"
++           />
++
++       <gs:upgradeStep
++           title="Cleanup uninstalled products"
++           description="Remove uninstalled products from QI and mark their profiles as unknown."
++           handler="plone.app.upgrade.v43.final.cleanupUninstalledProducts"
++           />
++
+     </gs:upgradeSteps>
+ 
+ </configure>
 
 
-Repository: plonetheme.sunburst
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-09-29T22:54:51+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plonetheme.sunburst/commit/a71fc9573b1715e1c7d6becc7b20b4227367f803
+Date: 2015-09-21T22:58:19+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/4ce2a965621d07221f83bde1f4ef479000a7bfae
 
-Merge pull request #14 from plone/hvelarde-chrome-frame
+Register QI/GS cleanup steps for 4.3 too.
 
-Remove Chrome Frame from X-UA-Compatible HTTP header as it's deprecated
+I have put them in the 4309-&gt;4310 upgrade,
+but they should be in the not yet existing 4310-&gt;4311.
+For that, the CMFPlone profile version should be updated.
+
+Files changed:
+M plone/app/upgrade/v43/configure.zcml
+
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index 5bfa94b..8a87555 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -182,6 +182,24 @@
+             handler=".final.improveSyndication"
+             />
+ 
++       <genericsetup:upgradeStep
++           title="Unmark installed profiles that are no longer available."
++           description="This removes no longer interesting info."
++           handler="plone.app.upgrade.v43.final.unmarkUnavailableProfiles"
++           />
++
++       <genericsetup:upgradeStep
++           title="Mark products as installed for installed uninstallable profiles"
++           description="The profiles were meant to be hidden, not uninstallable."
++           handler="plone.app.upgrade.v43.final.markProductsInstalledForUninstallableProfiles"
++           />
++
++       <genericsetup:upgradeStep
++           title="Cleanup uninstalled products"
++           description="Remove uninstalled products from QI and mark their profiles as unknown."
++           handler="plone.app.upgrade.v43.final.cleanupUninstalledProducts"
++           />
++
+     </genericsetup:upgradeSteps>
+ 
+ </configure>
+
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2015-09-29T23:40:12+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/61fb37f1da12a9c321a78c1e3950d73ff3b0833d
+
+Merge pull request #51 from plone/maurits-cleanup-qi-gs
+
+Cleanup profiles and products.
 
 Files changed:
 M CHANGES.rst
-M plonetheme/sunburst/skins/sunburst_templates/main_template.pt
+M plone/app/upgrade/v43/configure.zcml
+M plone/app/upgrade/v43/final.py
+M plone/app/upgrade/v43/tests.py
+M plone/app/upgrade/v50/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index af8e132..94e7d0c 100644
+index bd322c8..43d9cdf 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -5,7 +5,8 @@ Changelog
- 1.5.2 (unreleased)
- ------------------
+@@ -4,7 +4,19 @@ Changelog
+ 1.3.19 (unreleased)
+ -------------------
  
 -- Nothing changed yet.
-+- Remove Chrome Frame from ``X-UA-Compatible`` HTTP header as it's deprecated.
-+  [hvelarde]
++- Cleanup uninstalled products.  Remove uninstalled products from QI
++  and mark their installed profile version as unknown.
++  [maurits]
++
++- If non installable profiles (really: hidden profiles) have been
++  installed in GS, mark their products as installed in the QI.  This
++  does not work when also that *product* is marked as non installable,
++  because in normal operation (outside of plone.app.upgrade) this does
++  not happen either.
++  [maurits]
++
++- Unmark installed profiles that are no longer available.
++  [maurits]
  
  
- 1.5.1 (2014-07-10)
-@@ -48,7 +49,7 @@ Changelog
- 1.4.4 (2013-06-13)
- ------------------
+ 1.3.18 (2015-09-27)
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index 1101fad..e1e9928 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -182,6 +182,24 @@
+             handler=".final.improveSyndication"
+             />
  
--- fix green line showing under current select for green bar items in Firefox, 
-+- fix green line showing under current select for green bar items in Firefox,
-   Checked in Firefox, Chrome and IE8.
-   [gbastien, vangheem]
++       <genericsetup:upgradeStep
++           title="Unmark installed profiles that are no longer available."
++           description="This removes no longer interesting info."
++           handler="plone.app.upgrade.v43.final.unmarkUnavailableProfiles"
++           />
++
++       <genericsetup:upgradeStep
++           title="Mark products as installed for installed uninstallable profiles"
++           description="The profiles were meant to be hidden, not uninstallable."
++           handler="plone.app.upgrade.v43.final.markProductsInstalledForUninstallableProfiles"
++           />
++
++       <genericsetup:upgradeStep
++           title="Cleanup uninstalled products"
++           description="Remove uninstalled products from QI and mark their profiles as unknown."
++           handler="plone.app.upgrade.v43.final.cleanupUninstalledProducts"
++           />
++
+     </genericsetup:upgradeSteps>
  
-diff --git a/plonetheme/sunburst/skins/sunburst_templates/main_template.pt b/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-index eb39e25..0d5cba2 100644
---- a/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-+++ b/plonetheme/sunburst/skins/sunburst_templates/main_template.pt
-@@ -13,7 +13,7 @@
-         site_properties nocall:context/portal_properties/site_properties;
-         ajax_load request/ajax_load | nothing;
-         ajax_include_head request/ajax_include_head | nothing;
--        dummy python:request.RESPONSE.setHeader('X-UA-Compatible', 'IE=edge,chrome=1');"
-+        dummy python:request.RESPONSE.setHeader('X-UA-Compatible', 'IE=edge');"
-     tal:attributes="lang lang;">
+     <genericsetup:upgradeSteps
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index b14e380..ff653f8 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -1,6 +1,8 @@
+ import logging
+ from Products.CMFCore.utils import getToolByName
++from Products.GenericSetup import EXTENSION
  
-     <metal:cache use-macro="context/global_cache_settings/macros/cacheheaders">
++from zope.component import getAllUtilitiesRegisteredFor
+ from zope.component import queryUtility
+ from plone.contentrules.engine.interfaces import IRuleStorage
+ from plone.contentrules.engine.assignments import check_rules_with_dotted_name_moved
+@@ -53,3 +55,204 @@ def addShowInactiveCriteria(context):
+ 
+ def improveSyndication(context):
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v43:to435')
++
++
++def unmarkUnavailableProfiles(context):
++    """Unmark installed profiles that are no longer available.
++    """
++    setup = context
++    available = [profile['id'] for profile in setup.listProfileInfo()]
++    # XXX We want to use unsetLastVersionForProfile,
++    # but that requires a merge and release of this
++    # GenericSetup pull request:
++    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++    # portal_setup.unsetLastVersionForProfile(profile_id)
++    # Instead we must copy and set the
++    # (non-persistent) profile upgrade versions.
++    prof_versions = setup._profile_upgrade_versions.copy()
++    to_remove = [profile_id for profile_id in prof_versions
++                 if profile_id not in available]
++    if not to_remove:
++        return
++    for profile_id in to_remove:
++        logger.info('Setting installed version of profile %s as unknown.',
++                    profile_id)
++        del prof_versions[profile_id]
++    # save the new dictionary
++    setup._profile_upgrade_versions = prof_versions
++
++
++def markProductsInstalledForUninstallableProfiles(context):
++    """Cleanup uninstalled products.
++
++    QI 3.0.8 (Plone 4.3.5 / 5.0b1) no longer prevents INonInstallable
++    profiles from being recorded as QI installed products, because
++    really they are auto-installed products, not non-installable ones.
++
++    This means we should do some migration.
++
++    Go through all INonInstallable profiles, check if the profile was
++    applied and mark it as installed in QI.  This might mark too many
++    of these as installed, but so be it.
++
++    But: there are also INonInstallable products.  These are ignored
++    by the QI events.  So if the non installable profile of a non
++    installable product gets applied, the product is still NOT marked
++    as installed in the QI.  So we should not do that here either, but
++    that goes fine because we use the same logic.
++
++    In Plone 5.0, these packages fall under both categories:
++
++    [
++    'Archetypes',
++    'CMFDiffTool',
++    'CMFEditions',
++    'CMFFormController',
++    'CMFPlone',
++    'CMFQuickInstallerTool',
++    'MimetypesRegistry',
++    'NuPlone',
++    'PasswordResetTool',
++    'PloneLanguageTool',
++    'PlonePAS',
++    'PortalTransforms',
++    'borg.localrole',
++    'plone.app.blob',
++    'plone.app.collection',
++    'plone.app.dexterity',
++    'plone.app.discussion',
++    'plone.app.event',
++    'plone.app.folder',
++    'plone.app.imaging',
++    'plone.app.querystring',
++    'plone.app.registry',
++    'plone.app.theming',
++    'plone.formwidget.recurrence',
++    'plone.keyring',
++    'plone.outputfilters',
++    'plone.portlet.collection',
++    'plone.portlet.static',
++    'plone.protect',
++    'plone.resource',
++    ]
++
++    These only fall under non installable profiles:
++
++    [
++    'plone.app.contenttypes',
++    'plone.app.multilingual',
++    'plone.app.versioningbehavior',
++    'plone.browserlayer',
++    ]
++
++    BTW, plone.browserlayer does not even have a profile...
++
++    These only fall under non installable products:
++
++    [
++    'CMFDefault',
++    'CMFPlone.migrations',
++    'CMFTopic',
++    'CMFUid',
++    'DCWorkflow',
++    'plone.app.caching',
++    'plone.app.intid',
++    'plone.app.referenceablebehavior',
++    'plone.app.relationfield',
++    'plone.app.upgrade.v25',
++    'plone.app.upgrade.v30',
++    'plone.app.upgrade.v31',
++    'plone.app.upgrade.v32',
++    'plone.app.upgrade.v33',
++    'plone.app.upgrade.v40',
++    'plone.app.upgrade.v41',
++    'plone.app.upgrade.v42',
++    'plone.app.upgrade.v43',
++    'plone.app.widgets',
++    'plone.app.z3cform',
++    'plonetheme.barceloneta',
++    'wicked.at',
++    ]
++    """
++    from Products.CMFPlone.interfaces import INonInstallable
++    setup = context
++    qi = getToolByName(context, 'portal_quickinstaller')
++    # Get list of profiles that are marked as not installable.
++    profile_ids = []
++    utils = getAllUtilitiesRegisteredFor(INonInstallable)
++    for util in utils:
++        profile_ids.extend(util.getNonInstallableProfiles())
++    # If non installable profiles (really: hidden profiles) have been
++    # installed in GS, mark their products as installed in the QI.
++    for profile_id in profile_ids:
++        if setup.getLastVersionForProfile(profile_id) == 'unknown':
++            # not installed
++            continue
++        # Profile was installed.  Mark its corresponding product as
++        # installed too.
++        try:
++            profile = setup.getProfileInfo(profile_id)
++        except KeyError:
++            # Profile was installed at some point, but is no longer
++            # available.  Should have been caught by the
++            # unmarkUnavailableProfiles upgrade step, but let's be
++            # careful.
++            continue
++        product_id = profile['product']
++        if qi.isProductInstalled(product_id):
++            # all is well
++            continue
++        version = qi.getProductVersion(product_id)
++        qi.notifyInstalled(
++            product_id,
++            locked=False,
++            logmsg="Marked as installed by plone.app.upgrade",
++            settings={},
++            installedversion=version,
++            status='installed',
++            error=False,
++        )
++
++
++def cleanupUninstalledProducts(context):
++    """Cleanup uninstalled products.
++
++    QI 3.0.7 (Plone 4.3.4 / 5.0a3) removes the InstalledProduct
++    instance when a product is uninstalled, because leaving the
++    instance around can prevent settings from being stored properly
++    on subsequent installation of the product.
++
++    QI 3.0.12 (unreleased, maybe Plone 4.3.7 / 5.0rc3), marks
++    install profiles as unknown when uninstalling a product, so
++    portal_setup also regards it as not installed.
++
++    This means we should do some migration.
++
++    Go through all InstalledProduct items in the QI and remove any
++    that are not installed.  And unset their last profile versions in
++    GS too.
++    """
++    setup = context
++    qi = getToolByName(context, 'portal_quickinstaller')
++    for prod in qi.objectValues():
++        if prod.isInstalled():
++            continue
++        product_id = prod.id
++        qi.manage_delObjects(product_id)
++        profile = qi.getInstallProfile(product_id)
++        if profile is None:
++            continue
++        # Mark profile as uninstalled/unknown.
++        profile_id = profile['id']
++        # XXX We want to use unsetLastVersionForProfile,
++        # but that requires a merge and release of this
++        # GenericSetup pull request:
++        # https://github.com/zopefoundation/Products.GenericSetup/pull/18
++        # portal_setup.unsetLastVersionForProfile(profile_id)
++        # Instead we must copy and set the
++        # (non-persistent) profile upgrade versions.
++        prof_versions = setup._profile_upgrade_versions.copy()
++        if profile_id not in prof_versions:
++            continue
++        del prof_versions[profile_id]
++        setup._profile_upgrade_versions = prof_versions
+diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
+index 2263331..0b33ed4 100644
+--- a/plone/app/upgrade/v43/tests.py
++++ b/plone/app/upgrade/v43/tests.py
+@@ -1,11 +1,16 @@
+ from zope.component import getAdapters, queryMultiAdapter
++from zope.component import getSiteManager
+ from zope.contentprovider.interfaces import IContentProvider
++from zope.interface import implements
+ from zope.viewlet.interfaces import IViewlet
+ 
+ from plone.app.upgrade.tests.base import MigrationTest
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import INonInstallable
+ from Products.CMFPlone.utils import getFSVersionTuple
++from Products.GenericSetup import profile_registry
++from Products.GenericSetup.interfaces import EXTENSION
+ 
+ import alphas
+ 
+@@ -148,3 +153,125 @@ def testAddDefaultPlonePasswordPolicy(self):
+         relevantStep['step'].handler(portal)
+         # now it has been added...
+         self.assertTrue('password_policy' in portal.acl_users.objectIds())
++
++
++class TestQIandGS(MigrationTest):
++
++    def testUnmarkUnavailableProfiles(self):
++        from plone.app.upgrade.v43.final import unmarkUnavailableProfiles
++        setup = getToolByName(self.portal, 'portal_setup')
++        profile_id = 'dummyxyz:default'
++        # Pretend that this profile was installed at some point.
++        setup.setLastVersionForProfile(profile_id, '1.0')
++        self.assertTrue(profile_id in setup._profile_upgrade_versions)
++        # The profile is not known to portal_setup: it is not
++        # registered in zcml.  So our cleanup function gets rid of it.
++        unmarkUnavailableProfiles(setup)
++        self.assertFalse(profile_id in setup._profile_upgrade_versions)
++
++    def testMarkProductsInstalledForUninstallableProfiles(self):
++        from plone.app.upgrade.v43.final import \
++            markProductsInstalledForUninstallableProfiles
++
++        # Register a profile.
++        product_id = 'my.test.package'
++        profile_id = '{0}:default'.format(product_id)
++        profile_registry.registerProfile(
++            'default', 'title', 'description', '/my/path',
++            product=product_id, profile_type=EXTENSION)
++
++        # Hide the profile.
++        class HiddenProfiles(object):
++            implements(INonInstallable)
++
++            def getNonInstallableProfiles(self):
++                return [profile_id]
++
++        sm = getSiteManager()
++        sm.registerUtility(factory=HiddenProfiles, name='my.test.package')
++
++        # Check that nothing is installed at first.
++        setup = getToolByName(self.portal, 'portal_setup')
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), 'unknown')
++        qi = getToolByName(self.portal, 'portal_quickinstaller')
++        self.assertFalse(qi.isProductInstalled(product_id))
++
++        # Call our upgrade function.  This should have no effect,
++        # because the profile is not installed.
++        markProductsInstalledForUninstallableProfiles(setup)
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), 'unknown')
++        self.assertFalse(qi.isProductInstalled(product_id))
++
++        # Now fake that the profile is installed and try again.
++        setup.setLastVersionForProfile(profile_id, '1.0')
++        markProductsInstalledForUninstallableProfiles(setup)
++        self.assertEqual(
++            setup.getLastVersionForProfile(profile_id), ('1', '0'))
++        self.assertTrue(qi.isProductInstalled(product_id))
++
++        # Cleanup test.
++        profile_registry.unregisterProfile('default', product_id)
++
++    def testCleanupUninstalledProducts(self):
++        from plone.app.upgrade.v43.final import cleanupUninstalledProducts
++        qi = getToolByName(self.portal, 'portal_quickinstaller')
++        setup = getToolByName(self.portal, 'portal_setup')
++        # Register three profiles.  I wanted to take 'new' as product
++        # id, but there is already a python module 'new', so that goes
++        # wrong.
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='newproduct', profile_type=EXTENSION)
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='installed', profile_type=EXTENSION)
++        profile_registry.registerProfile(
++            'default', '', '', '/my/path',
++            product='uninstalled', profile_type=EXTENSION)
++        # Mark as installed.
++        setup.setLastVersionForProfile('newproduct:default', '1')
++        setup.setLastVersionForProfile('installed:default', '1')
++        setup.setLastVersionForProfile('uninstalled:default', '1')
++        # Notify of installation of three products.
++        qi.notifyInstalled('newproduct', status='new')
++        qi.notifyInstalled('installed', status='installed')
++        qi.notifyInstalled('uninstalled', status='uninstalled')
++        # The status differs, so QI does not think all are actually
++        # installed.
++        self.assertFalse(qi.isProductInstalled('newproduct'))
++        self.assertTrue(qi.isProductInstalled('installed'))
++        self.assertFalse(qi.isProductInstalled('uninstalled'))
++        # But all three have an object in the QI.
++        self.assertTrue('newproduct' in qi)
++        self.assertTrue('installed' in qi)
++        self.assertTrue('uninstalled' in qi)
++        # And all three have a version in GS.
++        self.assertEqual(
++            setup.getLastVersionForProfile('newproduct:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('installed:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('uninstalled:default'), ('1',))
++        # Call our cleanup function.
++        cleanupUninstalledProducts(setup)
++        # Same results for isProductInstalled.
++        self.assertFalse(qi.isProductInstalled('newproduct'))
++        self.assertTrue(qi.isProductInstalled('installed'))
++        self.assertFalse(qi.isProductInstalled('uninstalled'))
++        # The two not installed items are removed.
++        self.assertFalse('newproduct' in qi)
++        self.assertTrue('installed' in qi)
++        self.assertFalse('uninstalled' in qi)
++        # Those twee are unknown in GS.
++        self.assertEqual(
++            setup.getLastVersionForProfile('newproduct:default'), 'unknown')
++        self.assertEqual(
++            setup.getLastVersionForProfile('installed:default'), ('1',))
++        self.assertEqual(
++            setup.getLastVersionForProfile('uninstalled:default'), 'unknown')
++        # Cleanup test.
++        profile_registry.unregisterProfile('default', 'newproduct')
++        profile_registry.unregisterProfile('default', 'installed')
++        profile_registry.unregisterProfile('default', 'uninstalled')
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 5f10cc4..3ac392c 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -198,6 +198,24 @@
+            handler=".betas.to50rc3"
+            />
+ 
++       <gs:upgradeStep
++           title="Unmark installed profiles that are no longer available."
++           description="This removes no longer interesting info."
++           handler="plone.app.upgrade.v43.final.unmarkUnavailableProfiles"
++           />
++
++       <gs:upgradeStep
++           title="Mark products as installed for installed uninstallable profiles"
++           description="The profiles were meant to be hidden, not uninstallable."
++           handler="plone.app.upgrade.v43.final.markProductsInstalledForUninstallableProfiles"
++           />
++
++       <gs:upgradeStep
++           title="Cleanup uninstalled products"
++           description="Remove uninstalled products from QI and mark their profiles as unknown."
++           handler="plone.app.upgrade.v43.final.cleanupUninstalledProducts"
++           />
++
+     </gs:upgradeSteps>
+ 
+     <gs:upgradeSteps
 
 
