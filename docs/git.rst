@@ -382,7 +382,7 @@ Following this advice will:
 Making commits
 --------------
 For commit messages see:
-`plone API guidelines <http://docs.plone.org/external/plone.api/docs/contribute/conventions.html#git-commit-message-style>`_.
+`plone API guidelines <http://docs.plone.org/develop/plone.api/docs/contribute/conventions.html#git-commit-message-style>`_.
 
 Adding references to issues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
