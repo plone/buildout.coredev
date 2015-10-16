@@ -1,332 +1,107 @@
-Repository: plone.app.contenttypes
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2015-10-15T16:25:11+03:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/3f209d737b10504bf6fac794036a267484015a3e
+Date: 2015-10-17T00:48:20+03:00
+Author: Johannes Raggam (thet) <raggam-nl@adm.at>
+Commit: https://github.com/plone/plone.app.event/commit/861b609a11c2f4f4c185d32aaa399c32fadc4727
 
-Fix custom migration from and to types with spaces in the type-name.
+Fix the occurrences calculation to reliably return an Event instead of Occurrence object for the originating event. There was a bug introduced by a newer pytz version.
 
 Files changed:
 M CHANGES.rst
-M plone/app/contenttypes/migration/custom_migration.py
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/tests/test_migration_custom.py
+M plone/app/event/recurrence.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 4354af3..64f7891 100644
+index d38f3b1..05e67d8 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,6 +4,9 @@ Changelog
- 1.2.5 (unreleased)
+@@ -4,7 +4,10 @@ Changelog
+ 2.0.4 (unreleased)
  ------------------
  
-+- Fix custom migration from and to types with spaces in the type-name.
-+  [pbauer]
-+
- - Fix full_view when content is not IUUIDAware (like the portal).
-   Fixes https://github.com/plone/Products.CMFPlone/issues/1109.
-   [pbauer]
-diff --git a/plone/app/contenttypes/migration/custom_migration.py b/plone/app/contenttypes/migration/custom_migration.py
-index f3ae23b..ad2f6d8 100644
---- a/plone/app/contenttypes/migration/custom_migration.py
-+++ b/plone/app/contenttypes/migration/custom_migration.py
-@@ -226,22 +226,25 @@ def migrate(self, dry_run=False):
-                 if not form[k] or (dry_run and k != form.get('tested_type')):
-                     # nothing selected in this select, continue
-                     continue
--                at_typename = k[10:]
--                dx_typename = form[k]
-+                form_at_typename = k[10:]
-+                form_dx_typename = form[k]
-+                at_typename = form_at_typename.replace('_space_', ' ')
-+                dx_typename = form_dx_typename.replace('_space_', ' ')
-+
-                 data[at_typename] = {'target_type': dx_typename,
-                                      'field_mapping': []}
-                 # now handle fields mapping for found DX/AT type migration
--                # definition we have 2 keys we relevant mappings, first key
-+                # definition we have 2 keys with relevant mappings, first key
-                 # is the AT typename second key is a particular key like
-                 # 'dx_DXPortalType__for__MyATPortalType
--                safe_dx = dx_typename.replace('_space_', '')
--                safe_at = at_typename.replace('_space_', '')
--                dx_key = 'dx_%s__for__%s' % (safe_dx, safe_at)
--                for at_field in form[at_typename]:
-+                dx_key = 'dx_%s__for__%s' % (form_dx_typename,
-+                                             form_at_typename)
-+                for at_field in form[form_at_typename]:
-                     if form.get(dx_key) is None:
-                         # No field-mappings
-                         continue
--                    dx_field = form[dx_key][form[at_typename].index(at_field)]
-+                    dx_field = form[dx_key][form[form_at_typename].index(
-+                        at_field)]
-                     if not dx_field:
-                         # Do not migrate field
-                         continue
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index 013b3ec..45fe360 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -473,13 +473,19 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-     if fti is None or IDexterityFTI.providedBy(fti):
-         # Get the needed info from an instance of the type
-         catalog = portal.portal_catalog
--        brain = catalog(portal_type=src_type, sort_limit=1)[0]
--        src_obj = brain.getObject()
--        if IDexterityContent.providedBy(src_obj):
--            logger.error(
--                '%s should not be dexterity object!' % src_obj.absolute_url())
--        is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)
--        src_meta_type = src_obj.meta_type
-+        import pdb; pdb.set_trace()
-+        brains = catalog(portal_type=src_type, sort_limit=1)
-+        if not brains:
-+            # no item? assume stuff
-+            is_folderish = False
-+            src_meta_type = src_type
-+        else:
-+            src_obj = brains[0].getObject()
-+            if IDexterityContent.providedBy(src_obj):
-+                logger.error(
-+                    '%s should not be dexterity object!' % src_obj.absolute_url())
-+            is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)
-+            src_meta_type = src_obj.meta_type
-     else:
-         # Get info from at-fti
-         src_meta_type = fti.content_meta_type
-diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
-index b4d0f31..2af438a 100644
---- a/plone/app/contenttypes/tests/test_migration_custom.py
-+++ b/plone/app/contenttypes/tests/test_migration_custom.py
-@@ -478,3 +478,46 @@ def test_custom_migration_form(self):
-         view = link1()
-         self.assertIn(u'<h1 class="documentFirstHeading">Ein D\xf6cument</h1>', view)  # noqa
-         self.assertIn(u'The link address is:</span>\n            <a href="http://www.starzel.de">http://www.starzel.de</a>', view)  # noqa
-+
-+    def test_custom_migration_form_for_types_with_spaces(self):
-+        """Basic test for the custom_migration form.
-+        Field-mapping only works with javascript enabled so we migrate
-+        only the content but not the fields.
-+        """
-+        # add some at content
-+        self.portal.invokeFactory('News Item', 'news1')
-+        self.portal.invokeFactory('Event', 'event1')
-+        self.portal.event1.setTitle(u'Ein Törmin')
-+        self.portal.event1.setDescription(u'Wänn?')
-+        self.portal.news1.setTitle(u'Ein News Item')
-+        self.portal.news1.setDescription(u'Sö was')
-+        transaction.commit()
-+        self.browser.open('%s/@@pac_installer' % self.portal_url)
-+        self.browser.getControl('Install').click()
-+        # open custom-migration-form
-+        self.browser.open('%s/@@custom_migration' % self.portal_url)
-+        results = self.browser.contents
-+        self.assertIn('Custom types migration control panel', results)
-+        self.assertIn('<input type="hidden" name="News_space_Item:list" value="text__type__Products.Archetypes.Field.TextField" />', results)  # noqa
-+        self.assertEqual(self.browser.getControl(name='dx_select_News_space_Item').value, [''])  # noqa
-+        # chose to migrate to Link
-+        self.browser.getControl(name='dx_select_News_space_Item').value = ['Link']  # noqa
-+        self.assertIn('<input type="hidden" name="Event:list" value="startDate__type__Products.Archetypes.Field.DateTimeField" />', results)  # noqa
-+        # chose to migrate to Link
-+        self.browser.getControl(name='dx_select_Event').value = ['Link']
-+        # run migration
-+        self.browser.getControl(name='form.button.Migrate').click()
-+        results = self.browser.contents
-+        self.assertIn('Migration applied succesfully for 1 "News Item" items.', results)  # noqa
-+        self.assertIn('Migration applied succesfully for 1 "Event" items.', results)  # noqa
-+        self.assertIn('No content to migrate.', results)
-+        link1 = self.portal['news1']
-+        self.assertEqual(link1.portal_type, 'Link')
-+        self.assertEqual(link1.title, u'Ein News Item')
-+        self.assertEqual(link1.description, u'S\xf6 was')
-+        self.assertEqual(self.portal['event1'].portal_type, 'Link')
-+        # we did not migrate the fields so lets find out if it is a real Link
-+        link1.remote_url = 'http://www.starzel.de'
-+        view = link1()
-+        self.assertIn(u'<h1 class="documentFirstHeading">Ein News Item</h1>', view)  # noqa
-+        self.assertIn(u'The link address is:</span>\n            <a href="http://www.starzel.de">http://www.starzel.de</a>', view)  # noqa
+-- Nothing changed yet.
++- Fix the occurrences calculation to reliably return an Event instead of
++  Occurrence object for the originating event. There was a bug introduced by a
++  newer pytz version.
++  [thet]
+ 
+ 
+ 2.0.3 (2015-09-27)
+diff --git a/plone/app/event/recurrence.py b/plone/app/event/recurrence.py
+index 69b7dc4..ddcd410 100644
+--- a/plone/app/event/recurrence.py
++++ b/plone/app/event/recurrence.py
+@@ -9,6 +9,7 @@
+ from plone.event.interfaces import IRecurrenceSupport
+ from plone.event.recurrence import recurrence_sequence_ical
+ from plone.event.utils import is_same_day
++from plone.event.utils import pydt
+ from plone.namedfile.interfaces import IImageScaleTraversable
+ from plone.namedfile.scaling import ImageScaling
+ from zope.component import adapter
+@@ -66,7 +67,7 @@ def occurrences(self, range_start=None, range_end=None):
+         # but doing it for backwards compatibility as views/templates
+         # still rely on acquisition-wrapped objects.
+         def get_obj(start):
+-            if event.start.replace(microsecond=0) == start:
++            if pydt(event.start.replace(microsecond=0)) == start:
+                 # If the occurrence date is the same as the event object, the
+                 # occurrence is the event itself. return it as such.
+                 # Dates from recurrence_sequence_ical are explicitly without
 
 
-Repository: plone.app.contenttypes
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2015-10-15T16:47:22+03:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/7c13faff8290bf2dacf9ddd95735e21f818e1f20
+Date: 2015-10-17T00:48:32+03:00
+Author: Johannes Raggam (thet) <raggam-nl@adm.at>
+Commit: https://github.com/plone/plone.app.event/commit/00a5c89a3a8c9c06d0d33ff988f6d42f3771c18f
 
-remove pdb
-
-Files changed:
-M plone/app/contenttypes/migration/migration.py
-
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index 45fe360..8b3a052 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -473,7 +473,6 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-     if fti is None or IDexterityFTI.providedBy(fti):
-         # Get the needed info from an instance of the type
-         catalog = portal.portal_catalog
--        import pdb; pdb.set_trace()
-         brains = catalog(portal_type=src_type, sort_limit=1)
-         if not brains:
-             # no item? assume stuff
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2015-10-15T18:24:25+03:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/e7612ff861a4fcf59d958f77d963477e7654593d
-
-Merge pull request #281 from plone/fix_custom_migration_with_spaces
-
-Fix custom migration from and to types with spaces in the type-name.
+remove unused import and sort case insensitive
 
 Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/migration/custom_migration.py
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/tests/test_migration_custom.py
+M plone/app/event/tests/test_recurrence.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 4354af3..64f7891 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,6 +4,9 @@ Changelog
- 1.2.5 (unreleased)
- ------------------
- 
-+- Fix custom migration from and to types with spaces in the type-name.
-+  [pbauer]
-+
- - Fix full_view when content is not IUUIDAware (like the portal).
-   Fixes https://github.com/plone/Products.CMFPlone/issues/1109.
-   [pbauer]
-diff --git a/plone/app/contenttypes/migration/custom_migration.py b/plone/app/contenttypes/migration/custom_migration.py
-index f3ae23b..ad2f6d8 100644
---- a/plone/app/contenttypes/migration/custom_migration.py
-+++ b/plone/app/contenttypes/migration/custom_migration.py
-@@ -226,22 +226,25 @@ def migrate(self, dry_run=False):
-                 if not form[k] or (dry_run and k != form.get('tested_type')):
-                     # nothing selected in this select, continue
-                     continue
--                at_typename = k[10:]
--                dx_typename = form[k]
-+                form_at_typename = k[10:]
-+                form_dx_typename = form[k]
-+                at_typename = form_at_typename.replace('_space_', ' ')
-+                dx_typename = form_dx_typename.replace('_space_', ' ')
-+
-                 data[at_typename] = {'target_type': dx_typename,
-                                      'field_mapping': []}
-                 # now handle fields mapping for found DX/AT type migration
--                # definition we have 2 keys we relevant mappings, first key
-+                # definition we have 2 keys with relevant mappings, first key
-                 # is the AT typename second key is a particular key like
-                 # 'dx_DXPortalType__for__MyATPortalType
--                safe_dx = dx_typename.replace('_space_', '')
--                safe_at = at_typename.replace('_space_', '')
--                dx_key = 'dx_%s__for__%s' % (safe_dx, safe_at)
--                for at_field in form[at_typename]:
-+                dx_key = 'dx_%s__for__%s' % (form_dx_typename,
-+                                             form_at_typename)
-+                for at_field in form[form_at_typename]:
-                     if form.get(dx_key) is None:
-                         # No field-mappings
-                         continue
--                    dx_field = form[dx_key][form[at_typename].index(at_field)]
-+                    dx_field = form[dx_key][form[form_at_typename].index(
-+                        at_field)]
-                     if not dx_field:
-                         # Do not migrate field
-                         continue
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index 013b3ec..8b3a052 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -473,13 +473,18 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-     if fti is None or IDexterityFTI.providedBy(fti):
-         # Get the needed info from an instance of the type
-         catalog = portal.portal_catalog
--        brain = catalog(portal_type=src_type, sort_limit=1)[0]
--        src_obj = brain.getObject()
--        if IDexterityContent.providedBy(src_obj):
--            logger.error(
--                '%s should not be dexterity object!' % src_obj.absolute_url())
--        is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)
--        src_meta_type = src_obj.meta_type
-+        brains = catalog(portal_type=src_type, sort_limit=1)
-+        if not brains:
-+            # no item? assume stuff
-+            is_folderish = False
-+            src_meta_type = src_type
-+        else:
-+            src_obj = brains[0].getObject()
-+            if IDexterityContent.providedBy(src_obj):
-+                logger.error(
-+                    '%s should not be dexterity object!' % src_obj.absolute_url())
-+            is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)
-+            src_meta_type = src_obj.meta_type
-     else:
-         # Get info from at-fti
-         src_meta_type = fti.content_meta_type
-diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
-index b4d0f31..2af438a 100644
---- a/plone/app/contenttypes/tests/test_migration_custom.py
-+++ b/plone/app/contenttypes/tests/test_migration_custom.py
-@@ -478,3 +478,46 @@ def test_custom_migration_form(self):
-         view = link1()
-         self.assertIn(u'<h1 class="documentFirstHeading">Ein D\xf6cument</h1>', view)  # noqa
-         self.assertIn(u'The link address is:</span>\n            <a href="http://www.starzel.de">http://www.starzel.de</a>', view)  # noqa
-+
-+    def test_custom_migration_form_for_types_with_spaces(self):
-+        """Basic test for the custom_migration form.
-+        Field-mapping only works with javascript enabled so we migrate
-+        only the content but not the fields.
-+        """
-+        # add some at content
-+        self.portal.invokeFactory('News Item', 'news1')
-+        self.portal.invokeFactory('Event', 'event1')
-+        self.portal.event1.setTitle(u'Ein Törmin')
-+        self.portal.event1.setDescription(u'Wänn?')
-+        self.portal.news1.setTitle(u'Ein News Item')
-+        self.portal.news1.setDescription(u'Sö was')
-+        transaction.commit()
-+        self.browser.open('%s/@@pac_installer' % self.portal_url)
-+        self.browser.getControl('Install').click()
-+        # open custom-migration-form
-+        self.browser.open('%s/@@custom_migration' % self.portal_url)
-+        results = self.browser.contents
-+        self.assertIn('Custom types migration control panel', results)
-+        self.assertIn('<input type="hidden" name="News_space_Item:list" value="text__type__Products.Archetypes.Field.TextField" />', results)  # noqa
-+        self.assertEqual(self.browser.getControl(name='dx_select_News_space_Item').value, [''])  # noqa
-+        # chose to migrate to Link
-+        self.browser.getControl(name='dx_select_News_space_Item').value = ['Link']  # noqa
-+        self.assertIn('<input type="hidden" name="Event:list" value="startDate__type__Products.Archetypes.Field.DateTimeField" />', results)  # noqa
-+        # chose to migrate to Link
-+        self.browser.getControl(name='dx_select_Event').value = ['Link']
-+        # run migration
-+        self.browser.getControl(name='form.button.Migrate').click()
-+        results = self.browser.contents
-+        self.assertIn('Migration applied succesfully for 1 "News Item" items.', results)  # noqa
-+        self.assertIn('Migration applied succesfully for 1 "Event" items.', results)  # noqa
-+        self.assertIn('No content to migrate.', results)
-+        link1 = self.portal['news1']
-+        self.assertEqual(link1.portal_type, 'Link')
-+        self.assertEqual(link1.title, u'Ein News Item')
-+        self.assertEqual(link1.description, u'S\xf6 was')
-+        self.assertEqual(self.portal['event1'].portal_type, 'Link')
-+        # we did not migrate the fields so lets find out if it is a real Link
-+        link1.remote_url = 'http://www.starzel.de'
-+        view = link1()
-+        self.assertIn(u'<h1 class="documentFirstHeading">Ein News Item</h1>', view)  # noqa
-+        self.assertIn(u'The link address is:</span>\n            <a href="http://www.starzel.de">http://www.starzel.de</a>', view)  # noqa
+diff --git a/plone/app/event/tests/test_recurrence.py b/plone/app/event/tests/test_recurrence.py
+index 35b7d44..8f36cf8 100644
+--- a/plone/app/event/tests/test_recurrence.py
++++ b/plone/app/event/tests/test_recurrence.py
+@@ -1,30 +1,28 @@
++from mock import Mock
+ from OFS.SimpleItem import SimpleItem
+-from plone.app.event.base import RET_MODE_ACCESSORS
+ from plone.app.event.base import get_events
++from plone.app.event.base import RET_MODE_ACCESSORS
+ from plone.app.event.dx.traverser import OccurrenceTraverser
+ from plone.app.event.recurrence import Occurrence
++from plone.app.event.testing import PAEvent_INTEGRATION_TESTING
+ from plone.app.event.testing import PAEventDX_FUNCTIONAL_TESTING
+ from plone.app.event.testing import PAEventDX_INTEGRATION_TESTING
+-from plone.app.event.testing import PAEvent_INTEGRATION_TESTING
+ from plone.app.event.testing import set_browserlayer
+ from plone.app.event.testing import set_env_timezone
+ from plone.app.event.testing import set_timezone
+ from plone.app.event.tests.base_setup import AbstractSampleDataEvents
+ from plone.app.event.tests.base_setup import patched_now
+-from plone.app.testing import TEST_USER_ID, TEST_USER_PASSWORD
+ from plone.app.testing import setRoles
++from plone.app.testing import TEST_USER_ID, TEST_USER_PASSWORD
+ from plone.dexterity.utils import createContentInContainer
+ from plone.event.interfaces import IEvent
+ from plone.event.interfaces import IEventAccessor
+ from plone.event.interfaces import IEventRecurrence
+ from plone.event.interfaces import IOccurrence
+ from plone.event.interfaces import IRecurrenceSupport
+-from plone.namedfile.interfaces import IImageScaleTraversable
+ from plone.testing.z2 import Browser
+ from zope.interface import alsoProvides
+ from zope.publisher.interfaces.browser import IBrowserView
+-from mock import Mock
+-
+ import datetime
+ import pytz
+ import transaction
 
 
