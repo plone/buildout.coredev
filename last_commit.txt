@@ -1,361 +1,202 @@
-Repository: Products.CMFPlone
+Repository: plone.app.theming
 
 
 Branch: refs/heads/master
-Date: 2015-10-18T15:22:52-07:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/67bb341a558c7ec1ffc65ebba3f5eecb5897fc79
+Date: 2015-10-17T17:32:41+03:00
+Author: Manabu TERADA (terapyon) <terada@cmscom.jp>
+Commit: https://github.com/plone/plone.app.theming/commit/d6015cceed8acd6b6508f70f8cdc5686b69774b3
 
-Use the ++unique++ traverser instead of query string to make unique resource urls.
-This has the advantage of marking the resource as stable for caching purposes.
-Fix the custom traverser to properly pass persistent resource dirs along to the
-++unique++ traverser.
+Fix Unicode Encode Error when to copy intu multi-byte title / description
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/resources/browser/scripts.py
-M Products/CMFPlone/resources/browser/styles.py
-M Products/CMFPlone/traversal.py
+M src/plone/app/theming/__init__.py
+M src/plone/app/theming/tests/test_utils.py
+M src/plone/app/theming/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f56b4a9..8f33a5d 100644
+index 20b5e5b..61ec81d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -17,6 +17,8 @@ Changelog
+@@ -9,6 +9,8 @@ Changelog
+   other cases.
+   [maurits]
  
- - Add syndication for plone.app.contenttypes collections.
-   [do3cc]
-+- Use unique traverser for stable resources to set proper cache headers.
-+  [alecm]
++- Fix Unicode Encode Error when to copy intu multi-byte title / description
++  [terapyon]
  
- - fix "contains object" tinymce setting not getting passed into pattern
-   correctly Fixes #1023
-diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
-index 005dce5..5529991 100644
---- a/Products/CMFPlone/resources/browser/scripts.py
-+++ b/Products/CMFPlone/resources/browser/scripts.py
-@@ -1,4 +1,5 @@
- from urlparse import urlparse
-+from urllib import quote
- 
- from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
- from Products.CMFPlone.resources.browser.resource import ResourceView
-@@ -38,12 +39,26 @@ def get_data(self, bundle, result):
-                     # because the compiling is done outside of plone
-                     cookWhenChangingSettings(self.context, bundle)
-             if bundle.jscompilation:
-+                js_path = bundle.jscompilation
-+                if '++plone++' in js_path:
-+                    resource_path = js_path.split('++plone++')[-1]
-+                    resource_name, resource_filepath = resource_path.split('/', 1)
-+                    js_location = '%s/++plone++%s/++unique++%s/%s' % (
-+                        self.site_url,
-+                        resource_name,
-+                        quote(str(bundle.last_compilation)),
-+                        resource_filepath
-+                    )
-+                else:
-+                    js_location = '%s/%s?version=%s' % (
-+                        self.site_url,
-+                        bundle.jscompilation,
-+                        quote(str(bundle.last_compilation))
-+                    )
-                 result.append({
-                     'bundle': bundle_name,
-                     'conditionalcomment': bundle.conditionalcomment,
--                    'src': '%s/%s?version=%s' % (
--                        self.site_url, bundle.jscompilation,
--                        bundle.last_compilation)
-+                    'src': js_location
-                 })
- 
-     def scripts(self):
-diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
-index 924a4d0..b6ab76d 100644
---- a/Products/CMFPlone/resources/browser/styles.py
-+++ b/Products/CMFPlone/resources/browser/styles.py
-@@ -1,4 +1,5 @@
- from urlparse import urlparse
-+from urllib import quote
- 
- from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
- from Products.CMFPlone.resources.browser.resource import ResourceView
-@@ -60,15 +61,27 @@ def get_data(self, bundle, result):
-                     cookWhenChangingSettings(self.context, bundle)
- 
-             if bundle.csscompilation:
-+                css_path = bundle.csscompilation
-+                if '++plone++' in css_path:
-+                    resource_path = css_path.split('++plone++')[-1]
-+                    resource_name, resource_filepath = resource_path.split('/', 1)
-+                    css_location = '%s/++plone++%s/++unique++%s/%s' % (
-+                        self.site_url,
-+                        resource_name,
-+                        quote(str(bundle.last_compilation)),
-+                        resource_filepath
-+                    )
-+                else:
-+                    css_location = '%s/%s?version=%s' % (
-+                        self.site_url,
-+                        bundle.csscompilation,
-+                        quote(str(bundle.last_compilation))
-+                    )
-                 result.append({
-                     'bundle': bundle_name,
-                     'rel': 'stylesheet',
-                     'conditionalcomment': bundle.conditionalcomment,
--                    'src': '%s/%s?version=%s' % (
--                        self.site_url,
--                        bundle.csscompilation,
--                        bundle.last_compilation
--                    )
-+                    'src': css_location
-                 })
- 
-     def styles(self):
-diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
-index 4554d7d..5f9945e 100644
---- a/Products/CMFPlone/traversal.py
-+++ b/Products/CMFPlone/traversal.py
-@@ -1,6 +1,7 @@
- from plone.resource.traversal import ResourceTraverser
- from zope.component import getUtility
- from plone.resource.interfaces import IResourceDirectory
-+from plone.resource.interfaces import IUniqueResourceRequest
- from Products.CMFPlone.interfaces.resources import (
-     OVERRIDE_RESOURCE_DIRECTORY_NAME)
- from zope.globalrequest import getRequest
-@@ -19,12 +20,23 @@ def traverse(self, name, remaining):
-         resource_path = req.environ['PATH_INFO'].split('++plone++')[-1]
-         resource_name, resource_filepath = resource_path.split('/', 1)
- 
-+        # If we're traversing through the ++unique++ namespace to indicate a
-+        # stable resource, use the un-uniqued file path
-+        is_stable_resource = resource_filepath.startswith('++unique++')
-+        is_uniqued = IUniqueResourceRequest.providedBy(req)
-+        if is_stable_resource:
-+            resource_filepath = '/'.join(resource_filepath.split('/')[1:])
+ 1.2.14 (2015-09-27)
+ -------------------
+diff --git a/src/plone/app/theming/__init__.py b/src/plone/app/theming/__init__.py
+index c08456a..ee73f1f 100644
+--- a/src/plone/app/theming/__init__.py
++++ b/src/plone/app/theming/__init__.py
+@@ -11,3 +11,4 @@
+     from plone.app.theming import _roman
+     import sys
+     sys.modules['roman'] = _roman
 +
-         persistentDirectory = getUtility(IResourceDirectory, name="persistent")
-         directory = None
-         if OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory:
-             container = persistentDirectory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
-             if resource_name in container:
-                 directory = container[resource_name]
-+                if (is_stable_resource and not is_uniqued and
-+                        resource_filepath in directory):
-+                    # Continue traversal if we have not uniqued the request
-+                    return directory
-                 try:
-                     return directory[resource_filepath]
-                 except:
+diff --git a/src/plone/app/theming/tests/test_utils.py b/src/plone/app/theming/tests/test_utils.py
+index 2cb6e0a..00c41cf 100644
+--- a/src/plone/app/theming/tests/test_utils.py
++++ b/src/plone/app/theming/tests/test_utils.py
+@@ -276,6 +276,26 @@ def test_createThemeFromTemplate_rel_path(self):
+         self.assertEqual(theme.development_js, expected_dev_js)
+         self.assertEqual(theme.production_js, expected_prod_js)
+ 
++    def test_createThemeFromTemplate_ja_str_title(self):
++        from plone.app.theming.utils import createThemeFromTemplate
++        title = "copy of test theme by 日本語"
++        description = "test theme by 日本語"
++        try:
++            createThemeFromTemplate(title, description,
++                                            baseOn="another-theme")
++        except UnicodeEncodeError:
++            self.fail(msg=u"Unicode Encode Error")
++
++    def test_createThemeFromTemplate_ja_unicode_title(self):
++        from plone.app.theming.utils import createThemeFromTemplate
++        title = u"copy of test theme by 日本語"
++        description = u"test theme by 日本語"
++        try:
++            createThemeFromTemplate(title, description,
++                                            baseOn="another-theme")
++        except UnicodeEncodeError:
++            self.fail(msg=u"Unicode Encode Error")
++
+ 
+ class TestUnit(unittest.TestCase):
+ 
+diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
+index 2c00005..8bfb0a8 100644
+--- a/src/plone/app/theming/utils.py
++++ b/src/plone/app/theming/utils.py
+@@ -514,6 +514,10 @@ def createThemeFromTemplate(title, description, baseOn='template'):
+     if not manifest.has_section('theme'):
+         manifest.add_section('theme')
+ 
++    if not isinstance(title, str):
++        title = title.encode('utf-8')
++    if not isinstance(description, str):
++        description = description.encode('utf-8')
+     manifest.set('theme', 'title', title)
+     manifest.set('theme', 'description', description)
+ 
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.theming
 
 
 Branch: refs/heads/master
-Date: 2015-10-18T15:22:52-07:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/da4856730d05b07c4d18beab3e91e78f72889a95
+Date: 2015-10-17T17:36:28+03:00
+Author: Manabu TERADA (terapyon) <terada@cmscom.jp>
+Commit: https://github.com/plone/plone.app.theming/commit/1609b7406d7bf847effe2195e2cc644f5a25ae70
 
-Simplify traverser so fixes aren't specific to ++unique++ traverser, but allow any additional traversers to work as expected.
-
-Files changed:
-M Products/CMFPlone/traversal.py
-
-diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
-index 5f9945e..da58edc 100644
---- a/Products/CMFPlone/traversal.py
-+++ b/Products/CMFPlone/traversal.py
-@@ -20,12 +20,12 @@ def traverse(self, name, remaining):
-         resource_path = req.environ['PATH_INFO'].split('++plone++')[-1]
-         resource_name, resource_filepath = resource_path.split('/', 1)
- 
--        # If we're traversing through the ++unique++ namespace to indicate a
--        # stable resource, use the un-uniqued file path
--        is_stable_resource = resource_filepath.startswith('++unique++')
--        is_uniqued = IUniqueResourceRequest.providedBy(req)
--        if is_stable_resource:
--            resource_filepath = '/'.join(resource_filepath.split('/')[1:])
-+        # If we have additional traversers in the path we should not use them
-+        # in the file lookup
-+        more_traversal = (resource_filepath.startswith('++') or
-+                          resource_filepath.startswith('@@'))
-+        if more_traversal:
-+            resource_filepath = resource_filepath.split('/')[-1]
- 
-         persistentDirectory = getUtility(IResourceDirectory, name="persistent")
-         directory = None
-@@ -33,12 +33,6 @@ def traverse(self, name, remaining):
-             container = persistentDirectory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
-             if resource_name in container:
-                 directory = container[resource_name]
--                if (is_stable_resource and not is_uniqued and
--                        resource_filepath in directory):
--                    # Continue traversal if we have not uniqued the request
-+                if resource_filepath in directory:
-                     return directory
--                try:
--                    return directory[resource_filepath]
--                except:
--                    pass
--        return super(PloneBundlesTraverser, self).traverse(name, remaining)
-\ No newline at end of file
-+        return super(PloneBundlesTraverser, self).traverse(name, remaining)
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-10-18T20:23:48-05:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/d69dfa8f1cb5606ce9a665f8f9b04a6eb4943308
-
-Merge pull request #1174 from plone/alecm-stable-resource-handling
-
-Ensure cooked CSS/JS resources are treated as "stable resources" for caching
+modify typo
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/resources/browser/scripts.py
-M Products/CMFPlone/resources/browser/styles.py
-M Products/CMFPlone/traversal.py
+M src/plone/app/theming/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f56b4a9..8f33a5d 100644
+index 61ec81d..68250cf 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -17,6 +17,8 @@ Changelog
+@@ -9,7 +9,7 @@ Changelog
+   other cases.
+   [maurits]
  
- - Add syndication for plone.app.contenttypes collections.
-   [do3cc]
-+- Use unique traverser for stable resources to set proper cache headers.
-+  [alecm]
+-- Fix Unicode Encode Error when to copy intu multi-byte title / description
++- Fix Unicode Encode Error when to copy into multi-byte title / description
+   [terapyon]
  
- - fix "contains object" tinymce setting not getting passed into pattern
-   correctly Fixes #1023
-diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
-index 005dce5..5529991 100644
---- a/Products/CMFPlone/resources/browser/scripts.py
-+++ b/Products/CMFPlone/resources/browser/scripts.py
-@@ -1,4 +1,5 @@
- from urlparse import urlparse
-+from urllib import quote
+ 1.2.14 (2015-09-27)
+diff --git a/src/plone/app/theming/__init__.py b/src/plone/app/theming/__init__.py
+index ee73f1f..c08456a 100644
+--- a/src/plone/app/theming/__init__.py
++++ b/src/plone/app/theming/__init__.py
+@@ -11,4 +11,3 @@
+     from plone.app.theming import _roman
+     import sys
+     sys.modules['roman'] = _roman
+-
+
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2015-10-19T12:35:07+02:00
+Author: Gil Forcada Codinachs (gforcada) <gil.forcada@freitag.de>
+Commit: https://github.com/plone/plone.app.theming/commit/d52a8c96b52b5088616cbda126a676ed491f99d0
+
+Merge pull request #87 from terapyon/master
+
+Fix Unicode Encode Error when to copy into multi-byte title / desc
+
+Files changed:
+M CHANGES.rst
+M src/plone/app/theming/tests/test_utils.py
+M src/plone/app/theming/utils.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 20b5e5b..68250cf 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -9,6 +9,8 @@ Changelog
+   other cases.
+   [maurits]
  
- from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
- from Products.CMFPlone.resources.browser.resource import ResourceView
-@@ -38,12 +39,26 @@ def get_data(self, bundle, result):
-                     # because the compiling is done outside of plone
-                     cookWhenChangingSettings(self.context, bundle)
-             if bundle.jscompilation:
-+                js_path = bundle.jscompilation
-+                if '++plone++' in js_path:
-+                    resource_path = js_path.split('++plone++')[-1]
-+                    resource_name, resource_filepath = resource_path.split('/', 1)
-+                    js_location = '%s/++plone++%s/++unique++%s/%s' % (
-+                        self.site_url,
-+                        resource_name,
-+                        quote(str(bundle.last_compilation)),
-+                        resource_filepath
-+                    )
-+                else:
-+                    js_location = '%s/%s?version=%s' % (
-+                        self.site_url,
-+                        bundle.jscompilation,
-+                        quote(str(bundle.last_compilation))
-+                    )
-                 result.append({
-                     'bundle': bundle_name,
-                     'conditionalcomment': bundle.conditionalcomment,
--                    'src': '%s/%s?version=%s' % (
--                        self.site_url, bundle.jscompilation,
--                        bundle.last_compilation)
-+                    'src': js_location
-                 })
++- Fix Unicode Encode Error when to copy into multi-byte title / description
++  [terapyon]
  
-     def scripts(self):
-diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
-index 924a4d0..b6ab76d 100644
---- a/Products/CMFPlone/resources/browser/styles.py
-+++ b/Products/CMFPlone/resources/browser/styles.py
-@@ -1,4 +1,5 @@
- from urlparse import urlparse
-+from urllib import quote
+ 1.2.14 (2015-09-27)
+ -------------------
+diff --git a/src/plone/app/theming/tests/test_utils.py b/src/plone/app/theming/tests/test_utils.py
+index 2cb6e0a..00c41cf 100644
+--- a/src/plone/app/theming/tests/test_utils.py
++++ b/src/plone/app/theming/tests/test_utils.py
+@@ -276,6 +276,26 @@ def test_createThemeFromTemplate_rel_path(self):
+         self.assertEqual(theme.development_js, expected_dev_js)
+         self.assertEqual(theme.production_js, expected_prod_js)
  
- from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
- from Products.CMFPlone.resources.browser.resource import ResourceView
-@@ -60,15 +61,27 @@ def get_data(self, bundle, result):
-                     cookWhenChangingSettings(self.context, bundle)
- 
-             if bundle.csscompilation:
-+                css_path = bundle.csscompilation
-+                if '++plone++' in css_path:
-+                    resource_path = css_path.split('++plone++')[-1]
-+                    resource_name, resource_filepath = resource_path.split('/', 1)
-+                    css_location = '%s/++plone++%s/++unique++%s/%s' % (
-+                        self.site_url,
-+                        resource_name,
-+                        quote(str(bundle.last_compilation)),
-+                        resource_filepath
-+                    )
-+                else:
-+                    css_location = '%s/%s?version=%s' % (
-+                        self.site_url,
-+                        bundle.csscompilation,
-+                        quote(str(bundle.last_compilation))
-+                    )
-                 result.append({
-                     'bundle': bundle_name,
-                     'rel': 'stylesheet',
-                     'conditionalcomment': bundle.conditionalcomment,
--                    'src': '%s/%s?version=%s' % (
--                        self.site_url,
--                        bundle.csscompilation,
--                        bundle.last_compilation
--                    )
-+                    'src': css_location
-                 })
- 
-     def styles(self):
-diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
-index 4554d7d..da58edc 100644
---- a/Products/CMFPlone/traversal.py
-+++ b/Products/CMFPlone/traversal.py
-@@ -1,6 +1,7 @@
- from plone.resource.traversal import ResourceTraverser
- from zope.component import getUtility
- from plone.resource.interfaces import IResourceDirectory
-+from plone.resource.interfaces import IUniqueResourceRequest
- from Products.CMFPlone.interfaces.resources import (
-     OVERRIDE_RESOURCE_DIRECTORY_NAME)
- from zope.globalrequest import getRequest
-@@ -19,14 +20,19 @@ def traverse(self, name, remaining):
-         resource_path = req.environ['PATH_INFO'].split('++plone++')[-1]
-         resource_name, resource_filepath = resource_path.split('/', 1)
- 
-+        # If we have additional traversers in the path we should not use them
-+        # in the file lookup
-+        more_traversal = (resource_filepath.startswith('++') or
-+                          resource_filepath.startswith('@@'))
-+        if more_traversal:
-+            resource_filepath = resource_filepath.split('/')[-1]
++    def test_createThemeFromTemplate_ja_str_title(self):
++        from plone.app.theming.utils import createThemeFromTemplate
++        title = "copy of test theme by 日本語"
++        description = "test theme by 日本語"
++        try:
++            createThemeFromTemplate(title, description,
++                                            baseOn="another-theme")
++        except UnicodeEncodeError:
++            self.fail(msg=u"Unicode Encode Error")
 +
-         persistentDirectory = getUtility(IResourceDirectory, name="persistent")
-         directory = None
-         if OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory:
-             container = persistentDirectory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
-             if resource_name in container:
-                 directory = container[resource_name]
--                try:
--                    return directory[resource_filepath]
--                except:
--                    pass
--        return super(PloneBundlesTraverser, self).traverse(name, remaining)
-\ No newline at end of file
-+                if resource_filepath in directory:
-+                    return directory
-+        return super(PloneBundlesTraverser, self).traverse(name, remaining)
++    def test_createThemeFromTemplate_ja_unicode_title(self):
++        from plone.app.theming.utils import createThemeFromTemplate
++        title = u"copy of test theme by 日本語"
++        description = u"test theme by 日本語"
++        try:
++            createThemeFromTemplate(title, description,
++                                            baseOn="another-theme")
++        except UnicodeEncodeError:
++            self.fail(msg=u"Unicode Encode Error")
++
+ 
+ class TestUnit(unittest.TestCase):
+ 
+diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py
+index 2c00005..8bfb0a8 100644
+--- a/src/plone/app/theming/utils.py
++++ b/src/plone/app/theming/utils.py
+@@ -514,6 +514,10 @@ def createThemeFromTemplate(title, description, baseOn='template'):
+     if not manifest.has_section('theme'):
+         manifest.add_section('theme')
+ 
++    if not isinstance(title, str):
++        title = title.encode('utf-8')
++    if not isinstance(description, str):
++        description = description.encode('utf-8')
+     manifest.set('theme', 'title', title)
+     manifest.set('theme', 'description', description)
+ 
 
 
