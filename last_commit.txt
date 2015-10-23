@@ -1,184 +1,135 @@
-Repository: plone.app.dexterity
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.0.x
-Date: 2015-10-22T15:12:11+02:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/0054e386682a3744739144fa3c623e9bac791f28
+Branch: refs/heads/4.3.x
+Date: 2015-10-23T12:19:33+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/8fd7d9c19cac3abc3a74d2f96997c497574b9d9a
 
-One letter variables are always a bad idea
+When migration fails, do not upgrade addons or recatalog or update roles.
 
-'b' is doubly bad as it gets masked by pdb's own 'b' command.
+Otherwise those parts will get executed and saved to the database,
+which might make things worse.
 
-Files changed:
-M plone/app/dexterity/upgrades/to2001.py
-
-diff --git a/plone/app/dexterity/upgrades/to2001.py b/plone/app/dexterity/upgrades/to2001.py
-index b4a7c3c..c2c4a93 100644
---- a/plone/app/dexterity/upgrades/to2001.py
-+++ b/plone/app/dexterity/upgrades/to2001.py
-@@ -7,8 +7,8 @@
- def add_missing_uuids(context):
-     catalog = getToolByName(context, 'portal_catalog')
-     query = {'object_provides': IDexterityContent.__identifier__}
--    for b in catalog.unrestrictedSearchResults(query):
--        ob = b.getObject()
-+    for brain in catalog.unrestrictedSearchResults(query):
-+        ob = brain.getObject()
-         if IUUID(ob, None) is None:
-             addAttributeUUID(ob, None)
-             ob.reindexObject(idxs=['UID'])
-
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/2.0.x
-Date: 2015-10-22T15:12:56+02:00
-Author: Gil Forcada Codinachs (gforcada) <gil.forcada@freitag.de>
-Commit: https://github.com/plone/plone.app.dexterity/commit/1a597841bfbe0b1f480c45d44fe773a6b90a555c
-
-Avoid re-adding the UUID
-
-If an object already has a UID value on the catalog there is no need to add it again.
-
-In cases where *LOTS* of objects get returned by the catalog call it can dramatically impact the upgrade.
+Backport of commit dda8fb0f64b48c86c67e3ae5fad1a92d38523d26 from
+master branch.
 
 Files changed:
-M plone/app/dexterity/upgrades/to2001.py
+M Products/CMFPlone/MigrationTool.py
+M docs/CHANGES.rst
 
-diff --git a/plone/app/dexterity/upgrades/to2001.py b/plone/app/dexterity/upgrades/to2001.py
-index c2c4a93..34750ff 100644
---- a/plone/app/dexterity/upgrades/to2001.py
-+++ b/plone/app/dexterity/upgrades/to2001.py
-@@ -8,6 +8,8 @@ def add_missing_uuids(context):
-     catalog = getToolByName(context, 'portal_catalog')
-     query = {'object_provides': IDexterityContent.__identifier__}
-     for brain in catalog.unrestrictedSearchResults(query):
-+        if getattr(brain, 'UID', None) is not None:
-+            continue
-         ob = brain.getObject()
-         if IUUID(ob, None) is None:
-             addAttributeUUID(ob, None)
-
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/2.0.x
-Date: 2015-10-22T15:21:45+02:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/c2f9cb8589918d202142671a1e89db4c678363af
-
-Fix test
-
-Files changed:
-M plone/app/dexterity/tests/test_upgrades.py
-
-diff --git a/plone/app/dexterity/tests/test_upgrades.py b/plone/app/dexterity/tests/test_upgrades.py
-index fbe9528..c71f871 100644
---- a/plone/app/dexterity/tests/test_upgrades.py
-+++ b/plone/app/dexterity/tests/test_upgrades.py
-@@ -22,6 +22,8 @@ def test_add_missing_uuids(self):
-         )
-         setattr(page, ATTRIBUTE_NAME, None)
-         self.assertTrue(IUUID(page, None) is None)
-+        # reindex to remove the UUID it got when the page was created
-+        page.reindexObject(idxs=['UID'])
+diff --git a/Products/CMFPlone/MigrationTool.py b/Products/CMFPlone/MigrationTool.py
+index 65f1853..c705e79 100644
+--- a/Products/CMFPlone/MigrationTool.py
++++ b/Products/CMFPlone/MigrationTool.py
+@@ -272,54 +272,52 @@ def upgrade(self, REQUEST=None, dry_run=None, swallow_errors=True):
+                         transaction.abort()
+                         break
  
-         # run the migration
-         add_missing_uuids(self.layer['portal'])
-
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/2.0.x
-Date: 2015-10-22T15:21:45+02:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/a2c267a5c82769c8e62e4dd36cdfed04cc5f294b
-
-Update CHANGES.rst
-
-Files changed:
-M CHANGES.rst
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b2f160b..056f1ae 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 2.0.17 (unreleased)
- -------------------
+-            logger.info("Starting upgrade of core addons.")
+-            ADDON_LIST.upgrade_all(self)
+-            logger.info("Done upgrading core addons.")
+-
+-            logger.info("End of upgrade path, migration has finished")
++            logger.info("End of upgrade path, main migration has finished.")
  
--- Nothing changed yet.
-+- Avoid re-adding the UUID on an upgrade step.
-+  [gforcada]
+             if self.needUpgrading():
+-                logger.error("The upgrade path did NOT reach current version")
++                logger.error("The upgrade path did NOT reach current version.")
+                 logger.error("Migration has failed")
+             else:
+-                logger.info("Your Plone instance is now up-to-date.")
++                logger.info("Starting upgrade of core addons.")
++                ADDON_LIST.upgrade_all(self)
++                logger.info("Done upgrading core addons.")
  
+-            # do this once all the changes have been done
+-            if self.needRecatalog():
+-                logger.info("Please wait while we recatalog.")
+-                try:
+-                    catalog = self.portal_catalog
+-                    # Reduce threshold for the reindex run
+-                    old_threshold = catalog.threshold
+-                    pg_threshold = getattr(catalog, 'pgthreshold', 0)
+-                    catalog.pgthreshold = 300
+-                    catalog.threshold = 2000
+-                    catalog.refreshCatalog(clear=1)
+-                    catalog.threshold = old_threshold
+-                    catalog.pgthreshold = pg_threshold
+-                    self._needRecatalog = 0
+-                except (ConflictError, KeyboardInterrupt):
+-                    raise
+-                except:
+-                    logger.error("Exception was thrown while cataloging:\n",
+-                                 exc_info=True)
+-                    if not swallow_errors:
++                # do this once all the changes have been done
++                if self.needRecatalog():
++                    logger.info("Recatalog needed. This may take a while...")
++                    try:
++                        catalog = self.portal_catalog
++                        # Reduce threshold for the reindex run
++                        old_threshold = catalog.threshold
++                        pg_threshold = getattr(catalog, 'pgthreshold', 0)
++                        catalog.pgthreshold = 300
++                        catalog.threshold = 2000
++                        catalog.refreshCatalog(clear=1)
++                        catalog.threshold = old_threshold
++                        catalog.pgthreshold = pg_threshold
++                        self._needRecatalog = 0
++                    except (ConflictError, KeyboardInterrupt):
+                         raise
+-                logger.info("Done with recatalog.")
+-
+-            if self.needUpdateRole():
+-                logger.info("Please wait while we update role mappings.")
+-                try:
+-                    self.portal_workflow.updateRoleMappings()
+-                    self._needUpdateRole = 0
+-                except (ConflictError, KeyboardInterrupt):
+-                    raise
+-                except:
+-                    logger.error("Exception was thrown while updating role "
+-                                 "mappings", exc_info=True)
+-                    if not swallow_errors:
++                    except:
++                        logger.error("Exception was thrown while cataloging:\n",
++                                     exc_info=True)
++                        if not swallow_errors:
++                            raise
++                    logger.info("Done with recatalog.")
++
++                if self.needUpdateRole():
++                    logger.info("Role update needed. This may take a while...")
++                    try:
++                        self.portal_workflow.updateRoleMappings()
++                        self._needUpdateRole = 0
++                    except (ConflictError, KeyboardInterrupt):
+                         raise
+-                logger.info("Done updating role mappings.")
++                    except:
++                        logger.error("Exception was thrown while updating role "
++                                     "mappings", exc_info=True)
++                        if not swallow_errors:
++                            raise
++                    logger.info("Done updating role mappings.")
  
- 2.0.16 (2015-09-28)
-
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/2.0.x
-Date: 2015-10-23T10:42:42+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.dexterity/commit/7fd9bfff9645d86aa5835322eb4ffacd4e1b28ec
-
-Merge pull request #190 from plone/2.0.x-gforcada-avoid-reindex
-
-Avoid re-adding the UUID
-
-Files changed:
-M CHANGES.rst
-M plone/app/dexterity/tests/test_upgrades.py
-M plone/app/dexterity/upgrades/to2001.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b2f160b..056f1ae 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 2.0.17 (unreleased)
- -------------------
+             if dry_run:
+                 logger.info("Dry run selected, transaction aborted")
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 385f39e..a3bc00d 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -8,6 +8,10 @@ Changelog
+ 4.3.8 (unreleased)
+ ------------------
  
--- Nothing changed yet.
-+- Avoid re-adding the UUID on an upgrade step.
-+  [gforcada]
- 
- 
- 2.0.16 (2015-09-28)
-diff --git a/plone/app/dexterity/tests/test_upgrades.py b/plone/app/dexterity/tests/test_upgrades.py
-index fbe9528..c71f871 100644
---- a/plone/app/dexterity/tests/test_upgrades.py
-+++ b/plone/app/dexterity/tests/test_upgrades.py
-@@ -22,6 +22,8 @@ def test_add_missing_uuids(self):
-         )
-         setattr(page, ATTRIBUTE_NAME, None)
-         self.assertTrue(IUUID(page, None) is None)
-+        # reindex to remove the UUID it got when the page was created
-+        page.reindexObject(idxs=['UID'])
- 
-         # run the migration
-         add_missing_uuids(self.layer['portal'])
-diff --git a/plone/app/dexterity/upgrades/to2001.py b/plone/app/dexterity/upgrades/to2001.py
-index b4a7c3c..34750ff 100644
---- a/plone/app/dexterity/upgrades/to2001.py
-+++ b/plone/app/dexterity/upgrades/to2001.py
-@@ -7,8 +7,10 @@
- def add_missing_uuids(context):
-     catalog = getToolByName(context, 'portal_catalog')
-     query = {'object_provides': IDexterityContent.__identifier__}
--    for b in catalog.unrestrictedSearchResults(query):
--        ob = b.getObject()
-+    for brain in catalog.unrestrictedSearchResults(query):
-+        if getattr(brain, 'UID', None) is not None:
-+            continue
-+        ob = brain.getObject()
-         if IUUID(ob, None) is None:
-             addAttributeUUID(ob, None)
-             ob.reindexObject(idxs=['UID'])
++- When migration fails, do not upgrade addons or recatalog or
++  update roles.
++  [maurits]
++
+ - Let plone-final import step also depend on the workflow step.
+   Otherwise the plone-final step installs plone.app.discussion with an
+   extra workflow, and then our own workflow step throws it away again.
 
 
