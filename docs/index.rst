@@ -26,6 +26,7 @@ Table of Awesome
 .. toctree::
    :maxdepth: 2
 
+   guidelines
    agreement
    culture
    intro
@@ -50,5 +51,3 @@ These are some documents using as reference for this documentation.
    roboto
    mrdeveloper
    plipreview
-
-
