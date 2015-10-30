@@ -53,7 +53,7 @@ Create a pull request
 * All text that can be shown in a browser must be translatable.
   Please mark all such strings as translatable.
 
-* Be nice and and use code quality checkers like flake8 and jshint.
+* Be nice and use code quality checkers like flake8 and jshint.
 
 * See if you can use git to squash multiple commits into one where this makes sense.
   If you are not comfortable with git, never mind.
