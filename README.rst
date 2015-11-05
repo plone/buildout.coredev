@@ -16,5 +16,8 @@ Jenkins CI - Plone 5.0 - with archetypes:
 
 Introduction
 ============
-This is the development buildout for Plone Core. You are on the version 5.0 branch. If this is your first time here, please read ALL if the instructions at `readthedocs.org <http://readthedocs.org/docs/buildoutcoredev>`_  before getting started. It will save you time in the end, we promise!
+This is the development buildout for Plone Core.
+You are on the version 5.0 branch.
+If this is your first time here, please read ALL if the instructions at `readthedocs.org <http://docs.plone.org/develop/coredev/docs/index.html>`_  before getting started.
+It will save you time in the end, we promise!
 
