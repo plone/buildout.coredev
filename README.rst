@@ -13,6 +13,12 @@ Jenkins CI - Plone 5.0 - with archetypes:
     :target: http://jenkins.plone.org/job/plone-5.0-python-2.7-at/
     :alt: Jenkins CI - Plone 5.0 - with Archetypes
 
+Jenkins CI - Plone 5.0 - robot framework:
+
+.. image:: http://jenkins.plone.org/job/plone-5.0-python-2.7-robot/badge/icon
+    :target: http://jenkins.plone.org/job/plone-5.0-python-2.7-robot/
+    :alt: Jenkins CI - Plone 5.0 - robot framework
+
 
 Introduction
 ============
