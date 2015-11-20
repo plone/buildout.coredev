@@ -1,282 +1,67 @@
-Repository: plone.namedfile
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2015-11-20T02:22:13+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.namedfile/commit/d6c010ab25c7bf153e92a791e3b560ef6fd3ae5a
+Date: 2015-11-20T15:26:27-06:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/ad8808485c4bf7ed7de9325b16a706d1652ef023
 
-Added webdav support to image scales.
-
-https://github.com/plone/Products.CMFPlone/issues/1251
+Fix potential acquisition issues with folder listings
 
 Files changed:
 M CHANGES.rst
-M plone/namedfile/scaling.py
-M plone/namedfile/tests/test_scaling.py
+M plone/app/contenttypes/browser/folder.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e7a790b..c88565c 100644
+index 532a65a..f39738f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -6,7 +6,9 @@ Changelog
- 
- New:
- 
--- *add item here*
-+- Added webdav support to image scales.
-+  https://github.com/plone/Products.CMFPlone/issues/1251
-+  [maurits]
+@@ -11,6 +11,9 @@ New:
  
  Fixes:
  
-diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
-index 4311516..8fef433 100644
---- a/plone/namedfile/scaling.py
-+++ b/plone/namedfile/scaling.py
-@@ -99,6 +99,14 @@ def index_html(self):
-         set_headers(self.data, self.request.response)
-         return stream_data(self.data)
- 
-+    def manage_DAVget(self):
-+        """Get scale via webdav."""
-+        return self.manage_FTPget()
++- Fix potential acquisition issues with folder listings
++  [vangheem]
 +
-+    def manage_FTPget(self):
-+        """Get scale via ftp."""
-+        return self.index_html()
+ - Avoid AttributeError when trying to get the default_page of an item
+   when migrating
+   [frapell]
+diff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py
+index 50b5c33..fd1abf5 100644
+--- a/plone/app/contenttypes/browser/folder.py
++++ b/plone/app/contenttypes/browser/folder.py
+@@ -1,5 +1,8 @@
+ # -*- coding: utf-8 -*-
++import random
 +
-     def __call__(self):
-         # avoid the need to prefix with nocall: in TAL
-         return self
-@@ -133,12 +141,15 @@ def traverse(self, name, furtherPath):
- class ImageScaling(BrowserView):
-     """ view used for generating (and storing) image scales """
-     implements(ITraversable, IPublishTraverse)
-+    # Ignore some stacks to help with accessing via webdav, otherwise you get a
-+    # 404 NotFound error.
-+    _ignored_stacks = ('manage_DAVget', 'manage_FTPget')
+ from Acquisition import aq_base
++from Acquisition import aq_inner
+ from Products.CMFPlone.PloneBatch import Batch
+ from Products.CMFPlone.utils import safe_callable
+ from Products.Five import BrowserView
+@@ -12,7 +15,6 @@
+ from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ from zope.contentprovider.interfaces import IContentProvider
+-import random
  
-     def publishTraverse(self, request, name):
-         """ used for traversal via publisher, i.e. when using as a url """
-         stack = request.get('TraversalRequestNameStack')
-         image = None
--        if stack:
-+        if stack and stack[-1] not in self._ignored_stacks:
-             # field and scale name were given...
-             scale = stack.pop()
-             image = self.scale(name, scale)             # this is aq-wrapped
-@@ -198,12 +209,14 @@ def _set_sizes(self, value):
-     def getImageSize(self, fieldname=None):
-         if fieldname is not None:
-             value = self.guarded_orig_image(fieldname)
-+            if value is None:
-+                return (0, 0)
-             return value.getImageSize()
-         value = IPrimaryFieldInfo(self.context).value
-         return value.getImageSize()
+ HAS_SECURITY_SETTINGS = True
+ try:
+@@ -62,7 +64,7 @@ def results(self, **kwargs):
+         kwargs.setdefault('b_size', self.b_size)
+         kwargs.setdefault('b_start', self.b_start)
  
-     def guarded_orig_image(self, fieldname):
--        return guarded_getattr(self.context, fieldname)
-+        return guarded_getattr(self.context, fieldname, None)
+-        results = self.context.restrictedTraverse('@@folderListing')(**kwargs)
++        results = aq_inner(self.context).restrictedTraverse('@@folderListing')(**kwargs)
+         return results
  
-     def getQuality(self):
-         """Get plone.app.imaging's quality setting"""
-diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py
-index 6e56075..dafef96 100644
---- a/plone/namedfile/tests/test_scaling.py
-+++ b/plone/namedfile/tests/test_scaling.py
-@@ -280,6 +280,33 @@ def testPublishScaleViaUID(self):
-         self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-         self.assertImage(response.getBody(), 'JPEG', (64, 64))
- 
-+    def testPublishWebDavScaleViaUID(self):
-+        scale = self.view.scale('image', width=64, height=64)
-+        # make sure the referenced image scale is available
-+        url = scale.url.replace('http://nohost', '') + '/manage_DAVget'
-+        response = self.publish(url, basic=self.getCredentials())
-+        self.assertEqual(response.getStatus(), 200)
-+        # In plone.app.imaging we get a very different response, which in the
-+        # end works out.  It is a bit unclear which of the two responses is
-+        # wanted.
-+        # self.assertEqual(response.getHeader('Content-Type'),
-+        #                  'text/plain; charset=iso-8859-15')
-+        # self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+        self.assertEqual(response.getStatus(), 200)
-+        self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-+        self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+
-+    def testPublishFTPScaleViaUID(self):
-+        scale = self.view.scale('image', width=64, height=64)
-+        # make sure the referenced image scale is available
-+        url = scale.url.replace('http://nohost', '') + '/manage_FTPget'
-+        response = self.publish(url, basic=self.getCredentials())
-+        self.assertEqual(response.getStatus(), 200)
-+        # Same remark as in testPublishWebDavScaleViaUID is valid here.
-+        self.assertEqual(response.getStatus(), 200)
-+        self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-+        self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+
-     def testHeadRequestMethod(self):
-         scale = self.view.scale('image', width=64, height=64)
-         # make sure the referenced image scale is available
-@@ -348,6 +375,16 @@ def testPublishScaleWithInvalidUID(self):
-         response = self.publish(url, basic=self.getCredentials())
-         self.assertEqual(response.getStatus(), 404)
- 
-+    def testPublishScaleWithInvalidScale(self):
-+        scale = self.view.scale('image', 'no-such-scale')
-+        self.assertEqual(scale, None)
-+
-+    def test_getAvailableSizesWithInvalidScale(self):
-+        self.assertEqual(self.view.getAvailableSizes('no-such-scale'), {})
-+
-+    def test_getImageSizeWithInvalidScale(self):
-+        self.assertEqual(self.view.getImageSize('no-such-scale'), (0, 0))
-+
-     def testGuardedAccess(self):
-         # make sure it's not possible to access scales of forbidden images
-         self.item.__allow_access_to_unprotected_subobjects__ = 0
-
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/master
-Date: 2015-11-20T22:10:34+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.forcada@freitag.de>
-Commit: https://github.com/plone/plone.namedfile/commit/5d1ce7aed8b8964654eb04a3c524a16bef9a70f1
-
-Merge pull request #16 from plone/webdav-scale
-
-Added webdav support to image scales.
-
-Files changed:
-M CHANGES.rst
-M plone/namedfile/scaling.py
-M plone/namedfile/tests/test_scaling.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index e7a790b..c88565c 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -6,7 +6,9 @@ Changelog
- 
- New:
- 
--- *add item here*
-+- Added webdav support to image scales.
-+  https://github.com/plone/Products.CMFPlone/issues/1251
-+  [maurits]
- 
- Fixes:
- 
-diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
-index 4311516..8fef433 100644
---- a/plone/namedfile/scaling.py
-+++ b/plone/namedfile/scaling.py
-@@ -99,6 +99,14 @@ def index_html(self):
-         set_headers(self.data, self.request.response)
-         return stream_data(self.data)
- 
-+    def manage_DAVget(self):
-+        """Get scale via webdav."""
-+        return self.manage_FTPget()
-+
-+    def manage_FTPget(self):
-+        """Get scale via ftp."""
-+        return self.index_html()
-+
-     def __call__(self):
-         # avoid the need to prefix with nocall: in TAL
-         return self
-@@ -133,12 +141,15 @@ def traverse(self, name, furtherPath):
- class ImageScaling(BrowserView):
-     """ view used for generating (and storing) image scales """
-     implements(ITraversable, IPublishTraverse)
-+    # Ignore some stacks to help with accessing via webdav, otherwise you get a
-+    # 404 NotFound error.
-+    _ignored_stacks = ('manage_DAVget', 'manage_FTPget')
- 
-     def publishTraverse(self, request, name):
-         """ used for traversal via publisher, i.e. when using as a url """
-         stack = request.get('TraversalRequestNameStack')
-         image = None
--        if stack:
-+        if stack and stack[-1] not in self._ignored_stacks:
-             # field and scale name were given...
-             scale = stack.pop()
-             image = self.scale(name, scale)             # this is aq-wrapped
-@@ -198,12 +209,14 @@ def _set_sizes(self, value):
-     def getImageSize(self, fieldname=None):
-         if fieldname is not None:
-             value = self.guarded_orig_image(fieldname)
-+            if value is None:
-+                return (0, 0)
-             return value.getImageSize()
-         value = IPrimaryFieldInfo(self.context).value
-         return value.getImageSize()
- 
-     def guarded_orig_image(self, fieldname):
--        return guarded_getattr(self.context, fieldname)
-+        return guarded_getattr(self.context, fieldname, None)
- 
-     def getQuality(self):
-         """Get plone.app.imaging's quality setting"""
-diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py
-index 6e56075..dafef96 100644
---- a/plone/namedfile/tests/test_scaling.py
-+++ b/plone/namedfile/tests/test_scaling.py
-@@ -280,6 +280,33 @@ def testPublishScaleViaUID(self):
-         self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-         self.assertImage(response.getBody(), 'JPEG', (64, 64))
- 
-+    def testPublishWebDavScaleViaUID(self):
-+        scale = self.view.scale('image', width=64, height=64)
-+        # make sure the referenced image scale is available
-+        url = scale.url.replace('http://nohost', '') + '/manage_DAVget'
-+        response = self.publish(url, basic=self.getCredentials())
-+        self.assertEqual(response.getStatus(), 200)
-+        # In plone.app.imaging we get a very different response, which in the
-+        # end works out.  It is a bit unclear which of the two responses is
-+        # wanted.
-+        # self.assertEqual(response.getHeader('Content-Type'),
-+        #                  'text/plain; charset=iso-8859-15')
-+        # self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+        self.assertEqual(response.getStatus(), 200)
-+        self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-+        self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+
-+    def testPublishFTPScaleViaUID(self):
-+        scale = self.view.scale('image', width=64, height=64)
-+        # make sure the referenced image scale is available
-+        url = scale.url.replace('http://nohost', '') + '/manage_FTPget'
-+        response = self.publish(url, basic=self.getCredentials())
-+        self.assertEqual(response.getStatus(), 200)
-+        # Same remark as in testPublishWebDavScaleViaUID is valid here.
-+        self.assertEqual(response.getStatus(), 200)
-+        self.assertEqual(response.getHeader('Content-Type'), 'image/jpeg')
-+        self.assertImage(response.getBody(), 'JPEG', (64, 64))
-+
-     def testHeadRequestMethod(self):
-         scale = self.view.scale('image', width=64, height=64)
-         # make sure the referenced image scale is available
-@@ -348,6 +375,16 @@ def testPublishScaleWithInvalidUID(self):
-         response = self.publish(url, basic=self.getCredentials())
-         self.assertEqual(response.getStatus(), 404)
- 
-+    def testPublishScaleWithInvalidScale(self):
-+        scale = self.view.scale('image', 'no-such-scale')
-+        self.assertEqual(scale, None)
-+
-+    def test_getAvailableSizesWithInvalidScale(self):
-+        self.assertEqual(self.view.getAvailableSizes('no-such-scale'), {})
-+
-+    def test_getImageSizeWithInvalidScale(self):
-+        self.assertEqual(self.view.getImageSize('no-such-scale'), (0, 0))
-+
-     def testGuardedAccess(self):
-         # make sure it's not possible to access scales of forbidden images
-         self.item.__allow_access_to_unprotected_subobjects__ = 0
+     def batch(self):
+@@ -211,4 +213,4 @@ def no_items_message(self):
+         return _(
+             'description_no_items_in_folder',
+             default=u"There are currently no items in this folder."
+-        )
++        )
+\ No newline at end of file
 
 
