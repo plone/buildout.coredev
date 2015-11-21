@@ -1,82 +1,376 @@
-Repository: Products.CMFPlone
+Repository: plone.app.imaging
 
 
 Branch: refs/heads/master
-Date: 2015-11-21T00:35:49-06:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/cff60494a1c073d7e815ab4ee632c78a2b9813ec
+Date: 2015-11-19T23:20:53+01:00
+Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
+Commit: https://github.com/plone/plone.app.imaging/commit/87e0c9203141e3773eecfa3f69d2ab50a286db40
 
-Fix bbb global status message template rendering escaped html
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/browser/templates/global_statusmessage.pt
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 86a50e3..5f84a8c 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -61,6 +61,9 @@ Fixes:
-   https://github.com/plone/Products.CMFPlone/issues/1226
-   [fgrcon]
-   
-+- Fix bbb global status message template rendering escaped html
-+  [vangheem]
-+
- - Fixed white space pep8 warnings.
-   [maurits]
- 
-diff --git a/Products/CMFPlone/browser/templates/global_statusmessage.pt b/Products/CMFPlone/browser/templates/global_statusmessage.pt
-index 1d6bea1..779aa8a 100644
---- a/Products/CMFPlone/browser/templates/global_statusmessage.pt
-+++ b/Products/CMFPlone/browser/templates/global_statusmessage.pt
-@@ -7,7 +7,7 @@
- <body>
- <!-- BBB -->
- <tal:block i18n:domain="plone" metal:define-macro="portal_message">
--  <tal:message tal:content="provider:plone.globalstatusmessage"/>
-+  <tal:message tal:content="structure provider:plone.globalstatusmessage"/>
- </tal:block>
- 
- </body>
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2015-11-21T00:36:32-06:00
-Author: vangheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/b053c60786e568b75ee91d01b8cd3d14fbcc9f57
-
-merge
+Handled scale traversal correctly in zope.pagetemplate and five.pt (chameleon).
 
 Files changed:
 M CHANGES.rst
+M src/plone/app/imaging/scaling.py
+M src/plone/app/imaging/tests/test_new_scaling.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 5f84a8c..efcf645 100644
+index 7f44c9c..6659b8f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -52,6 +52,9 @@ New:
+@@ -10,6 +10,9 @@ New:
  
  Fixes:
  
-+- Fix bbb global status message template rendering escaped html
-+  [vangheem]
++- Fixed incompatibilities with five.pt and chameleon (closes `#16`_).
++  [rodfersou, maurits]
 +
- - Avoid AttributeError if registry is not yet there for the 
-   JSRegistryNodeAdapter while migrating from older versions
-   https://github.com/plone/Products.CMFPlone/pull/1246
-@@ -60,9 +63,6 @@ Fixes:
- - remove deprecated icons ...
-   https://github.com/plone/Products.CMFPlone/issues/1226
-   [fgrcon]
--  
--- Fix bbb global status message template rendering escaped html
--  [vangheem]
- 
- - Fixed white space pep8 warnings.
+ - Fixed 404 NotFound error when accessing image scales via webdav.
    [maurits]
+ 
+@@ -268,3 +271,5 @@ Fixes:
+ 
+ - Initial package structure.
+   [zopeskel]
++
++.. _`#16`: https://github.com/plone/plone.app.imaging/issues/16
+diff --git a/src/plone/app/imaging/scaling.py b/src/plone/app/imaging/scaling.py
+index 09757be..d819fe8 100644
+--- a/src/plone/app/imaging/scaling.py
++++ b/src/plone/app/imaging/scaling.py
+@@ -81,13 +81,54 @@ def publishTraverse(self, request, name):
+         raise NotFound(self, name, self.request)
+ 
+     def traverse(self, name, furtherPath):
+-        """ used for path traversal, i.e. in zope page templates """
++        """Used for path traversal, i.e. in zope page templates.
++
++        This method is called when you have something like this in a
++        page template:
++
++        <img tal:replace="structure context/@@images/image/mini" />
++
++        What then happens during traversal, is that the traverse method
++        gets called twice: we first traverse to name='image' and then to
++        name='mini'.  The traversal is done by the Zope page template
++        machinery.  There are differences between standard
++        zope.pagetemplate and five.pt (chameleon).  Roughly, it happens
++        like follows.
++
++        With zope.pagetemplate:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ['mini'])
++        tag = new_view.traverse('mini', [])
++
++        And with five.pt:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ('mini', ))
++        tag = new_view.traverse('mini', ())
++        """
+         if not furtherPath:
++            if hasattr(self, '_image_fieldname'):
++                # We have been here before, with the current name argument in
++                # the furtherPath.
++                scale_name = name
++                name = self._image_fieldname
++            else:
++                scale_name = None
+             field = self.context.getField(name)
+-            return field.get(self.context).tag()
+-        image = self.scale(name, furtherPath.pop())
+-        if image is not None:
+-            return image.tag()
++            image = self.scale(name, scale_name)
++            if image is not None:
++                return image.tag()
++            raise TraversalError(self, name)
++        field = self.field(name)
++        if field is not None:
++            # We have an image field of this name.  Store the scale name on
++            # self and return it.  Since there is a furtherPath, we will get
++            # called again in a moment, with this same 'self' with the
++            # _image_fieldname attribute, and with the current furtherPath as
++            # name, and an empty furtherPath.
++            self._image_fieldname = name
++            return self
+         raise TraversalError(self, name)
+ 
+     def make(self, info):
+diff --git a/src/plone/app/imaging/tests/test_new_scaling.py b/src/plone/app/imaging/tests/test_new_scaling.py
+index 5c5067a..cf57a8e 100644
+--- a/src/plone/app/imaging/tests/test_new_scaling.py
++++ b/src/plone/app/imaging/tests/test_new_scaling.py
+@@ -3,12 +3,24 @@
+ from plone.app.imaging.tests.base import getSettings
+ from plone.app.imaging.scaling import ImageScaling
+ from re import match
+-
++from unittest import defaultTestLoader
+ 
+ import transaction
+ 
+ 
+-class ImageTraverseTests(ImagingTestCase):
++class ImageStandardTraverseTests(ImagingTestCase):
++    # Note: this class is subclassed by ImageChameleonTraverseTests, which
++    # inherits our tests but uses a different traverser.  We use the standard
++    # Zope pagetemplate traverser.
++
++    def traverser(self, view, path=''):
++        # Standard Zope page template traversal uses a list as path.
++        # This is a simplified version specialised for the scaling view.
++        stack = path.split('/')
++        while stack:
++            name = stack.pop(0)
++            view = view.traverse(name, stack)
++        return view
+ 
+     def afterSetUp(self):
+         self.data = self.getImage()
+@@ -19,9 +31,7 @@ def afterSetUp(self):
+ 
+     def traverse(self, path=''):
+         view = self.image.unrestrictedTraverse('@@images')
+-        stack = path.split('/')
+-        name = stack.pop(0)
+-        tag = view.traverse(name, stack)
++        tag = self.traverser(view, path)
+         base = self.image.absolute_url()
+         expected = r'<img src="%s/@@images/([-0-9a-f]{36}).(jpeg|gif|png)" ' \
+             r'alt="foo" title="foo" height="(\d+)" width="(\d+)" />' % base
+@@ -72,6 +82,35 @@ def testCustomSizeChange(self):
+         self.assertEqual(height, 42)
+         self.assertNotEqual(uid1, uid2, 'scale not updated?')
+ 
++
++class ImageChameleonTraverseTests(ImageStandardTraverseTests):
++    # This class inherits all test methods from its parent, but uses the
++    # Chameleon/five.pt traverser.
++
++    def traverser(self, view, path=''):
++        # five.pt/chameleon uses a tuple as path.  This is a simplified
++        # version of BoboAwareZopeTraverse.traverse from five.pt.expressions,
++        # specialised for the scaling view.
++        path_items = tuple(path.split('/'))
++        length = len(path_items)
++        if length:
++            i = 0
++            while i < length:
++                name = path_items[i]
++                i += 1
++                view = view.traverse(name, path_items[i:])
++        return view
++
++
++class ImageTagTests(ImagingTestCase):
++
++    def afterSetUp(self):
++        self.data = self.getImage()
++        self.image = self.folder[self.folder.invokeFactory(
++            'Image', id='foo', image=self.data)]
++        field = self.image.getField('image')
++        self.available = field.getAvailableSizes(self.image)
++
+     def testViewTagMethod(self):
+         folder = self.folder
+         image = folder['foo']
+@@ -313,3 +352,7 @@ def testGetAvailableSizes(self):
+ 
+     def testGetImageSize(self):
+         assert self.adapter.getImageSize('image') == (200, 200)
++
++
++def test_suite():
++    return defaultTestLoader.loadTestsFromName(__name__)
+
+
+Repository: plone.app.imaging
+
+
+Branch: refs/heads/master
+Date: 2015-11-21T23:53:33+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.imaging/commit/a6e89f5fa26c05ae00a9f0dc816c70f8e770b2b5
+
+Merge pull request #23 from plone/issue_16_master
+
+Handled scale traversal correctly in five.pt (chameleon) - master
+
+Files changed:
+M CHANGES.rst
+M src/plone/app/imaging/scaling.py
+M src/plone/app/imaging/tests/test_new_scaling.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 7f44c9c..6659b8f 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -10,6 +10,9 @@ New:
+ 
+ Fixes:
+ 
++- Fixed incompatibilities with five.pt and chameleon (closes `#16`_).
++  [rodfersou, maurits]
++
+ - Fixed 404 NotFound error when accessing image scales via webdav.
+   [maurits]
+ 
+@@ -268,3 +271,5 @@ Fixes:
+ 
+ - Initial package structure.
+   [zopeskel]
++
++.. _`#16`: https://github.com/plone/plone.app.imaging/issues/16
+diff --git a/src/plone/app/imaging/scaling.py b/src/plone/app/imaging/scaling.py
+index 09757be..d819fe8 100644
+--- a/src/plone/app/imaging/scaling.py
++++ b/src/plone/app/imaging/scaling.py
+@@ -81,13 +81,54 @@ def publishTraverse(self, request, name):
+         raise NotFound(self, name, self.request)
+ 
+     def traverse(self, name, furtherPath):
+-        """ used for path traversal, i.e. in zope page templates """
++        """Used for path traversal, i.e. in zope page templates.
++
++        This method is called when you have something like this in a
++        page template:
++
++        <img tal:replace="structure context/@@images/image/mini" />
++
++        What then happens during traversal, is that the traverse method
++        gets called twice: we first traverse to name='image' and then to
++        name='mini'.  The traversal is done by the Zope page template
++        machinery.  There are differences between standard
++        zope.pagetemplate and five.pt (chameleon).  Roughly, it happens
++        like follows.
++
++        With zope.pagetemplate:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ['mini'])
++        tag = new_view.traverse('mini', [])
++
++        And with five.pt:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ('mini', ))
++        tag = new_view.traverse('mini', ())
++        """
+         if not furtherPath:
++            if hasattr(self, '_image_fieldname'):
++                # We have been here before, with the current name argument in
++                # the furtherPath.
++                scale_name = name
++                name = self._image_fieldname
++            else:
++                scale_name = None
+             field = self.context.getField(name)
+-            return field.get(self.context).tag()
+-        image = self.scale(name, furtherPath.pop())
+-        if image is not None:
+-            return image.tag()
++            image = self.scale(name, scale_name)
++            if image is not None:
++                return image.tag()
++            raise TraversalError(self, name)
++        field = self.field(name)
++        if field is not None:
++            # We have an image field of this name.  Store the scale name on
++            # self and return it.  Since there is a furtherPath, we will get
++            # called again in a moment, with this same 'self' with the
++            # _image_fieldname attribute, and with the current furtherPath as
++            # name, and an empty furtherPath.
++            self._image_fieldname = name
++            return self
+         raise TraversalError(self, name)
+ 
+     def make(self, info):
+diff --git a/src/plone/app/imaging/tests/test_new_scaling.py b/src/plone/app/imaging/tests/test_new_scaling.py
+index 5c5067a..cf57a8e 100644
+--- a/src/plone/app/imaging/tests/test_new_scaling.py
++++ b/src/plone/app/imaging/tests/test_new_scaling.py
+@@ -3,12 +3,24 @@
+ from plone.app.imaging.tests.base import getSettings
+ from plone.app.imaging.scaling import ImageScaling
+ from re import match
+-
++from unittest import defaultTestLoader
+ 
+ import transaction
+ 
+ 
+-class ImageTraverseTests(ImagingTestCase):
++class ImageStandardTraverseTests(ImagingTestCase):
++    # Note: this class is subclassed by ImageChameleonTraverseTests, which
++    # inherits our tests but uses a different traverser.  We use the standard
++    # Zope pagetemplate traverser.
++
++    def traverser(self, view, path=''):
++        # Standard Zope page template traversal uses a list as path.
++        # This is a simplified version specialised for the scaling view.
++        stack = path.split('/')
++        while stack:
++            name = stack.pop(0)
++            view = view.traverse(name, stack)
++        return view
+ 
+     def afterSetUp(self):
+         self.data = self.getImage()
+@@ -19,9 +31,7 @@ def afterSetUp(self):
+ 
+     def traverse(self, path=''):
+         view = self.image.unrestrictedTraverse('@@images')
+-        stack = path.split('/')
+-        name = stack.pop(0)
+-        tag = view.traverse(name, stack)
++        tag = self.traverser(view, path)
+         base = self.image.absolute_url()
+         expected = r'<img src="%s/@@images/([-0-9a-f]{36}).(jpeg|gif|png)" ' \
+             r'alt="foo" title="foo" height="(\d+)" width="(\d+)" />' % base
+@@ -72,6 +82,35 @@ def testCustomSizeChange(self):
+         self.assertEqual(height, 42)
+         self.assertNotEqual(uid1, uid2, 'scale not updated?')
+ 
++
++class ImageChameleonTraverseTests(ImageStandardTraverseTests):
++    # This class inherits all test methods from its parent, but uses the
++    # Chameleon/five.pt traverser.
++
++    def traverser(self, view, path=''):
++        # five.pt/chameleon uses a tuple as path.  This is a simplified
++        # version of BoboAwareZopeTraverse.traverse from five.pt.expressions,
++        # specialised for the scaling view.
++        path_items = tuple(path.split('/'))
++        length = len(path_items)
++        if length:
++            i = 0
++            while i < length:
++                name = path_items[i]
++                i += 1
++                view = view.traverse(name, path_items[i:])
++        return view
++
++
++class ImageTagTests(ImagingTestCase):
++
++    def afterSetUp(self):
++        self.data = self.getImage()
++        self.image = self.folder[self.folder.invokeFactory(
++            'Image', id='foo', image=self.data)]
++        field = self.image.getField('image')
++        self.available = field.getAvailableSizes(self.image)
++
+     def testViewTagMethod(self):
+         folder = self.folder
+         image = folder['foo']
+@@ -313,3 +352,7 @@ def testGetAvailableSizes(self):
+ 
+     def testGetImageSize(self):
+         assert self.adapter.getImageSize('image') == (200, 200)
++
++
++def test_suite():
++    return defaultTestLoader.loadTestsFromName(__name__)
 
 
