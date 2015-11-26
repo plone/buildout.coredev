@@ -1,209 +1,370 @@
-Repository: Products.CMFEditions
+Repository: plone.app.imaging
 
 
-Branch: refs/heads/master
-Date: 2015-11-25T22:48:07+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFEditions/commit/5bb8f4d2ef7aaf9c4043a2681ad176df57b14a49
+Branch: refs/heads/1.0.x
+Date: 2015-11-19T22:47:33+01:00
+Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
+Commit: https://github.com/plone/plone.app.imaging/commit/59e8d2bf071336d78a733d37d4627f83aed6d82d
 
-Removed executable bit from various files.
-
-And do a quick release, as on a test server the previous release was
-somehow missing a file.
+Handled scale traversal correctly in zope.pagetemplate and five.pt (chameleon).
 
 Files changed:
-M CHANGES.rst
-M Products/CMFEditions/interfaces/IPurgePolicy.py
-M Products/CMFEditions/tests/__init__.py
-M Products/CMFEditions/tests/images/Image1_v0.gif
-M Products/CMFEditions/tests/images/Image1_v1.gif
-M Products/CMFEditions/tests/images/Image1_v2.gif
-M Products/CMFEditions/tests/images/Image1_v3.gif
-M Products/CMFEditions/tests/images/Image2_v0.gif
-M Products/CMFEditions/tests/images/Image2_v1.gif
-M Products/CMFEditions/tests/images/Image2_v2.gif
-M Products/CMFEditions/tests/images/Image2_v3.gif
-M Products/CMFEditions/tests/test_ArchivistTool.py
-M Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-M Products/CMFEditions/tests/test_IntegrationTests.py
-M Products/CMFEditions/tests/test_KeepLastNVersionsTool.py
-M Products/CMFEditions/tests/test_ModifierRegistryTool.py
-M doc/presentations/EPC2005_CMFEditions.sxi
-M doc/presentations/EPC2006_CMFEditions.sxi
-M doc/presentations/PloneConf2005_CMFEditions.sxi
+M docs/HISTORY.txt
+M src/plone/app/imaging/scaling.py
+M src/plone/app/imaging/tests/test_new_scaling.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 0775995..075234b 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,13 +4,11 @@ Changelog
- 2.2.18 (unreleased)
- -------------------
+diff --git a/docs/HISTORY.txt b/docs/HISTORY.txt
+index 7921bef..c5a4013 100644
+--- a/docs/HISTORY.txt
++++ b/docs/HISTORY.txt
+@@ -6,6 +6,9 @@ Changelog
  
--New:
--
--- *add item here*
--
  Fixes:
  
--- *add item here*
-+- Removed executable bit from various files.  And do a quick release,
-+  as on a test server the previous release was somehow missing a file.
-+  [maurits]
++- Fixed incompatibilities with five.pt and chameleon (closes `#16`_).
++  [rodfersou, maurits]
++
+ - Fixed 404 NotFound error when accessing image scales via webdav.
+   [maurits]
+ 
+@@ -239,3 +242,5 @@ Fixes:
+ 
+ - Initial package structure.
+   [zopeskel]
++
++.. _`#16`: https://github.com/plone/plone.app.imaging/issues/16
+diff --git a/src/plone/app/imaging/scaling.py b/src/plone/app/imaging/scaling.py
+index 538daf0..1a853cd 100644
+--- a/src/plone/app/imaging/scaling.py
++++ b/src/plone/app/imaging/scaling.py
+@@ -79,13 +79,54 @@ def publishTraverse(self, request, name):
+         raise NotFound(self, name, self.request)
+ 
+     def traverse(self, name, furtherPath):
+-        """ used for path traversal, i.e. in zope page templates """
++        """Used for path traversal, i.e. in zope page templates.
++
++        This method is called when you have something like this in a
++        page template:
++
++        <img tal:replace="structure context/@@images/image/mini" />
++
++        What then happens during traversal, is that the traverse method
++        gets called twice: we first traverse to name='image' and then to
++        name='mini'.  The traversal is done by the Zope page template
++        machinery.  There are differences between standard
++        zope.pagetemplate and five.pt (chameleon).  Roughly, it happens
++        like follows.
++
++        With zope.pagetemplate:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ['mini'])
++        tag = new_view.traverse('mini', [])
++
++        And with five.pt:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ('mini', ))
++        tag = new_view.traverse('mini', ())
++        """
+         if not furtherPath:
++            if hasattr(self, '_image_fieldname'):
++                # We have been here before, with the current name argument in
++                # the furtherPath.
++                scale_name = name
++                name = self._image_fieldname
++            else:
++                scale_name = None
+             field = self.context.getField(name)
+-            return field.get(self.context).tag()
+-        image = self.scale(name, furtherPath.pop())
+-        if image is not None:
+-            return image.tag()
++            image = self.scale(name, scale_name)
++            if image is not None:
++                return image.tag()
++            raise TraversalError(self, name)
++        field = self.field(name)
++        if field is not None:
++            # We have an image field of this name.  Store the scale name on
++            # self and return it.  Since there is a furtherPath, we will get
++            # called again in a moment, with this same 'self' with the
++            # _image_fieldname attribute, and with the current furtherPath as
++            # name, and an empty furtherPath.
++            self._image_fieldname = name
++            return self
+         raise TraversalError(self, name)
+ 
+     def make(self, info):
+diff --git a/src/plone/app/imaging/tests/test_new_scaling.py b/src/plone/app/imaging/tests/test_new_scaling.py
+index 75e6ddc..e53b936 100644
+--- a/src/plone/app/imaging/tests/test_new_scaling.py
++++ b/src/plone/app/imaging/tests/test_new_scaling.py
+@@ -5,7 +5,19 @@
+ from unittest import TestSuite, makeSuite
  
  
- 2.2.17 (2015-11-25)
-diff --git a/Products/CMFEditions/interfaces/IPurgePolicy.py b/Products/CMFEditions/interfaces/IPurgePolicy.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/__init__.py b/Products/CMFEditions/tests/__init__.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image1_v0.gif b/Products/CMFEditions/tests/images/Image1_v0.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image1_v1.gif b/Products/CMFEditions/tests/images/Image1_v1.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image1_v2.gif b/Products/CMFEditions/tests/images/Image1_v2.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image1_v3.gif b/Products/CMFEditions/tests/images/Image1_v3.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image2_v0.gif b/Products/CMFEditions/tests/images/Image2_v0.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image2_v1.gif b/Products/CMFEditions/tests/images/Image2_v1.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image2_v2.gif b/Products/CMFEditions/tests/images/Image2_v2.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/images/Image2_v3.gif b/Products/CMFEditions/tests/images/Image2_v3.gif
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/test_ArchivistTool.py b/Products/CMFEditions/tests/test_ArchivistTool.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py b/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/test_IntegrationTests.py b/Products/CMFEditions/tests/test_IntegrationTests.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/test_KeepLastNVersionsTool.py b/Products/CMFEditions/tests/test_KeepLastNVersionsTool.py
-old mode 100755
-new mode 100644
-diff --git a/Products/CMFEditions/tests/test_ModifierRegistryTool.py b/Products/CMFEditions/tests/test_ModifierRegistryTool.py
-old mode 100755
-new mode 100644
-diff --git a/doc/presentations/EPC2005_CMFEditions.sxi b/doc/presentations/EPC2005_CMFEditions.sxi
-old mode 100755
-new mode 100644
-diff --git a/doc/presentations/EPC2006_CMFEditions.sxi b/doc/presentations/EPC2006_CMFEditions.sxi
-old mode 100755
-new mode 100644
-diff --git a/doc/presentations/PloneConf2005_CMFEditions.sxi b/doc/presentations/PloneConf2005_CMFEditions.sxi
-old mode 100755
-new mode 100644
+-class ImageTraverseTests(ImagingTestCase):
++class ImageStandardTraverseTests(ImagingTestCase):
++    # Note: this class is subclassed by ImageChameleonTraverseTests, which
++    # inherits our tests but uses a different traverser.  We use the standard
++    # Zope pagetemplate traverser.
++
++    def traverser(self, view, path=''):
++        # Standard Zope page template traversal uses a list as path.
++        # This is a simplified version specialised for the scaling view.
++        stack = path.split('/')
++        while stack:
++            name = stack.pop(0)
++            view = view.traverse(name, stack)
++        return view
+ 
+     def afterSetUp(self):
+         self.data = self.getImage()
+@@ -16,9 +28,7 @@ def afterSetUp(self):
+ 
+     def traverse(self, path=''):
+         view = self.image.unrestrictedTraverse('@@images')
+-        stack = path.split('/')
+-        name = stack.pop(0)
+-        tag = view.traverse(name, stack)
++        tag = self.traverser(view, path)
+         base = self.image.absolute_url()
+         expected = r'<img src="%s/@@images/([-0-9a-f]{36}).(jpeg|gif|png)" ' \
+             r'alt="foo" title="foo" height="(\d+)" width="(\d+)" />' % base
+@@ -69,6 +79,35 @@ def testCustomSizeChange(self):
+         self.assertEqual(height, 42)
+         self.assertNotEqual(uid1, uid2, 'scale not updated?')
+ 
++
++class ImageChameleonTraverseTests(ImageStandardTraverseTests):
++    # This class inherits all test methods from its parent, but uses the
++    # Chameleon/five.pt traverser.
++
++    def traverser(self, view, path=''):
++        # five.pt/chameleon uses a tuple as path.  This is a simplified
++        # version of BoboAwareZopeTraverse.traverse from five.pt.expressions,
++        # specialised for the scaling view.
++        path_items = tuple(path.split('/'))
++        length = len(path_items)
++        if length:
++            i = 0
++            while i < length:
++                name = path_items[i]
++                i += 1
++                view = view.traverse(name, path_items[i:])
++        return view
++
++
++class ImageTagTests(ImagingTestCase):
++
++    def afterSetUp(self):
++        self.data = self.getImage()
++        self.image = self.folder[self.folder.invokeFactory(
++            'Image', id='foo', image=self.data)]
++        field = self.image.getField('image')
++        self.available = field.getAvailableSizes(self.image)
++
+     def testViewTagMethod(self):
+         folder = self.folder
+         image = folder['foo']
+@@ -315,7 +354,9 @@ def testGetImageSize(self):
+ 
+ def test_suite():
+     return TestSuite([
+-        makeSuite(ImageTraverseTests),
++        makeSuite(ImageStandardTraverseTests),
++        makeSuite(ImageChameleonTraverseTests),
++        makeSuite(ImageTagTests),
+         makeSuite(ImagePublisherTests),
+         makeSuite(ScalesAdapterTests),
+     ])
 
 
-Repository: Products.CMFEditions
+Repository: plone.app.imaging
 
 
-Branch: refs/heads/master
-Date: 2015-11-25T22:48:31+01:00
+Branch: refs/heads/1.0.x
+Date: 2015-11-26T01:06:09+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFEditions/commit/64b3652101cfc6183b47da885b98411a29191a57
+Commit: https://github.com/plone/plone.app.imaging/commit/9022a3d1b17ce1a300d692b83f48a2f09b7eccd8
 
-Preparing release 2.2.18
+Merge pull request #18 from plone/issue_16_1x
 
-[ci skip]
+Issue 16 1.0.x - Fix incompatibilities with five.pt and chameleon
 
 Files changed:
-M CHANGES.rst
-M setup.py
+M docs/HISTORY.txt
+M src/plone/app/imaging/scaling.py
+M src/plone/app/imaging/tests/test_new_scaling.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 075234b..3a47610 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--2.2.18 (unreleased)
-+2.2.18 (2015-11-25)
- -------------------
+diff --git a/docs/HISTORY.txt b/docs/HISTORY.txt
+index 7921bef..c5a4013 100644
+--- a/docs/HISTORY.txt
++++ b/docs/HISTORY.txt
+@@ -6,6 +6,9 @@ Changelog
  
  Fixes:
-diff --git a/setup.py b/setup.py
-index 23ad4cf..a3dafbf 100644
---- a/setup.py
-+++ b/setup.py
-@@ -2,7 +2,7 @@
  
- from setuptools import setup, find_packages
- 
--version = '2.2.18.dev0'
-+version = '2.2.18'
- 
- setup(name='Products.CMFEditions',
-       version=version,
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2015-11-25T22:48:59+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFEditions/commit/e2a023c2653550d3e47a8c52ff2d9707aa8c724d
-
-Back to development: 2.2.19
-
-[ci skip]
-
-Files changed:
-M CHANGES.rst
-M setup.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 3a47610..587a201 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -1,6 +1,18 @@
- Changelog
- =========
- 
-+2.2.19 (unreleased)
-+-------------------
++- Fixed incompatibilities with five.pt and chameleon (closes `#16`_).
++  [rodfersou, maurits]
 +
-+New:
-+
-+- *add item here*
-+
-+Fixes:
-+
-+- *add item here*
-+
-+
- 2.2.18 (2015-11-25)
- -------------------
+ - Fixed 404 NotFound error when accessing image scales via webdav.
+   [maurits]
  
-diff --git a/setup.py b/setup.py
-index a3dafbf..2f52193 100644
---- a/setup.py
-+++ b/setup.py
-@@ -2,7 +2,7 @@
+@@ -239,3 +242,5 @@ Fixes:
  
- from setuptools import setup, find_packages
+ - Initial package structure.
+   [zopeskel]
++
++.. _`#16`: https://github.com/plone/plone.app.imaging/issues/16
+diff --git a/src/plone/app/imaging/scaling.py b/src/plone/app/imaging/scaling.py
+index 538daf0..1a853cd 100644
+--- a/src/plone/app/imaging/scaling.py
++++ b/src/plone/app/imaging/scaling.py
+@@ -79,13 +79,54 @@ def publishTraverse(self, request, name):
+         raise NotFound(self, name, self.request)
  
--version = '2.2.18'
-+version = '2.2.19.dev0'
+     def traverse(self, name, furtherPath):
+-        """ used for path traversal, i.e. in zope page templates """
++        """Used for path traversal, i.e. in zope page templates.
++
++        This method is called when you have something like this in a
++        page template:
++
++        <img tal:replace="structure context/@@images/image/mini" />
++
++        What then happens during traversal, is that the traverse method
++        gets called twice: we first traverse to name='image' and then to
++        name='mini'.  The traversal is done by the Zope page template
++        machinery.  There are differences between standard
++        zope.pagetemplate and five.pt (chameleon).  Roughly, it happens
++        like follows.
++
++        With zope.pagetemplate:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ['mini'])
++        tag = new_view.traverse('mini', [])
++
++        And with five.pt:
++
++        view = <the @@images view for this context>
++        new_view = view.traverse('image', ('mini', ))
++        tag = new_view.traverse('mini', ())
++        """
+         if not furtherPath:
++            if hasattr(self, '_image_fieldname'):
++                # We have been here before, with the current name argument in
++                # the furtherPath.
++                scale_name = name
++                name = self._image_fieldname
++            else:
++                scale_name = None
+             field = self.context.getField(name)
+-            return field.get(self.context).tag()
+-        image = self.scale(name, furtherPath.pop())
+-        if image is not None:
+-            return image.tag()
++            image = self.scale(name, scale_name)
++            if image is not None:
++                return image.tag()
++            raise TraversalError(self, name)
++        field = self.field(name)
++        if field is not None:
++            # We have an image field of this name.  Store the scale name on
++            # self and return it.  Since there is a furtherPath, we will get
++            # called again in a moment, with this same 'self' with the
++            # _image_fieldname attribute, and with the current furtherPath as
++            # name, and an empty furtherPath.
++            self._image_fieldname = name
++            return self
+         raise TraversalError(self, name)
  
- setup(name='Products.CMFEditions',
-       version=version,
+     def make(self, info):
+diff --git a/src/plone/app/imaging/tests/test_new_scaling.py b/src/plone/app/imaging/tests/test_new_scaling.py
+index 75e6ddc..e53b936 100644
+--- a/src/plone/app/imaging/tests/test_new_scaling.py
++++ b/src/plone/app/imaging/tests/test_new_scaling.py
+@@ -5,7 +5,19 @@
+ from unittest import TestSuite, makeSuite
+ 
+ 
+-class ImageTraverseTests(ImagingTestCase):
++class ImageStandardTraverseTests(ImagingTestCase):
++    # Note: this class is subclassed by ImageChameleonTraverseTests, which
++    # inherits our tests but uses a different traverser.  We use the standard
++    # Zope pagetemplate traverser.
++
++    def traverser(self, view, path=''):
++        # Standard Zope page template traversal uses a list as path.
++        # This is a simplified version specialised for the scaling view.
++        stack = path.split('/')
++        while stack:
++            name = stack.pop(0)
++            view = view.traverse(name, stack)
++        return view
+ 
+     def afterSetUp(self):
+         self.data = self.getImage()
+@@ -16,9 +28,7 @@ def afterSetUp(self):
+ 
+     def traverse(self, path=''):
+         view = self.image.unrestrictedTraverse('@@images')
+-        stack = path.split('/')
+-        name = stack.pop(0)
+-        tag = view.traverse(name, stack)
++        tag = self.traverser(view, path)
+         base = self.image.absolute_url()
+         expected = r'<img src="%s/@@images/([-0-9a-f]{36}).(jpeg|gif|png)" ' \
+             r'alt="foo" title="foo" height="(\d+)" width="(\d+)" />' % base
+@@ -69,6 +79,35 @@ def testCustomSizeChange(self):
+         self.assertEqual(height, 42)
+         self.assertNotEqual(uid1, uid2, 'scale not updated?')
+ 
++
++class ImageChameleonTraverseTests(ImageStandardTraverseTests):
++    # This class inherits all test methods from its parent, but uses the
++    # Chameleon/five.pt traverser.
++
++    def traverser(self, view, path=''):
++        # five.pt/chameleon uses a tuple as path.  This is a simplified
++        # version of BoboAwareZopeTraverse.traverse from five.pt.expressions,
++        # specialised for the scaling view.
++        path_items = tuple(path.split('/'))
++        length = len(path_items)
++        if length:
++            i = 0
++            while i < length:
++                name = path_items[i]
++                i += 1
++                view = view.traverse(name, path_items[i:])
++        return view
++
++
++class ImageTagTests(ImagingTestCase):
++
++    def afterSetUp(self):
++        self.data = self.getImage()
++        self.image = self.folder[self.folder.invokeFactory(
++            'Image', id='foo', image=self.data)]
++        field = self.image.getField('image')
++        self.available = field.getAvailableSizes(self.image)
++
+     def testViewTagMethod(self):
+         folder = self.folder
+         image = folder['foo']
+@@ -315,7 +354,9 @@ def testGetImageSize(self):
+ 
+ def test_suite():
+     return TestSuite([
+-        makeSuite(ImageTraverseTests),
++        makeSuite(ImageStandardTraverseTests),
++        makeSuite(ImageChameleonTraverseTests),
++        makeSuite(ImageTagTests),
+         makeSuite(ImagePublisherTests),
+         makeSuite(ScalesAdapterTests),
+     ])
 
 
