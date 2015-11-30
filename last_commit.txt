@@ -1,64 +1,919 @@
-Repository: plone.app.dexterity
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2015-11-29T16:59:40-08:00
-Author: Fulvio Casali (fulv) <fulviocasali@gmail.com>
-Commit: https://github.com/plone/plone.app.dexterity/commit/ddafc6d1e2021ee5564f872a6c3d08b8b8854598
+Date: 2015-11-26T16:46:53+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/plone.api/commit/9a06aaeb4cd9bd0ce77b72122a0343ef07abd124
 
-Fixes #198
+Allow to set/get registry settings from an interface
+
+Fixes:
+https://github.com/plone/plone.api/issues/269
 
 Files changed:
-M docs/advanced/vocabularies.rst
+M docs/CHANGES.rst
+M docs/portal.rst
+M src/plone/api/portal.py
+M src/plone/api/tests/test_portal.py
 
-diff --git a/docs/advanced/vocabularies.rst b/docs/advanced/vocabularies.rst
-index d931332..07aac79 100644
---- a/docs/advanced/vocabularies.rst
-+++ b/docs/advanced/vocabularies.rst
-@@ -61,9 +61,8 @@ in the drop-down list.
- Dynamic sources
- ~~~~~~~~~~~~~~~~
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 9d9f030..a2d1939 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -6,7 +6,9 @@ Changelog
  
--The static vocabulary is obviously a bit limited. Not only is it
--hard-coded in Python, it also does not allow separation of the stored
--values and the labels shown in the selection widget.
-+The static vocabulary is obviously a bit limited, 
-+since it is hard-coded in Python.
+ New:
  
- We can make a one-off dynamic vocabulary using a context source binder.
- This is simply a callable (usually a function or an object with a
+-- *add item here*
++- Allow to set/get registry settings from an interface.
++  https://github.com/plone/plone.api/issues/269
++  [gforcada]
+ 
+ Fixes:
+ 
+diff --git a/docs/portal.rst b/docs/portal.rst
+index 7298645..499fbae 100644
+--- a/docs/portal.rst
++++ b/docs/portal.rst
+@@ -226,6 +226,30 @@ Plone comes with a package ``plone.app.registry`` that provides a common way to
+ 
+     self.assertTrue(api.portal.get_registry_record('my.package.someoption'))
+ 
++One common pattern when using registry records is to define an interface with all the settings.
++:meth:`api.portal.get_registry_record` also allows you to use this pattern.
++
++.. invisible-code-block: python
++
++    from plone.registry.interfaces import IRegistry
++    from plone.api.tests.test_portal import IMyRegistrySettings
++
++    registry = getUtility(IRegistry)
++    registry.registerInterface(IMyRegistrySettings)
++    records = registry.forInterface(IMyRegistrySettings)
++    records.field_one = u'my text'
++
++.. code-block:: python
++
++    from plone import api
++    api.portal.get_registry_record('field_one', interface=IMyRegistrySettings)
++
++.. invisible-code-block: python
++
++    self.assertEqual(
++        api.portal.get_registry_record('field_one', interface=IMyRegistrySettings),
++        u'my text'
++    )
+ 
+ .. _portal_set_registry_record_example:
+ 
+@@ -255,6 +279,30 @@ Plone comes with a package ``plone.app.registry`` that provides a common way to
+ 
+     self.assertFalse(registry['my.package.someoption'])
+ 
++One common pattern when using registry records is to define an interface with all the settings.
++:meth:`api.portal.set_registry_record` also allows you to use this pattern.
++
++
++.. invisible-code-block: python
++
++    from plone.registry.interfaces import IRegistry
++    from plone.api.tests.test_portal import IMyRegistrySettings
++
++    registry = getUtility(IRegistry)
++    registry.registerInterface(IMyRegistrySettings)
++    records = registry.forInterface(IMyRegistrySettings)
++
++.. code-block:: python
++
++    from plone import api
++    api.portal.set_registry_record('field_one', u'new value', interface=IMyRegistrySettings)
++
++.. invisible-code-block: python
++
++    self.assertEqual(
++        api.portal.get_registry_record('field_one', interface=IMyRegistrySettings),
++        u'new value'
++    )
+ 
+ Further reading
+ ---------------
+diff --git a/src/plone/api/portal.py b/src/plone/api/portal.py
+index dbce214..7a3133e 100644
+--- a/src/plone/api/portal.py
++++ b/src/plone/api/portal.py
+@@ -18,6 +18,7 @@
+ from zope.component import providedBy
+ from zope.component.hooks import getSite
+ from zope.globalrequest import getRequest
++from zope.interface.interfaces import IInterface
+ 
+ import pkg_resources
+ 
+@@ -249,19 +250,46 @@ def show_message(message=None, request=None, type='info'):
+ 
+ 
+ @required_parameters('name')
+-def get_registry_record(name=None):
++def get_registry_record(name=None, interface=None):
+     """Get a record value from ``plone.app.registry``
+ 
+     :param name: [required] Name
+     :type name: string
++    :param interface: interface whose attributes are plone.app.registry
++        settings
++    :type interface: zope.interface.Interface
+     :returns: Registry record value
+     :rtype: plone.app.registry registry record
+     :Example: :ref:`portal_get_registry_record_example`
+     """
+     if not isinstance(name, str):
+-        raise InvalidParameterError(u"The parameter has to be a string")
++        raise InvalidParameterError(u"The 'name' parameter has to be a string")
++
++    if interface is not None and not IInterface.providedBy(interface):
++        raise InvalidParameterError(
++            u"The interface parameter has to derive from "
++            u"zope.interface.Interface"
++        )
+ 
+     registry = getUtility(IRegistry)
++
++    if interface is not None:
++        records = registry.forInterface(interface)
++        _marker = object()
++        if getattr(records, name, _marker) == _marker:
++            # Show all records on the interface.
++            records = [key for key in interface.names()]
++            raise InvalidParameterError(
++                "Cannot find a record with name '{0}' on interface {1}.\n"
++                "Did you mean?"
++                "{2}".format(
++                    name,
++                    interface.__identifier__,
++                    '\n'.join(records)
++                )
++            )
++        return registry['{0}.{1}'.format(interface.__identifier__, name)]
++
+     if name not in registry:
+         # Show all records that 'look like' name.
+         # We don't dump the whole list, because it 1500+ items.
+@@ -281,19 +309,52 @@ def get_registry_record(name=None):
+ 
+ 
+ @required_parameters('name', 'value')
+-def set_registry_record(name=None, value=None):
++def set_registry_record(name=None, value=None, interface=None):
+     """Set a record value in the ``plone.app.registry``
+ 
+     :param name: [required] Name of the record
+     :type name: string
+     :param value: [required] Value to set
+     :type value: python primitive
++    :param interface: interface whose attributes are plone.app.registry
++        settings
++    :type interface: zope.interface.Interface
+     :Example: :ref:`portal_set_registry_record_example`
+     """
+     if not isinstance(name, str):
+         raise InvalidParameterError(u"The parameter 'name' has to be a string")
++
++    if interface is not None and not IInterface.providedBy(interface):
++        raise InvalidParameterError(
++            u"The interface parameter has to derive from "
++            u"zope.interface.Interface"
++        )
++
+     registry = getUtility(IRegistry)
+-    if isinstance(name, str):
++
++    if interface is not None:
++        # confirm that the name exists on the interface
++        get_registry_record(name=name, interface=interface)
++
++        from zope.schema._bootstrapinterfaces import WrongType
++        try:
++            registry['{0}.{1}'.format(interface.__identifier__, name)] = value
++        except WrongType:
++            field_type = [
++                f[1]
++                for f in interface.namesAndDescriptions()
++                if f[0] == 'field_one'
++            ][0]
++            raise InvalidParameterError(
++                u"The value parameter for the field {0} needs to be {1}"
++                u"instead of {2}".format(
++                    name,
++                    str(field_type.__class__),
++                    type(value)
++                )
++            )
++
++    elif isinstance(name, str):
+ 
+         # confirm that the record exists before setting the value
+         get_registry_record(name)
+diff --git a/src/plone/api/tests/test_portal.py b/src/plone/api/tests/test_portal.py
+index 55e7d5f..1a6aa93 100644
+--- a/src/plone/api/tests/test_portal.py
++++ b/src/plone/api/tests/test_portal.py
+@@ -17,8 +17,10 @@
+ from plone.registry import field
+ from plone.registry.interfaces import IRegistry
+ from plone.registry.record import Record
++from zope import schema
+ from zope.component import getUtility
+ from zope.component.hooks import setSite
++from zope.interface import Interface
+ from zope.site import LocalSiteManager
+ 
+ import mock
+@@ -27,6 +29,23 @@
+ HAS_PLONE5 = parse_version(env.plone_version()) >= parse_version('5.0b2')
+ 
+ 
++class IMyRegistrySettings(Interface):
++
++    field_one = schema.TextLine(
++        title=u'something',
++        description=u'something else'
++    )
++
++    field_two = schema.TextLine(
++        title=u'something',
++        description=u'something else'
++    )
++
++
++class ImNotAnInterface(object):
++    pass
++
++
+ class TestPloneApiPortal(unittest.TestCase):
+     """Unit tests for getting portal info using plone.api."""
+ 
+@@ -525,6 +544,78 @@ def test_get_invalid_registry_record_suggestions(self):
+         self.assertTrue(exc_str.startswith("Cannot find a record with name"))
+         self.assertTrue('Did you mean?:' in exc_str)
+ 
++    def test_get_registry_record_from_interface(self):
++        """Test that getting a record from an interface works."""
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        self.assertEqual(
++            portal.get_registry_record(
++                'field_one',
++                interface=IMyRegistrySettings
++            ),
++            None,
++        )
++
++    def test_get_invalid_interface_for_registry_record(self):
++        """Test that passing an invalid interface raises an Exception."""
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError):
++            portal.get_registry_record(
++                'something',
++                interface=ImNotAnInterface
++            )
++
++    def test_get_invalid_interface_for_registry_record_msg(self):
++        """Test that a helpful message is shown when passing an invalid
++        interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.get_registry_record(
++                'something',
++                interface=ImNotAnInterface
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("The interface parameter has to "))
++
++    def test_get_invalid_record_in_interface_for_registry_record(self):
++        """Test that trying to get an invalid field from an interface raises
++        an Exception.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.get_registry_record(
++                'non_existing_field',
++                interface=IMyRegistrySettings
++            )
++
++    def test_get_invalid_record_in_interface_for_registry_record_msg(self):
++        """Test that a helpful message is shown when trying to get an invalid
++        field from an interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.get_registry_record(
++                'non_existing_field',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("Cannot find a record with name "))
++        self.assertTrue(exc_str.find(" on interface ") != -1)
++        self.assertTrue(exc_str.find("field_one") != -1)
++        self.assertTrue(exc_str.find("field_two") != -1)
++
+     def test_set_valid_registry_record(self):
+         """Test that setting a valid registry record succeeds."""
+         registry = getUtility(IRegistry)
+@@ -575,3 +666,123 @@ def test_set_invalid_key_type_record(self):
+                 name=['foo', 'bar'],
+                 value=u"baz",
+             )
++
++    def test_set_registry_record_from_interface(self):
++        """Test that setting a value on a record from an interface works."""
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        text = u'random text'
++        portal.set_registry_record(
++            'field_one',
++            text,
++            interface=IMyRegistrySettings
++        )
++        self.assertEqual(
++            portal.get_registry_record(
++                'field_one',
++                interface=IMyRegistrySettings
++            ),
++            text
++        )
++
++    def test_set_registry_record_on_invalid_interface(self):
++        """Test that passing an invalid interface raises an Exception."""
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'something',
++                'value',
++                interface=ImNotAnInterface
++            )
++
++    def test_set_registry_record_on_invalid_interface_msg(self):
++        """Test that a helpful message is shown when passing an invalid
++        interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'something',
++                'value',
++                interface=ImNotAnInterface
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("The interface parameter has to "))
++
++    def test_set_invalid_registry_record_from_interface(self):
++        """Test that trying to set an invalid field from an interface raises
++        an Exception.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'non_existing_field',
++                'value',
++                interface=IMyRegistrySettings
++            )
++
++    def test_set_invalid_registry_record_from_interface_msg(self):
++        """Test that a helpful message is shown when trying to set an invalid
++        field from an interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'non_existing_field',
++                'value',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("Cannot find a record with name "))
++        self.assertTrue(exc_str.find(" on interface ") != -1)
++        self.assertTrue(exc_str.find("field_one") != -1)
++        self.assertTrue(exc_str.find("field_two") != -1)
++
++    def test_set_invalid_value_on_registry_record_from_interface(self):
++        """Test that setting a value not meant for the record raises an
++        Exception..
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'field_one',
++                'value',
++                interface=IMyRegistrySettings
++            )
++
++    def test_set_invalid_value_on_registry_record_from_interface_msg(self):
++        """Test that setting a value not meant for the record raises an
++        Exception..
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'field_one',
++                'value',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(
++            exc_str.startswith("The value parameter for the field")
++        )
++        self.assertTrue(exc_str.find(" needs to be ") != -1)
++        self.assertTrue(exc_str.find("TextLine") != -1)
 
 
-Repository: plone.app.dexterity
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2015-11-29T17:37:57-08:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/12d218337d25967bf83e2aaa345486ffe53ff0f9
+Date: 2015-11-30T10:06:18Z
+Author: Adam Forsythe-Cheasley (adamcheasley) <adam@netsight.co.uk>
+Commit: https://github.com/plone/plone.api/commit/8cc89d45b38b09862630ca200841c6141a63c093
 
-Merge pull request #199 from plone/fulv-patch-1
+Merge pull request #286 from plone/registry-interface-269
 
-Fixes #198
+Allow to set/get registry settings from an interface
 
 Files changed:
-M docs/advanced/vocabularies.rst
+M docs/CHANGES.rst
+M docs/portal.rst
+M src/plone/api/portal.py
+M src/plone/api/tests/test_portal.py
 
-diff --git a/docs/advanced/vocabularies.rst b/docs/advanced/vocabularies.rst
-index d931332..07aac79 100644
---- a/docs/advanced/vocabularies.rst
-+++ b/docs/advanced/vocabularies.rst
-@@ -61,9 +61,8 @@ in the drop-down list.
- Dynamic sources
- ~~~~~~~~~~~~~~~~
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 9d9f030..a2d1939 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -6,7 +6,9 @@ Changelog
  
--The static vocabulary is obviously a bit limited. Not only is it
--hard-coded in Python, it also does not allow separation of the stored
--values and the labels shown in the selection widget.
-+The static vocabulary is obviously a bit limited, 
-+since it is hard-coded in Python.
+ New:
  
- We can make a one-off dynamic vocabulary using a context source binder.
- This is simply a callable (usually a function or an object with a
+-- *add item here*
++- Allow to set/get registry settings from an interface.
++  https://github.com/plone/plone.api/issues/269
++  [gforcada]
+ 
+ Fixes:
+ 
+diff --git a/docs/portal.rst b/docs/portal.rst
+index 7298645..499fbae 100644
+--- a/docs/portal.rst
++++ b/docs/portal.rst
+@@ -226,6 +226,30 @@ Plone comes with a package ``plone.app.registry`` that provides a common way to
+ 
+     self.assertTrue(api.portal.get_registry_record('my.package.someoption'))
+ 
++One common pattern when using registry records is to define an interface with all the settings.
++:meth:`api.portal.get_registry_record` also allows you to use this pattern.
++
++.. invisible-code-block: python
++
++    from plone.registry.interfaces import IRegistry
++    from plone.api.tests.test_portal import IMyRegistrySettings
++
++    registry = getUtility(IRegistry)
++    registry.registerInterface(IMyRegistrySettings)
++    records = registry.forInterface(IMyRegistrySettings)
++    records.field_one = u'my text'
++
++.. code-block:: python
++
++    from plone import api
++    api.portal.get_registry_record('field_one', interface=IMyRegistrySettings)
++
++.. invisible-code-block: python
++
++    self.assertEqual(
++        api.portal.get_registry_record('field_one', interface=IMyRegistrySettings),
++        u'my text'
++    )
+ 
+ .. _portal_set_registry_record_example:
+ 
+@@ -255,6 +279,30 @@ Plone comes with a package ``plone.app.registry`` that provides a common way to
+ 
+     self.assertFalse(registry['my.package.someoption'])
+ 
++One common pattern when using registry records is to define an interface with all the settings.
++:meth:`api.portal.set_registry_record` also allows you to use this pattern.
++
++
++.. invisible-code-block: python
++
++    from plone.registry.interfaces import IRegistry
++    from plone.api.tests.test_portal import IMyRegistrySettings
++
++    registry = getUtility(IRegistry)
++    registry.registerInterface(IMyRegistrySettings)
++    records = registry.forInterface(IMyRegistrySettings)
++
++.. code-block:: python
++
++    from plone import api
++    api.portal.set_registry_record('field_one', u'new value', interface=IMyRegistrySettings)
++
++.. invisible-code-block: python
++
++    self.assertEqual(
++        api.portal.get_registry_record('field_one', interface=IMyRegistrySettings),
++        u'new value'
++    )
+ 
+ Further reading
+ ---------------
+diff --git a/src/plone/api/portal.py b/src/plone/api/portal.py
+index dbce214..7a3133e 100644
+--- a/src/plone/api/portal.py
++++ b/src/plone/api/portal.py
+@@ -18,6 +18,7 @@
+ from zope.component import providedBy
+ from zope.component.hooks import getSite
+ from zope.globalrequest import getRequest
++from zope.interface.interfaces import IInterface
+ 
+ import pkg_resources
+ 
+@@ -249,19 +250,46 @@ def show_message(message=None, request=None, type='info'):
+ 
+ 
+ @required_parameters('name')
+-def get_registry_record(name=None):
++def get_registry_record(name=None, interface=None):
+     """Get a record value from ``plone.app.registry``
+ 
+     :param name: [required] Name
+     :type name: string
++    :param interface: interface whose attributes are plone.app.registry
++        settings
++    :type interface: zope.interface.Interface
+     :returns: Registry record value
+     :rtype: plone.app.registry registry record
+     :Example: :ref:`portal_get_registry_record_example`
+     """
+     if not isinstance(name, str):
+-        raise InvalidParameterError(u"The parameter has to be a string")
++        raise InvalidParameterError(u"The 'name' parameter has to be a string")
++
++    if interface is not None and not IInterface.providedBy(interface):
++        raise InvalidParameterError(
++            u"The interface parameter has to derive from "
++            u"zope.interface.Interface"
++        )
+ 
+     registry = getUtility(IRegistry)
++
++    if interface is not None:
++        records = registry.forInterface(interface)
++        _marker = object()
++        if getattr(records, name, _marker) == _marker:
++            # Show all records on the interface.
++            records = [key for key in interface.names()]
++            raise InvalidParameterError(
++                "Cannot find a record with name '{0}' on interface {1}.\n"
++                "Did you mean?"
++                "{2}".format(
++                    name,
++                    interface.__identifier__,
++                    '\n'.join(records)
++                )
++            )
++        return registry['{0}.{1}'.format(interface.__identifier__, name)]
++
+     if name not in registry:
+         # Show all records that 'look like' name.
+         # We don't dump the whole list, because it 1500+ items.
+@@ -281,19 +309,52 @@ def get_registry_record(name=None):
+ 
+ 
+ @required_parameters('name', 'value')
+-def set_registry_record(name=None, value=None):
++def set_registry_record(name=None, value=None, interface=None):
+     """Set a record value in the ``plone.app.registry``
+ 
+     :param name: [required] Name of the record
+     :type name: string
+     :param value: [required] Value to set
+     :type value: python primitive
++    :param interface: interface whose attributes are plone.app.registry
++        settings
++    :type interface: zope.interface.Interface
+     :Example: :ref:`portal_set_registry_record_example`
+     """
+     if not isinstance(name, str):
+         raise InvalidParameterError(u"The parameter 'name' has to be a string")
++
++    if interface is not None and not IInterface.providedBy(interface):
++        raise InvalidParameterError(
++            u"The interface parameter has to derive from "
++            u"zope.interface.Interface"
++        )
++
+     registry = getUtility(IRegistry)
+-    if isinstance(name, str):
++
++    if interface is not None:
++        # confirm that the name exists on the interface
++        get_registry_record(name=name, interface=interface)
++
++        from zope.schema._bootstrapinterfaces import WrongType
++        try:
++            registry['{0}.{1}'.format(interface.__identifier__, name)] = value
++        except WrongType:
++            field_type = [
++                f[1]
++                for f in interface.namesAndDescriptions()
++                if f[0] == 'field_one'
++            ][0]
++            raise InvalidParameterError(
++                u"The value parameter for the field {0} needs to be {1}"
++                u"instead of {2}".format(
++                    name,
++                    str(field_type.__class__),
++                    type(value)
++                )
++            )
++
++    elif isinstance(name, str):
+ 
+         # confirm that the record exists before setting the value
+         get_registry_record(name)
+diff --git a/src/plone/api/tests/test_portal.py b/src/plone/api/tests/test_portal.py
+index 55e7d5f..1a6aa93 100644
+--- a/src/plone/api/tests/test_portal.py
++++ b/src/plone/api/tests/test_portal.py
+@@ -17,8 +17,10 @@
+ from plone.registry import field
+ from plone.registry.interfaces import IRegistry
+ from plone.registry.record import Record
++from zope import schema
+ from zope.component import getUtility
+ from zope.component.hooks import setSite
++from zope.interface import Interface
+ from zope.site import LocalSiteManager
+ 
+ import mock
+@@ -27,6 +29,23 @@
+ HAS_PLONE5 = parse_version(env.plone_version()) >= parse_version('5.0b2')
+ 
+ 
++class IMyRegistrySettings(Interface):
++
++    field_one = schema.TextLine(
++        title=u'something',
++        description=u'something else'
++    )
++
++    field_two = schema.TextLine(
++        title=u'something',
++        description=u'something else'
++    )
++
++
++class ImNotAnInterface(object):
++    pass
++
++
+ class TestPloneApiPortal(unittest.TestCase):
+     """Unit tests for getting portal info using plone.api."""
+ 
+@@ -525,6 +544,78 @@ def test_get_invalid_registry_record_suggestions(self):
+         self.assertTrue(exc_str.startswith("Cannot find a record with name"))
+         self.assertTrue('Did you mean?:' in exc_str)
+ 
++    def test_get_registry_record_from_interface(self):
++        """Test that getting a record from an interface works."""
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        self.assertEqual(
++            portal.get_registry_record(
++                'field_one',
++                interface=IMyRegistrySettings
++            ),
++            None,
++        )
++
++    def test_get_invalid_interface_for_registry_record(self):
++        """Test that passing an invalid interface raises an Exception."""
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError):
++            portal.get_registry_record(
++                'something',
++                interface=ImNotAnInterface
++            )
++
++    def test_get_invalid_interface_for_registry_record_msg(self):
++        """Test that a helpful message is shown when passing an invalid
++        interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.get_registry_record(
++                'something',
++                interface=ImNotAnInterface
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("The interface parameter has to "))
++
++    def test_get_invalid_record_in_interface_for_registry_record(self):
++        """Test that trying to get an invalid field from an interface raises
++        an Exception.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.get_registry_record(
++                'non_existing_field',
++                interface=IMyRegistrySettings
++            )
++
++    def test_get_invalid_record_in_interface_for_registry_record_msg(self):
++        """Test that a helpful message is shown when trying to get an invalid
++        field from an interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.get_registry_record(
++                'non_existing_field',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("Cannot find a record with name "))
++        self.assertTrue(exc_str.find(" on interface ") != -1)
++        self.assertTrue(exc_str.find("field_one") != -1)
++        self.assertTrue(exc_str.find("field_two") != -1)
++
+     def test_set_valid_registry_record(self):
+         """Test that setting a valid registry record succeeds."""
+         registry = getUtility(IRegistry)
+@@ -575,3 +666,123 @@ def test_set_invalid_key_type_record(self):
+                 name=['foo', 'bar'],
+                 value=u"baz",
+             )
++
++    def test_set_registry_record_from_interface(self):
++        """Test that setting a value on a record from an interface works."""
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        text = u'random text'
++        portal.set_registry_record(
++            'field_one',
++            text,
++            interface=IMyRegistrySettings
++        )
++        self.assertEqual(
++            portal.get_registry_record(
++                'field_one',
++                interface=IMyRegistrySettings
++            ),
++            text
++        )
++
++    def test_set_registry_record_on_invalid_interface(self):
++        """Test that passing an invalid interface raises an Exception."""
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'something',
++                'value',
++                interface=ImNotAnInterface
++            )
++
++    def test_set_registry_record_on_invalid_interface_msg(self):
++        """Test that a helpful message is shown when passing an invalid
++        interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'something',
++                'value',
++                interface=ImNotAnInterface
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("The interface parameter has to "))
++
++    def test_set_invalid_registry_record_from_interface(self):
++        """Test that trying to set an invalid field from an interface raises
++        an Exception.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'non_existing_field',
++                'value',
++                interface=IMyRegistrySettings
++            )
++
++    def test_set_invalid_registry_record_from_interface_msg(self):
++        """Test that a helpful message is shown when trying to set an invalid
++        field from an interface.
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'non_existing_field',
++                'value',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(exc_str.startswith("Cannot find a record with name "))
++        self.assertTrue(exc_str.find(" on interface ") != -1)
++        self.assertTrue(exc_str.find("field_one") != -1)
++        self.assertTrue(exc_str.find("field_two") != -1)
++
++    def test_set_invalid_value_on_registry_record_from_interface(self):
++        """Test that setting a value not meant for the record raises an
++        Exception..
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError):
++            portal.set_registry_record(
++                'field_one',
++                'value',
++                interface=IMyRegistrySettings
++            )
++
++    def test_set_invalid_value_on_registry_record_from_interface_msg(self):
++        """Test that setting a value not meant for the record raises an
++        Exception..
++        """
++        from plone.api.exc import InvalidParameterError
++        registry = getUtility(IRegistry)
++        registry.registerInterface(IMyRegistrySettings)
++
++        with self.assertRaises(InvalidParameterError) as cm:
++            portal.set_registry_record(
++                'field_one',
++                'value',
++                interface=IMyRegistrySettings
++            )
++        exc_str = str(cm.exception)
++
++        # Check if there is an error message.
++        self.assertTrue(
++            exc_str.startswith("The value parameter for the field")
++        )
++        self.assertTrue(exc_str.find(" needs to be ") != -1)
++        self.assertTrue(exc_str.find("TextLine") != -1)
 
 
