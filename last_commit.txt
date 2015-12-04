@@ -2,244 +2,107 @@ Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-12-02T10:23:15+01:00
+Date: 2015-12-03T17:55:50+01:00
 Author: Gagaro (Gagaro) <gagaro42@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/3087285fd26f939ca4d6b0c3cdc648317136e0df
+Commit: https://github.com/plone/plone.app.upgrade/commit/24de09550cffc93337ac062a550de7aeaf4f8df9
 
-fix: getIcon for archetypes
-
-Files changed:
-M CHANGES.rst
-M plone/app/upgrade/v50/final.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 2e466b5..234a551 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -13,6 +13,9 @@ New:
- - extended step to501 with reindexing getIcon (#1226)
-   [fgrcon]
- 
-+- Reindex getIcon for all content types.
-+  [Gagaro]
-+
- - Removed fake kupu tool and related settings and resources.
-   [maurits]
- 
-diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
-index 8208e9f..3788a4a 100644
---- a/plone/app/upgrade/v50/final.py
-+++ b/plone/app/upgrade/v50/final.py
-@@ -50,10 +50,9 @@ def reindex_getIcon(context):
-         catalog = getToolByName(context, 'portal_catalog')
-         search = catalog.unrestrictedSearchResults
-         cnt=0
--        iface = "plone.dexterity.interfaces.IDexterityContent"
--        for brain in search(object_provides=iface):
-+        for brain in search():
-             brain._unrestrictedGetObject().reindexObject(idxs=['getIcon'])
-             cnt += 1
--        logger.info('Reindexed `getIcon` for %s dexterity items' % str(cnt))
-+        logger.info('Reindexed `getIcon` for %s items' % str(cnt))
-     
-     reindex_getIcon(context)
-\ No newline at end of file
-
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2015-12-02T18:41:30+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/72f437a88b91862026bb705748fec660f5fd37ca
-
-only deal with metadata on getIcon migration. should speed up things
+fix: update getIcon metadata only in to501
 
 Files changed:
 M plone/app/upgrade/v50/final.py
 
 diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
-index 3788a4a..15b5dbb 100644
+index 15b5dbb..01beec8 100644
 --- a/plone/app/upgrade/v50/final.py
 +++ b/plone/app/upgrade/v50/final.py
-@@ -41,18 +41,38 @@ def to501(context):
-     """5.0 -> 5.0.1"""
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to501')
- 
--    def reindex_getIcon(context): 
-+    def refresh_getIcon_catalog_metadata(context):
-         """
--        get_icon redefined: now boolean: 
--        true if dexterity item is image or has image field (named 'image') e.g. leadimage 
-+        get_icon redefined: now boolean:
-+        needs to update metadata
-+        true if item is type image or has image field (named 'image')
-+        e.g. leadimage
-         see https://github.com/plone/Products.CMFPlone/issues/1226
--        """ 
--        catalog = getToolByName(context, 'portal_catalog')
--        search = catalog.unrestrictedSearchResults
--        cnt=0
--        for brain in search():
--            brain._unrestrictedGetObject().reindexObject(idxs=['getIcon'])
--            cnt += 1
-+        """
-+        # Attention, this relies heavily on catalog internals.
+@@ -57,20 +57,27 @@ def refresh_getIcon_catalog_metadata(context):
+         # get the more hidden, inner (real) catalog implementation
+         catalog = zcatalog._catalog
+         try:
++            # Get the getIcon index value and
+             # check if there is a getIcon at all, this may not exist in some
+             # customizations, who knows, but always exists in default Plone
+-            catalog.names.index('getIcon')
++            metadata_index = catalog.names.index('getIcon')
+         except ValueError:
+             logger.info('`getIcon` not in metadata, skip upgrade step')
+             return
 +
-+        # get the more visible zcatalog
-+        zcatalog = getToolByName(context, 'portal_catalog')
 +
-+        # get the more hidden, inner (real) catalog implementation
-+        catalog = zcatalog._catalog
-+        try:
-+            # check if there is a getIcon at all, this may not exist in some
-+            # customizations, who knows, but always exists in default Plone
-+            catalog.names.index('getIcon')
-+        except ValueError:
-+            logger.info('`getIcon` not in metadata, skip upgrade step')
-+            return
-+        cnt = 0
-+        # search whole catalog
-+        for brain in zcatalog.unrestrictedSearchResults():
-+            # create and apply metadata
-+            catalog.data[brain.getRID()] = catalog.recordify(
-+                # wake up object
-+                brain._unrestrictedGetObject()
-+            )
-+            cnt += 1  # we are curious
-+        # done
+         cnt = 0
+         # search whole catalog
+         for brain in zcatalog.unrestrictedSearchResults():
+-            # create and apply metadata
+-            catalog.data[brain.getRID()] = catalog.recordify(
+-                # wake up object
+-                brain._unrestrictedGetObject()
+-            )
++            # First get the new value
++            obj = brain._unrestrictedGetObject()
++            new_value = bool(getattr(obj.aq_base, 'image', False))
++
++            # We can now update the record with the new getIcon value
++            record = list(catalog.data[brain.getRID()])
++            record[metadata_index] = new_value
++            catalog.data[brain.getRID()] = tuple(record)
++
+             cnt += 1  # we are curious
+         # done
          logger.info('Reindexed `getIcon` for %s items' % str(cnt))
--    
--    reindex_getIcon(context)
-\ No newline at end of file
-+
-+    refresh_getIcon_catalog_metadata(context)
 
 
 Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2015-12-02T18:46:32+01:00
+Date: 2015-12-04T15:26:56+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/ec43e83589529c1254cd7a0c4f0fc09a40640fe5
+Commit: https://github.com/plone/plone.app.upgrade/commit/c6bb01d8122fd28dadc10c903caefbab3739e3b9
 
-cleanup changelog
+Merge pull request #62 from plone/fix-getIcon-to501
+
+fix: update getIcon metadata only in to501
 
 Files changed:
-M CHANGES.rst
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 234a551..68cce28 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,11 +10,9 @@ New:
-   plone/Products.CMFPlone#124
-   [fgrcon]
-   
--- extended step to501 with reindexing getIcon (#1226)
--  [fgrcon]
--
--- Reindex getIcon for all content types.
--  [Gagaro]
-+- extended step to501 to recreate metadata for getIcon, see 
-+  plone/Products.CMFPlone#1226, #58, #60, #61
-+  [fgrcon, gagaro, jensens]
- 
- - Removed fake kupu tool and related settings and resources.
-   [maurits]
-
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2015-12-03T12:42:37+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/0c33e74d686082e91325c4b6cb6b58c89cff2b14
-
-Merge pull request #61 from plone/fix-geticon-archetypes
-
-fix: getIcon for archetypes
-
-Files changed:
-M CHANGES.rst
 M plone/app/upgrade/v50/final.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 2e466b5..68cce28 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,8 +10,9 @@ New:
-   plone/Products.CMFPlone#124
-   [fgrcon]
-   
--- extended step to501 with reindexing getIcon (#1226)
--  [fgrcon]
-+- extended step to501 to recreate metadata for getIcon, see 
-+  plone/Products.CMFPlone#1226, #58, #60, #61
-+  [fgrcon, gagaro, jensens]
- 
- - Removed fake kupu tool and related settings and resources.
-   [maurits]
 diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
-index 8208e9f..15b5dbb 100644
+index 15b5dbb..01beec8 100644
 --- a/plone/app/upgrade/v50/final.py
 +++ b/plone/app/upgrade/v50/final.py
-@@ -41,19 +41,38 @@ def to501(context):
-     """5.0 -> 5.0.1"""
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to501')
- 
--    def reindex_getIcon(context): 
-+    def refresh_getIcon_catalog_metadata(context):
-         """
--        get_icon redefined: now boolean: 
--        true if dexterity item is image or has image field (named 'image') e.g. leadimage 
-+        get_icon redefined: now boolean:
-+        needs to update metadata
-+        true if item is type image or has image field (named 'image')
-+        e.g. leadimage
-         see https://github.com/plone/Products.CMFPlone/issues/1226
--        """ 
--        catalog = getToolByName(context, 'portal_catalog')
--        search = catalog.unrestrictedSearchResults
--        cnt=0
--        iface = "plone.dexterity.interfaces.IDexterityContent"
--        for brain in search(object_provides=iface):
--            brain._unrestrictedGetObject().reindexObject(idxs=['getIcon'])
--            cnt += 1
--        logger.info('Reindexed `getIcon` for %s dexterity items' % str(cnt))
--    
--    reindex_getIcon(context)
-\ No newline at end of file
-+        """
-+        # Attention, this relies heavily on catalog internals.
+@@ -57,20 +57,27 @@ def refresh_getIcon_catalog_metadata(context):
+         # get the more hidden, inner (real) catalog implementation
+         catalog = zcatalog._catalog
+         try:
++            # Get the getIcon index value and
+             # check if there is a getIcon at all, this may not exist in some
+             # customizations, who knows, but always exists in default Plone
+-            catalog.names.index('getIcon')
++            metadata_index = catalog.names.index('getIcon')
+         except ValueError:
+             logger.info('`getIcon` not in metadata, skip upgrade step')
+             return
 +
-+        # get the more visible zcatalog
-+        zcatalog = getToolByName(context, 'portal_catalog')
 +
-+        # get the more hidden, inner (real) catalog implementation
-+        catalog = zcatalog._catalog
-+        try:
-+            # check if there is a getIcon at all, this may not exist in some
-+            # customizations, who knows, but always exists in default Plone
-+            catalog.names.index('getIcon')
-+        except ValueError:
-+            logger.info('`getIcon` not in metadata, skip upgrade step')
-+            return
-+        cnt = 0
-+        # search whole catalog
-+        for brain in zcatalog.unrestrictedSearchResults():
-+            # create and apply metadata
-+            catalog.data[brain.getRID()] = catalog.recordify(
-+                # wake up object
-+                brain._unrestrictedGetObject()
-+            )
-+            cnt += 1  # we are curious
-+        # done
-+        logger.info('Reindexed `getIcon` for %s items' % str(cnt))
+         cnt = 0
+         # search whole catalog
+         for brain in zcatalog.unrestrictedSearchResults():
+-            # create and apply metadata
+-            catalog.data[brain.getRID()] = catalog.recordify(
+-                # wake up object
+-                brain._unrestrictedGetObject()
+-            )
++            # First get the new value
++            obj = brain._unrestrictedGetObject()
++            new_value = bool(getattr(obj.aq_base, 'image', False))
 +
-+    refresh_getIcon_catalog_metadata(context)
++            # We can now update the record with the new getIcon value
++            record = list(catalog.data[brain.getRID()])
++            record[metadata_index] = new_value
++            catalog.data[brain.getRID()] = tuple(record)
++
+             cnt += 1  # we are curious
+         # done
+         logger.info('Reindexed `getIcon` for %s items' % str(cnt))
 
 
