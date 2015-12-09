@@ -49,7 +49,7 @@ All about PLIPS
 
 **I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up.
-    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `following link <https://dev.plone.org/report/24>`_.
+    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `following link <https://github.com/plone/Products.CMFPlone/labels/04%20type%3A%20enhancement>`_ (Here is the `old link <https://dev.plone.org/report/24>`_ for reference).
     Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list <https://lists.plone.org/mailman/listinfo/plone-framework-team>`_ and sending a quick email.
     Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`.
     Thank you in advance!
@@ -106,7 +106,10 @@ please contact a member of the framework team personally or ask for help on the 
 
 A PLIP is just a ticket with a special template.
 To get started,
-`open a new ticket <https://dev.plone.org/newticket>`_ and select "PLIP" as the ticket type.
+open a new ticket on Github in the plone/Products.CMFPlone repository using a issuetemplate template by clicking the following link `http://issuetemplate.com/#/plone/Products.CMFPlone/PLIP`_.
+Try to fill all fields.
+If not all are applicable, leave some out.
+After submitting, select "enhancement" for the issues tag.
 A new ticket template will reload and you should plan to fill in all of the fields.
 
 When writing a PLIP,
