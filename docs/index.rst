@@ -21,8 +21,10 @@ Submitting the agreement is easy (and will soon be easier) and if you want quick
 go into :doc:`irc <culture>` and ask one of the repo admins to give you access with a scanned copy of the agreement.
 They will get you going as fast as possible!
 
-Table of Awesome
-----------------
+
+Contents
+========
+
 .. toctree::
    :maxdepth: 2
 
@@ -37,8 +39,9 @@ Table of Awesome
    updateme
    git
 
-Others
-------
+
+Additional Material
+===================
 
 These are some documents using as reference for this documentation.
 
@@ -51,4 +54,4 @@ These are some documents using as reference for this documentation.
    mrdeveloper
    plipreview
 
-Our coding style guides are located at the `style guide section <https://github.com/plone/documentation/tree/5.0/develop/styleguide>`_ on docs.plone.org. 
+Our coding style guides are located at the `style guide section <https://github.com/plone/documentation/tree/5.0/develop/styleguide>`_ on docs.plone.org.
