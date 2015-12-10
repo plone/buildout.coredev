@@ -140,9 +140,7 @@ How much would a non-GPL version of Plone cost?
   and protect the GPL version of Plone.
 
 .. _http://plone.org/foundation/contributors-agreement/agreement.pdf: http://plone.org/foundation/contributors-agreement/agreement.pdf
-.. _http://dev.plone.org/plone: http://dev.plone.org/plone
 .. _https://github.com/plone: https://github.com/plone
-.. _http://dev.plone.org/collective: http://dev.plone.org/collective
 .. _https://github.com/collective: https://github.com/collective
 .. _Policy for Contributor Agreements and Patches : http://plone.org/foundation/materials/foundation-resolutions/patch-policy-052011
 
