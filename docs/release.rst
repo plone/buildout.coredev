@@ -21,11 +21,11 @@ This happens by enforcing Python packaging best practices and then making automa
 
 * Each package must have README.rst with links to the version control repository and issue tracker
 
-* CHANGES.txt (docs/HISTORY.txt in some packages) must be always up-to-date and must contain list of functional changes which may affect package users.
+* CHANGES.rst (docs/HISTORY.rst respectively .txt in some packages) must be always up-to-date and must contain list of functional changes which may affect package users.
 
-* CHANGES.txt must contain release dates
+* CHANGES.rst must contain release dates
 
-* README.rst and CHANGES.txt must be visible on PyPi
+* README.rst and CHANGES.rst must be visible on PyPi
 
 * Released eggs must contain generated gettext .mo files, but these files must not be committed to the repository (files can be created with *zest.pocompile* addon)
 
