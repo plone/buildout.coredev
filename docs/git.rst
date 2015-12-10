@@ -1,18 +1,35 @@
 .. -*- coding: utf-8 -*-
 
-==================
-git best practices
-==================
-Collection of best practices that would help the overall community to work with git more efficiently.
+===========================
+Working with git and GitHub
+===========================
 
-Basics
-======
+
+The Plone git workflow & branching model
+========================================
+
+Our repository on GitHub has the following layout:
+
+* **feature branches**: all development for new features must be done in
+  dedicated branches, normally one branch per feature,
+* **master branch**: when features get completed they are merged into the
+  master branch; bugfixes are commited directly on the master branch,
+* **tags**: whenever we create a new release we tag the repository so we can
+  later re-trace our steps, re-release versions, etc.
+
+
+
+Git Basics
+==========
+
 Some introductory definitions and concepts,
 if you are already familiar enough with git,
 head to next section: :ref:`general-guidelines-label`.
 
-Working model
--------------
+
+Mental working model
+--------------------
+
 In ``git``
 (as well as all modern `DVCS <http://en.wikipedia.org/wiki/Distributed_revision_control>`_),
 distributing changes to others is a two steps process
@@ -38,8 +55,10 @@ Just push your changes whenever you are sure they are what you,
 and others,
 expect them to be.
 
+
 Concepts
 --------
+
 In git there are:
 
 commits
@@ -72,8 +91,10 @@ Stash
   extremely useful in some scenarios,
   see further below for examples.
 
+
 Branches
 --------
+
 Another great feature of DVCS is cheap branching,
 i.e. branching in git is effortless and really useful.
 As it's no longer too much effort to branch,
@@ -91,6 +112,7 @@ Further documentation:
 
 Commands
 --------
+
 Some of the most useful/common commands
 (note that most of them have switches that enhance/*completely twist* their functionality):
 
@@ -215,13 +237,16 @@ reflog
 
    Extremely useful once a bad interactive rebase has happened.
 
+
 .. _general-guidelines-label:
 
 General guidelines
 ==================
 
+
 Pulling code
 ------------
+
 Let's compare this two histories::
 
     *   3333333 (HEAD, master) Merge branch 'feature-branch' into master
@@ -269,8 +294,10 @@ This happens if you have not properly configured ``git pull``.
 By default it does a ``merge`` meaning that an extra commit is always added,
 tangling the history and making this more complex when looking back for what happened there.
 
+
 How to solve it?
 ^^^^^^^^^^^^^^^^
+
 *ALWAYS* do a :command:`git pull --rebase` when fetching new code,
 configure git to do always so with::
 
@@ -290,8 +317,10 @@ http://www.slideshare.net/michalczyzcs3b/git-merge-vs-rebase-miksturait-4
 Just search for ``git merge vs rebase``,
 you will find plenty of literature.
 
+
 Reviewing your changes
 ----------------------
+
 After hacking for some minutes/hours/days you are finished and about to commit your changes,
 great!
 
@@ -319,8 +348,10 @@ And please,
 do remember the gold metric about reviewing code:
 http://www.osnews.com/story/19266/WTFs_m
 
+
 One commit does one thing
 ^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Repeat with me:
 *One commit does one thing*.
 Period.
@@ -379,13 +410,17 @@ Following this advice will:
 - make your changes easy to be reviewed
 - make later on lookups on those changes easy to follow
 
+
 Making commits
 --------------
+
 For commit messages see:
 `plone API guidelines <http://docs.plone.org/develop/plone.api/docs/contribute/conventions.html#git-commit-message-style>`_.
 
+
 Adding references to issues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Always add the full URL to the issue/pull request you are fixing/referring to.
 
 Maybe within the git repository it makes sense,
@@ -407,8 +442,10 @@ It would be far better if the commit goes instead like::
 
     Fixes: https://github.com/plone/plone.app.discussion/issue/999
 
+
 Bad examples
 ^^^^^^^^^^^^
+
 Some bad examples of commit messages:
 https://github.com/plone/plone.app.content/commit/0f3a6c65b2018e0ecc65d0ad1581e345f17e531b
 
@@ -440,8 +477,10 @@ you are given enough information of what changes have been made,
 when comparing the commit message and the actual code.
 Does the commit message match the code changed?
 
+
 Before pushing commits
 ----------------------
+
 Code is reviewed,
 spread into nice isolated commits,
 descriptive enough commit messages are written,
@@ -465,12 +504,16 @@ commit messages could get some improvements,
 that you forgot to add a reference to an issue,
 etc.
 
+
 Pull requests
 =============
+
 Some specific tips and best practices for pull requests.
+
 
 Always rebase
 -------------
+
 Always rebase on top of the branch you want your changes to be merged before sending a pull request,
 and as your pull request is still pending to be merged and the master branch evolves,
 keep rebasing it.
@@ -496,8 +539,10 @@ See the history example above: :ref:`general-guidelines-label`.
 Unfortunately the flat view from GitHub prevents us from seeing that,
 which is a shame.
 
+
 One line one commit
 -------------------
+
 On a series of commits make sure the same code line is not changed twice,
 the worst thing you can do to the one reviewing your changes,
 is to make him/her spend time reviewing some code changes that one the next commit are changed again to do something else.
@@ -505,8 +550,10 @@ is to make him/her spend time reviewing some code changes that one the next comm
 It will not only make your commits smaller,
 but it will also make it easy to do atomic commits.
 
+
 No cleanup commits please
 -------------------------
+
 *On the context of a pull request*
 
 Ask yourself: What relation does a cleanup commit,
@@ -538,8 +585,10 @@ so maybe a :command:`git blame` will report that within that test method,
 there are +5 related current commits to check,
 not nice right?
 
-interactive
-^^^^^^^^^^^
+
+Squashing commits
+^^^^^^^^^^^^^^^^^
+
 To fix the previous example,
 run the following command::
 
@@ -569,6 +618,7 @@ git will already reorder the commits as you already want.
 
 No side changes
 ---------------
+
 That's an extension to the previous point.
 
 Keeping pull requests simple and to the point,
@@ -578,12 +628,16 @@ will make your changes easier to understand and easier to follow.
 Again this applies:
 http://www.osnews.com/story/19266/WTFs_m
 
+
 Recipes
 =======
+
 Assorted list of tips and tricks.
+
 
 Change branches with uncommitted changes
 ----------------------------------------
+
 **Situation:** you are working on a pull request and while working on it founds that some cleanups are needed,
 how to proceed forward?
 
@@ -608,15 +662,37 @@ Command line version::
     git stash pop # or git reset HEAD^ if you did a git commit --amend -m"TMP"
     # if needed, fix the conflicts, with patience and practise that's a piece of cake once you are used to
 
-git visual applications
+
+Git visual applications
 -----------------------
+
 Not everyone is a fan of the command line,
 for them there is a list of GUI clients on the official git website:
 
 http://git-scm.com/downloads/guis
 
+
+Enhanced git prompt
+-------------------
+
+Do one (or more) of the following:
+
+* http://clalance.blogspot.com/2011/10/git-bash-prompts-and-tab-completion.html
+* http://en.newinstance.it/2010/05/23/git-autocompletion-and-enhanced-bash-prompt/
+* http://gitready.com/advanced/2009/02/05/bash-auto-completion.html
+
+
+Git dotfiles
+------------
+
+Plone developers have dotfiles similar to these:
+https://github.com/plone/plone.dotfiles.
+
+
+
 Learn more
 ==========
+
 What's here is just the tip of the iceberg,
 there's plenty of git knowledge on the web.
 
@@ -625,3 +701,4 @@ A few good further resources are listed here
 
 - official online git book: `Pro Git <http://git-scm.com/book/en/v2>`_
 - PyCon 2015 talk: `Advanced git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_
+

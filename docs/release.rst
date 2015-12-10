@@ -1,8 +1,43 @@
 .. -*- coding: utf-8 -*-
 
-=====================
-Plone Release Process
-=====================
+=========================
+The Plone release process
+=========================
+
+
+Release process for Plone packages
+==================================
+
+To keep the Plone software stack maintainable, the Python egg release process must be automated to high degree.
+This happens by enforcing Python packaging best practices and then making automated releases using the `zest.releaser <https://github.com/zestsoftware/zest.releaser/>`_  tool.
+
+* Anyone with necessary PyPi permissions must be able to make a new release by running the ``fullrelease`` command
+
+... which includes ...
+
+* All releases must be hosted on PyPi
+
+* All versions must be tagged at version control
+
+* Each package must have README.rst with links to the version control repository and issue tracker
+
+* CHANGES.txt (docs/HISTORY.txt in some packages) must be always up-to-date and must contain list of functional changes which may affect package users.
+
+* CHANGES.txt must contain release dates
+
+* README.rst and CHANGES.txt must be visible on PyPi
+
+* Released eggs must contain generated gettext .mo files, but these files must not be committed to the repository (files can be created with *zest.pocompile* addon)
+
+* ``.gitignore`` and ``MANIFEST.in`` must reflect the files going to egg (must include page template, po files)
+
+More information
+
+* `High quality automated package releases for Python with zest.releaser <http://opensourcehacker.com/2012/08/14/high-quality-automated-package-releases-for-python-with-zest-releaser/>`_.
+
+
+Plone core release process checklist
+====================================
 
 1. Check Jenkins Status
 
@@ -95,3 +130,4 @@ This step might become obsolete in the future if we do the check for every singl
   - Check to make sure the user has permission to upload the release to
     pypi
   - Update versions.cfg/checkouts.cfg after the package is released. (#)
+
