@@ -200,8 +200,8 @@ General Rules
 
     * Have clear code
 
-    * Follow our style guides: For Plone the `Plone coding style guide <https://github.com/plone/plone.api/blob/master/docs/contribute/conventions.rst>`_, for JavaScript the `The Patternslib coding style guide <http://patternslib.com/pattern-styleguide/#main-content>`_ and for the Documentation the `Documentation Styleguide <https://github.com/plone/documentation/blob/5.0/about/documentation_styleguide.rst>`_.
-      Use Python, JavaScript and other code linting plugins in your editor.
+    * Follow our style guides: `Style Guides <https://github.com/plone/documentation/tree/5.0/develop/styleguide>`_.
+      For convenience and better code quality use Python, JavaScript and other code linting plugins in your editor.
 
     * `Be tested <http://docs.plone.org/manage/deploying/testing_tuning/testing_and_debugging/index.html>`_
 
