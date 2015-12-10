@@ -52,7 +52,7 @@ All about PLIPS
 
 **I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up.
-    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the GitHub issue page for Products.CMFPlone for `issues tagged with "03 type: feature"<https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature>`_.
+    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the GitHub issue page for Products.CMFPlone for `issues tagged with "03 type: feature (plip)"<https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature%20%28plip%29>`_.
     For reference to old PLIPs see the `deprecated Trac tracker <https://dev.plone.org/report/24>`_.
     Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list`_ and sending a quick email.
     Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`.
@@ -117,7 +117,7 @@ To get started,
 open a new issue by using the `issuetemplate web service <http://issuetemplate.com/#/plone/Products.CMFPlone/PLIP>`_.
 You have to login with your GitHub account to use the issuetemplate service.
 Fill in all applicable fields.
-After submitting, select the tag "03 type: feature" for the issues.
+After submitting, select the tag "03 type: feature (plip)" for the issues.
 
 When writing a PLIP,
 be as specific and to-the-point as you can.
