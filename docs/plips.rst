@@ -52,7 +52,7 @@ All about PLIPS
 
 **I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up.
-    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the GitHub issue page for Products.CMFPlone for `issues tagged with "03 type: feature (plip)"<https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature%20%28plip%29>`_.
+    Simply ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the GitHub issue page for Products.CMFPlone for `issues tagged with "03 type: feature (plip)" <https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature%20%28plip%29>`_.
     For reference to old PLIPs see the `deprecated Trac tracker <https://dev.plone.org/report/24>`_.
     Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list`_ and sending a quick email.
     Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`.
@@ -223,11 +223,11 @@ In file :file:`plips/plip-1234-widget-frobbing.cfg`::
  auto-checkout +=
      plone.somepackage
      plone.app.someotherpackage
- 
+
  [sources]
  plone.somepackage = git git://github.com/plone/plone.somepackage.git branch=plip-1234-widget-frobbing
  plone.app.someotherpackage = git git://github.com/plone/plone.app.somepackage.git branch=plip-1234-widget-frobbing
- 
+
  [instance]
  eggs +=
      plone.somepackage

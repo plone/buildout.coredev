@@ -238,7 +238,7 @@ Phew! We are in the home stretch.
 How about a last minute checklist:
 
  * Did you fix the original bug?
- * Is your code consistent with our :doc:`style`?
+ * Is your code consistent with our :doc:`/develop/styleguide/index`?
  * Did you remove any extra code and lingering pdbs?
  * Did you write a test case for that bug?
  * Are all test cases for the modules(s) and for Plone passing?
