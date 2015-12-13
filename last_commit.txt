@@ -1,520 +1,450 @@
-Repository: Products.ATContentTypes
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.1.x
-Date: 2015-12-13T21:43:16+01:00
+Branch: refs/heads/4.3.x
+Date: 2015-10-23T16:41:50+02:00
 Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.ATContentTypes/commit/985bf5dc30da82be705922580c46442f4a9ad0f1
+Commit: https://github.com/plone/Products.CMFPlone/commit/4cedc63342161c7da0919fbdefa059a34a88a9bb
 
-Backport CSRF fix from @vangheem
+Backport CSRF fix from @ebrehault
 
-Original commit: https://github.com/plone/Products.ATContentTypes/commit/2958b34ec5f97a14f4c1e3136b5b92608f3ec3fb
+Original commit: https://github.com/plone/Products.ATContentTypes/commit/2eb817c5791540c5cf19b8dac7323c5c351fc431
 
 Files changed:
-M CHANGES.rst
-M Products/ATContentTypes/tests/atctftestcase.py
-M Products/ATContentTypes/tests/editing.txt
-M Products/ATContentTypes/tests/portaltype_criterion.txt
-M Products/ATContentTypes/tests/test_atdocument.py
-M Products/ATContentTypes/tests/test_atfolder.py
-M Products/ATContentTypes/tests/uploading.txt
+M Products/CMFPlone/skins/plone_scripts/createObject.cpy
+M docs/CHANGES.rst
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index df96f8b..eafa3d1 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 2.1.18 (unreleased)
- -------------------
+diff --git a/Products/CMFPlone/skins/plone_scripts/createObject.cpy b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
+index beabdf4..8de0040 100644
+--- a/Products/CMFPlone/skins/plone_scripts/createObject.cpy
++++ b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
+@@ -17,6 +17,8 @@ response = REQUEST.response
+ response.setHeader('Expires', 'Sat, 01 Jan 2000 00:00:00 GMT')
+ response.setHeader('Cache-Control', 'no-cache')
  
--- Nothing changed yet.
-+- Backport CSRF fixes.
-+  [vangheem] [gforcada]
- 
- 
- 2.1.17 (2015-09-28)
-diff --git a/Products/ATContentTypes/tests/atctftestcase.py b/Products/ATContentTypes/tests/atctftestcase.py
-index 7d3861a..49894c2 100644
---- a/Products/ATContentTypes/tests/atctftestcase.py
-+++ b/Products/ATContentTypes/tests/atctftestcase.py
-@@ -1,3 +1,6 @@
-+from zope.component import getUtility
-+from plone.keyring.interfaces import IKeyManager
++authenticator = context.restrictedTraverse("@@authenticator")
 +
- from Products.ATContentTypes.tests import atcttestcase
+ if id is None:
+     id = context.generateUniqueId(type_name)
+ else:
+@@ -37,7 +39,7 @@ if not fti.queryMethodID('edit'):
+ if type_name in context.portal_factory.getFactoryTypes():
+     new_url = 'portal_factory/' + type_name + '/' + id
+     if state.getStatus() != 'success_no_edit':
+-        new_url = new_url + '/edit'
++        new_url = new_url + '/edit?_authenticator='  + authenticator.token()
+     state.set(status='factory', next_action='redirect_to:string:%s' % new_url)
+     # If there's an issue with object creation, let the factory handle it
+     return state
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index a3bc00d..8422052 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -28,6 +28,8 @@ Changelog
+ - Add syndication for plone.app.contenttypes collections.
+   [do3cc]
  
- from Products.CMFCore.utils import getToolByName
-@@ -7,6 +10,12 @@
++- Add CSRF authenticator in createObject script
++  [ebrehault]
  
- from Products.ATContentTypes.config import HAS_LINGUA_PLONE
- 
-+import hmac
-+try:
-+    from hashlib import sha1 as sha
-+except ImportError:
-+    import sha
-+
- 
- class IntegrationTestCase(atcttestcase.ATCTFunctionalSiteTestCase):
- 
-@@ -33,6 +42,16 @@ def setupTestObject(self):
-         self.obj_url = self.obj.absolute_url()
-         self.obj_path = '/%s' % self.obj.absolute_url(1)
- 
-+    def getAuthToken(self, user=default_user):
-+        manager = getUtility(IKeyManager)
-+        try:
-+            ring = manager[u"_forms"]
-+        except KeyError:
-+            ring = manager[u'_system']
-+
-+        secret = ring.random()
-+        return hmac.new(secret, user, sha).hexdigest()
-+
- 
- class ATCTIntegrationTestCase(IntegrationTestCase):
-     """Integration tests for view and edit templates
-@@ -51,9 +70,11 @@ def setupTestObject(self):
- 
-     def test_createObject(self):
-         # create an object using the createObject script
--        response = self.publish(self.folder_path +
--                                '/createObject?type_name=%s' % self.portal_type,
--                                self.basic_auth)
-+        auth = self.getAuthToken()
-+        response = self.publish(
-+            '%s/createObject?type_name=%s&_authenticator=%s' % (
-+                self.folder_path, self.portal_type, auth),
-+            self.basic_auth)
- 
-         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
- 
-@@ -61,7 +82,7 @@ def test_createObject(self):
- 
-         self.assertTrue(body.startswith(self.folder_url), body)
-         # The url may end with /edit or /atct_edit depending on method aliases
--        self.assertTrue(body.endswith('edit'), body)
-+        self.assertTrue('edit' in body, body)
- 
-         # Perform the redirect
-         edit_form_path = body[len(self.app.REQUEST.SERVER_URL):]
-@@ -78,7 +99,10 @@ def check_newly_created(self):
- 
-     def test_edit_view(self):
-         # edit should work
--        response = self.publish('%s/atct_edit' % self.obj_path, self.basic_auth)
-+        response = self.publish(
-+            '%s/atct_edit?_authenticator=%s' % (
-+                self.obj_path, self.getAuthToken()),
-+            self.basic_auth)
-         self.assertEqual(response.getStatus(), 200)  # OK
- 
-     def test_base_view(self):
-diff --git a/Products/ATContentTypes/tests/editing.txt b/Products/ATContentTypes/tests/editing.txt
-index 2baa469..c604966 100644
---- a/Products/ATContentTypes/tests/editing.txt
-+++ b/Products/ATContentTypes/tests/editing.txt
-@@ -37,7 +37,8 @@ We'll try and set the title (a required field) to the empty string:
-   
-   >>> document.Schema().getField('title').required
-   1
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Title').value = ''
-   >>> browser.getControl('Save').click()
- 
-@@ -56,7 +57,8 @@ we want to make sure all of them are validated.
- 
-   >>> document.Schema().getField('title').schemata
-   'categorization'
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Title').value = ''
-   >>> browser.getControl('Save').click()
-   >>> document.title_or_id()
-@@ -70,7 +72,8 @@ Buttons name verification
- 
- Let's verify that the buttons have the correct name:
-   
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Save').name
-   'form.button.save'
-   
-@@ -95,7 +98,8 @@ and change the schemata of one of its fields
-   >>> document.Schema().getField('text').schemata
-   'someschemata'
-   
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Next').name
-   'form.button.next'
-   
-diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
-index 8056f99..1f86447 100644
---- a/Products/ATContentTypes/tests/portaltype_criterion.txt
-+++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
-@@ -52,7 +52,7 @@ We edit the criteria:
- 
-     >>> browser.getLink('Criteria').click()
-     >>> browser.url
--    'http://nohost/plone/my-collection/criterion_edit_form'
-+    'http://nohost/plone/my-collection/criterion_edit_form?_auth...'
-     >>> 'Add New Search Criteria' in browser.contents
-     True
- 
-@@ -103,7 +103,7 @@ We now view the collection.
- 
-     >>> browser.getLink('View').click()
-     >>> browser.url
--    'http://nohost/plone/my-collection/'
-+    'http://nohost/plone/my-collection/?_auth...'
- 
- The test document should be in the collection.
- 
-diff --git a/Products/ATContentTypes/tests/test_atdocument.py b/Products/ATContentTypes/tests/test_atdocument.py
-index c943e7c..8a220ae 100644
---- a/Products/ATContentTypes/tests/test_atdocument.py
-+++ b/Products/ATContentTypes/tests/test_atdocument.py
-@@ -275,16 +275,17 @@ class TestATDocumentFunctional(atctftestcase.ATCTIntegrationTestCase):
-     def test_id_change_on_initial_edit(self):
-         """Make sure Id is taken from title on initial edit and not otherwise"""
-         # first create an object using the createObject script
--
--        response = self.publish(self.folder_path +
--                                '/createObject?type_name=%s' % self.portal_type,
--                                self.basic_auth)
-+        auth = self.getAuthToken()
-+        response = self.publish(
-+            '%s/createObject?type_name=%s&_authenticator=%s' % (
-+                self.folder_path, self.portal_type, auth),
-+            self.basic_auth)
- 
-         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
- 
-         location = response.getHeader('Location')
-         self.assertTrue(location.startswith(self.folder_url), location)
--        self.assertTrue(location.endswith('edit'), location)
-+        self.assertTrue('edit' in location, location)
- 
-         # Perform the redirect
-         edit_form_path = location[len(self.app.REQUEST.SERVER_URL):]
-@@ -299,12 +300,12 @@ def test_id_change_on_initial_edit(self):
-         new_obj_path = '/%s' % new_obj.absolute_url(1)
-         self.assertEqual(new_obj.checkCreationFlag(), True)  # object is not yet edited
- 
--        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % (new_obj_path, obj_title,), self.basic_auth)  # Edit object
-+        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % (new_obj_path, obj_title, auth), self.basic_auth)  # Edit object
-         self.assertEqual(response.getStatus(), 302)  # OK
-         self.assertEqual(new_obj.getId(), new_id)  # does id match
-         self.assertEqual(new_obj.checkCreationFlag(), False)  # object is fully created
-         new_title = "Second Title"
--        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % ('/%s' % new_obj.absolute_url(1), new_title,), self.basic_auth)  # Edit object
-+        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % ('/%s' % new_obj.absolute_url(1), new_title, auth), self.basic_auth)  # Edit object
-         self.assertEqual(response.getStatus(), 302)  # OK
-         self.assertEqual(new_obj.getId(), new_id)  # id shouldn't have changed
- 
-diff --git a/Products/ATContentTypes/tests/test_atfolder.py b/Products/ATContentTypes/tests/test_atfolder.py
-index 3b19ff3..2d03905 100644
---- a/Products/ATContentTypes/tests/test_atfolder.py
-+++ b/Products/ATContentTypes/tests/test_atfolder.py
-@@ -9,6 +9,7 @@
- from OFS.interfaces import IOrderedContainer as IOrderedContainer
- from Products.ATContentTypes.interfaces import IATFolder
- from Products.ATContentTypes.interfaces import IATBTreeFolder
-+from Products.PloneTestCase.setup import portal_owner
- 
- from zope.interface.verify import verifyObject
- from Products.ATContentTypes.interfaces import ISelectableConstrainTypes
-@@ -175,9 +176,10 @@ def test_dynamic_view_without_view(self):
- 
-     def test_selectViewTemplate(self):
-         # create an object using the createObject script
--        self.publish(self.obj_path +
--                     '/selectViewTemplate?templateId=atct_album_view',
--                     self.owner_auth)
-+        self.publish(
-+            '%s/selectViewTemplate?templateId=atct_album_view&_authenticator=%s' % (
-+                self.obj_path, self.getAuthToken(portal_owner)),
-+            self.owner_auth)
-         self.assertEqual(self.obj.getLayout(), 'atct_album_view')
- 
- tests.append(TestATFolderFunctional)
-diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
-index d76b1b9..e410db9 100644
---- a/Products/ATContentTypes/tests/uploading.txt
-+++ b/Products/ATContentTypes/tests/uploading.txt
-@@ -75,7 +75,7 @@ Now try to empty value of the text field (#7324)
- 
-     >>> browser.getLink('Edit').click()
-     >>> browser.url
--    'http://nohost/plone/test-collection/edit'
-+    'http://nohost/plone/test-collection/edit?_auth...'
-     >>> browser.getControl(name='text').value = ''
-     >>> browser.getControl('Save').click()
-     >>> 'file contents' in browser.contents
+ 4.3.7 (2015-09-27)
+ ------------------
 
 
-Repository: Products.ATContentTypes
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.1.x
-Date: 2015-12-13T21:43:29+01:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.ATContentTypes/commit/9732ec48e9151cd649e403980b6dbca027e82c4e
+Branch: refs/heads/4.3.x
+Date: 2015-10-29T21:44:18+01:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/11e75b3a89e1548146d75d60aeffebf498ba0151
 
-Merge branch 'csrffixes' into 2.1.x
+fix browser default tests: disable CSRF transform rather than try to normalize output
 
 Files changed:
-M CHANGES.rst
-M Products/ATContentTypes/tests/atctftestcase.py
-M Products/ATContentTypes/tests/editing.txt
-M Products/ATContentTypes/tests/portaltype_criterion.txt
-M Products/ATContentTypes/tests/test_atdocument.py
-M Products/ATContentTypes/tests/test_atfolder.py
-M Products/ATContentTypes/tests/uploading.txt
+M Products/CMFPlone/tests/testBrowserDefault.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index df96f8b..eafa3d1 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -4,7 +4,8 @@ Changelog
- 2.1.18 (unreleased)
- -------------------
+diff --git a/Products/CMFPlone/tests/testBrowserDefault.py b/Products/CMFPlone/tests/testBrowserDefault.py
+index 5874eed..5afbe9f 100644
+--- a/Products/CMFPlone/tests/testBrowserDefault.py
++++ b/Products/CMFPlone/tests/testBrowserDefault.py
+@@ -32,12 +32,20 @@ def afterSetUp(self):
+         # make sure the test request gets marked with the default theme layer
+         notify(BeforeTraverseEvent(self.portal, self.app.REQUEST))
  
--- Nothing changed yet.
-+- Backport CSRF fixes.
-+  [vangheem] [gforcada]
- 
- 
- 2.1.17 (2015-09-28)
-diff --git a/Products/ATContentTypes/tests/atctftestcase.py b/Products/ATContentTypes/tests/atctftestcase.py
-index 7d3861a..49894c2 100644
---- a/Products/ATContentTypes/tests/atctftestcase.py
-+++ b/Products/ATContentTypes/tests/atctftestcase.py
-@@ -1,3 +1,6 @@
-+from zope.component import getUtility
-+from plone.keyring.interfaces import IKeyManager
++        # disable auto-CSRF
++        from plone.protect import auto
++        auto.CSRF_DISABLED = True
 +
- from Products.ATContentTypes.tests import atcttestcase
+         _createObjectByType('Folder',       self.portal, 'atctfolder')
+         _createObjectByType('Document',     self.portal, 'atctdocument')
+         _createObjectByType('File',         self.portal, 'atctfile')
  
+         self.putils = getToolByName(self.portal, "plone_utils")
+ 
++    def tearDown(self):
++        from plone.protect import auto
++        auto.CSRF_DISABLED = False
++
+     def compareLayoutVsView(self, obj, path="", viewaction=None):
+         if viewaction is None:
+             if hasattr(aq_base(obj), 'getLayout'):
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/4.3.x
+Date: 2015-10-29T21:58:41+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/a08c02c7b6d59c68303e78e38478bc523660f360
+
+Let set_own_login_name use the update(Own)LoginName method from PAS.
+
+Part of PLIP 13419.
+
+Files changed:
+M Products/CMFPlone/utils.py
+M docs/CHANGES.rst
+
+diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
+index dcbe753..3e608b6 100644
+--- a/Products/CMFPlone/utils.py
++++ b/Products/CMFPlone/utils.py
+@@ -24,11 +24,9 @@
+ from App.ImageFile import ImageFile
+ from DateTime import DateTime
+ from DateTime.interfaces import DateTimeError
+-from Products.CMFCore.permissions import SetOwnProperties
+ from Products.CMFCore.permissions import ManageUsers
+ from Products.CMFCore.utils import ToolInit as CMFCoreToolInit
  from Products.CMFCore.utils import getToolByName
-@@ -7,6 +10,12 @@
+-from Products.PlonePAS.interfaces.plugins import IUserManagement
  
- from Products.ATContentTypes.config import HAS_LINGUA_PLONE
+ import transaction
  
-+import hmac
-+try:
-+    from hashlib import sha1 as sha
-+except ImportError:
-+    import sha
+@@ -654,38 +652,16 @@ def isLinked(obj):
+ def set_own_login_name(member, loginname):
+     """Allow the user to set his/her own login name.
+ 
+-    PLIP9214 Does someone know a better spot to put this function?  It
+-    could be added to Products.CMFCore.MemberDataTool.MemberData.
++    If you have the Manage Users permission, you can update the login
++    name of another member too, though the name of this function is a
++    bit weird then.  Historical accident.
+     """
+-    if member.getUserName() == loginname:
+-        # Bail out early as there is nothing to do.  Also this avoids
+-        # an Unauthorized error when this is a member that has just
+-        # been registered.
++    pas = getToolByName(member, 'acl_users')
++    mt = getToolByName(member, 'portal_membership')
++    if member.getId() == mt.getAuthenticatedMember().getId():
++        pas.updateOwnLoginName(loginname)
+         return
+     secman = getSecurityManager()
+-    if not secman.checkPermission(SetOwnProperties, member):
+-        raise Unauthorized('You are not allowed to update this login name')
+-    membership = getToolByName(member, 'portal_membership')
+-    if member != membership.getAuthenticatedMember() \
+-        and not secman.checkPermission(ManageUsers, member):
++    if not secman.checkPermission(ManageUsers, member):
+         raise Unauthorized('You can only change your OWN login name.')
+-    acl_users = getToolByName(member, 'acl_users')
+-    for plugin_id, userfolder in acl_users.plugins.listPlugins(IUserManagement):
+-        if not hasattr(userfolder, 'updateUser'):
+-            continue
+-        try:
+-            userfolder.updateUser(member.id, loginname)
+-        except KeyError:
+-            continue
+-        else:
+-            return
+-    # PLIP9214: For a user in the zope root we could do something like this:
+-    # userfolder = member.getUser().__parent__.users
+-    # userfolder.updateUser(member.id, loginname)
+-    # But it is probably best not to touch root zope users.
+-    message = ('You are not a Plone member. You are probably '
+-               'registered on the root user folder. Please '
+-               'notify an administrator if this is unexpected.')
+-    log(message,
+-        summary='Could not update login name of user %s.' % member.id)
+-    raise KeyError(message)
++    pas.updateLoginName(member.getId(), loginname)
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 8422052..e05740d 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -31,6 +31,10 @@ Changelog
+ - Add CSRF authenticator in createObject script
+   [ebrehault]
+ 
++- Let set_own_login_name use the update(Own)LoginName method from PAS.
++  Part of PLIP 13419.
++  [maurits]
 +
+ 4.3.7 (2015-09-27)
+ ------------------
  
- class IntegrationTestCase(atcttestcase.ATCTFunctionalSiteTestCase):
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/4.3.x
+Date: 2015-10-29T21:59:13+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/da2ad8d596e57f3f47dd1cc147ea661ca065ae43
+
+crsf fixes
+
+Cherry pick changes from 3a48ae16a108b358eb62cc193e61dace4c9e168e
+
+Files changed:
+M Products/CMFPlone/tests/testEmailLogin.py
+
+diff --git a/Products/CMFPlone/tests/testEmailLogin.py b/Products/CMFPlone/tests/testEmailLogin.py
+index 89f974e..d8e95e6 100644
+--- a/Products/CMFPlone/tests/testEmailLogin.py
++++ b/Products/CMFPlone/tests/testEmailLogin.py
+@@ -90,19 +90,19 @@ def test_get_member_by_login_name(self):
  
-@@ -33,6 +42,16 @@ def setupTestObject(self):
-         self.obj_url = self.obj.absolute_url()
-         self.obj_path = '/%s' % self.obj.absolute_url(1)
+         # Login name and user name start out the same
+         found = get_member_by_login_name(context, PloneTestCase.default_user)
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
  
-+    def getAuthToken(self, user=default_user):
-+        manager = getUtility(IKeyManager)
-+        try:
-+            ring = manager[u"_forms"]
-+        except KeyError:
-+            ring = manager[u'_system']
+         # Change the login name:
+         set_own_login_name(member, 'vanrees')
+         # A member with this user name is still returned:
+         found = get_member_by_login_name(context, PloneTestCase.default_user)
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
+         # With the changed login name we can find the member:
+         found = get_member_by_login_name(context, 'vanrees')
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
+ 
+         # Demonstrate that we can find other members than just the
+         # default user:
+         found = get_member_by_login_name(context, 'portal_owner')
+         member = memship.getMemberById('portal_owner')
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/4.3.x
+Date: 2015-12-13T20:46:02+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/02c35420e7a3d009be4a05c6e02e932d4db829fb
+
+Depend on plone4.csrffixes
+
+Files changed:
+M setup.py
+
+diff --git a/setup.py b/setup.py
+index f67ecb1..eeed865 100644
+--- a/setup.py
++++ b/setup.py
+@@ -121,6 +121,7 @@
+           'plone.registry',
+           'plone.session',
+           'plone.theme',
++          'plone4.csrffixes',
+           'plonetheme.classic',
+           'plonetheme.sunburst',
+           'transaction',
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/4.3.x
+Date: 2015-12-13T21:47:03+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/4e272b2c62d4f007d2ad359079493f4fe29e4af9
+
+Merge branch '4.3.x-crsffixes' into 4.3.x
+
+Files changed:
+M Products/CMFPlone/skins/plone_scripts/createObject.cpy
+M Products/CMFPlone/tests/testBrowserDefault.py
+M Products/CMFPlone/tests/testEmailLogin.py
+M Products/CMFPlone/utils.py
+M docs/CHANGES.rst
+M setup.py
+
+diff --git a/Products/CMFPlone/skins/plone_scripts/createObject.cpy b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
+index beabdf4..8de0040 100644
+--- a/Products/CMFPlone/skins/plone_scripts/createObject.cpy
++++ b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
+@@ -17,6 +17,8 @@ response = REQUEST.response
+ response.setHeader('Expires', 'Sat, 01 Jan 2000 00:00:00 GMT')
+ response.setHeader('Cache-Control', 'no-cache')
+ 
++authenticator = context.restrictedTraverse("@@authenticator")
 +
-+        secret = ring.random()
-+        return hmac.new(secret, user, sha).hexdigest()
+ if id is None:
+     id = context.generateUniqueId(type_name)
+ else:
+@@ -37,7 +39,7 @@ if not fti.queryMethodID('edit'):
+ if type_name in context.portal_factory.getFactoryTypes():
+     new_url = 'portal_factory/' + type_name + '/' + id
+     if state.getStatus() != 'success_no_edit':
+-        new_url = new_url + '/edit'
++        new_url = new_url + '/edit?_authenticator='  + authenticator.token()
+     state.set(status='factory', next_action='redirect_to:string:%s' % new_url)
+     # If there's an issue with object creation, let the factory handle it
+     return state
+diff --git a/Products/CMFPlone/tests/testBrowserDefault.py b/Products/CMFPlone/tests/testBrowserDefault.py
+index 5874eed..5afbe9f 100644
+--- a/Products/CMFPlone/tests/testBrowserDefault.py
++++ b/Products/CMFPlone/tests/testBrowserDefault.py
+@@ -32,12 +32,20 @@ def afterSetUp(self):
+         # make sure the test request gets marked with the default theme layer
+         notify(BeforeTraverseEvent(self.portal, self.app.REQUEST))
+ 
++        # disable auto-CSRF
++        from plone.protect import auto
++        auto.CSRF_DISABLED = True
 +
+         _createObjectByType('Folder',       self.portal, 'atctfolder')
+         _createObjectByType('Document',     self.portal, 'atctdocument')
+         _createObjectByType('File',         self.portal, 'atctfile')
  
- class ATCTIntegrationTestCase(IntegrationTestCase):
-     """Integration tests for view and edit templates
-@@ -51,9 +70,11 @@ def setupTestObject(self):
+         self.putils = getToolByName(self.portal, "plone_utils")
  
-     def test_createObject(self):
-         # create an object using the createObject script
--        response = self.publish(self.folder_path +
--                                '/createObject?type_name=%s' % self.portal_type,
--                                self.basic_auth)
-+        auth = self.getAuthToken()
-+        response = self.publish(
-+            '%s/createObject?type_name=%s&_authenticator=%s' % (
-+                self.folder_path, self.portal_type, auth),
-+            self.basic_auth)
++    def tearDown(self):
++        from plone.protect import auto
++        auto.CSRF_DISABLED = False
++
+     def compareLayoutVsView(self, obj, path="", viewaction=None):
+         if viewaction is None:
+             if hasattr(aq_base(obj), 'getLayout'):
+diff --git a/Products/CMFPlone/tests/testEmailLogin.py b/Products/CMFPlone/tests/testEmailLogin.py
+index 89f974e..d8e95e6 100644
+--- a/Products/CMFPlone/tests/testEmailLogin.py
++++ b/Products/CMFPlone/tests/testEmailLogin.py
+@@ -90,19 +90,19 @@ def test_get_member_by_login_name(self):
  
-         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
+         # Login name and user name start out the same
+         found = get_member_by_login_name(context, PloneTestCase.default_user)
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
  
-@@ -61,7 +82,7 @@ def test_createObject(self):
+         # Change the login name:
+         set_own_login_name(member, 'vanrees')
+         # A member with this user name is still returned:
+         found = get_member_by_login_name(context, PloneTestCase.default_user)
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
+         # With the changed login name we can find the member:
+         found = get_member_by_login_name(context, 'vanrees')
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
  
-         self.assertTrue(body.startswith(self.folder_url), body)
-         # The url may end with /edit or /atct_edit depending on method aliases
--        self.assertTrue(body.endswith('edit'), body)
-+        self.assertTrue('edit' in body, body)
+         # Demonstrate that we can find other members than just the
+         # default user:
+         found = get_member_by_login_name(context, 'portal_owner')
+         member = memship.getMemberById('portal_owner')
+-        self.assertEqual(member, found)
++        self.assertEqual(member.id, found.id)
+diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
+index dcbe753..3e608b6 100644
+--- a/Products/CMFPlone/utils.py
++++ b/Products/CMFPlone/utils.py
+@@ -24,11 +24,9 @@
+ from App.ImageFile import ImageFile
+ from DateTime import DateTime
+ from DateTime.interfaces import DateTimeError
+-from Products.CMFCore.permissions import SetOwnProperties
+ from Products.CMFCore.permissions import ManageUsers
+ from Products.CMFCore.utils import ToolInit as CMFCoreToolInit
+ from Products.CMFCore.utils import getToolByName
+-from Products.PlonePAS.interfaces.plugins import IUserManagement
  
-         # Perform the redirect
-         edit_form_path = body[len(self.app.REQUEST.SERVER_URL):]
-@@ -78,7 +99,10 @@ def check_newly_created(self):
+ import transaction
  
-     def test_edit_view(self):
-         # edit should work
--        response = self.publish('%s/atct_edit' % self.obj_path, self.basic_auth)
-+        response = self.publish(
-+            '%s/atct_edit?_authenticator=%s' % (
-+                self.obj_path, self.getAuthToken()),
-+            self.basic_auth)
-         self.assertEqual(response.getStatus(), 200)  # OK
+@@ -654,38 +652,16 @@ def isLinked(obj):
+ def set_own_login_name(member, loginname):
+     """Allow the user to set his/her own login name.
  
-     def test_base_view(self):
-diff --git a/Products/ATContentTypes/tests/editing.txt b/Products/ATContentTypes/tests/editing.txt
-index 2baa469..c604966 100644
---- a/Products/ATContentTypes/tests/editing.txt
-+++ b/Products/ATContentTypes/tests/editing.txt
-@@ -37,7 +37,8 @@ We'll try and set the title (a required field) to the empty string:
-   
-   >>> document.Schema().getField('title').required
-   1
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Title').value = ''
-   >>> browser.getControl('Save').click()
+-    PLIP9214 Does someone know a better spot to put this function?  It
+-    could be added to Products.CMFCore.MemberDataTool.MemberData.
++    If you have the Manage Users permission, you can update the login
++    name of another member too, though the name of this function is a
++    bit weird then.  Historical accident.
+     """
+-    if member.getUserName() == loginname:
+-        # Bail out early as there is nothing to do.  Also this avoids
+-        # an Unauthorized error when this is a member that has just
+-        # been registered.
++    pas = getToolByName(member, 'acl_users')
++    mt = getToolByName(member, 'portal_membership')
++    if member.getId() == mt.getAuthenticatedMember().getId():
++        pas.updateOwnLoginName(loginname)
+         return
+     secman = getSecurityManager()
+-    if not secman.checkPermission(SetOwnProperties, member):
+-        raise Unauthorized('You are not allowed to update this login name')
+-    membership = getToolByName(member, 'portal_membership')
+-    if member != membership.getAuthenticatedMember() \
+-        and not secman.checkPermission(ManageUsers, member):
++    if not secman.checkPermission(ManageUsers, member):
+         raise Unauthorized('You can only change your OWN login name.')
+-    acl_users = getToolByName(member, 'acl_users')
+-    for plugin_id, userfolder in acl_users.plugins.listPlugins(IUserManagement):
+-        if not hasattr(userfolder, 'updateUser'):
+-            continue
+-        try:
+-            userfolder.updateUser(member.id, loginname)
+-        except KeyError:
+-            continue
+-        else:
+-            return
+-    # PLIP9214: For a user in the zope root we could do something like this:
+-    # userfolder = member.getUser().__parent__.users
+-    # userfolder.updateUser(member.id, loginname)
+-    # But it is probably best not to touch root zope users.
+-    message = ('You are not a Plone member. You are probably '
+-               'registered on the root user folder. Please '
+-               'notify an administrator if this is unexpected.')
+-    log(message,
+-        summary='Could not update login name of user %s.' % member.id)
+-    raise KeyError(message)
++    pas.updateLoginName(member.getId(), loginname)
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index a3bc00d..e05740d 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -28,6 +28,12 @@ Changelog
+ - Add syndication for plone.app.contenttypes collections.
+   [do3cc]
  
-@@ -56,7 +57,8 @@ we want to make sure all of them are validated.
++- Add CSRF authenticator in createObject script
++  [ebrehault]
++
++- Let set_own_login_name use the update(Own)LoginName method from PAS.
++  Part of PLIP 13419.
++  [maurits]
  
-   >>> document.Schema().getField('title').schemata
-   'categorization'
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Title').value = ''
-   >>> browser.getControl('Save').click()
-   >>> document.title_or_id()
-@@ -70,7 +72,8 @@ Buttons name verification
- 
- Let's verify that the buttons have the correct name:
-   
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Save').name
-   'form.button.save'
-   
-@@ -95,7 +98,8 @@ and change the schemata of one of its fields
-   >>> document.Schema().getField('text').schemata
-   'someschemata'
-   
--  >>> browser.open(url+'/edit')
-+  >>> browser.open(url)
-+  >>> browser.getLink('Edit').click()
-   >>> browser.getControl('Next').name
-   'form.button.next'
-   
-diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
-index 8056f99..1f86447 100644
---- a/Products/ATContentTypes/tests/portaltype_criterion.txt
-+++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
-@@ -52,7 +52,7 @@ We edit the criteria:
- 
-     >>> browser.getLink('Criteria').click()
-     >>> browser.url
--    'http://nohost/plone/my-collection/criterion_edit_form'
-+    'http://nohost/plone/my-collection/criterion_edit_form?_auth...'
-     >>> 'Add New Search Criteria' in browser.contents
-     True
- 
-@@ -103,7 +103,7 @@ We now view the collection.
- 
-     >>> browser.getLink('View').click()
-     >>> browser.url
--    'http://nohost/plone/my-collection/'
-+    'http://nohost/plone/my-collection/?_auth...'
- 
- The test document should be in the collection.
- 
-diff --git a/Products/ATContentTypes/tests/test_atdocument.py b/Products/ATContentTypes/tests/test_atdocument.py
-index c943e7c..8a220ae 100644
---- a/Products/ATContentTypes/tests/test_atdocument.py
-+++ b/Products/ATContentTypes/tests/test_atdocument.py
-@@ -275,16 +275,17 @@ class TestATDocumentFunctional(atctftestcase.ATCTIntegrationTestCase):
-     def test_id_change_on_initial_edit(self):
-         """Make sure Id is taken from title on initial edit and not otherwise"""
-         # first create an object using the createObject script
--
--        response = self.publish(self.folder_path +
--                                '/createObject?type_name=%s' % self.portal_type,
--                                self.basic_auth)
-+        auth = self.getAuthToken()
-+        response = self.publish(
-+            '%s/createObject?type_name=%s&_authenticator=%s' % (
-+                self.folder_path, self.portal_type, auth),
-+            self.basic_auth)
- 
-         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
- 
-         location = response.getHeader('Location')
-         self.assertTrue(location.startswith(self.folder_url), location)
--        self.assertTrue(location.endswith('edit'), location)
-+        self.assertTrue('edit' in location, location)
- 
-         # Perform the redirect
-         edit_form_path = location[len(self.app.REQUEST.SERVER_URL):]
-@@ -299,12 +300,12 @@ def test_id_change_on_initial_edit(self):
-         new_obj_path = '/%s' % new_obj.absolute_url(1)
-         self.assertEqual(new_obj.checkCreationFlag(), True)  # object is not yet edited
- 
--        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % (new_obj_path, obj_title,), self.basic_auth)  # Edit object
-+        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % (new_obj_path, obj_title, auth), self.basic_auth)  # Edit object
-         self.assertEqual(response.getStatus(), 302)  # OK
-         self.assertEqual(new_obj.getId(), new_id)  # does id match
-         self.assertEqual(new_obj.checkCreationFlag(), False)  # object is fully created
-         new_title = "Second Title"
--        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % ('/%s' % new_obj.absolute_url(1), new_title,), self.basic_auth)  # Edit object
-+        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % ('/%s' % new_obj.absolute_url(1), new_title, auth), self.basic_auth)  # Edit object
-         self.assertEqual(response.getStatus(), 302)  # OK
-         self.assertEqual(new_obj.getId(), new_id)  # id shouldn't have changed
- 
-diff --git a/Products/ATContentTypes/tests/test_atfolder.py b/Products/ATContentTypes/tests/test_atfolder.py
-index 3b19ff3..2d03905 100644
---- a/Products/ATContentTypes/tests/test_atfolder.py
-+++ b/Products/ATContentTypes/tests/test_atfolder.py
-@@ -9,6 +9,7 @@
- from OFS.interfaces import IOrderedContainer as IOrderedContainer
- from Products.ATContentTypes.interfaces import IATFolder
- from Products.ATContentTypes.interfaces import IATBTreeFolder
-+from Products.PloneTestCase.setup import portal_owner
- 
- from zope.interface.verify import verifyObject
- from Products.ATContentTypes.interfaces import ISelectableConstrainTypes
-@@ -175,9 +176,10 @@ def test_dynamic_view_without_view(self):
- 
-     def test_selectViewTemplate(self):
-         # create an object using the createObject script
--        self.publish(self.obj_path +
--                     '/selectViewTemplate?templateId=atct_album_view',
--                     self.owner_auth)
-+        self.publish(
-+            '%s/selectViewTemplate?templateId=atct_album_view&_authenticator=%s' % (
-+                self.obj_path, self.getAuthToken(portal_owner)),
-+            self.owner_auth)
-         self.assertEqual(self.obj.getLayout(), 'atct_album_view')
- 
- tests.append(TestATFolderFunctional)
-diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
-index d76b1b9..e410db9 100644
---- a/Products/ATContentTypes/tests/uploading.txt
-+++ b/Products/ATContentTypes/tests/uploading.txt
-@@ -75,7 +75,7 @@ Now try to empty value of the text field (#7324)
- 
-     >>> browser.getLink('Edit').click()
-     >>> browser.url
--    'http://nohost/plone/test-collection/edit'
-+    'http://nohost/plone/test-collection/edit?_auth...'
-     >>> browser.getControl(name='text').value = ''
-     >>> browser.getControl('Save').click()
-     >>> 'file contents' in browser.contents
+ 4.3.7 (2015-09-27)
+ ------------------
+diff --git a/setup.py b/setup.py
+index f67ecb1..eeed865 100644
+--- a/setup.py
++++ b/setup.py
+@@ -121,6 +121,7 @@
+           'plone.registry',
+           'plone.session',
+           'plone.theme',
++          'plone4.csrffixes',
+           'plonetheme.classic',
+           'plonetheme.sunburst',
+           'transaction',
 
 
