@@ -1,450 +1,71 @@
-Repository: Products.CMFPlone
+Repository: plone.app.imaging
 
 
-Branch: refs/heads/4.3.x
-Date: 2015-10-23T16:41:50+02:00
+Branch: refs/heads/1.0.x
+Date: 2015-12-13T23:42:30+01:00
 Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/4cedc63342161c7da0919fbdefa059a34a88a9bb
+Commit: https://github.com/plone/plone.app.imaging/commit/30ca8146b52e36ca1617f6bea873d6007ecc51fe
 
-Backport CSRF fix from @ebrehault
+Revert "Merge branch 'write-on-read' into 1.0.x"
 
-Original commit: https://github.com/plone/Products.ATContentTypes/commit/2eb817c5791540c5cf19b8dac7323c5c351fc431
-
-Files changed:
-M Products/CMFPlone/skins/plone_scripts/createObject.cpy
-M docs/CHANGES.rst
-
-diff --git a/Products/CMFPlone/skins/plone_scripts/createObject.cpy b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-index beabdf4..8de0040 100644
---- a/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-+++ b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-@@ -17,6 +17,8 @@ response = REQUEST.response
- response.setHeader('Expires', 'Sat, 01 Jan 2000 00:00:00 GMT')
- response.setHeader('Cache-Control', 'no-cache')
- 
-+authenticator = context.restrictedTraverse("@@authenticator")
-+
- if id is None:
-     id = context.generateUniqueId(type_name)
- else:
-@@ -37,7 +39,7 @@ if not fti.queryMethodID('edit'):
- if type_name in context.portal_factory.getFactoryTypes():
-     new_url = 'portal_factory/' + type_name + '/' + id
-     if state.getStatus() != 'success_no_edit':
--        new_url = new_url + '/edit'
-+        new_url = new_url + '/edit?_authenticator='  + authenticator.token()
-     state.set(status='factory', next_action='redirect_to:string:%s' % new_url)
-     # If there's an issue with object creation, let the factory handle it
-     return state
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index a3bc00d..8422052 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -28,6 +28,8 @@ Changelog
- - Add syndication for plone.app.contenttypes collections.
-   [do3cc]
- 
-+- Add CSRF authenticator in createObject script
-+  [ebrehault]
- 
- 4.3.7 (2015-09-27)
- ------------------
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2015-10-29T21:44:18+01:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/11e75b3a89e1548146d75d60aeffebf498ba0151
-
-fix browser default tests: disable CSRF transform rather than try to normalize output
+This reverts commit 37f1acdb9745d0fb6ab60c11098f100b9c6a3372, reversing
+changes made to cdb315a94bd2a0903f02be0cb3ac80073ef6a257.
 
 Files changed:
-M Products/CMFPlone/tests/testBrowserDefault.py
-
-diff --git a/Products/CMFPlone/tests/testBrowserDefault.py b/Products/CMFPlone/tests/testBrowserDefault.py
-index 5874eed..5afbe9f 100644
---- a/Products/CMFPlone/tests/testBrowserDefault.py
-+++ b/Products/CMFPlone/tests/testBrowserDefault.py
-@@ -32,12 +32,20 @@ def afterSetUp(self):
-         # make sure the test request gets marked with the default theme layer
-         notify(BeforeTraverseEvent(self.portal, self.app.REQUEST))
- 
-+        # disable auto-CSRF
-+        from plone.protect import auto
-+        auto.CSRF_DISABLED = True
-+
-         _createObjectByType('Folder',       self.portal, 'atctfolder')
-         _createObjectByType('Document',     self.portal, 'atctdocument')
-         _createObjectByType('File',         self.portal, 'atctfile')
- 
-         self.putils = getToolByName(self.portal, "plone_utils")
- 
-+    def tearDown(self):
-+        from plone.protect import auto
-+        auto.CSRF_DISABLED = False
-+
-     def compareLayoutVsView(self, obj, path="", viewaction=None):
-         if viewaction is None:
-             if hasattr(aq_base(obj), 'getLayout'):
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2015-10-29T21:58:41+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a08c02c7b6d59c68303e78e38478bc523660f360
-
-Let set_own_login_name use the update(Own)LoginName method from PAS.
-
-Part of PLIP 13419.
-
-Files changed:
-M Products/CMFPlone/utils.py
-M docs/CHANGES.rst
-
-diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
-index dcbe753..3e608b6 100644
---- a/Products/CMFPlone/utils.py
-+++ b/Products/CMFPlone/utils.py
-@@ -24,11 +24,9 @@
- from App.ImageFile import ImageFile
- from DateTime import DateTime
- from DateTime.interfaces import DateTimeError
--from Products.CMFCore.permissions import SetOwnProperties
- from Products.CMFCore.permissions import ManageUsers
- from Products.CMFCore.utils import ToolInit as CMFCoreToolInit
- from Products.CMFCore.utils import getToolByName
--from Products.PlonePAS.interfaces.plugins import IUserManagement
- 
- import transaction
- 
-@@ -654,38 +652,16 @@ def isLinked(obj):
- def set_own_login_name(member, loginname):
-     """Allow the user to set his/her own login name.
- 
--    PLIP9214 Does someone know a better spot to put this function?  It
--    could be added to Products.CMFCore.MemberDataTool.MemberData.
-+    If you have the Manage Users permission, you can update the login
-+    name of another member too, though the name of this function is a
-+    bit weird then.  Historical accident.
-     """
--    if member.getUserName() == loginname:
--        # Bail out early as there is nothing to do.  Also this avoids
--        # an Unauthorized error when this is a member that has just
--        # been registered.
-+    pas = getToolByName(member, 'acl_users')
-+    mt = getToolByName(member, 'portal_membership')
-+    if member.getId() == mt.getAuthenticatedMember().getId():
-+        pas.updateOwnLoginName(loginname)
-         return
-     secman = getSecurityManager()
--    if not secman.checkPermission(SetOwnProperties, member):
--        raise Unauthorized('You are not allowed to update this login name')
--    membership = getToolByName(member, 'portal_membership')
--    if member != membership.getAuthenticatedMember() \
--        and not secman.checkPermission(ManageUsers, member):
-+    if not secman.checkPermission(ManageUsers, member):
-         raise Unauthorized('You can only change your OWN login name.')
--    acl_users = getToolByName(member, 'acl_users')
--    for plugin_id, userfolder in acl_users.plugins.listPlugins(IUserManagement):
--        if not hasattr(userfolder, 'updateUser'):
--            continue
--        try:
--            userfolder.updateUser(member.id, loginname)
--        except KeyError:
--            continue
--        else:
--            return
--    # PLIP9214: For a user in the zope root we could do something like this:
--    # userfolder = member.getUser().__parent__.users
--    # userfolder.updateUser(member.id, loginname)
--    # But it is probably best not to touch root zope users.
--    message = ('You are not a Plone member. You are probably '
--               'registered on the root user folder. Please '
--               'notify an administrator if this is unexpected.')
--    log(message,
--        summary='Could not update login name of user %s.' % member.id)
--    raise KeyError(message)
-+    pas.updateLoginName(member.getId(), loginname)
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 8422052..e05740d 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -31,6 +31,10 @@ Changelog
- - Add CSRF authenticator in createObject script
-   [ebrehault]
- 
-+- Let set_own_login_name use the update(Own)LoginName method from PAS.
-+  Part of PLIP 13419.
-+  [maurits]
-+
- 4.3.7 (2015-09-27)
- ------------------
- 
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2015-10-29T21:59:13+01:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/da2ad8d596e57f3f47dd1cc147ea661ca065ae43
-
-crsf fixes
-
-Cherry pick changes from 3a48ae16a108b358eb62cc193e61dace4c9e168e
-
-Files changed:
-M Products/CMFPlone/tests/testEmailLogin.py
-
-diff --git a/Products/CMFPlone/tests/testEmailLogin.py b/Products/CMFPlone/tests/testEmailLogin.py
-index 89f974e..d8e95e6 100644
---- a/Products/CMFPlone/tests/testEmailLogin.py
-+++ b/Products/CMFPlone/tests/testEmailLogin.py
-@@ -90,19 +90,19 @@ def test_get_member_by_login_name(self):
- 
-         # Login name and user name start out the same
-         found = get_member_by_login_name(context, PloneTestCase.default_user)
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
- 
-         # Change the login name:
-         set_own_login_name(member, 'vanrees')
-         # A member with this user name is still returned:
-         found = get_member_by_login_name(context, PloneTestCase.default_user)
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
-         # With the changed login name we can find the member:
-         found = get_member_by_login_name(context, 'vanrees')
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
- 
-         # Demonstrate that we can find other members than just the
-         # default user:
-         found = get_member_by_login_name(context, 'portal_owner')
-         member = memship.getMemberById('portal_owner')
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2015-12-13T20:46:02+01:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/02c35420e7a3d009be4a05c6e02e932d4db829fb
-
-Depend on plone4.csrffixes
-
-Files changed:
+M docs/HISTORY.txt
 M setup.py
+M src/plone/app/imaging/traverse.py
 
+diff --git a/docs/HISTORY.txt b/docs/HISTORY.txt
+index 8c55bf7..68079a6 100644
+--- a/docs/HISTORY.txt
++++ b/docs/HISTORY.txt
+@@ -10,8 +10,7 @@ New:
+ 
+ Fixes:
+ 
+-- Disable csrf protection when scale is generated and traversed to.
+-  [vangheem]
++- *add item here*
+ 
+ 
+ 1.0.12 (2015-11-26)
 diff --git a/setup.py b/setup.py
-index f67ecb1..eeed865 100644
+index 533bc47..c4a1176 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -121,6 +121,7 @@
-           'plone.registry',
-           'plone.session',
-           'plone.theme',
-+          'plone4.csrffixes',
-           'plonetheme.classic',
-           'plonetheme.sunburst',
-           'transaction',
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2015-12-13T21:47:03+01:00
-Author: Gil Forcada (gforcada) <gforcada@gnome.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/4e272b2c62d4f007d2ad359079493f4fe29e4af9
-
-Merge branch '4.3.x-crsffixes' into 4.3.x
-
-Files changed:
-M Products/CMFPlone/skins/plone_scripts/createObject.cpy
-M Products/CMFPlone/tests/testBrowserDefault.py
-M Products/CMFPlone/tests/testEmailLogin.py
-M Products/CMFPlone/utils.py
-M docs/CHANGES.rst
-M setup.py
-
-diff --git a/Products/CMFPlone/skins/plone_scripts/createObject.cpy b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-index beabdf4..8de0040 100644
---- a/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-+++ b/Products/CMFPlone/skins/plone_scripts/createObject.cpy
-@@ -17,6 +17,8 @@ response = REQUEST.response
- response.setHeader('Expires', 'Sat, 01 Jan 2000 00:00:00 GMT')
- response.setHeader('Cache-Control', 'no-cache')
+@@ -35,7 +35,6 @@
+         'setuptools',
+         'plone.scale [storage]',
+         'z3c.caching',
+-        'five.globalrequest'
+       ],
+       extras_require = {'test':
+           ['collective.testcaselayer',
+diff --git a/src/plone/app/imaging/traverse.py b/src/plone/app/imaging/traverse.py
+index e967754..4cfe2c8 100644
+--- a/src/plone/app/imaging/traverse.py
++++ b/src/plone/app/imaging/traverse.py
+@@ -9,9 +9,6 @@
+ from plone.app.imaging.interfaces import IBaseObject
+ from plone.app.imaging.interfaces import IImageScaleHandler
+ from plone.app.imaging.scale import ImageScale
+-from plone.protect.interfaces import IDisableCSRFProtection
+-from zope.interface import alsoProvides
+-from zope.globalrequest import getRequest
  
-+authenticator = context.restrictedTraverse("@@authenticator")
-+
- if id is None:
-     id = context.generateUniqueId(type_name)
- else:
-@@ -37,7 +39,7 @@ if not fti.queryMethodID('edit'):
- if type_name in context.portal_factory.getFactoryTypes():
-     new_url = 'portal_factory/' + type_name + '/' + id
-     if state.getStatus() != 'success_no_edit':
--        new_url = new_url + '/edit'
-+        new_url = new_url + '/edit?_authenticator='  + authenticator.token()
-     state.set(status='factory', next_action='redirect_to:string:%s' % new_url)
-     # If there's an issue with object creation, let the factory handle it
-     return state
-diff --git a/Products/CMFPlone/tests/testBrowserDefault.py b/Products/CMFPlone/tests/testBrowserDefault.py
-index 5874eed..5afbe9f 100644
---- a/Products/CMFPlone/tests/testBrowserDefault.py
-+++ b/Products/CMFPlone/tests/testBrowserDefault.py
-@@ -32,12 +32,20 @@ def afterSetUp(self):
-         # make sure the test request gets marked with the default theme layer
-         notify(BeforeTraverseEvent(self.portal, self.app.REQUEST))
  
-+        # disable auto-CSRF
-+        from plone.protect import auto
-+        auto.CSRF_DISABLED = True
-+
-         _createObjectByType('Folder',       self.portal, 'atctfolder')
-         _createObjectByType('Document',     self.portal, 'atctdocument')
-         _createObjectByType('File',         self.portal, 'atctfile')
- 
-         self.putils = getToolByName(self.portal, "plone_utils")
- 
-+    def tearDown(self):
-+        from plone.protect import auto
-+        auto.CSRF_DISABLED = False
-+
-     def compareLayoutVsView(self, obj, path="", viewaction=None):
-         if viewaction is None:
-             if hasattr(aq_base(obj), 'getLayout'):
-diff --git a/Products/CMFPlone/tests/testEmailLogin.py b/Products/CMFPlone/tests/testEmailLogin.py
-index 89f974e..d8e95e6 100644
---- a/Products/CMFPlone/tests/testEmailLogin.py
-+++ b/Products/CMFPlone/tests/testEmailLogin.py
-@@ -90,19 +90,19 @@ def test_get_member_by_login_name(self):
- 
-         # Login name and user name start out the same
-         found = get_member_by_login_name(context, PloneTestCase.default_user)
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
- 
-         # Change the login name:
-         set_own_login_name(member, 'vanrees')
-         # A member with this user name is still returned:
-         found = get_member_by_login_name(context, PloneTestCase.default_user)
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
-         # With the changed login name we can find the member:
-         found = get_member_by_login_name(context, 'vanrees')
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
- 
-         # Demonstrate that we can find other members than just the
-         # default user:
-         found = get_member_by_login_name(context, 'portal_owner')
-         member = memship.getMemberById('portal_owner')
--        self.assertEqual(member, found)
-+        self.assertEqual(member.id, found.id)
-diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
-index dcbe753..3e608b6 100644
---- a/Products/CMFPlone/utils.py
-+++ b/Products/CMFPlone/utils.py
-@@ -24,11 +24,9 @@
- from App.ImageFile import ImageFile
- from DateTime import DateTime
- from DateTime.interfaces import DateTimeError
--from Products.CMFCore.permissions import SetOwnProperties
- from Products.CMFCore.permissions import ManageUsers
- from Products.CMFCore.utils import ToolInit as CMFCoreToolInit
- from Products.CMFCore.utils import getToolByName
--from Products.PlonePAS.interfaces.plugins import IUserManagement
- 
- import transaction
- 
-@@ -654,38 +652,16 @@ def isLinked(obj):
- def set_own_login_name(member, loginname):
-     """Allow the user to set his/her own login name.
- 
--    PLIP9214 Does someone know a better spot to put this function?  It
--    could be added to Products.CMFCore.MemberDataTool.MemberData.
-+    If you have the Manage Users permission, you can update the login
-+    name of another member too, though the name of this function is a
-+    bit weird then.  Historical accident.
-     """
--    if member.getUserName() == loginname:
--        # Bail out early as there is nothing to do.  Also this avoids
--        # an Unauthorized error when this is a member that has just
--        # been registered.
-+    pas = getToolByName(member, 'acl_users')
-+    mt = getToolByName(member, 'portal_membership')
-+    if member.getId() == mt.getAuthenticatedMember().getId():
-+        pas.updateOwnLoginName(loginname)
-         return
-     secman = getSecurityManager()
--    if not secman.checkPermission(SetOwnProperties, member):
--        raise Unauthorized('You are not allowed to update this login name')
--    membership = getToolByName(member, 'portal_membership')
--    if member != membership.getAuthenticatedMember() \
--        and not secman.checkPermission(ManageUsers, member):
-+    if not secman.checkPermission(ManageUsers, member):
-         raise Unauthorized('You can only change your OWN login name.')
--    acl_users = getToolByName(member, 'acl_users')
--    for plugin_id, userfolder in acl_users.plugins.listPlugins(IUserManagement):
--        if not hasattr(userfolder, 'updateUser'):
--            continue
--        try:
--            userfolder.updateUser(member.id, loginname)
--        except KeyError:
--            continue
--        else:
--            return
--    # PLIP9214: For a user in the zope root we could do something like this:
--    # userfolder = member.getUser().__parent__.users
--    # userfolder.updateUser(member.id, loginname)
--    # But it is probably best not to touch root zope users.
--    message = ('You are not a Plone member. You are probably '
--               'registered on the root user folder. Please '
--               'notify an administrator if this is unexpected.')
--    log(message,
--        summary='Could not update login name of user %s.' % member.id)
--    raise KeyError(message)
-+    pas.updateLoginName(member.getId(), loginname)
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index a3bc00d..e05740d 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -28,6 +28,12 @@ Changelog
- - Add syndication for plone.app.contenttypes collections.
-   [do3cc]
- 
-+- Add CSRF authenticator in createObject script
-+  [ebrehault]
-+
-+- Let set_own_login_name use the update(Own)LoginName method from PAS.
-+  Part of PLIP 13419.
-+  [maurits]
- 
- 4.3.7 (2015-09-27)
- ------------------
-diff --git a/setup.py b/setup.py
-index f67ecb1..eeed865 100644
---- a/setup.py
-+++ b/setup.py
-@@ -121,6 +121,7 @@
-           'plone.registry',
-           'plone.session',
-           'plone.theme',
-+          'plone4.csrffixes',
-           'plonetheme.classic',
-           'plonetheme.sunburst',
-           'transaction',
+ class ImageTraverser(DefaultPublishTraverse):
+@@ -63,10 +60,6 @@ def getScale(self, instance, scale):
+     def createScale(self, instance, scale, width, height, data=None):
+         """ create & return a scaled version of the image as retrieved
+             from the field or optionally given data """
+-        # disable CRSF on scale generation
+-        req = getRequest()
+-        if req:
+-            alsoProvides(req, IDisableCSRFProtection)
+         field = self.context
+         if HAS_PIL and width and height:
+             if data is None:
 
 
