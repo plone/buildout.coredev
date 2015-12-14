@@ -35,6 +35,8 @@ Dependencies
   including development headers.
 
 
+.. _setup-development-environment
+
 Setting up Your Development Environment
 =======================================
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running.
@@ -85,9 +87,6 @@ The line with a * by it will indicate which branch you are currently working on.
 .. important::
    Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages,
    otherwise you will get some weird behavior!
-
-For more information on buildout,
-please see the `collective developer manual documentation on buildout <http://docs.plone.org/old-reference-manuals/buildout/index.html>`_.
 
 
 Jenkins / mr.roboto

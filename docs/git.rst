@@ -414,8 +414,7 @@ Following this advice will:
 Making commits
 --------------
 
-For commit messages see:
-`plone API guidelines <http://docs.plone.org/develop/plone.api/docs/contribute/conventions.html#git-commit-message-style>`_.
+For commit messages see: :ref:`git_commit_message_style_guide`.
 
 
 Adding references to issues

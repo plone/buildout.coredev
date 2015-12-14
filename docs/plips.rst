@@ -200,10 +200,10 @@ General Rules
 
     * Have clear code
 
-    * Follow our style guides: `Style Guides <http://docs.plone.org/develop/styleguide/index.html>`_.
+    * Follow our style guides: :doc:`/develop/styleguide/index`.
       For convenience and better code quality use Python, JavaScript and other code linting plugins in your editor.
 
-    * `Be tested <http://docs.plone.org/develop/testing/index.html>`_
+    * Be tested: :doc:`/develop/testing/index`.
 
 Creating a New PLIP Branch
 --------------------------
