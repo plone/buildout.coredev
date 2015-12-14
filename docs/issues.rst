@@ -71,7 +71,7 @@ Although this technically isn't a buildout issue,
 it happens when running buildout so I'm putting it under buildout issues.
 
 When working with the dev instance,
-especially with all the moving back and forth between github and svn,
+especially with all the moving back and forth between GitHub and svn,
 you may have an old copy of a src package.
 The error looks like::
  

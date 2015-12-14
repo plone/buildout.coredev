@@ -43,7 +43,7 @@ or just revert the commit in order to be able to continue to work.
 Following this practice ensures the build stays green and other developers can continue to work without breaking the first rule.
 
 There might be changes that have been checked in before your last update from the version control that might lead to a build failure in Jenkins in combination with your changes.
-Therefore it is essential that you check out (:command:`git pull`) and run the tests again before you push your changes to github.
+Therefore it is essential that you check out (:command:`git pull`) and run the tests again before you push your changes to GitHub.
 
 Furthermore,
 a common source of errors on check-in is to forget to add some files to the repository.

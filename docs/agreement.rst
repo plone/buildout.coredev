@@ -28,7 +28,7 @@ We do ask that before requesting core access you familiarize yourself a little w
   Technically,
   in order for us to accept your patch you must sign the contributors agreement.
   If you want to contribute fixes,
-  please just sign the agreement and go through the standard github pull request process described below until you feel comfortable to bypass review.
+  please just sign the agreement and go through the standard GitHub pull request process described below until you feel comfortable to bypass review.
   If the ticket is trivial,
   or you're fixing documentation,
   you do not need to sign a contributor's agreement.

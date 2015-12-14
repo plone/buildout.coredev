@@ -6,7 +6,7 @@
 Guidelines for contributing to Plone Core
 =========================================
 
-You probably came here by clicking one of the 'guidelines for contributing' links on github.
+You probably came here by clicking one of the 'guidelines for contributing' links on GitHub.
 So you probably have an issue to report or you want to create a pull request.
 Thanks a lot!
 Let's bring you up to speed with the minimum you need to know to start contributing.

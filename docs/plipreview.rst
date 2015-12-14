@@ -14,7 +14,7 @@ please attach your review to the PLIP ticket itself.
 
 Setting up the environment
 ==========================
-Follow the instructions on `setting up a development environment <http://docs.plone.org/develop/plone-coredev/intro.html#setting-up-your-development-environment>`_ for "Getting the Code".
+Follow the instructions on :ref:`setup-development-environment`.
 You will need to checkout the branch to which the PLIP is assigned.
 Instead of running the buildout with the default buildout file,
 you will run the config specific to that plip::
@@ -89,11 +89,11 @@ Python
 * Does the code adhere to PEP8 standards (more or less)?
 * Are they importing deprecated modules?
 
-Javascript
+JavaScript
 ----------
-* Does the javascript meet our set of javascript standards?
-  See http://docs.plone.org/5/en/develop/addons/javascript.html
-* Does the Javascript work in all currently supported browsers?
+* Does the JavaScript meet our set of JavaScript standards?
+  See our section about :doc:`JavaScript </develop/addons/javascript/index>` and the :doc:`JavaScript styleguide </develop/styleguide/javascript>`.
+* Does the JavaScript work in all currently supported browsers?
   Is it performant?
 
 ME/TAL
