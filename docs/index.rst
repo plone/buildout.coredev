@@ -54,5 +54,5 @@ These are some documents using as reference for this documentation.
    mrdeveloper
    plipreview
 
-Our coding style guides are located at :doc:`/develop/styleguide/index`.
+Our coding style guides are located at the :doc:`Plone Style Guide </develop/styleguide/index>` section.
 

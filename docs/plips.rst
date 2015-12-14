@@ -200,10 +200,10 @@ General Rules
 
     * Have clear code
 
-    * Follow our style guides: :doc:`/develop/styleguide/index`.
+    * :doc:`Follow our style guides </develop/styleguide/index>`.
       For convenience and better code quality use Python, JavaScript and other code linting plugins in your editor.
 
-    * Be tested: :doc:`/develop/testing/index`.
+    * :doc:`Be tested </develop/testing/index>`.
 
 Creating a New PLIP Branch
 --------------------------

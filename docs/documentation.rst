@@ -10,12 +10,12 @@ Documentation of Plone
 The comprehensive resource for Plone documentation is http://docs.plone.org/. The following sections among 
 others are included: 
 
-* :doc:`/working-with-content/index`
-* :doc:`/manage/installing/index`
-* :doc:`/adapt-and-extend/theming/index`
-* :doc:`/develop/index`
+* :doc:`User Manual </working-with-content/index>`
+* :doc:`Installing Plone </manage/installing/index>`
+* :doc:`Theme Reference </adapt-and-extend/theming/index>`
+* :doc:`Developer Manual </develop/index>`
 
-The documentation is hosted on `GitHub <https://github.com/plone/documentation>`_ and information how to contribute can be found at :doc:`/about/contributing`.
+The documentation is hosted on `GitHub <https://github.com/plone/documentation>`_ and information how to contribute can be found at :doc:`Contributing to the documentation </about/contributing>`.
 
 Documenting a package
 =====================
