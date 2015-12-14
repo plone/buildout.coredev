@@ -1,3 +1,9 @@
+.. -*- coding: utf-8 -*-
+
+==========
+Mr. Roboto
+==========
+
 GitHub push
 ===========
 When a push happens on GitHub,
