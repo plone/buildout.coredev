@@ -4,7 +4,7 @@
 How to Update these Docs
 ========================
 
-These documents are currently stored with the coredev buildout in github in :file:`/docs`.
+These documents are currently stored with the coredev buildout in GitHub in :file:`/docs`.
 To update them,
 please checkout the coredev buildout and update there.
 Make the changes on the latest version branch (as of this writing ``5.0``)::

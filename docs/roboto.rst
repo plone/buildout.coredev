@@ -1,12 +1,6 @@
-.. -*- coding: utf-8 -*-
-
-==========
-Mr. Roboto
-==========
-
-Github push
+GitHub push
 ===========
-When a push happens on Github,
+When a push happens on GitHub,
 ``mr.roboto`` is triggered so starts to analyze the push.
 
 * If it's on ``buildout-coredev`` it starts the job of the branch that has been pushed.
@@ -21,7 +15,7 @@ Job finishes
 When jenkins finish a job it does a callback to ``mr.roboto`` in order to :
 
 * If it comes from a ``coredev`` job,
-  all the ``coredev`` jobs related to that push are finished writes a comment on the github commit with all the information
+  all the ``coredev`` jobs related to that push are finished writes a comment on the GitHub commit with all the information
   (once and with all the information so no more empty mails from gh notification system)
 * If it comes from a kgs job and all the kgs jobs are finished,
   (that may take max 10 min)

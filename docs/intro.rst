@@ -41,7 +41,7 @@ Setting up Your Development Environment
 =======================================
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running.
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
-`Github <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
+`GitHub <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
 More information on switching release branches is below.
 
 To set up a plone 5 development environment::
@@ -72,7 +72,7 @@ you can easily switch branches. The first time you get a branch, you must do::
 
   > git checkout -t origin/4.1
 
-This should set up a local 4.1 branch tracking the one on github.
+This should set up a local 4.1 branch tracking the one on GitHub.
 From then on you can just do::
 
   > git checkout 4.1
@@ -173,7 +173,7 @@ if the issue is in ``plone.app.caching`` and ``plone.caching``::
 
 Don't forget to rerun buildout!
 In both methods,
-``mr.developer`` will download the source from github (or otherwise) and put the package in the :file:`src/` directory.
+``mr.developer`` will download the source from GitHub (or otherwise) and put the package in the :file:`src/` directory.
 You can repeat this process with as many or as few packages as you need.
 For some more tips on working with ``mr.developer``,
 please :doc:`read more here <mrdeveloper>`.
@@ -275,7 +275,7 @@ At the time of writing this document,
 there are branches for 4.2.x, 4.3.x and master,
 which is the implied 5.0.
 This may change faster than this documentation,
-so check the branch dropdown on Github.
+so check the branch dropdown on GitHub.
 
 Still with me? So you have a bug fix for 4.x.
 If the fix is only for one version,
@@ -332,7 +332,7 @@ Branches and Forks and Direct Commits - Oh My!
 ----------------------------------------------
 Plone used to be in an svn repository,
 so everyone is familiar and accustomed to committing directly to the branches.
-After the migration to github,
+After the migration to GitHub,
 the community decided to maintain this spirit.
 If you have signed the :doc:`contributor agreement <contributors_agreement_explained>` form,
 you can commit directly to the branch
@@ -347,7 +347,7 @@ If you:
  * want feedback/code review
  * are implementing a non-trivial change
 
-then you likely want to create a branch of whatever packages you are using and then use the `pull request <https://help.github.com/articles/using-pull-requests>`_ feature of github to get review.
+then you likely want to create a branch of whatever packages you are using and then use the `pull request <https://help.github.com/articles/using-pull-requests>`_ feature of GitHub to get review.
 Everything about this process would be the same except you need to work on a branch.
 Take the ``plone.app.caching`` example.
 After checking it out with ``mr.developer``,
@@ -371,8 +371,8 @@ push to a remote branch with::
 
   > git push origin my_descriptive_branch_name
 
-This will make a remote branch in github.
-Navigate to this branch in the github UI and on the top right there will be a button that says **"Pull Request"**.
+This will make a remote branch in GitHub.
+Navigate to this branch in the GitHub UI and on the top right there will be a button that says **"Pull Request"**.
 This will turn your request into a pull request on the main branch.
 There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary.
 The reviewers are informal and very nice so don't worry - they are there to help!
@@ -386,7 +386,7 @@ Finalizing Tickets
 ==================
 If you are working from a ticket,
 please don't forget to go back to the ticket and add a link to the changeset.
-We don't have integration with github yet so it's a nice way to track changes.
+We don't have integration with GitHub yet so it's a nice way to track changes.
 It also lets the reporter know that you care.
 If the bug is really bad,
 consider pinging the release manager and asking him to make a release pronto.
@@ -394,6 +394,6 @@ consider pinging the release manager and asking him to make a release pronto.
 FAQ
 ===
  * *How do I know when my package got made?*
-    You can follow the project on github and watch its `timeline <https://github.com/organizations/plone>`_.
+    You can follow the project on GitHub and watch its `timeline <https://github.com/organizations/plone>`_.
     You can also check the :file:`CHANGES.rst` of every plone release for a comprehensive list of all changes and validate that yours is present.
 

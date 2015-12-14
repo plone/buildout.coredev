@@ -15,7 +15,7 @@ others are included:
 * :doc:`/adapt-and-extend/theming/index`
 * :doc:`/develop/index`
 
-The documentation is hosted on `github <https://github.com/plone/documentation>`_ and information how to contribute can be found at :doc:`/about/contributing`.
+The documentation is hosted on `GitHub <https://github.com/plone/documentation>`_ and information how to contribute can be found at :doc:`/about/contributing`.
 
 Documenting a package
 =====================
@@ -29,7 +29,7 @@ your package should include the following forms of documentation:
   :file:`README.rst`
     The readme is the first entry point for most people to your package.
     It will be included on the PyPI page for your egg,
-    and on the front page of its github repository.
+    and on the front page of its GitHub repository.
     It should be formatted using `reStructuredText (reST) <http://docutils.sourceforge.net/rst.html>`_ in order to get formatted properly by those systems.
 
     :file:`README.rst` should include:
@@ -64,7 +64,7 @@ your package should include the following forms of documentation:
 
     If your project is moderately complex,
     you may want to set up your documentation with multiple pages.
-    The best way to do this is to add Sphinx to your project and host your docs on readthedocs.org so that it rebuilds the documentation whenever you push to github.
+    The best way to do this is to add Sphinx to your project and host your docs on readthedocs.org so that it rebuilds the documentation whenever you push to GitHub.
     If you do this,
     your :file:`README.rst` must link off site to the documentation.
 
