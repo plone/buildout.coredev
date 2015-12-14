@@ -92,7 +92,7 @@ Python
 JavaScript
 ----------
 * Does the JavaScript meet our set of JavaScript standards?
-  See our section about :doc:`/develop/addons/javascript/index` and the :doc:`/develop/styleguide/javascript`.
+  See our section about :doc:`JavaScript </develop/addons/javascript/index>` and the :doc:`JavaScript styleguide </develop/styleguide/javascript>`.
 * Does the JavaScript work in all currently supported browsers?
   Is it performant?
 
