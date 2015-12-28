@@ -1,436 +1,1015 @@
-Repository: plone.app.dexterity
+Repository: mockup
 
 
 Branch: refs/heads/master
-Date: 2015-12-21T20:01:14+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.dexterity/commit/6259b0c9f1c95f4065f6d18b8e0356f279962cfe
+Date: 2015-12-28T11:34:16-06:00
+Author: Sam Schwartz (obct537) <obct537@gmail.com>
+Commit: https://github.com/plone/mockup/commit/c5c43b436c7859731b95042b4018cc25c6cedbed
 
-update event handler docs
+changed how the querystring pattern displays path-based criteria to use
+related items widget and some pre-baked often-used queries
 
 Files changed:
 M CHANGES.rst
-M docs/advanced/event-handlers.rst
+M mockup/patterns/querystring/pattern.js
+M mockup/patterns/querystring/pattern.querystring.less
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 14b4c7c..7bc5d97 100644
+index 3dd3360..77fc915 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,9 @@ New:
+@@ -23,6 +23,9 @@ New:
+   be taken care of with plone-modal-open class being applied to the body.
+   This should fix issues with scrolling when this isn't properly cleared
+   [vangheem]
++- Changed how the querystring pattern displays options for path-based queries,
++  to improve usability for less tech-savvy users.
++  [obct537]
  
  Fixes:
  
-+- Update event handler documentation.
-+  [jensens]
-+
- - Remove unused locales folder, translations are now in plone.app.locales.
-   [vincentfretin]
+@@ -53,6 +56,8 @@ Fixes:
+ ------------------
  
-diff --git a/docs/advanced/event-handlers.rst b/docs/advanced/event-handlers.rst
-index 295ca4a..2ff2ad3 100644
---- a/docs/advanced/event-handlers.rst
-+++ b/docs/advanced/event-handlers.rst
-@@ -3,105 +3,115 @@ Event handlers
+ New:
++- Fixed issue causing the querystring pattern to query multiple times per change
++  [obct537]
  
- **Adding custom event handlers for your type**
+ - Added the ``momentFormat`` option to the ``structure`` pattern.
+   [Gagaro]
+diff --git a/mockup/patterns/querystring/pattern.js b/mockup/patterns/querystring/pattern.js
+index 3a72988..240d7d6 100644
+--- a/mockup/patterns/querystring/pattern.js
++++ b/mockup/patterns/querystring/pattern.js
+@@ -44,10 +44,11 @@ define([
+   'pat-base',
+   'mockup-patterns-select2',
+   'mockup-patterns-pickadate',
++  'mockup-patterns-relateditems',
+   'select2',
+   'translate',
+   'underscore'
+-], function($, Base, Select2, PickADate, undefined, _t, _) {
++], function($, Base, Select2, PickADate, relatedItems, undefined, _t, _) {
+   'use strict';
  
--So far, we have mainly been concerned with content types’ schemata and
--forms created from these. However, we often want to add more dynamic
--functionality, reacting when something happens to objects of our type.
--In Zope, that usually means writing event subscribers.
+   var Criteria = function() { this.init.apply(this, arguments); };
+@@ -62,15 +63,18 @@ define([
+       classValueName: 'querystring-criteria-value',
+       classRemoveName: 'querystring-criteria-remove',
+       classResultsName: 'querystring-criteria-results',
+-      classClearName: 'querystring-criteria-clear'
++      classClearName: 'querystring-criteria-clear',
++      classDepthName: 'querystring-criteria-depth'
+     },
+-    init: function($el, options, indexes, index, operator, value) {
++    init: function($el, options, indexes, index, operator, value, baseUrl) {
+       var self = this;
+ 
+       self.options = $.extend(true, {}, self.defaults, options);
+       self.indexes = indexes;
+       self.indexGroups = {};
 -
--Zope’s event model is *synchronous*. When an event is broadcast (via the
--``notify()`` function from the `zope.event`_ package), for example from the
--``save`` action of an add form, all registered event handlers will be
--called. There is no guarantee of which order the event handlers will be
--called in, however.
++      self.baseUrl = baseUrl;
++      self.advanced = false;
++      self.initial = value;
+       // create wrapper criteria and append it to DOM
+       self.$wrapper = $('<div/>')
+               .addClass(self.options.classWrapperName)
+@@ -132,10 +136,9 @@ define([
+ 
+       self.trigger('create-criteria');
+     },
+-    createOperator: function(index, operator, value) {
++    appendOperators: function(index) {
+       var self = this;
+ 
+-      self.removeOperator();
+       self.$operator = $('<select/>');
+ 
+       if (self.indexes[index]) {
+@@ -163,6 +166,83 @@ define([
+           self.createClear();
+           self.trigger('operator-changed');
+         });
++    },
++    convertPathOperators: function(oval) {
++      var self = this;
++
++      if( self.advanced ) {
++        return oval;
++      }
++      //This allows us to use the same query operation for multiple dropdown options.
++      oval = oval
++        .replace('advanced', 'relativePath')
++        .replace('path', 'relativePath');
++      return oval;
++    },
++    createPathOperators: function() {
++      var self = this;
++
++      if( self.advanced ) {
++        self.resetPathOperators();
++        return;
++      }
++      var newOperator = "plone.app.querystring.operation.string.advanced";
++
++      if( self.indexes.path.operators[newOperator] === undefined ) {
++        self.indexes.path.operations.push(newOperator);
++        self.indexes.path.operators[newOperator] = {
++          title: 'Advanced',
++          widget: 'AdvancedPathWidget',
++          description: 'Enter a custom path string',
++          operation: 'plone.app.querystring.queryparser._relativePath'
++        };
++      }
++
++      $.each(self.indexes.path.operators, function(key, value) {
++        var options = value;
++        if( key.indexOf('absolute') > 0 ) {
++          options.title = "Custom";
++        }
++        else if( key.indexOf('relative') > 0 ) {
++          options.title = "Parent (../)";
++        }
++        else if( key.indexOf('advanced') > 0 ) {
++          options.title = "Advanced Mode";
++        }
++        else {
++          options.title = "Current (./)";
++          options.widget = "RelativePathWidget";
++        }
++      });
++    },
++    resetPathOperators: function() {
++      var self = this;
++      $.each(self.indexes.path.operators, function(key, value) {
++        var options = value;
++        if( key.indexOf('absolute') > 0 ) {
++          options.title = "Absolute Path";
++        }
++        else if( key.indexOf('relative') > 0 ) {
++          options.title = "Relative Path";
++        }
++        else if( key.indexOf('advanced') > 0 ) {
++          options.title = "Simple Mode";
++        }
++        else {
++          options.title = "Navigation Path";
++          options.widget = "ReferenceWidget";
++        }
++      });
++
++      return;
++    },
++    createOperator: function(index, operator, value) {
++      var self = this;
++
++      self.removeOperator();
++      self.createPathOperators();
++
++      self.appendOperators(index);
+ 
+       if (operator === undefined) {
+         operator = self.$operator.select2('val');
+@@ -182,6 +262,28 @@ define([
+ 
+       self.removeValue();
+ 
++      var createDepthSelect = function(selected) {
++        var select =
++          "<div class='depth-select-box'>" +
++            "<label for='depth-select'>Depth</label>" +
++            "<select name='depth-select' class='"+self.options.classDepthName+"'>" +
++              "<option value='-1' selected='selected'>Unlimited</option>";
++
++              for(var i = 0; i <= 10; i+=1) {
++                select += "<option value="+i+" ";
++                if( ""+i === selected ) {
++                  select += "selected='selected' ";
++                }
++                select += ">" + i + "</option>";
++              }
++            select += "</select>" +
++          "</div>";
++
++          return $(select).change(function() {
++            self.trigger('depth-changed');
++          });
++      };
++
+       if (widget === 'StringWidget') {
+         self.$value = $('<input type="text"/>')
+                 .addClass(self.options.classValueName + '-' + widget)
+@@ -250,24 +352,69 @@ define([
+                   self.trigger('value-changed');
+                 });
+ 
+-      } else if (widget === 'ReferenceWidget') {
+-        self.$value = $('<input type="text"/>')
+-                .addClass(self.options.classValueName + '-' + widget)
+-                .val(value)
+-                .appendTo($wrapper)
+-                .change(function() {
+-                  self.trigger('value-changed');
+-                });
 -
--Each event is described by an interface, and will typically carry some
--information about the event. Some events are known as *object events*,
--and provide ``zope.component.interfaces.IObjectEvent``. These have an
--``object`` attribute giving access to the (content) object that the event
--relates to. Object events allow event handlers to be registered for a
--specific type of object as well as a specific type of event.
-+Zope (and so Plone) has a powerful event notification and subscriber subsystem.
-+Events notifications are already fired at several places.
-+
-+With custom subscribers to these events more dynamic functionality can be added.
-+It is possible to react when something happens to objects of a specific type.
-+
-+Zope’s event model is *synchronous*.
-+When an event is broadcast (via the ``notify()`` function from the `zope.event`_ package) all registered event handlers will be called.
-+This happens for example from the ``save`` action of an add form, on move or delete of content-objects.
-+There is no guarantee of which order the event handlers will be called in, however.
-+
-+Each event is described by an interface, and will typically carry some information about the event.
-+Some events are known as *object events*, and provide ``zope.component.interfaces.IObjectEvent``.
-+These have an ``object`` attribute giving access to the (content) object that the event relates to.
-+Object events allow event handlers to be registered for a specific type of object as well as a specific type of event.
++      } else if (widget === 'AdvancedPathWidget') {
++        if( self.advanced ) {
++          self.advanced = false;
++        }
++        else {
++          self.advanced = true;
++        }
++        self.createPathOperators();
++        self.removeOperator();
++        self.appendOperators(index);
++        self.createValue(index);
+       } else if (widget === 'RelativePathWidget') {
+-        self.$value = $('<input type="text"/>')
+-                .addClass(self.options.classValueName + '-' + widget)
+-                .appendTo($wrapper)
+-                .val(value)
+-                .change(function() {
+-                  self.trigger('value-changed');
+-                });
  
- Some of the most commonly used event types in Plone are shown below.
- They are all object events.
++        if( self.advanced ) {
++          self.$value = $('<input type="text"/>')
++            .addClass(self.options.classValueName + '-' + widget)
++            .appendTo($wrapper)
++            .val(value)
++            .change(function() {
++              self.trigger('value-changed');
++            });
++        }else{
++          //These 2 hard-coded values correspond to the "Current (./)" and "Parent (../)" options
++          //under the location index.
++          var val = ".::1";
++          if ( self.$operator.val().indexOf('relativePath') > 0 ) {
++            val = "..::1";
++          }
++          self.$value = $('<input type="hidden"/>')
++          .addClass(self.options.classValueName + '-' + widget)
++          .appendTo($wrapper)
++          .val(val);
++        }
++      } else if (widget === 'ReferenceWidget') {
++        if( self.advanced ) {
++          self.$value = $('<input type="text"/>')
++            .addClass(self.options.classValueName + '-' + widget)
++            .val(value)
++            .appendTo($wrapper)
++            .change(function() {
++              self.trigger('value-changed');
++            });
++        }else{
++          var pathAndDepth = ['', -1];
++          if( value !== undefined ) {
++              pathAndDepth = value.split('::');
++          }
++          self.$value = $('<input type="text"/>')
++          .addClass(self.options.classValueName + '-' + widget)
++          .appendTo($wrapper)
++          .val(pathAndDepth[0])
++          .patternRelateditems({
++            "vocabularyUrl": self.baseUrl + "@@getVocabulary?name=plone.app.vocabularies.Catalog&field=relatedItems",
++            "folderTypes": ["Folder"],
++            "maximumSelectionSize": 1,
++            "width": "400px"
++          })
++          .change(function() {
++            self.trigger('value-changed');
++          });
++          self.$value.parent().after(createDepthSelect(pathAndDepth[1]));
++          self.$value.parents('.' + self.options.classValueName).addClass('break-line');
++        }
+       } else if (widget === 'MultipleSelectionWidget') {
+         self.$value = $('<select/>').prop('multiple', true)
+                 .addClass(self.options.classValueName + '-' + widget)
+@@ -293,7 +440,11 @@ define([
+           });
+         }
+         else {
+-          self.$value.select2('val', value);
++          var trimmedValue = value;
++          if( typeof value === "string" ) {
++            trimmedValue = value.replace(/::[0-9]+/, '');
++          }
++          self.$value.select2('val', trimmedValue);
+         }
+       }
  
- ``zope.lifecycleevent.interfaces.IObjectCreatedEvent``
--    fired by the standard add form just after an object has been created,
--    but before it has been added on the container. Note that it is often
--    easier to write a handler for ``IObjectAddedEvent`` (see below), because
--    at this point the object has a proper acquisition context.
-+    fired by the standard add form just after an object has been created, but before it has been added on the container.
-+    Note that it is often easier to write a handler for ``IObjectAddedEvent`` (see below), because at this point the object has a proper acquisition context.
+@@ -359,8 +510,16 @@ define([
+       if (typeof self.$operator === 'undefined') { // no operator, no query
+         return '';
+       }
+-      var oval = self.$operator.val(),
+-          ostr = 'query.o:records=' + oval;
++      var oval = self.$operator.val();
 +
-+``zope.lifecycleevent.interfaces.IObjectAddedEvent``
-+    fired when an object has been added to its container.
-+    The container is available as the ``newParent`` attribute.
-+    The name the new item holds in the container is available as ``newName``.
++      if( ival === "path" ) {
++        if( oval.indexOf('advanced') > 0 ) {
++          return '';
++        }
++        oval = self.convertPathOperators(oval);
++      }
 +
-+``OFS.interfaces.IObjectWillBeAddedEvent``
-+    fired before an object is added to its container.
-+    It is also fired on move of an object (copy/paste).
++      var ostr = 'query.o:records=' + oval;
  
- ``zope.lifecycleevent.interfaces.IObjectModifiedEvent``
-     fired by the standard edit form when an object has been modified.
+       // value(s)
+       var vstrbase = 'query.v:records=',
+@@ -380,7 +539,17 @@ define([
+         });
+       }
+       else {
+-        vstr.push(vstrbase + self.$value.val());
++        var str = vstrbase + self.$value.val();
++        if( ival === "path" && self.$value.val() !== '') {
++          str += self.getDepthString();
++        }
++        else if( self.initial !== undefined ) {
++          str = vstrbase + self.initial;
++          //Sometimes the RelatedItemsWidget won't be loaded by this point.
++          //This only should happen on the initial page load.
++          delete self.initial;
++        }
++        vstr.push(str);
+       }
  
--``zope.lifecycleevent.interfaces.IObjectAddedEvent``
--    fired when an object has been added to its container. The container is
--    available as the ``newParent`` attribute, and the name the new item holds
--    in the container is available as ``newName``.
+       return istr + '&' + ostr + '&' + vstr.join('&');
+@@ -400,6 +569,14 @@ define([
+       }
+       var oval = self.$operator.val();
+ 
++      if( ival === "path" ) {
++        if( oval.indexOf('advanced') > 0 ) {
++          //The advanced function is just a placeholder,
++          //We don't want to send an actual query
++          return '';
++        }
++        oval = self.convertPathOperators(oval);
++      }
+       // value(s)
+       var varr = [];
+       if ($.isArray(self.$value)) { // handles only datepickers from the 'between' operator right now
+@@ -408,7 +585,9 @@ define([
+         });
+       }
+       else if (typeof self.$value !== 'undefined') {
+-        varr.push(self.$value.val());
++        var value = self.$value.val();
++        value += self.getDepthString();
++        varr.push(value);
+       }
+       var vval;
+       if (varr.length > 1) {
+@@ -421,8 +600,22 @@ define([
+         vval = '""';
+       }
+ 
++      if( self.indexes[ival].operators[oval] === undefined ) {
++        return;
++      }
++
+       return '{"i":"' + ival + '", "o":"' + oval + '", "v":' + vval + '}';
+     },
++    getDepthString: function() {
++      var self = this,
++          out = "",
++          depth = $('.'+self.options.classDepthName).val();
++
++      if( depth !== "" && depth !== undefined ) {
++        out += '::' + depth;
++      }
++      return out;
++    },
+     trigger: function(name) {
+       this.$wrapper.trigger(name + '-criteria.querystring.patterns', [ this ]);
+     },
+@@ -536,8 +729,9 @@ define([
+     },
+     createCriteria: function(index, operator, value) {
+       var self = this,
++          baseUrl = self.options.indexOptionsUrl.replace(/(@@.*)/g, ''),
+           criteria = new Criteria(self.$criteriaWrapper, self.options.criteria,
+-            self.options.indexes, index, operator, value);
++            self.options.indexes, index, operator, value, baseUrl);
+ 
+       criteria.on('remove', function(e) {
+         if (self.criterias[self.criterias.length - 1] === criteria) {
+@@ -551,10 +745,16 @@ define([
+         }
+       });
+ 
+-      var doupdates = function() {
++      //This prevents multiple requests from going off after making a single change
++      var _doupdates = function(){
+         self.refreshPreviewEvent();
+         self.updateValue();
+       };
++      var _updateTimeout = -1;
++      var doupdates = function() {
++        clearTimeout(_updateTimeout);
++        _updateTimeout = setTimeout(_doupdates, 100);
++      };
+ 
+       criteria.on('remove', function(e, criteria) {
+         if (self.criterias.indexOf(criteria) !== -1) {
+@@ -571,6 +771,7 @@ define([
+       criteria.on('create-operator', doupdates);
+       criteria.on('create-value', doupdates);
+       criteria.on('value-changed', doupdates);
++      criteria.on('depth-changed', doupdates);
+ 
+       self.criterias.push(criteria);
+     },
+@@ -639,7 +840,7 @@ define([
+         $(existingSortOrder).hide();
+       }
+     },
+-    refreshPreviewEvent: function() {
++    refreshPreviewEvent: function(value) {
+       var self = this;
+ 
+       if (!self.options.showPreviews) {
+@@ -665,9 +866,9 @@ define([
+ 
+       var query = [], querypart;
+       $.each(self.criterias, function(i, criteria) {
+-        querypart = criteria.buildQueryPart();
++        var querypart = criteria.buildQueryPart();
+         if (querypart !== '') {
+-          query.push(criteria.buildQueryPart());
++          query.push(querypart);
+         }
+       });
+ 
+diff --git a/mockup/patterns/querystring/pattern.querystring.less b/mockup/patterns/querystring/pattern.querystring.less
+index 006f10e..fe95cb4 100644
+--- a/mockup/patterns/querystring/pattern.querystring.less
++++ b/mockup/patterns/querystring/pattern.querystring.less
+@@ -17,17 +17,17 @@
+   .querystring-criteria-remove {
+     float: left;
+     display: block;
+-    
++
+     height: 13px;
+     right: 3px;
+     top: 4px;
+-    
++
+     line-height: 13px;
+     font-style: italic;
+     outline: 0;
+     margin: 8px 4px;
+     cursor: pointer;
+-    
++
+     .glyphicon();
+     .glyphicon-remove();
+   }
+@@ -57,8 +57,8 @@
+       line-height: 1.5em;
+       margin-right: 0.3em !important;
+     }
 -
- ``zope.lifecycleevent.interfaces.IObjectRemovedEvent``
--    fired when an object has been removed from its container. The container
--    is available as the ``oldParent`` attribute, and the name the item held
--    in the container is available as ``oldName``.
-+    fired when an object has been removed from its container.
-+    The container is available as the ``oldParent`` attribute.
-+    The name the item held in the container is available as ``oldName``.
+   }
 +
-+``OFS.interfaces.IObjectWillBeRemovedEvent``
-+    fired before an object is removed. Until here no deletion has happend.
-+    It is also fired on move of an object (copy/paste).
+   .querystring-criteria-clear {
+     clear: both;
+   }
+@@ -106,7 +106,22 @@
  
- ``zope.lifecycleevent.interfaces.IObjectMovedEvent``
--    fired when an object is added to, removed from, renamed in, or moved
--    between containers. This event is a super-type of ``IObjectAddedEvent``
--    and ``IObjectRemovedEvent``, shown above, so an event handler registered
--    for this interface will be invoked for the ‘added’ and ‘removed’ cases
--    as well. When an object is moved or renamed, all of ``oldParent``,
--    ``newParent``, ``oldName`` and ``newName`` will be set.
-+    fired when an object is added to, removed from, renamed in, or moved between containers.
-+    This event is a super-type of ``IObjectAddedEvent`` and ``IObjectRemovedEvent``, shown above.
-+    An event handler registered for this interface will be invoked for the ‘added’ and ‘removed’ cases as well.
-+    When an object is moved or renamed, all of ``oldParent``, ``newParent``, ``oldName`` and ``newName`` will be set.
+ }
  
- ``Products.CMFCore.interfaces.IActionSucceededEvent``
--    fired when a workflow event has completed. The ``workflow`` attribute
--    holds the workflow instance involved, and the ``action`` attribute holds
--    the action (transition) invoked.
-+    fired when a workflow event has completed.
-+    The ``workflow`` attribute holds the workflow instance involved, and the ``action`` attribute holds the action (transition) invoked.
++.break-line {
++  width: 80%;
++  padding-left: 22px;
  
--Event handlers can be registered using ZCML with the ``<subscriber />``
--directive.
-+Event handlers can be registered using ZCML with the ``<subscriber />`` directive.
- 
--As an example, let’s add an event handler to the ``Presenter`` type that
--tries to find users with matching names matching the presenter id, and
--send these users an email.
-+As an example, let’s add an event handler to the ``Presenter`` type.
-+It tries to find users with matching names matching the presenter id, and send these users an email.
- 
--First, we require an additional import at the top of ``presenter.py``::
-+First, we require an additional import at the top of ``presenter.py``:
- 
--    from Products.CMFCore.utils import getToolByName
-+.. code-block:: python
- 
--Then, we’ll add the following event subscriber after the schema
--definition::
-+    from plone import api
- 
--    def notifyUser(presenter, event):
--        acl_users = getToolByName(presenter, 'acl_users')
--        mail_host = getToolByName(presenter, 'MailHost')
--        portal_url = getToolByName(presenter, 'portal_url')
-+Then, we’ll add the following event subscriber after the schema definition:
++  div.depth-select-box {
++    width: 30%;
++    display: inline;
++    padding-left: 15px;
++  }
 +
-+.. code-block:: python
++  select {
++    margin-left: 15px;
++    width: 100px;
++    display: inline
++  }
++}
+ .querystring-sort-wrapper {
  
--        portal = portal_url.getPortalObject()
--        sender = portal.getProperty('email_from_address')
-+
-+    def notifyUser(presenter, event):
-+        acl_users = api.portal.get_tool('acl_users')
-+        sender = api.portal.get_registry_record('plone.email_from_name')
- 
-         if not sender:
-             return
- 
--        subject = "Is this you?"
--        message = "A presenter called %s was added here %s" % (presenter.title, presenter.absolute_url(),)
-+        subject = 'Is this you?'
-+        message = 'A presenter called {0} was added here {1}'.format(
-+            presenter.title,
-+            presenter.absolute_url()
-+        )
- 
-         matching_users = acl_users.searchUsers(fullname=presenter.title)
-         for user_info in matching_users:
-             email = user_info.get('email', None)
-             if email is not None:
--                mail_host.secureSend(message, email, sender, subject)
-+                api.portal.send_email(
-+                    recipient=email,
-+                    sender=sender,
-+                    subject=subject
-+                    body=message,
-+                )
- 
--And register it in ZCML::
-+
-+And register it in ZCML:
-+
-+- First argument to ``for`` is an interface describing the object type.
-+- Second argument is the event type.
-+- The arguments to the function reflects these two, so the first argument is the ``IPresenter`` instance and the second is an ``IObjectAddedEvent`` instance.
-+
-+.. code-block:: xml
- 
-     <subscriber
--        for=".presenter.IPresenter zope.lifecycleevent.interfaces.IObjectAddedEvent"
--        handler=".presenter.notifyUser"
--        />
--
--There are many ways to improve this rather simplistic event handler, but
--it illustrates how events can be used. The first argument to
--``for`` is an interface describing the object type. The second argument
--is the event type. The arguments to the function reflects these two,
--so the first argument is the ``IPresenter`` instance and the second is an
--``IObjectAddedEvent`` instance.
-+      for=".presenter.IPresenter
-+           zope.lifecycleevent.interfaces.IObjectAddedEvent"
-+      handler=".presenter.notifyUser"
-+    />
-+
-+There are many ways to improve this rather simplistic event handler, but it illustrates how events can be used.
- 
- .. _zope.event: http://pypi.python.org/pypi/zope.event
+   margin: 10px 0;
 
 
-Repository: plone.app.dexterity
+Repository: mockup
 
 
 Branch: refs/heads/master
-Date: 2015-12-28T11:18:01+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.forcada@freitag.de>
-Commit: https://github.com/plone/plone.app.dexterity/commit/901f275d1e6728d6928b592242227035634f240d
+Date: 2015-12-28T11:35:18-06:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/mockup/commit/c6feb9858174222f395778eb00a39ccd2713f4b3
 
-Merge pull request #204 from plone/jensens-event-handler-docs
+Merge pull request #615 from plone/path_criteria
 
-update event handler docs
+Path criteria
 
 Files changed:
 M CHANGES.rst
-M docs/advanced/event-handlers.rst
+M mockup/patterns/querystring/pattern.js
+M mockup/patterns/querystring/pattern.querystring.less
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 14b4c7c..7bc5d97 100644
+index 3dd3360..77fc915 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,9 @@ New:
+@@ -23,6 +23,9 @@ New:
+   be taken care of with plone-modal-open class being applied to the body.
+   This should fix issues with scrolling when this isn't properly cleared
+   [vangheem]
++- Changed how the querystring pattern displays options for path-based queries,
++  to improve usability for less tech-savvy users.
++  [obct537]
  
  Fixes:
  
-+- Update event handler documentation.
-+  [jensens]
-+
- - Remove unused locales folder, translations are now in plone.app.locales.
-   [vincentfretin]
+@@ -53,6 +56,8 @@ Fixes:
+ ------------------
  
-diff --git a/docs/advanced/event-handlers.rst b/docs/advanced/event-handlers.rst
-index 295ca4a..2ff2ad3 100644
---- a/docs/advanced/event-handlers.rst
-+++ b/docs/advanced/event-handlers.rst
-@@ -3,105 +3,115 @@ Event handlers
+ New:
++- Fixed issue causing the querystring pattern to query multiple times per change
++  [obct537]
  
- **Adding custom event handlers for your type**
+ - Added the ``momentFormat`` option to the ``structure`` pattern.
+   [Gagaro]
+diff --git a/mockup/patterns/querystring/pattern.js b/mockup/patterns/querystring/pattern.js
+index 3a72988..240d7d6 100644
+--- a/mockup/patterns/querystring/pattern.js
++++ b/mockup/patterns/querystring/pattern.js
+@@ -44,10 +44,11 @@ define([
+   'pat-base',
+   'mockup-patterns-select2',
+   'mockup-patterns-pickadate',
++  'mockup-patterns-relateditems',
+   'select2',
+   'translate',
+   'underscore'
+-], function($, Base, Select2, PickADate, undefined, _t, _) {
++], function($, Base, Select2, PickADate, relatedItems, undefined, _t, _) {
+   'use strict';
  
--So far, we have mainly been concerned with content types’ schemata and
--forms created from these. However, we often want to add more dynamic
--functionality, reacting when something happens to objects of our type.
--In Zope, that usually means writing event subscribers.
+   var Criteria = function() { this.init.apply(this, arguments); };
+@@ -62,15 +63,18 @@ define([
+       classValueName: 'querystring-criteria-value',
+       classRemoveName: 'querystring-criteria-remove',
+       classResultsName: 'querystring-criteria-results',
+-      classClearName: 'querystring-criteria-clear'
++      classClearName: 'querystring-criteria-clear',
++      classDepthName: 'querystring-criteria-depth'
+     },
+-    init: function($el, options, indexes, index, operator, value) {
++    init: function($el, options, indexes, index, operator, value, baseUrl) {
+       var self = this;
+ 
+       self.options = $.extend(true, {}, self.defaults, options);
+       self.indexes = indexes;
+       self.indexGroups = {};
 -
--Zope’s event model is *synchronous*. When an event is broadcast (via the
--``notify()`` function from the `zope.event`_ package), for example from the
--``save`` action of an add form, all registered event handlers will be
--called. There is no guarantee of which order the event handlers will be
--called in, however.
++      self.baseUrl = baseUrl;
++      self.advanced = false;
++      self.initial = value;
+       // create wrapper criteria and append it to DOM
+       self.$wrapper = $('<div/>')
+               .addClass(self.options.classWrapperName)
+@@ -132,10 +136,9 @@ define([
+ 
+       self.trigger('create-criteria');
+     },
+-    createOperator: function(index, operator, value) {
++    appendOperators: function(index) {
+       var self = this;
+ 
+-      self.removeOperator();
+       self.$operator = $('<select/>');
+ 
+       if (self.indexes[index]) {
+@@ -163,6 +166,83 @@ define([
+           self.createClear();
+           self.trigger('operator-changed');
+         });
++    },
++    convertPathOperators: function(oval) {
++      var self = this;
++
++      if( self.advanced ) {
++        return oval;
++      }
++      //This allows us to use the same query operation for multiple dropdown options.
++      oval = oval
++        .replace('advanced', 'relativePath')
++        .replace('path', 'relativePath');
++      return oval;
++    },
++    createPathOperators: function() {
++      var self = this;
++
++      if( self.advanced ) {
++        self.resetPathOperators();
++        return;
++      }
++      var newOperator = "plone.app.querystring.operation.string.advanced";
++
++      if( self.indexes.path.operators[newOperator] === undefined ) {
++        self.indexes.path.operations.push(newOperator);
++        self.indexes.path.operators[newOperator] = {
++          title: 'Advanced',
++          widget: 'AdvancedPathWidget',
++          description: 'Enter a custom path string',
++          operation: 'plone.app.querystring.queryparser._relativePath'
++        };
++      }
++
++      $.each(self.indexes.path.operators, function(key, value) {
++        var options = value;
++        if( key.indexOf('absolute') > 0 ) {
++          options.title = "Custom";
++        }
++        else if( key.indexOf('relative') > 0 ) {
++          options.title = "Parent (../)";
++        }
++        else if( key.indexOf('advanced') > 0 ) {
++          options.title = "Advanced Mode";
++        }
++        else {
++          options.title = "Current (./)";
++          options.widget = "RelativePathWidget";
++        }
++      });
++    },
++    resetPathOperators: function() {
++      var self = this;
++      $.each(self.indexes.path.operators, function(key, value) {
++        var options = value;
++        if( key.indexOf('absolute') > 0 ) {
++          options.title = "Absolute Path";
++        }
++        else if( key.indexOf('relative') > 0 ) {
++          options.title = "Relative Path";
++        }
++        else if( key.indexOf('advanced') > 0 ) {
++          options.title = "Simple Mode";
++        }
++        else {
++          options.title = "Navigation Path";
++          options.widget = "ReferenceWidget";
++        }
++      });
++
++      return;
++    },
++    createOperator: function(index, operator, value) {
++      var self = this;
++
++      self.removeOperator();
++      self.createPathOperators();
++
++      self.appendOperators(index);
+ 
+       if (operator === undefined) {
+         operator = self.$operator.select2('val');
+@@ -182,6 +262,28 @@ define([
+ 
+       self.removeValue();
+ 
++      var createDepthSelect = function(selected) {
++        var select =
++          "<div class='depth-select-box'>" +
++            "<label for='depth-select'>Depth</label>" +
++            "<select name='depth-select' class='"+self.options.classDepthName+"'>" +
++              "<option value='-1' selected='selected'>Unlimited</option>";
++
++              for(var i = 0; i <= 10; i+=1) {
++                select += "<option value="+i+" ";
++                if( ""+i === selected ) {
++                  select += "selected='selected' ";
++                }
++                select += ">" + i + "</option>";
++              }
++            select += "</select>" +
++          "</div>";
++
++          return $(select).change(function() {
++            self.trigger('depth-changed');
++          });
++      };
++
+       if (widget === 'StringWidget') {
+         self.$value = $('<input type="text"/>')
+                 .addClass(self.options.classValueName + '-' + widget)
+@@ -250,24 +352,69 @@ define([
+                   self.trigger('value-changed');
+                 });
+ 
+-      } else if (widget === 'ReferenceWidget') {
+-        self.$value = $('<input type="text"/>')
+-                .addClass(self.options.classValueName + '-' + widget)
+-                .val(value)
+-                .appendTo($wrapper)
+-                .change(function() {
+-                  self.trigger('value-changed');
+-                });
 -
--Each event is described by an interface, and will typically carry some
--information about the event. Some events are known as *object events*,
--and provide ``zope.component.interfaces.IObjectEvent``. These have an
--``object`` attribute giving access to the (content) object that the event
--relates to. Object events allow event handlers to be registered for a
--specific type of object as well as a specific type of event.
-+Zope (and so Plone) has a powerful event notification and subscriber subsystem.
-+Events notifications are already fired at several places.
-+
-+With custom subscribers to these events more dynamic functionality can be added.
-+It is possible to react when something happens to objects of a specific type.
-+
-+Zope’s event model is *synchronous*.
-+When an event is broadcast (via the ``notify()`` function from the `zope.event`_ package) all registered event handlers will be called.
-+This happens for example from the ``save`` action of an add form, on move or delete of content-objects.
-+There is no guarantee of which order the event handlers will be called in, however.
-+
-+Each event is described by an interface, and will typically carry some information about the event.
-+Some events are known as *object events*, and provide ``zope.component.interfaces.IObjectEvent``.
-+These have an ``object`` attribute giving access to the (content) object that the event relates to.
-+Object events allow event handlers to be registered for a specific type of object as well as a specific type of event.
++      } else if (widget === 'AdvancedPathWidget') {
++        if( self.advanced ) {
++          self.advanced = false;
++        }
++        else {
++          self.advanced = true;
++        }
++        self.createPathOperators();
++        self.removeOperator();
++        self.appendOperators(index);
++        self.createValue(index);
+       } else if (widget === 'RelativePathWidget') {
+-        self.$value = $('<input type="text"/>')
+-                .addClass(self.options.classValueName + '-' + widget)
+-                .appendTo($wrapper)
+-                .val(value)
+-                .change(function() {
+-                  self.trigger('value-changed');
+-                });
  
- Some of the most commonly used event types in Plone are shown below.
- They are all object events.
++        if( self.advanced ) {
++          self.$value = $('<input type="text"/>')
++            .addClass(self.options.classValueName + '-' + widget)
++            .appendTo($wrapper)
++            .val(value)
++            .change(function() {
++              self.trigger('value-changed');
++            });
++        }else{
++          //These 2 hard-coded values correspond to the "Current (./)" and "Parent (../)" options
++          //under the location index.
++          var val = ".::1";
++          if ( self.$operator.val().indexOf('relativePath') > 0 ) {
++            val = "..::1";
++          }
++          self.$value = $('<input type="hidden"/>')
++          .addClass(self.options.classValueName + '-' + widget)
++          .appendTo($wrapper)
++          .val(val);
++        }
++      } else if (widget === 'ReferenceWidget') {
++        if( self.advanced ) {
++          self.$value = $('<input type="text"/>')
++            .addClass(self.options.classValueName + '-' + widget)
++            .val(value)
++            .appendTo($wrapper)
++            .change(function() {
++              self.trigger('value-changed');
++            });
++        }else{
++          var pathAndDepth = ['', -1];
++          if( value !== undefined ) {
++              pathAndDepth = value.split('::');
++          }
++          self.$value = $('<input type="text"/>')
++          .addClass(self.options.classValueName + '-' + widget)
++          .appendTo($wrapper)
++          .val(pathAndDepth[0])
++          .patternRelateditems({
++            "vocabularyUrl": self.baseUrl + "@@getVocabulary?name=plone.app.vocabularies.Catalog&field=relatedItems",
++            "folderTypes": ["Folder"],
++            "maximumSelectionSize": 1,
++            "width": "400px"
++          })
++          .change(function() {
++            self.trigger('value-changed');
++          });
++          self.$value.parent().after(createDepthSelect(pathAndDepth[1]));
++          self.$value.parents('.' + self.options.classValueName).addClass('break-line');
++        }
+       } else if (widget === 'MultipleSelectionWidget') {
+         self.$value = $('<select/>').prop('multiple', true)
+                 .addClass(self.options.classValueName + '-' + widget)
+@@ -293,7 +440,11 @@ define([
+           });
+         }
+         else {
+-          self.$value.select2('val', value);
++          var trimmedValue = value;
++          if( typeof value === "string" ) {
++            trimmedValue = value.replace(/::[0-9]+/, '');
++          }
++          self.$value.select2('val', trimmedValue);
+         }
+       }
  
- ``zope.lifecycleevent.interfaces.IObjectCreatedEvent``
--    fired by the standard add form just after an object has been created,
--    but before it has been added on the container. Note that it is often
--    easier to write a handler for ``IObjectAddedEvent`` (see below), because
--    at this point the object has a proper acquisition context.
-+    fired by the standard add form just after an object has been created, but before it has been added on the container.
-+    Note that it is often easier to write a handler for ``IObjectAddedEvent`` (see below), because at this point the object has a proper acquisition context.
+@@ -359,8 +510,16 @@ define([
+       if (typeof self.$operator === 'undefined') { // no operator, no query
+         return '';
+       }
+-      var oval = self.$operator.val(),
+-          ostr = 'query.o:records=' + oval;
++      var oval = self.$operator.val();
 +
-+``zope.lifecycleevent.interfaces.IObjectAddedEvent``
-+    fired when an object has been added to its container.
-+    The container is available as the ``newParent`` attribute.
-+    The name the new item holds in the container is available as ``newName``.
++      if( ival === "path" ) {
++        if( oval.indexOf('advanced') > 0 ) {
++          return '';
++        }
++        oval = self.convertPathOperators(oval);
++      }
 +
-+``OFS.interfaces.IObjectWillBeAddedEvent``
-+    fired before an object is added to its container.
-+    It is also fired on move of an object (copy/paste).
++      var ostr = 'query.o:records=' + oval;
  
- ``zope.lifecycleevent.interfaces.IObjectModifiedEvent``
-     fired by the standard edit form when an object has been modified.
+       // value(s)
+       var vstrbase = 'query.v:records=',
+@@ -380,7 +539,17 @@ define([
+         });
+       }
+       else {
+-        vstr.push(vstrbase + self.$value.val());
++        var str = vstrbase + self.$value.val();
++        if( ival === "path" && self.$value.val() !== '') {
++          str += self.getDepthString();
++        }
++        else if( self.initial !== undefined ) {
++          str = vstrbase + self.initial;
++          //Sometimes the RelatedItemsWidget won't be loaded by this point.
++          //This only should happen on the initial page load.
++          delete self.initial;
++        }
++        vstr.push(str);
+       }
  
--``zope.lifecycleevent.interfaces.IObjectAddedEvent``
--    fired when an object has been added to its container. The container is
--    available as the ``newParent`` attribute, and the name the new item holds
--    in the container is available as ``newName``.
+       return istr + '&' + ostr + '&' + vstr.join('&');
+@@ -400,6 +569,14 @@ define([
+       }
+       var oval = self.$operator.val();
+ 
++      if( ival === "path" ) {
++        if( oval.indexOf('advanced') > 0 ) {
++          //The advanced function is just a placeholder,
++          //We don't want to send an actual query
++          return '';
++        }
++        oval = self.convertPathOperators(oval);
++      }
+       // value(s)
+       var varr = [];
+       if ($.isArray(self.$value)) { // handles only datepickers from the 'between' operator right now
+@@ -408,7 +585,9 @@ define([
+         });
+       }
+       else if (typeof self.$value !== 'undefined') {
+-        varr.push(self.$value.val());
++        var value = self.$value.val();
++        value += self.getDepthString();
++        varr.push(value);
+       }
+       var vval;
+       if (varr.length > 1) {
+@@ -421,8 +600,22 @@ define([
+         vval = '""';
+       }
+ 
++      if( self.indexes[ival].operators[oval] === undefined ) {
++        return;
++      }
++
+       return '{"i":"' + ival + '", "o":"' + oval + '", "v":' + vval + '}';
+     },
++    getDepthString: function() {
++      var self = this,
++          out = "",
++          depth = $('.'+self.options.classDepthName).val();
++
++      if( depth !== "" && depth !== undefined ) {
++        out += '::' + depth;
++      }
++      return out;
++    },
+     trigger: function(name) {
+       this.$wrapper.trigger(name + '-criteria.querystring.patterns', [ this ]);
+     },
+@@ -536,8 +729,9 @@ define([
+     },
+     createCriteria: function(index, operator, value) {
+       var self = this,
++          baseUrl = self.options.indexOptionsUrl.replace(/(@@.*)/g, ''),
+           criteria = new Criteria(self.$criteriaWrapper, self.options.criteria,
+-            self.options.indexes, index, operator, value);
++            self.options.indexes, index, operator, value, baseUrl);
+ 
+       criteria.on('remove', function(e) {
+         if (self.criterias[self.criterias.length - 1] === criteria) {
+@@ -551,10 +745,16 @@ define([
+         }
+       });
+ 
+-      var doupdates = function() {
++      //This prevents multiple requests from going off after making a single change
++      var _doupdates = function(){
+         self.refreshPreviewEvent();
+         self.updateValue();
+       };
++      var _updateTimeout = -1;
++      var doupdates = function() {
++        clearTimeout(_updateTimeout);
++        _updateTimeout = setTimeout(_doupdates, 100);
++      };
+ 
+       criteria.on('remove', function(e, criteria) {
+         if (self.criterias.indexOf(criteria) !== -1) {
+@@ -571,6 +771,7 @@ define([
+       criteria.on('create-operator', doupdates);
+       criteria.on('create-value', doupdates);
+       criteria.on('value-changed', doupdates);
++      criteria.on('depth-changed', doupdates);
+ 
+       self.criterias.push(criteria);
+     },
+@@ -639,7 +840,7 @@ define([
+         $(existingSortOrder).hide();
+       }
+     },
+-    refreshPreviewEvent: function() {
++    refreshPreviewEvent: function(value) {
+       var self = this;
+ 
+       if (!self.options.showPreviews) {
+@@ -665,9 +866,9 @@ define([
+ 
+       var query = [], querypart;
+       $.each(self.criterias, function(i, criteria) {
+-        querypart = criteria.buildQueryPart();
++        var querypart = criteria.buildQueryPart();
+         if (querypart !== '') {
+-          query.push(criteria.buildQueryPart());
++          query.push(querypart);
+         }
+       });
+ 
+diff --git a/mockup/patterns/querystring/pattern.querystring.less b/mockup/patterns/querystring/pattern.querystring.less
+index 006f10e..fe95cb4 100644
+--- a/mockup/patterns/querystring/pattern.querystring.less
++++ b/mockup/patterns/querystring/pattern.querystring.less
+@@ -17,17 +17,17 @@
+   .querystring-criteria-remove {
+     float: left;
+     display: block;
+-    
++
+     height: 13px;
+     right: 3px;
+     top: 4px;
+-    
++
+     line-height: 13px;
+     font-style: italic;
+     outline: 0;
+     margin: 8px 4px;
+     cursor: pointer;
+-    
++
+     .glyphicon();
+     .glyphicon-remove();
+   }
+@@ -57,8 +57,8 @@
+       line-height: 1.5em;
+       margin-right: 0.3em !important;
+     }
 -
- ``zope.lifecycleevent.interfaces.IObjectRemovedEvent``
--    fired when an object has been removed from its container. The container
--    is available as the ``oldParent`` attribute, and the name the item held
--    in the container is available as ``oldName``.
-+    fired when an object has been removed from its container.
-+    The container is available as the ``oldParent`` attribute.
-+    The name the item held in the container is available as ``oldName``.
+   }
 +
-+``OFS.interfaces.IObjectWillBeRemovedEvent``
-+    fired before an object is removed. Until here no deletion has happend.
-+    It is also fired on move of an object (copy/paste).
+   .querystring-criteria-clear {
+     clear: both;
+   }
+@@ -106,7 +106,22 @@
  
- ``zope.lifecycleevent.interfaces.IObjectMovedEvent``
--    fired when an object is added to, removed from, renamed in, or moved
--    between containers. This event is a super-type of ``IObjectAddedEvent``
--    and ``IObjectRemovedEvent``, shown above, so an event handler registered
--    for this interface will be invoked for the ‘added’ and ‘removed’ cases
--    as well. When an object is moved or renamed, all of ``oldParent``,
--    ``newParent``, ``oldName`` and ``newName`` will be set.
-+    fired when an object is added to, removed from, renamed in, or moved between containers.
-+    This event is a super-type of ``IObjectAddedEvent`` and ``IObjectRemovedEvent``, shown above.
-+    An event handler registered for this interface will be invoked for the ‘added’ and ‘removed’ cases as well.
-+    When an object is moved or renamed, all of ``oldParent``, ``newParent``, ``oldName`` and ``newName`` will be set.
+ }
  
- ``Products.CMFCore.interfaces.IActionSucceededEvent``
--    fired when a workflow event has completed. The ``workflow`` attribute
--    holds the workflow instance involved, and the ``action`` attribute holds
--    the action (transition) invoked.
-+    fired when a workflow event has completed.
-+    The ``workflow`` attribute holds the workflow instance involved, and the ``action`` attribute holds the action (transition) invoked.
++.break-line {
++  width: 80%;
++  padding-left: 22px;
  
--Event handlers can be registered using ZCML with the ``<subscriber />``
--directive.
-+Event handlers can be registered using ZCML with the ``<subscriber />`` directive.
- 
--As an example, let’s add an event handler to the ``Presenter`` type that
--tries to find users with matching names matching the presenter id, and
--send these users an email.
-+As an example, let’s add an event handler to the ``Presenter`` type.
-+It tries to find users with matching names matching the presenter id, and send these users an email.
- 
--First, we require an additional import at the top of ``presenter.py``::
-+First, we require an additional import at the top of ``presenter.py``:
- 
--    from Products.CMFCore.utils import getToolByName
-+.. code-block:: python
- 
--Then, we’ll add the following event subscriber after the schema
--definition::
-+    from plone import api
- 
--    def notifyUser(presenter, event):
--        acl_users = getToolByName(presenter, 'acl_users')
--        mail_host = getToolByName(presenter, 'MailHost')
--        portal_url = getToolByName(presenter, 'portal_url')
-+Then, we’ll add the following event subscriber after the schema definition:
++  div.depth-select-box {
++    width: 30%;
++    display: inline;
++    padding-left: 15px;
++  }
 +
-+.. code-block:: python
++  select {
++    margin-left: 15px;
++    width: 100px;
++    display: inline
++  }
++}
+ .querystring-sort-wrapper {
  
--        portal = portal_url.getPortalObject()
--        sender = portal.getProperty('email_from_address')
-+
-+    def notifyUser(presenter, event):
-+        acl_users = api.portal.get_tool('acl_users')
-+        sender = api.portal.get_registry_record('plone.email_from_name')
- 
-         if not sender:
-             return
- 
--        subject = "Is this you?"
--        message = "A presenter called %s was added here %s" % (presenter.title, presenter.absolute_url(),)
-+        subject = 'Is this you?'
-+        message = 'A presenter called {0} was added here {1}'.format(
-+            presenter.title,
-+            presenter.absolute_url()
-+        )
- 
-         matching_users = acl_users.searchUsers(fullname=presenter.title)
-         for user_info in matching_users:
-             email = user_info.get('email', None)
-             if email is not None:
--                mail_host.secureSend(message, email, sender, subject)
-+                api.portal.send_email(
-+                    recipient=email,
-+                    sender=sender,
-+                    subject=subject
-+                    body=message,
-+                )
- 
--And register it in ZCML::
-+
-+And register it in ZCML:
-+
-+- First argument to ``for`` is an interface describing the object type.
-+- Second argument is the event type.
-+- The arguments to the function reflects these two, so the first argument is the ``IPresenter`` instance and the second is an ``IObjectAddedEvent`` instance.
-+
-+.. code-block:: xml
- 
-     <subscriber
--        for=".presenter.IPresenter zope.lifecycleevent.interfaces.IObjectAddedEvent"
--        handler=".presenter.notifyUser"
--        />
--
--There are many ways to improve this rather simplistic event handler, but
--it illustrates how events can be used. The first argument to
--``for`` is an interface describing the object type. The second argument
--is the event type. The arguments to the function reflects these two,
--so the first argument is the ``IPresenter`` instance and the second is an
--``IObjectAddedEvent`` instance.
-+      for=".presenter.IPresenter
-+           zope.lifecycleevent.interfaces.IObjectAddedEvent"
-+      handler=".presenter.notifyUser"
-+    />
-+
-+There are many ways to improve this rather simplistic event handler, but it illustrates how events can be used.
- 
- .. _zope.event: http://pypi.python.org/pypi/zope.event
+   margin: 10px 0;
 
 
