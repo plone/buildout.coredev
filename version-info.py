@@ -6,7 +6,7 @@ from ConfigParser import NoOptionError
 from ConfigParser import NoSectionError
 import os.path
 import urllib2
-
+import urlparse
 
 parser = ArgumentParser(
     description="Print info about pinned versions and its overrides"
@@ -17,13 +17,25 @@ parser.add_argument(
     help='path to buildout.cfg or other cfg file',
     default='buildout.cfg'
 )
+parser.add_argument(
+    "-o",
+    "--overrides",
+    help='print only packages with overrides',
+    action="store_true"
+)
 
 args = parser.parse_args()
 
 version_sections = OrderedDict()
 
 
-def extract_versions_section(filename):
+def extract_versions_section(filename, relative=None):
+    if (
+        relative is not None and
+        "://" not in filename and
+        not filename.startswith('/')
+    ):
+        filename = relative + '/' + filename
     config = ConfigParser()
     if os.path.isfile(filename):
         config.read(filename)
@@ -38,8 +50,17 @@ def extract_versions_section(filename):
     except (NoSectionError, NoOptionError):
         return
     for extend in extends.splitlines():
-        if extend.strip():
-            extract_versions_section(extend.strip())
+        extend = extend.strip()
+        if not extend:
+            continue
+        sub_relative = relative
+        if "://" in extend:
+            parts = list(urlparse.urlparse(extend))
+            parts[2] = '/'.join(parts[2].split('/')[:-1])
+            sub_relative = urlparse.urlunparse(parts)
+        elif '/' in extend:
+            sub_relative = os.path.dirname(extend)
+        extract_versions_section(extend, sub_relative)
 
 
 extract_versions_section(args.buildout)
@@ -62,6 +83,8 @@ for pkg in pkgs:
             ver_maxlen = len(ver) if len(ver) > ver_maxlen else ver_maxlen
 
 for pkg in sorted(pkgs):
+    if args.overrides and len(pkgs[pkg]) < 2:
+        continue
     print pkg.ljust(pkg_maxlen, '.'),
     for idx, name in enumerate(pkgs[pkg]):
         version = pkgs[pkg][name].ljust(ver_maxlen, '.')
