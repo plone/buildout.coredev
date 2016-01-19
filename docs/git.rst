@@ -1,11 +1,11 @@
 .. -*- coding: utf-8 -*-
 
 ===========================
-Working with git and GitHub
+Working with Git and GitHub
 ===========================
 
 
-The Plone git workflow & branching model
+The Plone Git workflow & branching model
 ========================================
 
 Our repository on GitHub has the following layout:
@@ -23,19 +23,19 @@ Git Basics
 ==========
 
 Some introductory definitions and concepts,
-if you are already familiar enough with git,
+if you are already familiar enough with Git,
 head to next section: :ref:`general-guidelines-label`.
 
 
 Mental working model
 --------------------
 
-In ``git``
+With Git
 (as well as all modern `DVCS <http://en.wikipedia.org/wiki/Distributed_revision_control>`_),
 distributing changes to others is a two steps process
 (contrary to traditional VCS like ``svn``).
 
-This way what on svn is a single ``svn ci`` in git is two commands:
+This way what on svn is a single ``svn ci`` in Git is two commands:
 ``git commit`` and ``git push``.
 
 This may seem to be a drawback,
@@ -59,10 +59,10 @@ expect them to be.
 Concepts
 --------
 
-In git there are:
+In Git there are:
 
 commits
-   A patch made out of changes (additions, removals) on files tracked by git.
+   A patch made out of changes (additions, removals) on files tracked by Git.
 
 branches
    Series of commits that have a name.
@@ -76,13 +76,13 @@ tags
 
 The index
   A temporal staging storage with changes on files that are pending to be added to a commit.
-  If your git output is colored,
+  If your Git output is colored,
   green filenames are those in the index.
 
 Working tree
   Your current modified files.
   This is the only place where you can loose your changes.
-  If your git output is colored,
+  If your Git output is colored,
   red filenames are those in the working tree.
 
 Stash
@@ -96,7 +96,7 @@ Branches
 --------
 
 Another great feature of DVCS is cheap branching,
-i.e. branching in git is effortless and really useful.
+i.e. branching in Git is effortless and really useful.
 As it's no longer too much effort to branch,
 there is no need to always work on the master branch.
 A developer can branch easily for each fix/feature.
@@ -135,12 +135,12 @@ status
    Get an overview of the repository status.
 
    If there are files on the index,
-   or files not tracked by git,
+   or files not tracked by Git,
    or the status of your local branch with regards to the remote,
    etc.
 
 diff
-   See the current changes made to the files already tracked by git.
+   See the current changes made to the files already tracked by Git.
 
    .. note::
       Fear not, if you used ``git add SOME_FILE`` and then ``git diff`` doesn't output anything you haven't lost your changes!
@@ -199,7 +199,7 @@ checkout
    Change to the given branch or get the given file to its latest committed version.
 
    .. note::
-      If git is criticized for being complex,
+      If Git is criticized for being complex,
       this command is one of the main sources of complains.
 
       You can compare it with ``svn switch`` if you happen to know it.
@@ -299,11 +299,11 @@ How to solve it?
 ^^^^^^^^^^^^^^^^
 
 *ALWAYS* do a :command:`git pull --rebase` when fetching new code,
-configure git to do always so with::
+configure Git to do always so with::
 
     git config branch.autosetuprebase always # add the --global switch to make it default everywhere
 
-This way you do not introduce new extra commits and the git history is kept as simple as possible.
+This way you do not introduce new extra commits and the Git history is kept as simple as possible.
 
 This is especially important when trying to understand why some changes were made,
 or who did actually change that line,
@@ -422,7 +422,7 @@ Adding references to issues
 
 Always add the full URL to the issue/pull request you are fixing/referring to.
 
-Maybe within the git repository it makes sense,
+Maybe within the Git repository it makes sense,
 but as soon as you are outside of it,
 it will not.
 
@@ -489,13 +489,13 @@ so,
 A final overview of what you are about to push!
 
 To do so,
-you can get an idea with the following git alias
+you can get an idea with the following Git alias
 (to be added on your ``~/.gitconfig``)::
 
     [alias]
         fulllog = log --graph --decorate --pretty=oneline --abbrev-commit --all
 
-Now run :command:`git fulllog` on your git repository,
+Now run :command:`git fulllog` on your Git repository,
 you will see a nice graph showing you the current situation.
 
 Maybe it makes you realize that commits need to be reordered,
@@ -612,7 +612,7 @@ Where ``HASH`` is the commit hash you want the changes you are about to commit b
 
 This way,
 when running :command:`git rebase --interactive`,
-git will already reorder the commits as you already want.
+Git will already reorder the commits as you already want.
 
 
 No side changes
@@ -643,7 +643,7 @@ how to proceed forward?
 **Solution:** ``git stash`` or ``git commit --amend -m"TMP"``.
 
 The basic idea here is: store your current changes safely
-(either on a git stash commit or directly on a commit on the branch,
+(either on a Git stash commit or directly on a commit on the branch,
 whichever you prefer),
 move to the canonical branch (``master`` usually),
 do the fixes/cleanups/refactorings there,
@@ -666,12 +666,12 @@ Git visual applications
 -----------------------
 
 Not everyone is a fan of the command line,
-for them there is a list of GUI clients on the official git website:
+for them there is a list of GUI clients on the official Git website:
 
 http://git-scm.com/downloads/guis
 
 
-Enhanced git prompt
+Enhanced Git prompt
 -------------------
 
 Do one (or more) of the following:
@@ -693,11 +693,11 @@ Learn more
 ==========
 
 What's here is just the tip of the iceberg,
-there's plenty of git knowledge on the web.
+there's plenty of Git knowledge on the web.
 
 A few good further resources are listed here
 (contributions welcome):
 
-- official online git book: `Pro Git <http://git-scm.com/book/en/v2>`_
-- PyCon 2015 talk: `Advanced git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_
+- official online Git book: `Pro Git <http://git-scm.com/book/en/v2>`_
+- PyCon 2015 talk: `Advanced Git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_
 
