@@ -1,64 +1,418 @@
-Repository: plone.app.z3cform
+Repository: plone.app.testing
 
 
 Branch: refs/heads/master
-Date: 2016-01-26T18:22:09+01:00
-Author: Fred van Dijk (fredvd) <fredvd@gmail.com>
-Commit: https://github.com/plone/plone.app.z3cform/commit/39ed517472349ad3838ff9279e07228b60faae5b
+Date: 2016-01-31T22:48:23+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/plone.app.testing/commit/babef4796082ada71442263431a81dc829811e2f
 
-Add metal slot for inserting stuff below fields
+Create a MockMailHostLayer layer
 
-It's currently not possible to insert any html by overriding the template on a form and using a fill-slot to insert something between the fields and the action buttons in a form. There's formtop and formbottom, but no belowfields. 
+This makes it easier to third party packages to test mail functionality.
 
-Example use case: we want to provide an extra snipped on a controlpanel form from plone.app.registry.browser.controlpanel, which generates everything for us, but it is almost impossible to add an extra text without resorting to inserting custom fields/etc.
-
-Suggestions for a better name than 'belowfields' are appreciated.
+Fixes: https://github.com/plone/plone.app.testing/issues/19
 
 Files changed:
-M plone/app/z3cform/templates/macros.pt
+A plone/app/testing/utils.py
+M plone/app/testing/__init__.py
+M plone/app/testing/layers.py
 
-diff --git a/plone/app/z3cform/templates/macros.pt b/plone/app/z3cform/templates/macros.pt
-index eda67cf..c792c9f 100644
---- a/plone/app/z3cform/templates/macros.pt
-+++ b/plone/app/z3cform/templates/macros.pt
-@@ -143,6 +143,8 @@
-                       </metal:define>
-                     </metal:fields-slot>
+diff --git a/plone/app/testing/__init__.py b/plone/app/testing/__init__.py
+index 1097442..cb62bee 100644
+--- a/plone/app/testing/__init__.py
++++ b/plone/app/testing/__init__.py
+@@ -28,6 +28,7 @@
+ from plone.app.testing.interfaces import TEST_USER_ROLES
+ from plone.app.testing.layers import FunctionalTesting
+ from plone.app.testing.layers import IntegrationTesting
++from plone.app.testing.layers import MOCK_MAILHOST_FIXTURE
+ from plone.app.testing.layers import PLONE_FIXTURE
+ from plone.app.testing.layers import PLONE_FTP_SERVER
+ from plone.app.testing.layers import PLONE_FUNCTIONAL_TESTING
+diff --git a/plone/app/testing/layers.py b/plone/app/testing/layers.py
+index fce7f16..f9fcecb 100644
+--- a/plone/app/testing/layers.py
++++ b/plone/app/testing/layers.py
+@@ -2,6 +2,7 @@
+ # Layers setting up fixtures with a Plone site. Also importable from
+ # plone.app.testing directly
  
-+                    <metal:block define-slot="belowfields" />
++from Acquisition import aq_base
+ from plone.app.testing.interfaces import DEFAULT_LANGUAGE
+ from plone.app.testing.interfaces import PLONE_SITE_ID
+ from plone.app.testing.interfaces import PLONE_SITE_TITLE
+@@ -11,10 +12,13 @@
+ from plone.app.testing.interfaces import TEST_USER_NAME
+ from plone.app.testing.interfaces import TEST_USER_PASSWORD
+ from plone.app.testing.interfaces import TEST_USER_ROLES
++from plone.app.testing.utils import MockMailHost
+ from plone.testing import Layer
+ from plone.testing import z2
+ from plone.testing import zca
+ from plone.testing import zodb
++from Products.MailHost.interfaces import IMailHost
++from zope.component import getSiteManager
+ from zope.event import notify
+ from zope.traversing.interfaces import BeforeTraverseEvent
+ 
+@@ -312,6 +316,41 @@ def tearDownEnvironment(self, portal):
+         setSite(None)
+ 
+ 
++class MockMailHostLayer(Layer):
++    """Layer for setting up a MockMailHost to store all sent messages as
++    strings into a list at portal.MailHost.messages
++    """
++    defaultBases = (PLONE_FIXTURE,)
 +
-                     <metal:actions-slot define-slot="actions">
-                         <metal:define define-macro="actions">
-                             <div class="formControls" tal:condition="view/actions/values|nothing">
++    def setUp(self):
++        with z2.zopeApp() as app:
++            portal = app[PLONE_SITE_ID]
++            portal.email_from_address = 'noreply@example.com'
++            portal.email_from_name = 'Plone Site'
++            portal._original_MailHost = portal.MailHost
++            portal.MailHost = mailhost = MockMailHost('MailHost')
++            portal.MailHost.smtp_host = 'localhost'
++            sm = getSiteManager(context=portal)
++            sm.unregisterUtility(provided=IMailHost)
++            sm.registerUtility(mailhost, provided=IMailHost)
++
++    def tearDown(self):
++        with z2.zopeApp() as app:
++            portal = app[PLONE_SITE_ID]
++            _o_mailhost = getattr(portal, '_original_MailHost', None)
++            if _o_mailhost:
++                portal.MailHost = portal._original_MailHost
++                sm = getSiteManager(context=portal)
++                sm.unregisterUtility(provided=IMailHost)
++                sm.registerUtility(
++                    aq_base(portal._original_MailHost),
++                    provided=IMailHost
++                )
++
++
++MOCK_MAILHOST_FIXTURE = MockMailHostLayer()
++
++
+ class IntegrationTesting(PloneTestLifecycle, z2.IntegrationTesting):
+     """Plone version of the integration testing layer
+     """
+diff --git a/plone/app/testing/utils.py b/plone/app/testing/utils.py
+new file mode 100644
+index 0000000..0771372
+--- /dev/null
++++ b/plone/app/testing/utils.py
+@@ -0,0 +1,27 @@
++# -*- coding: utf-8 -*-
++from persistent.list import PersistentList
++from Products.MailHost.MailHost import _mungeHeaders
++from Products.MailHost.MailHost import MailBase
++
++
++class MockMailHost(MailBase):
++    """A MailHost that collects messages instead of sending them.
++    """
++
++    def __init__(self, id):
++        self.reset()
++
++    def reset(self):
++        self.messages = PersistentList()
++
++    def _send(self, mfrom, mto, messageText, immediate=False):
++        """ Send the message """
++        self.messages.append(messageText)
++
++    def send(self, messageText, mto=None, mfrom=None, subject=None,
++             encode=None, immediate=False, charset=None, msg_type=None):
++        messageText, mto, mfrom = _mungeHeaders(messageText,
++                                                mto, mfrom, subject,
++                                                charset=charset,
++                                                msg_type=msg_type)
++        self.messages.append(messageText)
 
 
-Repository: plone.app.z3cform
+Repository: plone.app.testing
 
 
 Branch: refs/heads/master
-Date: 2016-02-01T00:20:39+01:00
+Date: 2016-01-31T22:48:23+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/plone.app.testing/commit/06a39f3aa516b87c930577824364a891808540b0
+
+Add docs
+
+Files changed:
+M docs/source/README.rst
+
+diff --git a/docs/source/README.rst b/docs/source/README.rst
+index 3262033..a9d1701 100644
+--- a/docs/source/README.rst
++++ b/docs/source/README.rst
+@@ -144,6 +144,40 @@ lifecycle or transaction management. Instead, you should use a layer
+ created with either the ``IntegrationTesting`` or ``FunctionalTesting``
+ classes, as outlined below.
+ 
++Mock MailHost
++-------------
++
+++------------+--------------------------------------------------+
++| Layer:     | ``plone.app.testing.MOCK_MAILHOST_FIXTURE``      |
+++------------+--------------------------------------------------+
++| Class:     | ``plone.app.testing.layers.MockMailHostLayer``   |
+++------------+--------------------------------------------------+
++| Bases:     | ``plone.app.testing.layers.PLONE_FIXTURE``       |
+++------------+--------------------------------------------------+
++| Resources: |                                                  |
+++------------+--------------------------------------------------+
++
++This layer builds on top of ``PLONE_FIXTURE`` to patch Plone's MailHost implementation.
++
++With it,
++any attempt to send an email will instead store each of them as a string in a list in ``portal.MailHost.messages``.
++
++You should not use this layer directly, as it does not provide any test
++lifecycle or transaction management. Instead, you should use a layer
++created with either the ``IntegrationTesting`` or ``FunctionalTesting``
++classes, like::
++
++    from plone.app.testing import MOCK_MAILHOST_FIXTURE
++
++    MY_INTEGRATION_TESTING = IntegrationTesting(
++        bases=(
++            MY_FIXTURE,
++            MOCK_MAILHOST_FIXTURE,
++        ),
++        name="MyFixture:Integration"
++    )
++
++
+ PloneWithPackageLayer class
+ ---------------------------
+ 
+
+
+Repository: plone.app.testing
+
+
+Branch: refs/heads/master
+Date: 2016-01-31T22:48:24+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/plone.app.testing/commit/2bff0f706e2d66f95bccecf4efe350ec1f457d37
+
+Add changelog entry
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 33c3cc6..7e5394e 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -6,7 +6,9 @@ Changelog
+ 
+ New:
+ 
+-- *add item here*
++- Add a MOCK_MAILHOST_FIXTURE fixture that integration and functional tests layers can depend on.
++  This allows to easily check how mails are sent from Plone.
++  [gforcada]
+ 
+ Fixes:
+ 
+
+
+Repository: plone.app.testing
+
+
+Branch: refs/heads/master
+Date: 2016-02-01T00:25:58+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.z3cform/commit/dffc19c832df9c4ec3904954f3a0f3b6736f1fdb
+Commit: https://github.com/plone/plone.app.testing/commit/eba46b44b78dac7656764bf3f6b4d0961dbbcf65
 
-Merge pull request #37 from plone/fredvd-belowfields-slot
+Merge pull request #23 from plone/gforcada-mockmailhost
 
-Add metal slot for inserting stuff below fields
+Create a MockMailHostLayer layer
 
 Files changed:
-M plone/app/z3cform/templates/macros.pt
+A plone/app/testing/utils.py
+M CHANGES.rst
+M docs/source/README.rst
+M plone/app/testing/__init__.py
+M plone/app/testing/layers.py
 
-diff --git a/plone/app/z3cform/templates/macros.pt b/plone/app/z3cform/templates/macros.pt
-index eda67cf..c792c9f 100644
---- a/plone/app/z3cform/templates/macros.pt
-+++ b/plone/app/z3cform/templates/macros.pt
-@@ -143,6 +143,8 @@
-                       </metal:define>
-                     </metal:fields-slot>
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 33c3cc6..7e5394e 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -6,7 +6,9 @@ Changelog
  
-+                    <metal:block define-slot="belowfields" />
+ New:
+ 
+-- *add item here*
++- Add a MOCK_MAILHOST_FIXTURE fixture that integration and functional tests layers can depend on.
++  This allows to easily check how mails are sent from Plone.
++  [gforcada]
+ 
+ Fixes:
+ 
+diff --git a/docs/source/README.rst b/docs/source/README.rst
+index 3262033..a9d1701 100644
+--- a/docs/source/README.rst
++++ b/docs/source/README.rst
+@@ -144,6 +144,40 @@ lifecycle or transaction management. Instead, you should use a layer
+ created with either the ``IntegrationTesting`` or ``FunctionalTesting``
+ classes, as outlined below.
+ 
++Mock MailHost
++-------------
 +
-                     <metal:actions-slot define-slot="actions">
-                         <metal:define define-macro="actions">
-                             <div class="formControls" tal:condition="view/actions/values|nothing">
+++------------+--------------------------------------------------+
++| Layer:     | ``plone.app.testing.MOCK_MAILHOST_FIXTURE``      |
+++------------+--------------------------------------------------+
++| Class:     | ``plone.app.testing.layers.MockMailHostLayer``   |
+++------------+--------------------------------------------------+
++| Bases:     | ``plone.app.testing.layers.PLONE_FIXTURE``       |
+++------------+--------------------------------------------------+
++| Resources: |                                                  |
+++------------+--------------------------------------------------+
++
++This layer builds on top of ``PLONE_FIXTURE`` to patch Plone's MailHost implementation.
++
++With it,
++any attempt to send an email will instead store each of them as a string in a list in ``portal.MailHost.messages``.
++
++You should not use this layer directly, as it does not provide any test
++lifecycle or transaction management. Instead, you should use a layer
++created with either the ``IntegrationTesting`` or ``FunctionalTesting``
++classes, like::
++
++    from plone.app.testing import MOCK_MAILHOST_FIXTURE
++
++    MY_INTEGRATION_TESTING = IntegrationTesting(
++        bases=(
++            MY_FIXTURE,
++            MOCK_MAILHOST_FIXTURE,
++        ),
++        name="MyFixture:Integration"
++    )
++
++
+ PloneWithPackageLayer class
+ ---------------------------
+ 
+diff --git a/plone/app/testing/__init__.py b/plone/app/testing/__init__.py
+index 1097442..cb62bee 100644
+--- a/plone/app/testing/__init__.py
++++ b/plone/app/testing/__init__.py
+@@ -28,6 +28,7 @@
+ from plone.app.testing.interfaces import TEST_USER_ROLES
+ from plone.app.testing.layers import FunctionalTesting
+ from plone.app.testing.layers import IntegrationTesting
++from plone.app.testing.layers import MOCK_MAILHOST_FIXTURE
+ from plone.app.testing.layers import PLONE_FIXTURE
+ from plone.app.testing.layers import PLONE_FTP_SERVER
+ from plone.app.testing.layers import PLONE_FUNCTIONAL_TESTING
+diff --git a/plone/app/testing/layers.py b/plone/app/testing/layers.py
+index fce7f16..f9fcecb 100644
+--- a/plone/app/testing/layers.py
++++ b/plone/app/testing/layers.py
+@@ -2,6 +2,7 @@
+ # Layers setting up fixtures with a Plone site. Also importable from
+ # plone.app.testing directly
+ 
++from Acquisition import aq_base
+ from plone.app.testing.interfaces import DEFAULT_LANGUAGE
+ from plone.app.testing.interfaces import PLONE_SITE_ID
+ from plone.app.testing.interfaces import PLONE_SITE_TITLE
+@@ -11,10 +12,13 @@
+ from plone.app.testing.interfaces import TEST_USER_NAME
+ from plone.app.testing.interfaces import TEST_USER_PASSWORD
+ from plone.app.testing.interfaces import TEST_USER_ROLES
++from plone.app.testing.utils import MockMailHost
+ from plone.testing import Layer
+ from plone.testing import z2
+ from plone.testing import zca
+ from plone.testing import zodb
++from Products.MailHost.interfaces import IMailHost
++from zope.component import getSiteManager
+ from zope.event import notify
+ from zope.traversing.interfaces import BeforeTraverseEvent
+ 
+@@ -312,6 +316,41 @@ def tearDownEnvironment(self, portal):
+         setSite(None)
+ 
+ 
++class MockMailHostLayer(Layer):
++    """Layer for setting up a MockMailHost to store all sent messages as
++    strings into a list at portal.MailHost.messages
++    """
++    defaultBases = (PLONE_FIXTURE,)
++
++    def setUp(self):
++        with z2.zopeApp() as app:
++            portal = app[PLONE_SITE_ID]
++            portal.email_from_address = 'noreply@example.com'
++            portal.email_from_name = 'Plone Site'
++            portal._original_MailHost = portal.MailHost
++            portal.MailHost = mailhost = MockMailHost('MailHost')
++            portal.MailHost.smtp_host = 'localhost'
++            sm = getSiteManager(context=portal)
++            sm.unregisterUtility(provided=IMailHost)
++            sm.registerUtility(mailhost, provided=IMailHost)
++
++    def tearDown(self):
++        with z2.zopeApp() as app:
++            portal = app[PLONE_SITE_ID]
++            _o_mailhost = getattr(portal, '_original_MailHost', None)
++            if _o_mailhost:
++                portal.MailHost = portal._original_MailHost
++                sm = getSiteManager(context=portal)
++                sm.unregisterUtility(provided=IMailHost)
++                sm.registerUtility(
++                    aq_base(portal._original_MailHost),
++                    provided=IMailHost
++                )
++
++
++MOCK_MAILHOST_FIXTURE = MockMailHostLayer()
++
++
+ class IntegrationTesting(PloneTestLifecycle, z2.IntegrationTesting):
+     """Plone version of the integration testing layer
+     """
+diff --git a/plone/app/testing/utils.py b/plone/app/testing/utils.py
+new file mode 100644
+index 0000000..0771372
+--- /dev/null
++++ b/plone/app/testing/utils.py
+@@ -0,0 +1,27 @@
++# -*- coding: utf-8 -*-
++from persistent.list import PersistentList
++from Products.MailHost.MailHost import _mungeHeaders
++from Products.MailHost.MailHost import MailBase
++
++
++class MockMailHost(MailBase):
++    """A MailHost that collects messages instead of sending them.
++    """
++
++    def __init__(self, id):
++        self.reset()
++
++    def reset(self):
++        self.messages = PersistentList()
++
++    def _send(self, mfrom, mto, messageText, immediate=False):
++        """ Send the message """
++        self.messages.append(messageText)
++
++    def send(self, messageText, mto=None, mfrom=None, subject=None,
++             encode=None, immediate=False, charset=None, msg_type=None):
++        messageText, mto, mfrom = _mungeHeaders(messageText,
++                                                mto, mfrom, subject,
++                                                charset=charset,
++                                                msg_type=msg_type)
++        self.messages.append(messageText)
 
 
