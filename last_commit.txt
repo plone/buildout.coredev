@@ -1,178 +1,306 @@
-Repository: Products.CMFPlone
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2016-01-25T14:46:25+01:00
+Date: 2016-01-25T14:45:59+01:00
 Author: Fred van Dijk (fredvd) <fredvd@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/af7ec5ff7980359328370493656c0a416852f9a8
+Commit: https://github.com/plone/plone.app.discussion/commit/fcb4bbf94bf8aa490df087c69a9628e865d7fa91
 
-Move p.a.discussion monkey patch for reindexing conversations to CatalogTool.py
+Get rid of the monkey patch on Products.CMFPlone's CatalogTool.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/__init__.py
+M plone/app/discussion/configure.zcml
+M plone/app/discussion/conversation.py
+M setup.py
+D plone/app/discussion/patches.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index bcae7a3..1e77e81 100644
+index 876ecd3..5e47cd9 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,11 @@ New:
+@@ -11,7 +11,10 @@ New:
  
  Fixes:
  
-+- Move p.a.discussion monkey patch for reindexing conversations to
-+  CatalogTool.py as p.a.discussion is part of Plone core.
+-- *add item here*
++- Get rid of the monkey patch on Products.CMFPlone's CatalogTool.
 +  Issue https://github.com/plone/Products.CMFPlone/issues/1332
-+  [fredvd, staeff]
-+
- - Fix custom tinymce content styles not getting included correctly
-   [vangheem]
- 
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index 87c902d..93d1036 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -22,6 +22,7 @@
- from Products.CMFCore.utils import _checkPermission
- from Products.CMFCore.utils import _getAuthenticatedUser
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY
- from Products.CMFPlone.PloneBaseTool import PloneBaseTool
- from Products.CMFPlone.interfaces import INonStructuralFolder
- from Products.CMFPlone.interfaces import IPloneCatalogTool
-@@ -32,6 +33,7 @@
- from plone.i18n.normalizer.base import mapUnicode
- from plone.indexer import indexer
- from plone.indexer.interfaces import IIndexableObject
-+from zope.annotation.interfaces import IAnnotations
- from zope.component import queryMultiAdapter
- from zope.interface import Interface
- from zope.interface import implementer
-@@ -425,6 +427,21 @@ def indexObject(obj, path):
-                     safe_callable(obj.indexObject)):
-                 try:
-                     obj.indexObject()
-+
-+                    # index conversions from plone.app.discussion
-+                    annotions = IAnnotations(obj)
-+                    catalog = getToolByName(obj, "portal_catalog")
-+                    if DISCUSSION_ANNOTATION_KEY in annotions:
-+                        conversation = annotions[DISCUSSION_ANNOTATION_KEY]
-+                        conversation = conversation.__of__(obj)
-+                        for comment in conversation.getComments():
-+                            try:
-+                                if catalog:
-+                                    catalog.indexObject(comment)
-+                            except StopIteration:  # pragma: no cover
-+                                pass
-+
-+
-                 except TypeError:
-                     # Catalogs have 'indexObject' as well, but they
-                     # take different args, and will fail
-diff --git a/Products/CMFPlone/__init__.py b/Products/CMFPlone/__init__.py
-index 81c7454..9ea177f 100644
---- a/Products/CMFPlone/__init__.py
-+++ b/Products/CMFPlone/__init__.py
-@@ -15,6 +15,8 @@
-     os.path.join('skins', 'plone_images', 'logoIcon.png'),
-     cmfplone_globals)}
- 
-+DISCUSSION_ANNOTATION_KEY = 'plone.app.discussion:conversation'
++  [staeff, fredvd]
 +
  
- def initialize(context):
  
+ 2.4.9 (2015-11-25)
+diff --git a/plone/app/discussion/configure.zcml b/plone/app/discussion/configure.zcml
+index 0a3fe54..4e634ba 100644
+--- a/plone/app/discussion/configure.zcml
++++ b/plone/app/discussion/configure.zcml
+@@ -2,7 +2,6 @@
+     xmlns="http://namespaces.zope.org/zope"
+     xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+     xmlns:i18n="http://namespaces.zope.org/i18n"
+-    xmlns:monkey="http://namespaces.plone.org/monkey"
+     xmlns:zcml="http://namespaces.zope.org/zcml"
+     xmlns:five="http://namespaces.zope.org/five"
+     i18n_domain="plone">
+@@ -62,19 +61,6 @@
+         profile="plone.app.discussion:default"
+     />
+ 
+-
+-    <!-- Monkey Patches -->
+-
+-    <include package="collective.monkeypatcher" />
+-
+-    <monkey:patch
+-        description="This allows Catalog Tool to find comments
+-                     during clear-and-rebuild catalog"
+-        class="Products.CMFPlone.CatalogTool.CatalogTool"
+-        original="clearFindAndRebuild"
+-        replacement=".patches.patchedClearFindAndRebuild"
+-        />
+-
+     <!-- Comments -->
+ 
+     <class class=".comment.Comment">
+diff --git a/plone/app/discussion/conversation.py b/plone/app/discussion/conversation.py
+index f0ebc4d..0e074a7 100644
+--- a/plone/app/discussion/conversation.py
++++ b/plone/app/discussion/conversation.py
+@@ -21,6 +21,7 @@
+ from OFS.event import ObjectWillBeRemovedEvent
+ from OFS.Traversable import Traversable
+ from Products.CMFPlone.interfaces import IHideFromBreadcrumbs
++from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY as ANNOTATION_KEY
+ from persistent import Persistent
+ from plone.app.discussion.comment import Comment
+ from plone.app.discussion.interfaces import IConversation
+@@ -37,10 +38,8 @@
+ from zope.lifecycleevent import ObjectCreatedEvent
+ from zope.lifecycleevent import ObjectRemovedEvent
+ 
+-import time
+-
+ 
+-ANNOTATION_KEY = 'plone.app.discussion:conversation'
++import time
+ 
+ 
+ class Conversation(Traversable, Persistent, Explicit):
+diff --git a/plone/app/discussion/patches.py b/plone/app/discussion/patches.py
+deleted file mode 100644
+index fd0070b..0000000
+--- a/plone/app/discussion/patches.py
++++ /dev/null
+@@ -1,43 +0,0 @@
+-from Acquisition import aq_inner
+-from Acquisition import aq_parent
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import base_hasattr
+-from Products.CMFPlone.utils import safe_callable
+-from plone.app.discussion.conversation import ANNOTATION_KEY
+-from zope.annotation.interfaces import IAnnotations
+-
+-
+-def patchedClearFindAndRebuild(self):
+-    """Empties catalog, then finds all contentish objects (i.e. objects
+-       with an indexObject method), and reindexes them.
+-       This may take a long time.
+-    """
+-
+-    def indexObject(obj, path):
+-
+-        if (base_hasattr(obj, 'indexObject') and
+-                safe_callable(obj.indexObject)):
+-
+-            try:
+-                obj.indexObject()
+-
+-                annotions = IAnnotations(obj)
+-                catalog = getToolByName(obj, "portal_catalog")
+-                if ANNOTATION_KEY in annotions:
+-                    conversation = annotions[ANNOTATION_KEY]
+-                    conversation = conversation.__of__(obj)
+-                    for comment in conversation.getComments():
+-                        try:
+-                            if catalog:
+-                                catalog.indexObject(comment)
+-                        except StopIteration:  # pragma: no cover
+-                            pass
+-
+-            except TypeError:
+-                # Catalogs have 'indexObject' as well, but they
+-                # take different args, and will fail
+-                pass
+-
+-    self.manage_catalogClear()
+-    portal = aq_parent(aq_inner(self))
+-    portal.ZopeFindAndApply(portal, search_sub=True, apply_func=indexObject)
+diff --git a/setup.py b/setup.py
+index 7c2e09a..8547015 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,6 @@
+ 
+ install_requires = [
+     'setuptools',
+-    'collective.monkeypatcher',
+     'plone.app.layout',
+     'plone.app.registry',
+     'plone.app.uuid',
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2016-01-31T23:33:06+01:00
+Date: 2016-01-31T23:33:33+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/f57a28567ccf295676f3327230b0e519f4d67d69
+Commit: https://github.com/plone/plone.app.discussion/commit/fb71aee6cd0cd6438c83521abbd8a521dd99dc98
 
-Merge pull request #1333 from plone/remove-p.a.discussion-monkey
+Merge pull request #80 from plone/remove-p.a.discussion-monkey
 
-Move p.a.discussion monkey patch for reindexing conversations
+Get rid of the monkey patch on Products.CMFPlone's CatalogTool.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/__init__.py
+M plone/app/discussion/configure.zcml
+M plone/app/discussion/conversation.py
+M setup.py
+D plone/app/discussion/patches.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3ef80c4..7ecfd02 100644
+index 876ecd3..5e47cd9 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -15,6 +15,11 @@ New:
+@@ -11,7 +11,10 @@ New:
  
  Fixes:
  
-+- Move p.a.discussion monkey patch for reindexing conversations to
-+  CatalogTool.py as p.a.discussion is part of Plone core.
+-- *add item here*
++- Get rid of the monkey patch on Products.CMFPlone's CatalogTool.
 +  Issue https://github.com/plone/Products.CMFPlone/issues/1332
-+  [fredvd, staeff]
-+
- - Fix custom tinymce content styles not getting included correctly
-   [vangheem]
- 
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index 87c902d..93d1036 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -22,6 +22,7 @@
- from Products.CMFCore.utils import _checkPermission
- from Products.CMFCore.utils import _getAuthenticatedUser
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY
- from Products.CMFPlone.PloneBaseTool import PloneBaseTool
- from Products.CMFPlone.interfaces import INonStructuralFolder
- from Products.CMFPlone.interfaces import IPloneCatalogTool
-@@ -32,6 +33,7 @@
- from plone.i18n.normalizer.base import mapUnicode
- from plone.indexer import indexer
- from plone.indexer.interfaces import IIndexableObject
-+from zope.annotation.interfaces import IAnnotations
- from zope.component import queryMultiAdapter
- from zope.interface import Interface
- from zope.interface import implementer
-@@ -425,6 +427,21 @@ def indexObject(obj, path):
-                     safe_callable(obj.indexObject)):
-                 try:
-                     obj.indexObject()
-+
-+                    # index conversions from plone.app.discussion
-+                    annotions = IAnnotations(obj)
-+                    catalog = getToolByName(obj, "portal_catalog")
-+                    if DISCUSSION_ANNOTATION_KEY in annotions:
-+                        conversation = annotions[DISCUSSION_ANNOTATION_KEY]
-+                        conversation = conversation.__of__(obj)
-+                        for comment in conversation.getComments():
-+                            try:
-+                                if catalog:
-+                                    catalog.indexObject(comment)
-+                            except StopIteration:  # pragma: no cover
-+                                pass
-+
-+
-                 except TypeError:
-                     # Catalogs have 'indexObject' as well, but they
-                     # take different args, and will fail
-diff --git a/Products/CMFPlone/__init__.py b/Products/CMFPlone/__init__.py
-index 81c7454..9ea177f 100644
---- a/Products/CMFPlone/__init__.py
-+++ b/Products/CMFPlone/__init__.py
-@@ -15,6 +15,8 @@
-     os.path.join('skins', 'plone_images', 'logoIcon.png'),
-     cmfplone_globals)}
- 
-+DISCUSSION_ANNOTATION_KEY = 'plone.app.discussion:conversation'
++  [staeff, fredvd]
 +
  
- def initialize(context):
  
+ 2.4.9 (2015-11-25)
+diff --git a/plone/app/discussion/configure.zcml b/plone/app/discussion/configure.zcml
+index 0a3fe54..4e634ba 100644
+--- a/plone/app/discussion/configure.zcml
++++ b/plone/app/discussion/configure.zcml
+@@ -2,7 +2,6 @@
+     xmlns="http://namespaces.zope.org/zope"
+     xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+     xmlns:i18n="http://namespaces.zope.org/i18n"
+-    xmlns:monkey="http://namespaces.plone.org/monkey"
+     xmlns:zcml="http://namespaces.zope.org/zcml"
+     xmlns:five="http://namespaces.zope.org/five"
+     i18n_domain="plone">
+@@ -62,19 +61,6 @@
+         profile="plone.app.discussion:default"
+     />
+ 
+-
+-    <!-- Monkey Patches -->
+-
+-    <include package="collective.monkeypatcher" />
+-
+-    <monkey:patch
+-        description="This allows Catalog Tool to find comments
+-                     during clear-and-rebuild catalog"
+-        class="Products.CMFPlone.CatalogTool.CatalogTool"
+-        original="clearFindAndRebuild"
+-        replacement=".patches.patchedClearFindAndRebuild"
+-        />
+-
+     <!-- Comments -->
+ 
+     <class class=".comment.Comment">
+diff --git a/plone/app/discussion/conversation.py b/plone/app/discussion/conversation.py
+index f0ebc4d..0e074a7 100644
+--- a/plone/app/discussion/conversation.py
++++ b/plone/app/discussion/conversation.py
+@@ -21,6 +21,7 @@
+ from OFS.event import ObjectWillBeRemovedEvent
+ from OFS.Traversable import Traversable
+ from Products.CMFPlone.interfaces import IHideFromBreadcrumbs
++from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY as ANNOTATION_KEY
+ from persistent import Persistent
+ from plone.app.discussion.comment import Comment
+ from plone.app.discussion.interfaces import IConversation
+@@ -37,10 +38,8 @@
+ from zope.lifecycleevent import ObjectCreatedEvent
+ from zope.lifecycleevent import ObjectRemovedEvent
+ 
+-import time
+-
+ 
+-ANNOTATION_KEY = 'plone.app.discussion:conversation'
++import time
+ 
+ 
+ class Conversation(Traversable, Persistent, Explicit):
+diff --git a/plone/app/discussion/patches.py b/plone/app/discussion/patches.py
+deleted file mode 100644
+index fd0070b..0000000
+--- a/plone/app/discussion/patches.py
++++ /dev/null
+@@ -1,43 +0,0 @@
+-from Acquisition import aq_inner
+-from Acquisition import aq_parent
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import base_hasattr
+-from Products.CMFPlone.utils import safe_callable
+-from plone.app.discussion.conversation import ANNOTATION_KEY
+-from zope.annotation.interfaces import IAnnotations
+-
+-
+-def patchedClearFindAndRebuild(self):
+-    """Empties catalog, then finds all contentish objects (i.e. objects
+-       with an indexObject method), and reindexes them.
+-       This may take a long time.
+-    """
+-
+-    def indexObject(obj, path):
+-
+-        if (base_hasattr(obj, 'indexObject') and
+-                safe_callable(obj.indexObject)):
+-
+-            try:
+-                obj.indexObject()
+-
+-                annotions = IAnnotations(obj)
+-                catalog = getToolByName(obj, "portal_catalog")
+-                if ANNOTATION_KEY in annotions:
+-                    conversation = annotions[ANNOTATION_KEY]
+-                    conversation = conversation.__of__(obj)
+-                    for comment in conversation.getComments():
+-                        try:
+-                            if catalog:
+-                                catalog.indexObject(comment)
+-                        except StopIteration:  # pragma: no cover
+-                            pass
+-
+-            except TypeError:
+-                # Catalogs have 'indexObject' as well, but they
+-                # take different args, and will fail
+-                pass
+-
+-    self.manage_catalogClear()
+-    portal = aq_parent(aq_inner(self))
+-    portal.ZopeFindAndApply(portal, search_sub=True, apply_func=indexObject)
+diff --git a/setup.py b/setup.py
+index 7c2e09a..8547015 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,6 @@
+ 
+ install_requires = [
+     'setuptools',
+-    'collective.monkeypatcher',
+     'plone.app.layout',
+     'plone.app.registry',
+     'plone.app.uuid',
 
 
