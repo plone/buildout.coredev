@@ -1,260 +1,115 @@
-Repository: Products.PortalTransforms
+Repository: plone.app.users
 
 
 Branch: refs/heads/master
-Date: 2016-02-01T13:36:21+01:00
+Date: 2016-01-28T13:11:37+01:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/e9ff23b7f56297dadcfe91f4108b0d8b39ed2c6a
+Commit: https://github.com/plone/plone.app.users/commit/83310f87cffc7c10dd205e5e8a0d70d9faa850af
 
-Use docutils for rest since the rest-wrapper was removed from zope2
+Fix bug when registering a user by adding a schema-setter to UserDataPanelAdapter
+
+when registering a user the properties-setter in
+plone.app.users.browser.register.BaseRegistrationForm.applyProperties uses
+``adapter.schema = schema`` to set schema on plone.app.users.browser.userdatapanel.UserDataPanelAdapter.
+That used the __setattr__ of its super but UserDataPanelAdapter.schema was a property.
 
 Files changed:
 M CHANGES.rst
-M Products/PortalTransforms/transforms/rest.py
+M plone/app/users/browser/userdatapanel.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ca732d5..7c4eb57 100644
+index b5a4234..e1a3260 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -6,6 +6,9 @@ Changelog
+@@ -10,7 +10,9 @@ New:
  
- New:
+ Fixes:
  
-+- Use docutils for rest since the rest-wrapper was removed from zope2.
+-- *add item here*
++- Fix bug when registering a user by adding a schema-setter to
++  UserDataPanelAdapter.
 +  [pbauer]
-+
- - Depend on ``Pillow>=3.1.0``.
-   [jensens]
- 
-diff --git a/Products/PortalTransforms/transforms/rest.py b/Products/PortalTransforms/transforms/rest.py
-index e86a0ad..ed28b23 100644
---- a/Products/PortalTransforms/transforms/rest.py
-+++ b/Products/PortalTransforms/transforms/rest.py
-@@ -1,6 +1,6 @@
- # -*- coding: utf-8 -*-
- from Products.PortalTransforms.interfaces import ITransform
--from reStructuredText import HTML
-+from docutils.core import publish_parts
- from zope.interface import implementer
  
  
-@@ -22,7 +22,7 @@ class rest(object):
-     default:
+ 2.3.4 (2015-11-28)
+diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
+index 6645dbe..debc12d 100644
+--- a/plone/app/users/browser/userdatapanel.py
++++ b/plone/app/users/browser/userdatapanel.py
+@@ -22,7 +22,17 @@ class UserDataPanelAdapter(AccountPanelSchemaAdapter):
  
-       >>> try:
--      ...     out = transform.convert('.. raw:: html\n  :file: <isonum.txt>', D())
-+      ...     out = transform.convert('.. raw:: html\n  :file: <isonum.txt>', D())  # noqa
-       ... except NotImplementedError:
-       ...     print 'Good'
-       ... else:
-@@ -79,27 +79,64 @@ def name(self):
+     @property
+     def schema(self):
+-        return getUserDataSchema()
++        # prevent infinite recursion when accessing the schema via bypassing
++        # __getattr__ of self
++        try:
++            return object.__getattribute__(self, '_schema')
++        except AttributeError:
++            object.__setattr__(self, '_schema', getUserDataSchema())
++        return object.__getattribute__(self, '_schema')
++
++    @schema.setter
++    def schema(self, value):
++        self._schema = value
  
-     def convert(self, orig, data, **kwargs):
-         # do the format
-+        writer_name = kwargs.get('writer_name', 'html4css1')
-+
-         encoding = kwargs.get('encoding', 'utf-8')
-         input_encoding = kwargs.get('input_encoding', encoding)
-         output_encoding = kwargs.get('output_encoding', encoding)
-         language = kwargs.get('language', 'en')
-         warnings = kwargs.get('warnings', None)
--
-+        stylesheet = kwargs.get('stylesheet', None)
-         initial_header_level = int(self.config.get('initial_header_level', 2))
-         report_level = int(self.config.get('report_level', 2))
-+        settings = {
-+            'documentclass': '',
-+            'traceback': 1,
-+            'input_encoding': input_encoding,
-+            'output_encoding': output_encoding,
-+            'stylesheet': stylesheet,
-+            'stylesheet_path': None,
-+            'file_insertion_enabled': 0,
-+            'raw_enabled': 0,
-+            'language_code': language,
-+            # starting level for <H> elements:
-+            'initial_header_level': initial_header_level,
-+            # set the reporting level to something sane:
-+            'report_level': report_level,
-+            # don't break if we get errors:
-+            'halt_level': 6,
-+            # remember warnings:
-+            'warning_stream': warnings,
-+        }
- 
--        settings = {'documentclass': '',
--                    'traceback': 1,
--                    }
--
--        html = HTML(orig,
--                    input_encoding=input_encoding,
--                    output_encoding=output_encoding,
--                    language_code=language,
--                    initial_header_level=initial_header_level,
--                    report_level=report_level,
--                    warnings=warnings,
--                    settings=settings)
-+        parts = publish_parts(
-+            source=orig,
-+            writer_name=writer_name,
-+            settings_overrides=settings,
-+            config_section='zope application'
-+        )
-+
-+        header = '<h%(level)s class="title">%(title)s</h%(level)s>\n' % {
-+            'level': initial_header_level,
-+            'title': parts['title']}
-+
-+        subheader = '<h%(level)s class="subtitle">%(subtitle)s</h%(level)s>\n' % {  # noqa
-+            'level': initial_header_level+1,
-+            'subtitle': parts['subtitle']}
-+
-+        body = '%(docinfo)s%(body)s' % {
-+            'docinfo': parts['docinfo'],
-+            'body': parts['body']}
-+
-+        html = ''
-+        if parts['title']:
-+            html = html + header
-+        if parts['subtitle']:
-+            html = html + subheader
-+        html = html + body
-+
-+        if output_encoding != 'unicode':
-+            html = html.encode(output_encoding)
- 
-         html = html.replace(' class="document"', '', 1)
-         data.setData(html)
+     def get_email(self):
+         return self._getProperty('email')
 
 
-Repository: Products.PortalTransforms
+Repository: plone.app.users
 
 
 Branch: refs/heads/master
-Date: 2016-02-01T15:39:17+01:00
+Date: 2016-02-01T15:47:34+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/ac64a87406a808e261063fff4e138ad9709cb818
+Commit: https://github.com/plone/plone.app.users/commit/2f671578d8448a443560f07b801594f4148e9799
 
-Merge pull request #13 from plone/thet-zope4
+Merge pull request #53 from plone/thet-zope4
 
-Use docutils for rest-transforms
+Fix bug when registering a user
 
 Files changed:
 M CHANGES.rst
-M Products/PortalTransforms/transforms/rest.py
+M plone/app/users/browser/userdatapanel.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ca732d5..7c4eb57 100644
+index b5a4234..e1a3260 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -6,6 +6,9 @@ Changelog
+@@ -10,7 +10,9 @@ New:
  
- New:
+ Fixes:
  
-+- Use docutils for rest since the rest-wrapper was removed from zope2.
+-- *add item here*
++- Fix bug when registering a user by adding a schema-setter to
++  UserDataPanelAdapter.
 +  [pbauer]
-+
- - Depend on ``Pillow>=3.1.0``.
-   [jensens]
- 
-diff --git a/Products/PortalTransforms/transforms/rest.py b/Products/PortalTransforms/transforms/rest.py
-index e86a0ad..ed28b23 100644
---- a/Products/PortalTransforms/transforms/rest.py
-+++ b/Products/PortalTransforms/transforms/rest.py
-@@ -1,6 +1,6 @@
- # -*- coding: utf-8 -*-
- from Products.PortalTransforms.interfaces import ITransform
--from reStructuredText import HTML
-+from docutils.core import publish_parts
- from zope.interface import implementer
  
  
-@@ -22,7 +22,7 @@ class rest(object):
-     default:
+ 2.3.4 (2015-11-28)
+diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
+index 6645dbe..debc12d 100644
+--- a/plone/app/users/browser/userdatapanel.py
++++ b/plone/app/users/browser/userdatapanel.py
+@@ -22,7 +22,17 @@ class UserDataPanelAdapter(AccountPanelSchemaAdapter):
  
-       >>> try:
--      ...     out = transform.convert('.. raw:: html\n  :file: <isonum.txt>', D())
-+      ...     out = transform.convert('.. raw:: html\n  :file: <isonum.txt>', D())  # noqa
-       ... except NotImplementedError:
-       ...     print 'Good'
-       ... else:
-@@ -79,27 +79,64 @@ def name(self):
+     @property
+     def schema(self):
+-        return getUserDataSchema()
++        # prevent infinite recursion when accessing the schema via bypassing
++        # __getattr__ of self
++        try:
++            return object.__getattribute__(self, '_schema')
++        except AttributeError:
++            object.__setattr__(self, '_schema', getUserDataSchema())
++        return object.__getattribute__(self, '_schema')
++
++    @schema.setter
++    def schema(self, value):
++        self._schema = value
  
-     def convert(self, orig, data, **kwargs):
-         # do the format
-+        writer_name = kwargs.get('writer_name', 'html4css1')
-+
-         encoding = kwargs.get('encoding', 'utf-8')
-         input_encoding = kwargs.get('input_encoding', encoding)
-         output_encoding = kwargs.get('output_encoding', encoding)
-         language = kwargs.get('language', 'en')
-         warnings = kwargs.get('warnings', None)
--
-+        stylesheet = kwargs.get('stylesheet', None)
-         initial_header_level = int(self.config.get('initial_header_level', 2))
-         report_level = int(self.config.get('report_level', 2))
-+        settings = {
-+            'documentclass': '',
-+            'traceback': 1,
-+            'input_encoding': input_encoding,
-+            'output_encoding': output_encoding,
-+            'stylesheet': stylesheet,
-+            'stylesheet_path': None,
-+            'file_insertion_enabled': 0,
-+            'raw_enabled': 0,
-+            'language_code': language,
-+            # starting level for <H> elements:
-+            'initial_header_level': initial_header_level,
-+            # set the reporting level to something sane:
-+            'report_level': report_level,
-+            # don't break if we get errors:
-+            'halt_level': 6,
-+            # remember warnings:
-+            'warning_stream': warnings,
-+        }
- 
--        settings = {'documentclass': '',
--                    'traceback': 1,
--                    }
--
--        html = HTML(orig,
--                    input_encoding=input_encoding,
--                    output_encoding=output_encoding,
--                    language_code=language,
--                    initial_header_level=initial_header_level,
--                    report_level=report_level,
--                    warnings=warnings,
--                    settings=settings)
-+        parts = publish_parts(
-+            source=orig,
-+            writer_name=writer_name,
-+            settings_overrides=settings,
-+            config_section='zope application'
-+        )
-+
-+        header = '<h%(level)s class="title">%(title)s</h%(level)s>\n' % {
-+            'level': initial_header_level,
-+            'title': parts['title']}
-+
-+        subheader = '<h%(level)s class="subtitle">%(subtitle)s</h%(level)s>\n' % {  # noqa
-+            'level': initial_header_level+1,
-+            'subtitle': parts['subtitle']}
-+
-+        body = '%(docinfo)s%(body)s' % {
-+            'docinfo': parts['docinfo'],
-+            'body': parts['body']}
-+
-+        html = ''
-+        if parts['title']:
-+            html = html + header
-+        if parts['subtitle']:
-+            html = html + subheader
-+        html = html + body
-+
-+        if output_encoding != 'unicode':
-+            html = html.encode(output_encoding)
- 
-         html = html.replace(' class="document"', '', 1)
-         data.setData(html)
+     def get_email(self):
+         return self._getProperty('email')
 
 
