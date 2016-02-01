@@ -1,200 +1,172 @@
-Repository: plone.portlet.static
+Repository: plone.app.linkintegrity
 
 
 Branch: refs/heads/master
-Date: 2015-11-25T22:52:11+01:00
-Author: Johannes Raggam (thet) <raggam-nl@adm.at>
-Commit: https://github.com/plone/plone.portlet.static/commit/bdf9c9651aca9db49d90e0f0f9e15ffb646e5370
+Date: 2016-01-22T14:53:29+01:00
+Author: Thomas Schorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/8c831a19eaad1ffe57b75a18681105c553e3b775
 
-Plone 4 compatibility.
+fix findObjects for the case where the webserver rewrites the portal name
 
 Files changed:
+A plone/app/linkintegrity/tests/test_handlers.py
 M CHANGES.rst
-M plone/portlet/static/static.py
+M plone/app/linkintegrity/handlers.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7259bb2..238c4e0 100644
+index 8648edb..78ce7ca 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,6 +14,9 @@ Fixes:
-   and compute 'assignment context' only for 'context' portlet.
-   [sverbois]
+   upgrade issues.
+   [vangheem]
  
-+- Plone 4 compatibility.
-+  [thet]
++- make handler.findObject() work when the webserver rewrites the portal name
++  [tschorr]
 +
  
- 3.0.1 (2014-10-23)
+ 3.0.3 (2015-11-26)
  ------------------
-diff --git a/plone/portlet/static/static.py b/plone/portlet/static/static.py
-index 64c68f1..a9635e0 100644
---- a/plone/portlet/static/static.py
-+++ b/plone/portlet/static/static.py
-@@ -1,6 +1,7 @@
- # -*- coding: utf-8 -*-
- from Acquisition import aq_inner
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.utils import getFSVersionTuple
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from plone.app.portlets.portlets import base
- from plone.app.textfield import RichText
-@@ -15,6 +16,15 @@
- import re
- 
- logger = logging.getLogger('plone.portlet.static')
-+PLONE5 = getFSVersionTuple()[0] >= 5
+diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py
+index 999d1e0..5e12ffd 100644
+--- a/plone/app/linkintegrity/handlers.py
++++ b/plone/app/linkintegrity/handlers.py
+@@ -30,7 +30,7 @@ def findObject(base, path):
+     if path.startswith('/'):
+         # Make an absolute path relative to the portal root
+         obj = getToolByName(base, 'portal_url').getPortalObject()
+-        portal_path = '/'.join(obj.getPhysicalPath()) + '/'
++        portal_path = obj.absolute_url_path() + '/'
+         if path.startswith(portal_path):
+             path = path[len(portal_path):]
+     else:
+diff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py
+new file mode 100644
+index 0000000..9126475
+--- /dev/null
++++ b/plone/app/linkintegrity/tests/test_handlers.py
+@@ -0,0 +1,35 @@
++from plone.app.linkintegrity.tests.base import ATBaseTestCase
++from plone.app.linkintegrity.tests.base import DXBaseTestCase
++from plone.app.linkintegrity.handlers import findObject
 +
-+if PLONE5:
-+    base_AddForm = base.AddForm
-+    base_EditForm = base.EditForm
-+else:
-+    from plone.app.portlets.browser.z3cformhelper import AddForm as base_AddForm  # noqa
-+    from plone.app.portlets.browser.z3cformhelper import EditForm as base_EditForm  # noqa
-+    from z3c.form import field
- 
- 
- class IStaticPortlet(IPortletDataProvider):
-@@ -156,14 +166,18 @@ def transformed(self, mt='text/x-html-safe'):
-         return None
- 
- 
--class AddForm(base.AddForm):
-+class AddForm(base_AddForm):
-     """Portlet add form.
- 
-     This is registered in configure.zcml. The form_fields variable tells
-     zope.formlib which fields to display. The create() method actually
-     constructs the assignment that is being added.
-     """
--    schema = IStaticPortlet
-+    if PLONE5:
-+        schema = IStaticPortlet
-+    else:
-+        fields = field.Fields(IStaticPortlet)
 +
-     label = _(u"title_add_static_portlet", default=u"Add static text portlet")
-     description = _(
-         u"description_static_portlet",
-@@ -174,13 +188,17 @@ def create(self, data):
-         return Assignment(**data)
- 
- 
--class EditForm(base.EditForm):
-+class EditForm(base_EditForm):
-     """Portlet edit form.
- 
-     This is registered with configure.zcml. The form_fields variable tells
-     zope.formlib which fields to display.
-     """
--    schema = IStaticPortlet
-+    if PLONE5:
-+        schema = IStaticPortlet
-+    else:
-+        fields = field.Fields(IStaticPortlet)
++class FindObjectTests:
++    """ testing the handlers.findObject function """
++    
++    def test_relative_to_portal_root_1(self):
++        obj, components = findObject(self.portal.doc1, '/plone/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone/doc2')
++        self.assertEqual(components, '')
 +
-     label = _(
-         u"title_edit_static_portlet",
-         default=u"Edit static text portlet"
++    def test_relative_to_portal_root_2(self):
++        # Prevent regression. See https://github.com/plone/plone.app.linkintegrity/pull/17
++        obj, components = findObject(self.portal.doc1, '/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone/doc2')
++        self.assertEqual(components, '')
++
++    def test_webserver_rewrites_portal_name(self):
++        # test the case where a webserver rewrites the portal name, e.g. for Apache:
++        # RewriteRule ^/wssitename(.*)$ http://localhost:8080/VirtualHostBase/http/my.domain.com:80/plonesitename/VirtualHostRoot/_vh_wssitename$1
++        self.portal.REQUEST.other['VirtualRootPhysicalPath'] = ('', 'plone')
++        self.portal.REQUEST._script = ['plone_foo']
++        obj, components = findObject(self.portal.doc1, '/plone_foo/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone_foo/doc2')
++        self.assertEqual(obj.getPhysicalPath(), ('','plone', 'doc2'))
++        self.assertEqual(components, '')
++
++class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):
++    """findObject testcase for dx content types"""
++
++
++class ReferenceGenerationATTestCase(ATBaseTestCase, FindObjectTests):
++    """findObject testcase for at content types"""
 
 
-Repository: plone.portlet.static
+Repository: plone.app.linkintegrity
 
 
 Branch: refs/heads/master
-Date: 2016-02-01T08:52:43+01:00
+Date: 2016-02-01T10:45:46+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.portlet.static/commit/45411dc42885e98a3a0ff165710e02cb9ee2ff8e
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/508835bd9ea88d1a4c8e0a8cf0c069f6ba05f0ae
 
-Merge pull request #11 from bluedynamics/master
+Merge pull request #35 from plone/rewritten_portal_name_master_pr
 
-Plone 4 compatibility.
+Make findObject work if the webserver rewrites the portal name (master)
 
 Files changed:
+A plone/app/linkintegrity/tests/test_handlers.py
 M CHANGES.rst
-M plone/portlet/static/static.py
+M plone/app/linkintegrity/handlers.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7259bb2..238c4e0 100644
+index 8648edb..78ce7ca 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,6 +14,9 @@ Fixes:
-   and compute 'assignment context' only for 'context' portlet.
-   [sverbois]
+   upgrade issues.
+   [vangheem]
  
-+- Plone 4 compatibility.
-+  [thet]
++- make handler.findObject() work when the webserver rewrites the portal name
++  [tschorr]
 +
  
- 3.0.1 (2014-10-23)
+ 3.0.3 (2015-11-26)
  ------------------
-diff --git a/plone/portlet/static/static.py b/plone/portlet/static/static.py
-index 64c68f1..a9635e0 100644
---- a/plone/portlet/static/static.py
-+++ b/plone/portlet/static/static.py
-@@ -1,6 +1,7 @@
- # -*- coding: utf-8 -*-
- from Acquisition import aq_inner
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.utils import getFSVersionTuple
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from plone.app.portlets.portlets import base
- from plone.app.textfield import RichText
-@@ -15,6 +16,15 @@
- import re
- 
- logger = logging.getLogger('plone.portlet.static')
-+PLONE5 = getFSVersionTuple()[0] >= 5
+diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py
+index 999d1e0..5e12ffd 100644
+--- a/plone/app/linkintegrity/handlers.py
++++ b/plone/app/linkintegrity/handlers.py
+@@ -30,7 +30,7 @@ def findObject(base, path):
+     if path.startswith('/'):
+         # Make an absolute path relative to the portal root
+         obj = getToolByName(base, 'portal_url').getPortalObject()
+-        portal_path = '/'.join(obj.getPhysicalPath()) + '/'
++        portal_path = obj.absolute_url_path() + '/'
+         if path.startswith(portal_path):
+             path = path[len(portal_path):]
+     else:
+diff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py
+new file mode 100644
+index 0000000..9126475
+--- /dev/null
++++ b/plone/app/linkintegrity/tests/test_handlers.py
+@@ -0,0 +1,35 @@
++from plone.app.linkintegrity.tests.base import ATBaseTestCase
++from plone.app.linkintegrity.tests.base import DXBaseTestCase
++from plone.app.linkintegrity.handlers import findObject
 +
-+if PLONE5:
-+    base_AddForm = base.AddForm
-+    base_EditForm = base.EditForm
-+else:
-+    from plone.app.portlets.browser.z3cformhelper import AddForm as base_AddForm  # noqa
-+    from plone.app.portlets.browser.z3cformhelper import EditForm as base_EditForm  # noqa
-+    from z3c.form import field
- 
- 
- class IStaticPortlet(IPortletDataProvider):
-@@ -156,14 +166,18 @@ def transformed(self, mt='text/x-html-safe'):
-         return None
- 
- 
--class AddForm(base.AddForm):
-+class AddForm(base_AddForm):
-     """Portlet add form.
- 
-     This is registered in configure.zcml. The form_fields variable tells
-     zope.formlib which fields to display. The create() method actually
-     constructs the assignment that is being added.
-     """
--    schema = IStaticPortlet
-+    if PLONE5:
-+        schema = IStaticPortlet
-+    else:
-+        fields = field.Fields(IStaticPortlet)
 +
-     label = _(u"title_add_static_portlet", default=u"Add static text portlet")
-     description = _(
-         u"description_static_portlet",
-@@ -174,13 +188,17 @@ def create(self, data):
-         return Assignment(**data)
- 
- 
--class EditForm(base.EditForm):
-+class EditForm(base_EditForm):
-     """Portlet edit form.
- 
-     This is registered with configure.zcml. The form_fields variable tells
-     zope.formlib which fields to display.
-     """
--    schema = IStaticPortlet
-+    if PLONE5:
-+        schema = IStaticPortlet
-+    else:
-+        fields = field.Fields(IStaticPortlet)
++class FindObjectTests:
++    """ testing the handlers.findObject function """
++    
++    def test_relative_to_portal_root_1(self):
++        obj, components = findObject(self.portal.doc1, '/plone/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone/doc2')
++        self.assertEqual(components, '')
 +
-     label = _(
-         u"title_edit_static_portlet",
-         default=u"Edit static text portlet"
++    def test_relative_to_portal_root_2(self):
++        # Prevent regression. See https://github.com/plone/plone.app.linkintegrity/pull/17
++        obj, components = findObject(self.portal.doc1, '/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone/doc2')
++        self.assertEqual(components, '')
++
++    def test_webserver_rewrites_portal_name(self):
++        # test the case where a webserver rewrites the portal name, e.g. for Apache:
++        # RewriteRule ^/wssitename(.*)$ http://localhost:8080/VirtualHostBase/http/my.domain.com:80/plonesitename/VirtualHostRoot/_vh_wssitename$1
++        self.portal.REQUEST.other['VirtualRootPhysicalPath'] = ('', 'plone')
++        self.portal.REQUEST._script = ['plone_foo']
++        obj, components = findObject(self.portal.doc1, '/plone_foo/doc2')
++        self.assertEqual(obj.absolute_url_path(), '/plone_foo/doc2')
++        self.assertEqual(obj.getPhysicalPath(), ('','plone', 'doc2'))
++        self.assertEqual(components, '')
++
++class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):
++    """findObject testcase for dx content types"""
++
++
++class ReferenceGenerationATTestCase(ATBaseTestCase, FindObjectTests):
++    """findObject testcase for at content types"""
 
 
