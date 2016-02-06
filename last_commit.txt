@@ -1,80 +1,216 @@
-Repository: plone.app.blob
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.5.x
-Date: 2016-02-06T23:01:50+01:00
+Branch: refs/heads/master
+Date: 2016-02-07T00:10:57+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.blob/commit/222e67515ce029297d7d837e0a854b4bfcfc9a8b
+Commit: https://github.com/plone/plone.app.upgrade/commit/2e368576d5a2727a68739b363bee25f5c0b80812
 
-Made catalog migration test clearer in case of failure.
+Use unsetLastVersionForProfile from Products.GenericSetup 1.8.1.
 
 Files changed:
 M CHANGES.rst
-M src/plone/app/blob/tests/test_replacements.py
+M plone/app/upgrade/v43/final.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 96e666b..66d49cd 100644
+index c774eca..eef4faa 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -4,7 +4,7 @@ Changelog
- 1.5.17 (unreleased)
- -------------------
+@@ -10,6 +10,9 @@ New:
  
--- Nothing changed yet.
-+- Made catalog migration test clearer in case of failure.  [maurits]
+ Fixes:
+ 
++- Use `unsetLastVersionForProfile` from GenericSetup 1.8.1 and
++  higher.  [maurits]
++
+ - Fix ``cleanUpProductRegistry`` to not break when ``Control_Panel`` cannot be found.
+   Fixes test failures with Zope 4.
+   [thet]
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index 2c199c9..ff4d6c4 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -4,7 +4,8 @@
+ from zope.component import getAllUtilitiesRegisteredFor
+ from zope.component import queryUtility
+ from plone.contentrules.engine.interfaces import IRuleStorage
+-from plone.contentrules.engine.assignments import check_rules_with_dotted_name_moved
++from plone.contentrules.engine.assignments import \
++    check_rules_with_dotted_name_moved
+ 
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from plone.app.upgrade.utils import unregisterSteps
+@@ -61,24 +62,12 @@ def unmarkUnavailableProfiles(context):
+     """
+     setup = context
+     available = [profile['id'] for profile in setup.listProfileInfo()]
+-    # XXX We want to use unsetLastVersionForProfile,
+-    # but that requires a merge and release of this
+-    # GenericSetup pull request:
+-    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
+-    # portal_setup.unsetLastVersionForProfile(profile_id)
+-    # Instead we must copy and set the
+-    # (non-persistent) profile upgrade versions.
+-    prof_versions = setup._profile_upgrade_versions.copy()
+-    to_remove = [profile_id for profile_id in prof_versions
+-                 if profile_id not in available]
+-    if not to_remove:
+-        return
+-    for profile_id in to_remove:
++    for profile_id in setup._profile_upgrade_versions.copy():
++        if profile_id in available:
++            continue
+         logger.info('Setting installed version of profile %s as unknown.',
+                     profile_id)
+-        del prof_versions[profile_id]
+-    # save the new dictionary
+-    setup._profile_upgrade_versions = prof_versions
++        setup.unsetLastVersionForProfile(profile_id)
  
  
- 1.5.16 (2015-07-29)
-diff --git a/src/plone/app/blob/tests/test_replacements.py b/src/plone/app/blob/tests/test_replacements.py
-index 61a6251..9e5ead7 100644
---- a/src/plone/app/blob/tests/test_replacements.py
-+++ b/src/plone/app/blob/tests/test_replacements.py
-@@ -93,7 +93,8 @@ def testFileMigration(self):
-         self.assertEqual(blob.read(), 'plain text')
+ def markProductsInstalledForUninstallableProfiles(context):
+@@ -243,18 +232,7 @@ def cleanupUninstalledProducts(context):
+             continue
+         # Mark profile as uninstalled/unknown.
+         profile_id = profile['id']
+-        # XXX We want to use unsetLastVersionForProfile,
+-        # but that requires a merge and release of this
+-        # GenericSetup pull request:
+-        # https://github.com/zopefoundation/Products.GenericSetup/pull/18
+-        # portal_setup.unsetLastVersionForProfile(profile_id)
+-        # Instead we must copy and set the
+-        # (non-persistent) profile upgrade versions.
+-        prof_versions = setup._profile_upgrade_versions.copy()
+-        if profile_id not in prof_versions:
+-            continue
+-        del prof_versions[profile_id]
+-        setup._profile_upgrade_versions = prof_versions
++        setup.unsetLastVersionForProfile(profile_id)
  
-     def testCatalogAfterFileMigration(self):
--        foo = self.folder[self.folder.invokeFactory('ATFile', id='foo',
-+        foo = self.folder[self.folder.invokeFactory(
-+            'ATFile', id='foo',
-             title='a file', file='plain text', subject=('foo', 'bar'),
-             contributors=('me'))]
-         # fake old content from before applying the replacement profile
-@@ -105,7 +106,8 @@ def testCatalogAfterFileMigration(self):
-         index_data = catalog.getIndexDataForRID(rid)
-         meta_data = catalog.getMetadataForRID(rid)
-         # migrate & check migrated content item
--        self.assertEqual(migrateATBlobFiles(self.portal),
-+        self.assertEqual(
-+            migrateATBlobFiles(self.portal),
-             'Migrating /plone/Members/test_user_1_/foo (File -> File)\n')
-         foo = self.folder['foo']
-         brain = catalog(id='foo')[0]
-@@ -113,14 +115,21 @@ def testCatalogAfterFileMigration(self):
-         self.assertEqual(foo.getObjSize(), brain.getObjSize)
-         self.assertEqual(foo.getPortalTypeName(), brain.Type)
-         # compare pre-migration and current catalog data...
--        okay = ('meta_type', 'Type', 'object_provides', 'SearchableText', 'Language')
-+        okay = ('meta_type', 'Type', 'object_provides', 'SearchableText',
-+                'Language')
-         for key, value in catalog.getIndexDataForRID(brain.getRID()).items():
--            if not key in okay:
--                self.assertEqual(index_data[key], value, 'index: %s' % key)
-+            if key not in okay:
-+                self.assertEqual(
-+                    index_data[key], value,
-+                    'index {0} had value {1} but now has value {2}'.format(
-+                        key, index_data[key], value))
-         okay = ('meta_type', )
-         for key, value in catalog.getMetadataForRID(brain.getRID()).items():
--            if not key in okay:
--                self.assertEqual(meta_data[key], value, 'meta: %s' % key)
-+            if key not in okay:
-+                self.assertEqual(
-+                    meta_data[key], value,
-+                    'meta {0} had value {1} but now has value {2}'.format(
-+                        key, meta_data[key], value))
-         # also make sure the `Type` index has been updated correctly
-         brains = catalog(Type='File')
-         self.assertEqual([b.getObject() for b in brains], [foo])
+ 
+ def removeFakeKupu(context):
+diff --git a/setup.py b/setup.py
+index 3366cf1..d6bf463 100644
+--- a/setup.py
++++ b/setup.py
+@@ -64,7 +64,7 @@
+         'Products.CMFQuickInstallerTool',
+         'Products.CMFUid',
+         'Products.DCWorkflow',
+-        'Products.GenericSetup',
++        'Products.GenericSetup>=1.8.1',
+         'Products.MimetypesRegistry',
+         # 'Products.PloneLanguageTool',
+         'Products.PlonePAS',
+
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2016-02-07T00:12:22+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/36567888628353b9326d7de486b30a35605166d5
+
+Merge pull request #63 from plone/use-gs-181
+
+Use unsetLastVersionForProfile from Products.GenericSetup 1.8.1.
+
+Files changed:
+M CHANGES.rst
+M plone/app/upgrade/v43/final.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c774eca..eef4faa 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -10,6 +10,9 @@ New:
+ 
+ Fixes:
+ 
++- Use `unsetLastVersionForProfile` from GenericSetup 1.8.1 and
++  higher.  [maurits]
++
+ - Fix ``cleanUpProductRegistry`` to not break when ``Control_Panel`` cannot be found.
+   Fixes test failures with Zope 4.
+   [thet]
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index 2c199c9..ff4d6c4 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -4,7 +4,8 @@
+ from zope.component import getAllUtilitiesRegisteredFor
+ from zope.component import queryUtility
+ from plone.contentrules.engine.interfaces import IRuleStorage
+-from plone.contentrules.engine.assignments import check_rules_with_dotted_name_moved
++from plone.contentrules.engine.assignments import \
++    check_rules_with_dotted_name_moved
+ 
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from plone.app.upgrade.utils import unregisterSteps
+@@ -61,24 +62,12 @@ def unmarkUnavailableProfiles(context):
+     """
+     setup = context
+     available = [profile['id'] for profile in setup.listProfileInfo()]
+-    # XXX We want to use unsetLastVersionForProfile,
+-    # but that requires a merge and release of this
+-    # GenericSetup pull request:
+-    # https://github.com/zopefoundation/Products.GenericSetup/pull/18
+-    # portal_setup.unsetLastVersionForProfile(profile_id)
+-    # Instead we must copy and set the
+-    # (non-persistent) profile upgrade versions.
+-    prof_versions = setup._profile_upgrade_versions.copy()
+-    to_remove = [profile_id for profile_id in prof_versions
+-                 if profile_id not in available]
+-    if not to_remove:
+-        return
+-    for profile_id in to_remove:
++    for profile_id in setup._profile_upgrade_versions.copy():
++        if profile_id in available:
++            continue
+         logger.info('Setting installed version of profile %s as unknown.',
+                     profile_id)
+-        del prof_versions[profile_id]
+-    # save the new dictionary
+-    setup._profile_upgrade_versions = prof_versions
++        setup.unsetLastVersionForProfile(profile_id)
+ 
+ 
+ def markProductsInstalledForUninstallableProfiles(context):
+@@ -243,18 +232,7 @@ def cleanupUninstalledProducts(context):
+             continue
+         # Mark profile as uninstalled/unknown.
+         profile_id = profile['id']
+-        # XXX We want to use unsetLastVersionForProfile,
+-        # but that requires a merge and release of this
+-        # GenericSetup pull request:
+-        # https://github.com/zopefoundation/Products.GenericSetup/pull/18
+-        # portal_setup.unsetLastVersionForProfile(profile_id)
+-        # Instead we must copy and set the
+-        # (non-persistent) profile upgrade versions.
+-        prof_versions = setup._profile_upgrade_versions.copy()
+-        if profile_id not in prof_versions:
+-            continue
+-        del prof_versions[profile_id]
+-        setup._profile_upgrade_versions = prof_versions
++        setup.unsetLastVersionForProfile(profile_id)
+ 
+ 
+ def removeFakeKupu(context):
+diff --git a/setup.py b/setup.py
+index 3366cf1..d6bf463 100644
+--- a/setup.py
++++ b/setup.py
+@@ -64,7 +64,7 @@
+         'Products.CMFQuickInstallerTool',
+         'Products.CMFUid',
+         'Products.DCWorkflow',
+-        'Products.GenericSetup',
++        'Products.GenericSetup>=1.8.1',
+         'Products.MimetypesRegistry',
+         # 'Products.PloneLanguageTool',
+         'Products.PlonePAS',
 
 
