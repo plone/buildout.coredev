@@ -1,62 +1,132 @@
-Repository: plone.app.widgets
+Repository: plone.app.z3cform
 
 
 Branch: refs/heads/master
-Date: 2016-02-17T03:10:27-08:00
+Date: 2016-02-17T03:36:24-08:00
 Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.widgets/commit/59f74d53482f5092ee7dd0c6d9c29d2637ea168c
+Commit: https://github.com/plone/plone.app.z3cform/commit/4aaaf754f32dd03be1403d0151259a7a825603a0
 
 Ensure vocabulary lookup works on add forms for related items widget, and with add forms using schema groups.
 
 Files changed:
-M CHANGES.rst
-M plone/app/widgets/utils.py
+M plone/app/z3cform/tests/test_widgets.py
+M plone/app/z3cform/widget.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 5b1e48c..d8ba9e2 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -12,7 +12,8 @@ New:
+diff --git a/plone/app/z3cform/tests/test_widgets.py b/plone/app/z3cform/tests/test_widgets.py
+index 19f2d01..3ba3ca9 100644
+--- a/plone/app/z3cform/tests/test_widgets.py
++++ b/plone/app/z3cform/tests/test_widgets.py
+@@ -765,7 +765,7 @@ def test_widget_choice(self):
+     def test_widget_addform_url_on_addform(self):
+         from plone.app.z3cform.widget import AjaxSelectWidget
+         widget = AjaxSelectWidget(self.request)
+-        form = Mock()
++        form = Mock(parentForm=None)
+         from zope.interface import directlyProvides
+         from z3c.form.interfaces import IAddForm
+         directlyProvides(form, IAddForm)
+diff --git a/plone/app/z3cform/widget.py b/plone/app/z3cform/widget.py
+index 8e3c331..b23fddc 100644
+--- a/plone/app/z3cform/widget.py
++++ b/plone/app/z3cform/widget.py
+@@ -16,6 +16,7 @@
+ from plone.app.widgets.utils import get_querystring_options
+ from plone.app.widgets.utils import get_relateditems_options
+ from plone.app.widgets.utils import get_tinymce_options
++from plone.app.widgets.utils import get_widget_form
+ from plone.registry.interfaces import IRegistry
+ from plone.app.z3cform.utils import closest_content
+ from z3c.form.browser.select import SelectWidget as z3cform_SelectWidget
+@@ -289,6 +290,15 @@ class AjaxSelectWidget(BaseWidget, z3cform_TextWidget):
+     vocabulary_view = '@@getVocabulary'
+     orderable = False
  
- Fixes:
- 
--- *add item here*
-+- Ensure vocabulary lookup works on add forms for related items widget.
-+  [alecm]
- 
- 
- 2.0.3 (2016-02-14)
-diff --git a/plone/app/widgets/utils.py b/plone/app/widgets/utils.py
-index 7a164e9..49bccc4 100644
---- a/plone/app/widgets/utils.py
-+++ b/plone/app/widgets/utils.py
-@@ -1,5 +1,6 @@
- # -*- coding: utf-8 -*-
- 
-+from Acquisition import aq_base
- from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFCore.utils import getToolByName
- from datetime import datetime
-@@ -122,7 +123,8 @@ def get_relateditems_options(context, value, separator, vocabulary_name,
-     options = get_ajaxselect_options(context, value, separator,
-                                      vocabulary_name, vocabulary_view,
-                                      field_name)
--
-+    if IAddForm.providedBy(context):
-+        context = context.context
-     request = getRequest()
-     msgstr = translate(_(u'Search'), context=request)
-     options.setdefault('searchText', msgstr)
-@@ -204,3 +206,10 @@ def get_context_url(context):
-     else:
-         url = get_portal_url(context)
-     return url
++    def update(self):
++        super(AjaxSelectWidget, self).update()
++        field = getattr(self, 'field', None)
++        if ICollection.providedBy(self.field):
++            field = self.field.value_type
++        if (not self.vocabulary and field is not None and
++                getattr(field, 'vocabularyName', None)):
++            self.vocabulary = field.vocabularyName
 +
+     def _base_args(self):
+         """Method which will calculate _base class arguments.
+ 
+@@ -312,9 +322,10 @@ def _base_args(self):
+         field_name = self.field and self.field.__name__ or None
+ 
+         context = self.context
++        form = get_widget_form(self)
+         # We need special handling for AddForms
+-        if IAddForm.providedBy(getattr(self, 'form')):
+-            context = self.form
++        if IAddForm.providedBy(form):
++            context = form
+         # Use the main form as context if we have groups in an add form
+         elif IGroup.providedBy(getattr(self, 'form')) and \
+                 IAddForm.providedBy(self.form.parentForm):
+@@ -330,8 +341,6 @@ def _base_args(self):
+             field = self.field.value_type
+         if IChoice.providedBy(field):
+             args['pattern_options']['allowNewItems'] = 'false'
+-        if not vocabulary_name and field is not None:
+-            vocabulary_name = field.vocabularyName
+ 
+         args['pattern_options'] = dict_merge(
+             get_ajaxselect_options(context, args['value'], self.separator,
+@@ -377,9 +386,22 @@ class RelatedItemsWidget(BaseWidget, z3cform_TextWidget):
+ 
+     separator = ';'
+     vocabulary = None
++    vocabulary_override = False
+     vocabulary_view = '@@getVocabulary'
+     orderable = False
+ 
++    def update(self):
++        super(RelatedItemsWidget, self).update()
++        field = getattr(self, 'field', None)
++        if ICollection.providedBy(self.field):
++            field = self.field.value_type
++        if (not self.vocabulary and field is not None and
++                getattr(field, 'vocabularyName', None)):
++            self.vocabulary = field.vocabularyName
++            self.vocabulary_override = True
++        else:
++            self.vocabulary = 'plone.app.vocabularies.Catalog'
 +
-+def get_widget_form(widget):
-+    form = getattr(widget, 'form', None)
-+    if getattr(aq_base(form), 'parentForm', None) is not None:
-+        form = form.parentForm
-+    return form
+     def _base_args(self):
+         """Method which will calculate _base class arguments.
+ 
+@@ -406,20 +428,22 @@ def _base_args(self):
+             field = self.field.value_type
+ 
+         vocabulary_name = self.vocabulary
+-        if not vocabulary_name:
+-            if field is not None and field.vocabularyName:
+-                vocabulary_name = field.vocabularyName
+-            else:
+-                vocabulary_name = 'plone.app.vocabularies.Catalog'
+ 
+         field_name = self.field and self.field.__name__ or None
++
++        context = self.context
++        form = get_widget_form(self)
++        # We need special handling for AddForms
++        if IAddForm.providedBy(form):
++            context = form
++
+         args['pattern_options'] = dict_merge(
+-            get_relateditems_options(self.context, args['value'],
++            get_relateditems_options(context, args['value'],
+                                      self.separator, vocabulary_name,
+                                      self.vocabulary_view, field_name),
+             args['pattern_options'])
+ 
+-        if not self.vocabulary:  # widget vocab takes precedence over field
++        if not self.vocabulary_override:  # widget vocab takes precedence over field
+             if field and getattr(field, 'vocabulary', None):
+                 form_url = self.request.getURL()
+                 source_url = "%s/++widget++%s/@@getSource" % (
 
 
