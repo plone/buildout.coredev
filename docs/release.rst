@@ -55,6 +55,7 @@ fix the problem first.
 ::
 
   git clone git@github.com:plone/buildout.coredev.git
+  cd buildout.coredev
   git checkout 5.0
   python bootstrap.py
   bin/buildout -c release.cfg
