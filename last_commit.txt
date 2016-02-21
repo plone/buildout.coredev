@@ -1,42 +1,2100 @@
-Repository: plone.app.lockingbehavior
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-02-20T16:49:02+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.lockingbehavior/commit/0b9f67560c9e6e35f8ea1b2713e29d51e8994cf9
+Date: 2016-02-18T19:55:01+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/223d8c75ed2d4d4594b52f82b36751847cc95418
 
-Required plone.app.locales 4.3.9 or higher.
+add 'merge_with' attribute
+
+Files changed:
+M Products/CMFPlone/interfaces/resources.py
+M Products/CMFPlone/profiles/dependencies/registry.xml
+
+diff --git a/Products/CMFPlone/interfaces/resources.py b/Products/CMFPlone/interfaces/resources.py
+index ffd5243..5b741e3 100644
+--- a/Products/CMFPlone/interfaces/resources.py
++++ b/Products/CMFPlone/interfaces/resources.py
+@@ -1,6 +1,8 @@
+ import zope.interface
+ import zope.component
+ from zope import schema
++from zope.schema.vocabulary import SimpleTerm
++from zope.schema.vocabulary import SimpleVocabulary
+ 
+ from Products.CMFPlone import PloneMessageFactory as _
+ 
+@@ -60,13 +62,15 @@ class IBundleRegistry(zope.interface.Interface):
+     expression = schema.ASCIILine(
+         title=_(u"Expression to render"),
+         description=_(
+-            u"In case its a bundle we can have a condition to render it"),
++            u"In case its a bundle we can have a condition to render it (it "
++            "does not apply if the bundle is merged)."),
+         required=False)
+ 
+     conditionalcomment = schema.ASCIILine(
+         title=_(u"Conditional comment"),
+         description=_(
+-            u"In case you want to render this resource on conditional comment"),
++            u"In case you want to render this resource on conditional comment "
++            "(it does not apply if the bundle is merged)."),
+         required=False)
+ 
+     resources = schema.List(
+@@ -110,3 +114,18 @@ class IBundleRegistry(zope.interface.Interface):
+         required=False,
+         missing_value=[],
+         default=[])
++
++    merge_with = schema.Choice(
++        title=_(u"Merge with"),
++        description=_(
++            u"In production mode, bundles are merged together to reduce the "
++            "quantity of JS and CSS resources loaded by the browser. Choose "
++            "'default' if this bundle must be available for all the visitors, "
++            "choose 'logged-in' if it must be available for logged-in users "
++            "only, or leave it empty if it must not be merged."),
++        vocabulary=SimpleVocabulary(
++            [SimpleTerm('', '', _(u"")),
++             SimpleTerm('default', 'default', 'default'),
++             SimpleTerm('logged-in', 'logged-in', 'logged-in')]),
++        default=u"",
++        required=False)
+diff --git a/Products/CMFPlone/profiles/dependencies/registry.xml b/Products/CMFPlone/profiles/dependencies/registry.xml
+index 9dc0b6f..6f46e7e 100644
+--- a/Products/CMFPlone/profiles/dependencies/registry.xml
++++ b/Products/CMFPlone/profiles/dependencies/registry.xml
+@@ -1054,6 +1054,7 @@
+   <!-- Bundles -->
+   <records prefix="plone.bundles/plone"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">default</value>
+     <value key="resources">
+       <element>plone</element>
+     </value>
+@@ -1068,6 +1069,7 @@
+ 
+   <records prefix="plone.bundles/plone-logged-in"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">logged-in</value>
+     <value key="resources">
+       <element>plone-logged-in</element>
+     </value>
+@@ -1111,6 +1113,7 @@
+ 
+   <records prefix="plone.bundles/plone-legacy"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">default</value>
+     <value key="resources" purge="false">
+       <element>jquery-highlightsearchterms</element>
+     </value>
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-18T19:55:01+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/398cebbbdc7451cfbd8ebba678e65b33376613ea
+
+implement meta-bundle generation and injection
+
+Files changed:
+A Products/CMFPlone/resources/browser/combine.py
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/resource.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+
+diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
+new file mode 100644
+index 0000000..8d5c2d4
+--- /dev/null
++++ b/Products/CMFPlone/resources/browser/combine.py
+@@ -0,0 +1,101 @@
++from Acquisition import aq_base
++from datetime import datetime
++from plone.registry.interfaces import IRegistry
++from plone.resource.file import FilesystemFile
++from plone.resource.interfaces import IResourceDirectory
++from Products.CMFPlone.interfaces import IBundleRegistry
++from Products.CMFPlone.interfaces.resources import (
++    OVERRIDE_RESOURCE_DIRECTORY_NAME,
++)
++from StringIO import StringIO
++from zope.component import getUtility
++
++PRODUCTION_RESOURCE_DIRECTORY = "production"
++
++
++def get_production_resource_directory():
++    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++    production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++    timestamp = production_folder.readFile('timestamp.txt')
++    return "%s/++unique++%s" % (
++        PRODUCTION_RESOURCE_DIRECTORY, timestamp)
++
++
++def get_resource(context, path):
++    resource = context.unrestrictedTraverse(path)
++    if isinstance(resource, FilesystemFile):
++        (directory, sep, filename) = path.rpartition('/')
++        return context.unrestrictedTraverse(directory).readFile(filename)
++    else:
++        if hasattr(aq_base(resource), 'GET'):
++            # for FileResource
++            return resource.GET()
++        else:
++            # any BrowserView
++            return resource()
++
++
++def write_js(context, folder, meta_bundle):
++    registry = getUtility(IRegistry)
++    resources = []
++
++    # default resources
++    if meta_bundle == 'default' and registry.records.get(
++        'plone.resources/jquery.js'
++    ):
++        resources.append(get_resource(context,
++            registry.records['plone.resources/jquery.js'].value))
++        resources.append(get_resource(context,
++            registry.records['plone.resources.requirejs'].value))
++        resources.append(get_resource(context,
++            registry.records['plone.resources.configjs'].value))
++
++    # bundles
++    bundles = registry.collectionOfInterface(
++        IBundleRegistry, prefix="plone.bundles", check=False)
++    for bundle in bundles.values():
++        if bundle.merge_with == meta_bundle:
++            resources.append(get_resource(context, bundle.jscompilation))
++
++    fi = StringIO()
++    for script in resources:
++        fi.write(script + '\n')
++    folder.writeFile(meta_bundle + ".js", fi)
++
++
++def write_css(context, folder, meta_bundle):
++    registry = getUtility(IRegistry)
++    resources = []
++
++    bundles = registry.collectionOfInterface(
++        IBundleRegistry, prefix="plone.bundles", check=False)
++    for bundle in bundles.values():
++        if bundle.merge_with == meta_bundle:
++            resources.append(get_resource(context, bundle.csscompilation))
++
++    fi = StringIO()
++    for script in resources:
++        fi.write(script + '\n')
++    folder.writeFile(meta_bundle + ".css", fi)
++
++
++def combine_bundles(context):
++    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
++        persistent_directory.makeDirectory(OVERRIDE_RESOURCE_DIRECTORY_NAME)
++    container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++    if PRODUCTION_RESOURCE_DIRECTORY not in container:
++        container.makeDirectory(PRODUCTION_RESOURCE_DIRECTORY)
++    production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++
++    # store timestamp
++    fi = StringIO()
++    fi.write(datetime.now().isoformat())
++    production_folder.writeFile("timestamp.txt", fi)
++
++    # generate new combined bundles
++    write_js(context, production_folder, 'default')
++    write_js(context, production_folder, 'logged-in')
++    write_css(context, production_folder, 'default')
++    write_css(context, production_folder, 'logged-in')
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index f44c458..362517d 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -3,6 +3,7 @@
+ from Products.CMFPlone.interfaces.resources import IResourceRegistry
+ from Products.CMFPlone.interfaces.resources import IBundleRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
++from Products.CMFPlone.resources.browser.combine import combine_bundles
+ from StringIO import StringIO
+ from cssmin import cssmin
+ from datetime import datetime
+@@ -127,5 +128,9 @@ def cookWhenChangingSettings(context, bundle=None):
+         # setRequest(original_request)
+     except NotFound:
+         logger.info('Error compiling js/css for the bundle')
++
++    # refresh production meta bundles
++    combine_bundles(context)
++
+     # Disable CSRF protection on this request
+     alsoProvides(request, IDisableCSRFProtection)
+diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py
+index 522f577..d7734af 100644
+--- a/Products/CMFPlone/resources/browser/resource.py
++++ b/Products/CMFPlone/resources/browser/resource.py
+@@ -15,6 +15,8 @@
+ from plone.memoize.view import memoize
+ from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
+ 
++from .combine import get_production_resource_directory
++
+ 
+ class ResourceView(ViewletBase):
+     """Information for script rendering.
+@@ -22,6 +24,12 @@ class ResourceView(ViewletBase):
+ 
+     @property
+     @memoize
++    def anonymous(self):
++        return _getAuthenticatedUser(
++            self.context).getUserName() == 'Anonymous User'
++
++    @property
++    @memoize
+     def development(self):
+         """
+         To set development mode:
+@@ -32,7 +40,7 @@ def development(self):
+         """
+         if RESOURCE_DEVELOPMENT_MODE:
+             return True
+-        if _getAuthenticatedUser(self.context).getUserName() == 'Anonymous User':
++        if self.anonymous:
+             return False
+         return self.registry.records['plone.resources.development'].value
+ 
+@@ -83,6 +91,25 @@ def update(self):
+         self.site_url = self.portal_state.portal_url()
+         self.registry = getUtility(IRegistry)
+ 
++        self.production_path = get_production_resource_directory()
++
++        self.diazo_production_css = None
++        self.diazo_development_css = None
++        self.diazo_development_js = None
++        self.diazo_production_js = None
++        self.themeObj = None
++
++        # Check if its Diazo enabled
++        policy = theming_policy(self.request)
++        if policy.isThemeEnabled():
++            self.themeObj = policy.get_theme()
++            if self.themeObj:
++                if hasattr(self.themeObj, 'production_css'):
++                    self.diazo_production_css = self.themeObj.production_css
++                    self.diazo_development_css = self.themeObj.development_css
++                    self.diazo_development_js = self.themeObj.development_js
++                    self.diazo_production_js = self.themeObj.production_js
++
+     def get_bundles(self):
+         return self.registry.collectionOfInterface(
+             IBundleRegistry, prefix="plone.bundles", check=False)
+@@ -97,26 +124,13 @@ def get_cooked_bundles(self):
+         """
+         cache = component.queryUtility(ram.IRAMCache)
+         bundles = self.get_bundles()
+-        policy = theming_policy(self.request)
+ 
+         enabled_diazo_bundles = []
+         disabled_diazo_bundles = []
+-        self.diazo_production_css = None
+-        self.diazo_development_css = None
+-        self.diazo_development_js = None
+-        self.diazo_production_js = None
+ 
+-        # Check if its Diazo enabled
+-        if policy.isThemeEnabled():
+-            themeObj = policy.get_theme()
+-            if themeObj:
+-                enabled_diazo_bundles = themeObj.enabled_bundles
+-                disabled_diazo_bundles = themeObj.disabled_bundles
+-                if hasattr(themeObj, 'production_css'):
+-                    self.diazo_production_css = themeObj.production_css
+-                    self.diazo_development_css = themeObj.development_css
+-                    self.diazo_development_js = themeObj.development_js
+-                    self.diazo_production_js = themeObj.production_js
++        if self.themeObj:
++            enabled_diazo_bundles = self.themeObj.enabled_bundles
++            disabled_diazo_bundles = self.themeObj.disabled_bundles
+ 
+         # Request set bundles
+         enabled_request_bundles = []
+@@ -157,7 +171,7 @@ def get_cooked_bundles(self):
+                         continue
+                 yield key, bundle
+ 
+-    def ordered_bundles_result(self):
++    def ordered_bundles_result(self, production=False):
+         """
+         It gets the ordered result of bundles
+         """
+@@ -168,7 +182,8 @@ def ordered_bundles_result(self):
+         for key, bundle in self.get_cooked_bundles():
+             if bundle.depends is None or bundle.depends == '':
+                 # its the first one
+-                self.get_data(bundle, result)
++                if not(production and bundle.merge_with):
++                    self.get_data(bundle, result)
+                 inserted.append(key)
+             else:
+                 name = bundle.depends.strip()
+@@ -184,7 +199,8 @@ def ordered_bundles_result(self):
+                 if key in inserted:
+                     found = True
+                     for bundle in bundles_to_add:
+-                        self.get_data(bundle, result)
++                        if not(production and bundle.merge_with):
++                            self.get_data(bundle, result)
+                         inserted.append(
+                             bundle.__prefix__.split('/', 1)[1].rstrip('.'))
+                     del depends_on[key]
+@@ -194,6 +210,7 @@ def ordered_bundles_result(self):
+         # THe ones that does not get the dependencies
+         for bundles_to_add in depends_on.values():
+             for bundle in bundles_to_add:
+-                self.get_data(bundle, result)
++                if not(production and bundle.merge_with):
++                    self.get_data(bundle, result)
+ 
+         return result
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 652d729..280e06a 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -111,8 +111,28 @@ def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
+         """
+-        result = self.default_resources()
+-        result.extend(self.ordered_bundles_result())
++        if self.development:
++            result = self.default_resources()
++            result.extend(self.ordered_bundles_result())
++        else:
++            result = [{
++                'src': '%s/++plone++%s' % (
++                    self.site_url,
++                    self.production_path + '/default.js'
++                ),
++                'conditionalcomment': None,
++                'bundle': 'production'
++            }, ]
++            if not self.anonymous:
++                result.append({
++                    'src': '%s/++plone++%s' % (
++                        self.site_url,
++                        self.production_path + '/logged-in.js'
++                    ),
++                    'conditionalcomment': None,
++                    'bundle': 'production'
++                })
++            result.extend(self.ordered_bundles_result(production=True))
+ 
+         # Add manual added resources
+         if hasattr(self.request, 'enabled_resources'):
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index 9ae829e..be93a6b 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -89,7 +89,30 @@ def styles(self):
+         """
+         Get all the styles
+         """
+-        result = self.ordered_bundles_result()
++        if self.development:
++            result = self.ordered_bundles_result()
++        else:
++            result = [{
++                'src': '%s/++plone++%s' % (
++                    self.site_url,
++                    self.production_path + '/default.css'
++                ),
++                'conditionalcomment': None,
++                'rel': 'stylesheet',
++                'bundle': 'production'
++            }, ]
++            if not self.anonymous:
++                result.append({
++                    'src': '%s/++plone++%s' % (
++                        self.site_url,
++                        self.production_path + '/logged-in.css'
++                    ),
++                    'conditionalcomment': None,
++                    'rel': 'stylesheet',
++                    'bundle': 'production'
++                })
++            result.extend(self.ordered_bundles_result(production=True))
++
+         # Add manual added resources
+         resources = self.get_resources()
+         if hasattr(self.request, 'enabled_resources'):
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-18T19:55:01+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/a2b2f238a0c828a26924686396ad944bb54ff556
+
+GenericSetup step to generate meta bundles
+
+Files changed:
+A Products/CMFPlone/resources/exportimport/bundles.py
+M Products/CMFPlone/exportimport/configure.zcml
+
+diff --git a/Products/CMFPlone/exportimport/configure.zcml b/Products/CMFPlone/exportimport/configure.zcml
+index 46c28ff..70a9736 100644
+--- a/Products/CMFPlone/exportimport/configure.zcml
++++ b/Products/CMFPlone/exportimport/configure.zcml
+@@ -100,6 +100,14 @@
+       description="Import CMFDiffTool settings">
+   </genericsetup:importStep>
+ 
++  <genericsetup:importStep
++      name="combine-bundles"
++      title="Bundle combination"
++      description="Combine JS/CSS bundles together"
++      handler="Products.CMFPlone.resources.exportimport.bundles.combine">
++    <depends name="plone.app.registry" />
++  </genericsetup:importStep>
++
+   <genericsetup:exportStep
+       name="content"
+       title="Content"
+diff --git a/Products/CMFPlone/resources/exportimport/bundles.py b/Products/CMFPlone/resources/exportimport/bundles.py
+new file mode 100644
+index 0000000..a51042c
+--- /dev/null
++++ b/Products/CMFPlone/resources/exportimport/bundles.py
+@@ -0,0 +1,19 @@
++from plone.registry.interfaces import IRegistry
++from zope.component import queryUtility
++
++from ..browser.combine import combine_bundles
++
++
++def combine(context):
++
++    logger = context.getLogger('bundles')
++    registry = queryUtility(IRegistry)
++
++    if registry is None:
++        logger.info("Cannot find registry")
++        return
++
++    body = context.readDataFile('registry.xml')
++    if body and "IBundleRegistry" in body:
++        site = context.getSite()
++        combine_bundles(site)
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-18T19:55:01+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/3c4d25de3918e2bbe5e1989ff9ef7679123a66e8
+
+tests
+
+Files changed:
+A Products/CMFPlone/tests/test_metabundles.py
+M Products/CMFPlone/tests/testResourceRegistries.py
+
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index fc8ea51..86b20db 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -311,22 +311,26 @@ def test_scripts_viewlet(self):
+         scripts = ScriptsView(self.layer['portal'], self.layer['request'], None)
+         scripts.update()
+         results = scripts.scripts()
+-        self.assertEqual(
+-            results[0],
+-            {'src': 'http://nohost/plone/++plone++static/components/jquery/dist/jquery.min.js',
+-             'conditionalcomment': None, 'bundle': 'basic'})
+-        self.assertEqual(len(results), 6)
++        self.assertEqual(results[0]['bundle'], 'production')
++        self.assertTrue(results[0]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[0]['src'].endswith('/default.js'))
++        self.assertEqual(results[1]['bundle'], 'production')
++        self.assertTrue(results[1]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[1]['src'].endswith('/logged-in.js'))
++        self.assertEqual(len(results), 2)
+ 
+     def test_scripts_viewlet_anonymous(self):
+         logout()
+         scripts = ScriptsView(self.layer['portal'], self.layer['request'], None)
+         scripts.update()
+         results = scripts.scripts()
+-        self.assertEqual(
+-            results[0],
+-            {'src': 'http://nohost/plone/++plone++static/components/jquery/dist/jquery.min.js',
+-             'conditionalcomment': None, 'bundle': 'basic'})
+-        self.assertEqual(len(results), 5)
++        self.assertEqual(results[0]['bundle'], 'production')
++        self.assertTrue(results[0]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[0]['src'].endswith('/default.js'))
++        self.assertEqual(len(results), 1)
+ 
+     @mock.patch.object(ScriptsView,
+                        'get_resources',
+diff --git a/Products/CMFPlone/tests/test_metabundles.py b/Products/CMFPlone/tests/test_metabundles.py
+new file mode 100644
+index 0000000..35d2346
+--- /dev/null
++++ b/Products/CMFPlone/tests/test_metabundles.py
+@@ -0,0 +1,40 @@
++# -*- coding: utf-8 -*-
++from plone.resource.interfaces import IResourceDirectory
++from Products.CMFPlone.interfaces.resources import (
++    OVERRIDE_RESOURCE_DIRECTORY_NAME,
++)
++from Products.CMFPlone.tests.PloneTestCase import PloneTestCase
++from zope.component import getUtility
++
++from Products.CMFPlone.resources.browser.combine import (
++    PRODUCTION_RESOURCE_DIRECTORY,
++    combine_bundles,
++)
++
++
++class ProductsCMFPloneSetupTest(PloneTestCase):
++
++    def afterSetUp(self):
++        combine_bundles(self.portal)
++        persistent_directory = getUtility(
++            IResourceDirectory, name="persistent")
++        container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++        self.production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++
++    def test_production_directory(self):
++        self.assertEquals(
++            self.production_folder.listDirectory(),
++            [
++                'default.css',
++                'default.js',
++                'logged-in.css',
++                'logged-in.js',
++                'timestamp.txt'
++            ]
++        )
++
++    def test_default_js_bundle(self):
++        self.assertIn(
++            "jQuery",
++            self.production_folder.readFile('default.js')
++        )
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-18T19:55:01+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/2fe9dc607c7cd97beaf0a328be8e010e48bee8fc
+
+fix traversal to resources in test context
+
+Files changed:
+M Products/CMFPlone/traversal.py
+
+diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
+index da58edc..4b64550 100644
+--- a/Products/CMFPlone/traversal.py
++++ b/Products/CMFPlone/traversal.py
+@@ -14,7 +14,7 @@ class PloneBundlesTraverser(ResourceTraverser):
+     def traverse(self, name, remaining):
+         # in case its not a request get the default one
+         req = getRequest()
+-        if 'PATH_INFO' not in req.environ:
++        if not req or 'PATH_INFO' not in req.environ:
+             return super(PloneBundlesTraverser, self).traverse(name, remaining)
+ 
+         resource_path = req.environ['PATH_INFO'].split('++plone++')[-1]
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-18T19:55:02+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/749ede18c6b93d3d9441b3d564b991f12b14adb0
+
+update CHANGES.rst
 
 Files changed:
 M CHANGES.rst
-M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index c870af4..3be53c1 100644
+index 8b82400..0e2e41e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -13,7 +13,8 @@ Fixes:
- - Refactor doctest to an integration test and skip it for Zope 4 due to isolation problems.
-   [pbauer]
+@@ -19,6 +19,10 @@ New:
+ - Add barceloneta theme path in less configuration.
+   [Gagaro]
  
--- Changed i18n_domain to "plone"
-+- Changed i18n_domain to "plone".
-+  Requires plone.app.locales 4.3.9 or higher.
-   [claytonc]
++- Merge JS and CSS bundles into meta-bundles to reduce the number of requests
++  when loading a page (PLIP #1277)
++  [ebrehault]
++
+ Fixes:
+ 
+ - Get ``email_from_name`` from the mail settings registry.
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-20T12:02:04+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/9c83ceb6e417fb2df43f662054d6a77246545340
+
+do not break save_registry if no resources and no bundles
+
+Files changed:
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index e59fbf5..d4de75c 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -208,12 +208,13 @@ def update_registry_collection(self, itype, prefix, newdata):
+     def save_registry(self):
+         req = self.request
+ 
+-        self.update_registry_collection(
+-            IResourceRegistry, "plone.resources",
+-            json.loads(req.get('resources')))
+-        self.update_registry_collection(
+-            IBundleRegistry, "plone.bundles",
+-            json.loads(req.get('bundles')))
++        if req.get('resources') and req.get('bundles'):
++            self.update_registry_collection(
++                IResourceRegistry, "plone.resources",
++                json.loads(req.get('resources')))
++            self.update_registry_collection(
++                IBundleRegistry, "plone.bundles",
++                json.loads(req.get('bundles')))
+ 
+         if self.request.form.get('development', '').lower() == 'true':
+             self.registry['plone.resources.development'] = True
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-21T14:26:09+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/608077966620fa8a094e51ac474dee1ad6e2e731
+
+refresh resources meta bundles during robot test setup
+
+Files changed:
+M Products/CMFPlone/tests/robot/common.robot
+M Products/CMFPlone/tests/robot/keywords.robot
+M Products/CMFPlone/tests/robot/test_actionmenu.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+M Products/CMFPlone/tests/robot/test_edit.robot
+M Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+M Products/CMFPlone/tests/robot/test_folder_contents.robot
+M Products/CMFPlone/tests/robot/test_linkintegrity.robot
+M Products/CMFPlone/tests/robot/test_livesearch.robot
+M Products/CMFPlone/tests/robot/test_overlays.robot
+M Products/CMFPlone/tests/robot/test_portlets.robot
+M Products/CMFPlone/tests/robot/test_querystring.robot
+M Products/CMFPlone/tests/robot/test_thememapper.robot
+M Products/CMFPlone/tests/robot/test_tinymce.robot
+
+diff --git a/Products/CMFPlone/tests/robot/common.robot b/Products/CMFPlone/tests/robot/common.robot
+index cac4ec8..7f3878f 100644
+--- a/Products/CMFPlone/tests/robot/common.robot
++++ b/Products/CMFPlone/tests/robot/common.robot
+@@ -62,3 +62,11 @@ there should be '${count}' livesearch results
+ 
+ patterns are loaded
+     Wait For Condition  return $('body.patterns-loaded').size() > 0
++
++Refresh JS/CSS resources
++    # If we do not regenerate the resources meta-bundles, the baseUrl value in
++    # config.js is http://foo/plone. We need to trigger the meta-bundles
++    # generation from the browser so baseUrl gets the proper value.
++    Enable autologin as  Manager
++    Execute Javascript    $.post($('body').attr('data-portal-url')+'/@@resourceregistry-controlpanel', {action: 'save-registry', _authenticator: $('input[name="_authenticator"]').val()});
++    Disable Autologin
+\ No newline at end of file
+diff --git a/Products/CMFPlone/tests/robot/keywords.robot b/Products/CMFPlone/tests/robot/keywords.robot
+index 7ffd098..c68dd6b 100644
+--- a/Products/CMFPlone/tests/robot/keywords.robot
++++ b/Products/CMFPlone/tests/robot/keywords.robot
+@@ -1,5 +1,15 @@
+ *** Keywords *****************************************************************
+ 
++# --- SETUP ------------------------------------------------------------------
++
++Refresh JS/CSS resources
++  # If we do not regenerate the resources meta-bundles, the baseUrl value in
++  # config.js is http://foo/plone. We need to trigger the meta-bundles
++  # generation from the browser so baseUrl gets the proper value.
++  Enable autologin as  Manager
++  Execute Javascript    $.post($('body').attr('data-portal-url')+'/@@resourceregistry-controlpanel', {action: 'save-registry', _authenticator: $('input[name="_authenticator"]').val()});
++  Disable Autologin
++
+ # --- GIVEN ------------------------------------------------------------------
+ 
+ a logged-in site administrator
+diff --git a/Products/CMFPlone/tests/robot/test_actionmenu.robot b/Products/CMFPlone/tests/robot/test_actionmenu.robot
+index 4f98af6..cc7ff5f 100644
+--- a/Products/CMFPlone/tests/robot/test_actionmenu.robot
++++ b/Products/CMFPlone/tests/robot/test_actionmenu.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
  
  
-diff --git a/setup.py b/setup.py
-index 34c29ef..a59858d 100644
---- a/setup.py
-+++ b/setup.py
-@@ -35,6 +35,7 @@
-     zip_safe=False,
-     install_requires=[
-         'setuptools',
-+        'plone.app.locales >= 4.3.9',
-         'plone.behavior',
-         'plone.dexterity>=1.1',
-         'plone.locking',
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot b/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+index ebeaf19..e8828da 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot b/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+index 5f51bf7..1cddc33 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_language.robot b/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+index cb4213e..f4c2b56 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot b/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+index 65f090e..d81161d 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+@@ -11,7 +11,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot b/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+index 253605f..ebcd2c9 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_search.robot b/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+index 786554e..f3bab01 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_security.robot b/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+index 939a4f5..82b1861 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+@@ -8,7 +8,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_site.robot b/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+index f3c94e8..921f6a0 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+@@ -12,7 +12,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_social.robot b/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+index ab4d273..eae2c4c 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_types.robot b/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+index a5cbd04..a0be91f 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot b/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+index d7fa9a5..3f9992c 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_edit.robot b/Products/CMFPlone/tests/robot/test_edit.robot
+index 7d25191..e700069 100644
+--- a/Products/CMFPlone/tests/robot/test_edit.robot
++++ b/Products/CMFPlone/tests/robot/test_edit.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_edit_user_schema.robot b/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+index 0b8df80..68d536f 100644
+--- a/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
++++ b/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_folder_contents.robot b/Products/CMFPlone/tests/robot/test_folder_contents.robot
+index d9be992..9e5811e 100644
+--- a/Products/CMFPlone/tests/robot/test_folder_contents.robot
++++ b/Products/CMFPlone/tests/robot/test_folder_contents.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -40,7 +40,6 @@ Scenario: Select All items
+ #     When I reorder the elements
+ #     Then the new order should be 4 > 3 > 2 > 1
+ 
+-
+ *** Keywords *****************************************************************
+ 
+ a folder with four pages
+diff --git a/Products/CMFPlone/tests/robot/test_linkintegrity.robot b/Products/CMFPlone/tests/robot/test_linkintegrity.robot
+index 0909ac0..57fa37d 100644
+--- a/Products/CMFPlone/tests/robot/test_linkintegrity.robot
++++ b/Products/CMFPlone/tests/robot/test_linkintegrity.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_livesearch.robot b/Products/CMFPlone/tests/robot/test_livesearch.robot
+index d6dc731..994a6dd 100644
+--- a/Products/CMFPlone/tests/robot/test_livesearch.robot
++++ b/Products/CMFPlone/tests/robot/test_livesearch.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_overlays.robot b/Products/CMFPlone/tests/robot/test_overlays.robot
+index ccc0f25..50696c3 100644
+--- a/Products/CMFPlone/tests/robot/test_overlays.robot
++++ b/Products/CMFPlone/tests/robot/test_overlays.robot
+@@ -13,7 +13,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  common.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser  Background
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources  Background
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -196,7 +196,7 @@ Scenario: New user overlay closes on valid data
+ #      When I click the 'Content Info' link
+ #       And I click the 'History' link
+ #      Then overlay should open
+-# 
++#
+ # Scenario: History overlay closes
+ #     Given a logged-in site administrator
+ #       And the test folder
+@@ -204,7 +204,7 @@ Scenario: New user overlay closes on valid data
+ #       And I click the 'History' link
+ #      When I close the overlay
+ #      Then overlay should close
+-# 
++#
+ *** Keywords ***
+ 
+ Background
+diff --git a/Products/CMFPlone/tests/robot/test_portlets.robot b/Products/CMFPlone/tests/robot/test_portlets.robot
+index c521774..f6fa67b 100644
+--- a/Products/CMFPlone/tests/robot/test_portlets.robot
++++ b/Products/CMFPlone/tests/robot/test_portlets.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_querystring.robot b/Products/CMFPlone/tests/robot/test_querystring.robot
+index f9d5804..73c6c8e 100644
+--- a/Products/CMFPlone/tests/robot/test_querystring.robot
++++ b/Products/CMFPlone/tests/robot/test_querystring.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ *** Test Cases **************************************************************
+diff --git a/Products/CMFPlone/tests/robot/test_thememapper.robot b/Products/CMFPlone/tests/robot/test_thememapper.robot
+index 7d0eef6..8be1299 100644
+--- a/Products/CMFPlone/tests/robot/test_thememapper.robot
++++ b/Products/CMFPlone/tests/robot/test_thememapper.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ *** Variables ***
+diff --git a/Products/CMFPlone/tests/robot/test_tinymce.robot b/Products/CMFPlone/tests/robot/test_tinymce.robot
+index dc4c702..481ebfb 100644
+--- a/Products/CMFPlone/tests/robot/test_tinymce.robot
++++ b/Products/CMFPlone/tests/robot/test_tinymce.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -26,7 +26,7 @@ Scenario: A page is opened to edit
+       and text inserted into wysiwyg
+       and insert link
+       and insert image
+-    
++
+     Click Button  css=#form-buttons-save
+     Element Should Be Visible  css=#parent-fieldname-text img[alt="SomeAlt"]
+     Element Should Be Visible  css=#parent-fieldname-text img[title="SomeTitle"]
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-02-21T16:03:12+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/d6b1255af582f16908812a27907a64f1a638d2ee
+
+Merge pull request #1300 from plone/plip-1277-meta-bundles-generation
+
+Plip 1277 meta bundles generation
+
+Files changed:
+A Products/CMFPlone/resources/browser/combine.py
+A Products/CMFPlone/resources/exportimport/bundles.py
+A Products/CMFPlone/tests/test_metabundles.py
+M CHANGES.rst
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+M Products/CMFPlone/exportimport/configure.zcml
+M Products/CMFPlone/interfaces/resources.py
+M Products/CMFPlone/profiles/dependencies/registry.xml
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/resource.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+M Products/CMFPlone/tests/robot/common.robot
+M Products/CMFPlone/tests/robot/keywords.robot
+M Products/CMFPlone/tests/robot/test_actionmenu.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+M Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+M Products/CMFPlone/tests/robot/test_edit.robot
+M Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+M Products/CMFPlone/tests/robot/test_folder_contents.robot
+M Products/CMFPlone/tests/robot/test_linkintegrity.robot
+M Products/CMFPlone/tests/robot/test_livesearch.robot
+M Products/CMFPlone/tests/robot/test_overlays.robot
+M Products/CMFPlone/tests/robot/test_portlets.robot
+M Products/CMFPlone/tests/robot/test_querystring.robot
+M Products/CMFPlone/tests/robot/test_thememapper.robot
+M Products/CMFPlone/tests/robot/test_tinymce.robot
+M Products/CMFPlone/tests/testResourceRegistries.py
+M Products/CMFPlone/traversal.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 761d28e..a5edf71 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -22,6 +22,10 @@ New:
+ - Add barceloneta theme path in less configuration.
+   [Gagaro]
+ 
++- Merge JS and CSS bundles into meta-bundles to reduce the number of requests
++  when loading a page (PLIP #1277)
++  [ebrehault]
++
+ Fixes:
+ 
+ - Get ``email_from_name`` from the mail settings registry.
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index e59fbf5..d4de75c 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -208,12 +208,13 @@ def update_registry_collection(self, itype, prefix, newdata):
+     def save_registry(self):
+         req = self.request
+ 
+-        self.update_registry_collection(
+-            IResourceRegistry, "plone.resources",
+-            json.loads(req.get('resources')))
+-        self.update_registry_collection(
+-            IBundleRegistry, "plone.bundles",
+-            json.loads(req.get('bundles')))
++        if req.get('resources') and req.get('bundles'):
++            self.update_registry_collection(
++                IResourceRegistry, "plone.resources",
++                json.loads(req.get('resources')))
++            self.update_registry_collection(
++                IBundleRegistry, "plone.bundles",
++                json.loads(req.get('bundles')))
+ 
+         if self.request.form.get('development', '').lower() == 'true':
+             self.registry['plone.resources.development'] = True
+diff --git a/Products/CMFPlone/exportimport/configure.zcml b/Products/CMFPlone/exportimport/configure.zcml
+index 46c28ff..70a9736 100644
+--- a/Products/CMFPlone/exportimport/configure.zcml
++++ b/Products/CMFPlone/exportimport/configure.zcml
+@@ -100,6 +100,14 @@
+       description="Import CMFDiffTool settings">
+   </genericsetup:importStep>
+ 
++  <genericsetup:importStep
++      name="combine-bundles"
++      title="Bundle combination"
++      description="Combine JS/CSS bundles together"
++      handler="Products.CMFPlone.resources.exportimport.bundles.combine">
++    <depends name="plone.app.registry" />
++  </genericsetup:importStep>
++
+   <genericsetup:exportStep
+       name="content"
+       title="Content"
+diff --git a/Products/CMFPlone/interfaces/resources.py b/Products/CMFPlone/interfaces/resources.py
+index ffd5243..5b741e3 100644
+--- a/Products/CMFPlone/interfaces/resources.py
++++ b/Products/CMFPlone/interfaces/resources.py
+@@ -1,6 +1,8 @@
+ import zope.interface
+ import zope.component
+ from zope import schema
++from zope.schema.vocabulary import SimpleTerm
++from zope.schema.vocabulary import SimpleVocabulary
+ 
+ from Products.CMFPlone import PloneMessageFactory as _
+ 
+@@ -60,13 +62,15 @@ class IBundleRegistry(zope.interface.Interface):
+     expression = schema.ASCIILine(
+         title=_(u"Expression to render"),
+         description=_(
+-            u"In case its a bundle we can have a condition to render it"),
++            u"In case its a bundle we can have a condition to render it (it "
++            "does not apply if the bundle is merged)."),
+         required=False)
+ 
+     conditionalcomment = schema.ASCIILine(
+         title=_(u"Conditional comment"),
+         description=_(
+-            u"In case you want to render this resource on conditional comment"),
++            u"In case you want to render this resource on conditional comment "
++            "(it does not apply if the bundle is merged)."),
+         required=False)
+ 
+     resources = schema.List(
+@@ -110,3 +114,18 @@ class IBundleRegistry(zope.interface.Interface):
+         required=False,
+         missing_value=[],
+         default=[])
++
++    merge_with = schema.Choice(
++        title=_(u"Merge with"),
++        description=_(
++            u"In production mode, bundles are merged together to reduce the "
++            "quantity of JS and CSS resources loaded by the browser. Choose "
++            "'default' if this bundle must be available for all the visitors, "
++            "choose 'logged-in' if it must be available for logged-in users "
++            "only, or leave it empty if it must not be merged."),
++        vocabulary=SimpleVocabulary(
++            [SimpleTerm('', '', _(u"")),
++             SimpleTerm('default', 'default', 'default'),
++             SimpleTerm('logged-in', 'logged-in', 'logged-in')]),
++        default=u"",
++        required=False)
+diff --git a/Products/CMFPlone/profiles/dependencies/registry.xml b/Products/CMFPlone/profiles/dependencies/registry.xml
+index 9dc0b6f..6f46e7e 100644
+--- a/Products/CMFPlone/profiles/dependencies/registry.xml
++++ b/Products/CMFPlone/profiles/dependencies/registry.xml
+@@ -1054,6 +1054,7 @@
+   <!-- Bundles -->
+   <records prefix="plone.bundles/plone"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">default</value>
+     <value key="resources">
+       <element>plone</element>
+     </value>
+@@ -1068,6 +1069,7 @@
+ 
+   <records prefix="plone.bundles/plone-logged-in"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">logged-in</value>
+     <value key="resources">
+       <element>plone-logged-in</element>
+     </value>
+@@ -1111,6 +1113,7 @@
+ 
+   <records prefix="plone.bundles/plone-legacy"
+             interface='Products.CMFPlone.interfaces.IBundleRegistry'>
++    <value key="merge_with">default</value>
+     <value key="resources" purge="false">
+       <element>jquery-highlightsearchterms</element>
+     </value>
+diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
+new file mode 100644
+index 0000000..8d5c2d4
+--- /dev/null
++++ b/Products/CMFPlone/resources/browser/combine.py
+@@ -0,0 +1,101 @@
++from Acquisition import aq_base
++from datetime import datetime
++from plone.registry.interfaces import IRegistry
++from plone.resource.file import FilesystemFile
++from plone.resource.interfaces import IResourceDirectory
++from Products.CMFPlone.interfaces import IBundleRegistry
++from Products.CMFPlone.interfaces.resources import (
++    OVERRIDE_RESOURCE_DIRECTORY_NAME,
++)
++from StringIO import StringIO
++from zope.component import getUtility
++
++PRODUCTION_RESOURCE_DIRECTORY = "production"
++
++
++def get_production_resource_directory():
++    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++    production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++    timestamp = production_folder.readFile('timestamp.txt')
++    return "%s/++unique++%s" % (
++        PRODUCTION_RESOURCE_DIRECTORY, timestamp)
++
++
++def get_resource(context, path):
++    resource = context.unrestrictedTraverse(path)
++    if isinstance(resource, FilesystemFile):
++        (directory, sep, filename) = path.rpartition('/')
++        return context.unrestrictedTraverse(directory).readFile(filename)
++    else:
++        if hasattr(aq_base(resource), 'GET'):
++            # for FileResource
++            return resource.GET()
++        else:
++            # any BrowserView
++            return resource()
++
++
++def write_js(context, folder, meta_bundle):
++    registry = getUtility(IRegistry)
++    resources = []
++
++    # default resources
++    if meta_bundle == 'default' and registry.records.get(
++        'plone.resources/jquery.js'
++    ):
++        resources.append(get_resource(context,
++            registry.records['plone.resources/jquery.js'].value))
++        resources.append(get_resource(context,
++            registry.records['plone.resources.requirejs'].value))
++        resources.append(get_resource(context,
++            registry.records['plone.resources.configjs'].value))
++
++    # bundles
++    bundles = registry.collectionOfInterface(
++        IBundleRegistry, prefix="plone.bundles", check=False)
++    for bundle in bundles.values():
++        if bundle.merge_with == meta_bundle:
++            resources.append(get_resource(context, bundle.jscompilation))
++
++    fi = StringIO()
++    for script in resources:
++        fi.write(script + '\n')
++    folder.writeFile(meta_bundle + ".js", fi)
++
++
++def write_css(context, folder, meta_bundle):
++    registry = getUtility(IRegistry)
++    resources = []
++
++    bundles = registry.collectionOfInterface(
++        IBundleRegistry, prefix="plone.bundles", check=False)
++    for bundle in bundles.values():
++        if bundle.merge_with == meta_bundle:
++            resources.append(get_resource(context, bundle.csscompilation))
++
++    fi = StringIO()
++    for script in resources:
++        fi.write(script + '\n')
++    folder.writeFile(meta_bundle + ".css", fi)
++
++
++def combine_bundles(context):
++    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
++        persistent_directory.makeDirectory(OVERRIDE_RESOURCE_DIRECTORY_NAME)
++    container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++    if PRODUCTION_RESOURCE_DIRECTORY not in container:
++        container.makeDirectory(PRODUCTION_RESOURCE_DIRECTORY)
++    production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++
++    # store timestamp
++    fi = StringIO()
++    fi.write(datetime.now().isoformat())
++    production_folder.writeFile("timestamp.txt", fi)
++
++    # generate new combined bundles
++    write_js(context, production_folder, 'default')
++    write_js(context, production_folder, 'logged-in')
++    write_css(context, production_folder, 'default')
++    write_css(context, production_folder, 'logged-in')
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index f44c458..362517d 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -3,6 +3,7 @@
+ from Products.CMFPlone.interfaces.resources import IResourceRegistry
+ from Products.CMFPlone.interfaces.resources import IBundleRegistry
+ from Products.CMFPlone.interfaces.resources import OVERRIDE_RESOURCE_DIRECTORY_NAME  # noqa
++from Products.CMFPlone.resources.browser.combine import combine_bundles
+ from StringIO import StringIO
+ from cssmin import cssmin
+ from datetime import datetime
+@@ -127,5 +128,9 @@ def cookWhenChangingSettings(context, bundle=None):
+         # setRequest(original_request)
+     except NotFound:
+         logger.info('Error compiling js/css for the bundle')
++
++    # refresh production meta bundles
++    combine_bundles(context)
++
+     # Disable CSRF protection on this request
+     alsoProvides(request, IDisableCSRFProtection)
+diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py
+index 522f577..d7734af 100644
+--- a/Products/CMFPlone/resources/browser/resource.py
++++ b/Products/CMFPlone/resources/browser/resource.py
+@@ -15,6 +15,8 @@
+ from plone.memoize.view import memoize
+ from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE
+ 
++from .combine import get_production_resource_directory
++
+ 
+ class ResourceView(ViewletBase):
+     """Information for script rendering.
+@@ -22,6 +24,12 @@ class ResourceView(ViewletBase):
+ 
+     @property
+     @memoize
++    def anonymous(self):
++        return _getAuthenticatedUser(
++            self.context).getUserName() == 'Anonymous User'
++
++    @property
++    @memoize
+     def development(self):
+         """
+         To set development mode:
+@@ -32,7 +40,7 @@ def development(self):
+         """
+         if RESOURCE_DEVELOPMENT_MODE:
+             return True
+-        if _getAuthenticatedUser(self.context).getUserName() == 'Anonymous User':
++        if self.anonymous:
+             return False
+         return self.registry.records['plone.resources.development'].value
+ 
+@@ -83,6 +91,25 @@ def update(self):
+         self.site_url = self.portal_state.portal_url()
+         self.registry = getUtility(IRegistry)
+ 
++        self.production_path = get_production_resource_directory()
++
++        self.diazo_production_css = None
++        self.diazo_development_css = None
++        self.diazo_development_js = None
++        self.diazo_production_js = None
++        self.themeObj = None
++
++        # Check if its Diazo enabled
++        policy = theming_policy(self.request)
++        if policy.isThemeEnabled():
++            self.themeObj = policy.get_theme()
++            if self.themeObj:
++                if hasattr(self.themeObj, 'production_css'):
++                    self.diazo_production_css = self.themeObj.production_css
++                    self.diazo_development_css = self.themeObj.development_css
++                    self.diazo_development_js = self.themeObj.development_js
++                    self.diazo_production_js = self.themeObj.production_js
++
+     def get_bundles(self):
+         return self.registry.collectionOfInterface(
+             IBundleRegistry, prefix="plone.bundles", check=False)
+@@ -97,26 +124,13 @@ def get_cooked_bundles(self):
+         """
+         cache = component.queryUtility(ram.IRAMCache)
+         bundles = self.get_bundles()
+-        policy = theming_policy(self.request)
+ 
+         enabled_diazo_bundles = []
+         disabled_diazo_bundles = []
+-        self.diazo_production_css = None
+-        self.diazo_development_css = None
+-        self.diazo_development_js = None
+-        self.diazo_production_js = None
+ 
+-        # Check if its Diazo enabled
+-        if policy.isThemeEnabled():
+-            themeObj = policy.get_theme()
+-            if themeObj:
+-                enabled_diazo_bundles = themeObj.enabled_bundles
+-                disabled_diazo_bundles = themeObj.disabled_bundles
+-                if hasattr(themeObj, 'production_css'):
+-                    self.diazo_production_css = themeObj.production_css
+-                    self.diazo_development_css = themeObj.development_css
+-                    self.diazo_development_js = themeObj.development_js
+-                    self.diazo_production_js = themeObj.production_js
++        if self.themeObj:
++            enabled_diazo_bundles = self.themeObj.enabled_bundles
++            disabled_diazo_bundles = self.themeObj.disabled_bundles
+ 
+         # Request set bundles
+         enabled_request_bundles = []
+@@ -157,7 +171,7 @@ def get_cooked_bundles(self):
+                         continue
+                 yield key, bundle
+ 
+-    def ordered_bundles_result(self):
++    def ordered_bundles_result(self, production=False):
+         """
+         It gets the ordered result of bundles
+         """
+@@ -168,7 +182,8 @@ def ordered_bundles_result(self):
+         for key, bundle in self.get_cooked_bundles():
+             if bundle.depends is None or bundle.depends == '':
+                 # its the first one
+-                self.get_data(bundle, result)
++                if not(production and bundle.merge_with):
++                    self.get_data(bundle, result)
+                 inserted.append(key)
+             else:
+                 name = bundle.depends.strip()
+@@ -184,7 +199,8 @@ def ordered_bundles_result(self):
+                 if key in inserted:
+                     found = True
+                     for bundle in bundles_to_add:
+-                        self.get_data(bundle, result)
++                        if not(production and bundle.merge_with):
++                            self.get_data(bundle, result)
+                         inserted.append(
+                             bundle.__prefix__.split('/', 1)[1].rstrip('.'))
+                     del depends_on[key]
+@@ -194,6 +210,7 @@ def ordered_bundles_result(self):
+         # THe ones that does not get the dependencies
+         for bundles_to_add in depends_on.values():
+             for bundle in bundles_to_add:
+-                self.get_data(bundle, result)
++                if not(production and bundle.merge_with):
++                    self.get_data(bundle, result)
+ 
+         return result
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 652d729..280e06a 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -111,8 +111,28 @@ def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
+         """
+-        result = self.default_resources()
+-        result.extend(self.ordered_bundles_result())
++        if self.development:
++            result = self.default_resources()
++            result.extend(self.ordered_bundles_result())
++        else:
++            result = [{
++                'src': '%s/++plone++%s' % (
++                    self.site_url,
++                    self.production_path + '/default.js'
++                ),
++                'conditionalcomment': None,
++                'bundle': 'production'
++            }, ]
++            if not self.anonymous:
++                result.append({
++                    'src': '%s/++plone++%s' % (
++                        self.site_url,
++                        self.production_path + '/logged-in.js'
++                    ),
++                    'conditionalcomment': None,
++                    'bundle': 'production'
++                })
++            result.extend(self.ordered_bundles_result(production=True))
+ 
+         # Add manual added resources
+         if hasattr(self.request, 'enabled_resources'):
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index 9ae829e..be93a6b 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -89,7 +89,30 @@ def styles(self):
+         """
+         Get all the styles
+         """
+-        result = self.ordered_bundles_result()
++        if self.development:
++            result = self.ordered_bundles_result()
++        else:
++            result = [{
++                'src': '%s/++plone++%s' % (
++                    self.site_url,
++                    self.production_path + '/default.css'
++                ),
++                'conditionalcomment': None,
++                'rel': 'stylesheet',
++                'bundle': 'production'
++            }, ]
++            if not self.anonymous:
++                result.append({
++                    'src': '%s/++plone++%s' % (
++                        self.site_url,
++                        self.production_path + '/logged-in.css'
++                    ),
++                    'conditionalcomment': None,
++                    'rel': 'stylesheet',
++                    'bundle': 'production'
++                })
++            result.extend(self.ordered_bundles_result(production=True))
++
+         # Add manual added resources
+         resources = self.get_resources()
+         if hasattr(self.request, 'enabled_resources'):
+diff --git a/Products/CMFPlone/resources/exportimport/bundles.py b/Products/CMFPlone/resources/exportimport/bundles.py
+new file mode 100644
+index 0000000..a51042c
+--- /dev/null
++++ b/Products/CMFPlone/resources/exportimport/bundles.py
+@@ -0,0 +1,19 @@
++from plone.registry.interfaces import IRegistry
++from zope.component import queryUtility
++
++from ..browser.combine import combine_bundles
++
++
++def combine(context):
++
++    logger = context.getLogger('bundles')
++    registry = queryUtility(IRegistry)
++
++    if registry is None:
++        logger.info("Cannot find registry")
++        return
++
++    body = context.readDataFile('registry.xml')
++    if body and "IBundleRegistry" in body:
++        site = context.getSite()
++        combine_bundles(site)
+diff --git a/Products/CMFPlone/tests/robot/common.robot b/Products/CMFPlone/tests/robot/common.robot
+index cac4ec8..7f3878f 100644
+--- a/Products/CMFPlone/tests/robot/common.robot
++++ b/Products/CMFPlone/tests/robot/common.robot
+@@ -62,3 +62,11 @@ there should be '${count}' livesearch results
+ 
+ patterns are loaded
+     Wait For Condition  return $('body.patterns-loaded').size() > 0
++
++Refresh JS/CSS resources
++    # If we do not regenerate the resources meta-bundles, the baseUrl value in
++    # config.js is http://foo/plone. We need to trigger the meta-bundles
++    # generation from the browser so baseUrl gets the proper value.
++    Enable autologin as  Manager
++    Execute Javascript    $.post($('body').attr('data-portal-url')+'/@@resourceregistry-controlpanel', {action: 'save-registry', _authenticator: $('input[name="_authenticator"]').val()});
++    Disable Autologin
+\ No newline at end of file
+diff --git a/Products/CMFPlone/tests/robot/keywords.robot b/Products/CMFPlone/tests/robot/keywords.robot
+index 7ffd098..c68dd6b 100644
+--- a/Products/CMFPlone/tests/robot/keywords.robot
++++ b/Products/CMFPlone/tests/robot/keywords.robot
+@@ -1,5 +1,15 @@
+ *** Keywords *****************************************************************
+ 
++# --- SETUP ------------------------------------------------------------------
++
++Refresh JS/CSS resources
++  # If we do not regenerate the resources meta-bundles, the baseUrl value in
++  # config.js is http://foo/plone. We need to trigger the meta-bundles
++  # generation from the browser so baseUrl gets the proper value.
++  Enable autologin as  Manager
++  Execute Javascript    $.post($('body').attr('data-portal-url')+'/@@resourceregistry-controlpanel', {action: 'save-registry', _authenticator: $('input[name="_authenticator"]').val()});
++  Disable Autologin
++
+ # --- GIVEN ------------------------------------------------------------------
+ 
+ a logged-in site administrator
+diff --git a/Products/CMFPlone/tests/robot/test_actionmenu.robot b/Products/CMFPlone/tests/robot/test_actionmenu.robot
+index 4f98af6..cc7ff5f 100644
+--- a/Products/CMFPlone/tests/robot/test_actionmenu.robot
++++ b/Products/CMFPlone/tests/robot/test_actionmenu.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot b/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+index ebeaf19..e8828da 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_editing.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot b/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+index 5f51bf7..1cddc33 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_filter.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_language.robot b/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+index cb4213e..f4c2b56 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_language.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot b/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+index 65f090e..d81161d 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_markup.robot
+@@ -11,7 +11,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot b/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+index 253605f..ebcd2c9 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_navigation.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_search.robot b/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+index 786554e..f3bab01 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_search.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_security.robot b/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+index 939a4f5..82b1861 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_security.robot
+@@ -8,7 +8,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_site.robot b/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+index f3c94e8..921f6a0 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_site.robot
+@@ -12,7 +12,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_social.robot b/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+index ab4d273..eae2c4c 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_social.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_types.robot b/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+index a5cbd04..a0be91f 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_types.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot b/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+index d7fa9a5..3f9992c 100644
+--- a/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
++++ b/Products/CMFPlone/tests/robot/test_controlpanel_usergroups.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_edit.robot b/Products/CMFPlone/tests/robot/test_edit.robot
+index 7d25191..e700069 100644
+--- a/Products/CMFPlone/tests/robot/test_edit.robot
++++ b/Products/CMFPlone/tests/robot/test_edit.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_edit_user_schema.robot b/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+index 0b8df80..68d536f 100644
+--- a/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
++++ b/Products/CMFPlone/tests/robot/test_edit_user_schema.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_folder_contents.robot b/Products/CMFPlone/tests/robot/test_folder_contents.robot
+index d9be992..9e5811e 100644
+--- a/Products/CMFPlone/tests/robot/test_folder_contents.robot
++++ b/Products/CMFPlone/tests/robot/test_folder_contents.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -40,7 +40,6 @@ Scenario: Select All items
+ #     When I reorder the elements
+ #     Then the new order should be 4 > 3 > 2 > 1
+ 
+-
+ *** Keywords *****************************************************************
+ 
+ a folder with four pages
+diff --git a/Products/CMFPlone/tests/robot/test_linkintegrity.robot b/Products/CMFPlone/tests/robot/test_linkintegrity.robot
+index 0909ac0..57fa37d 100644
+--- a/Products/CMFPlone/tests/robot/test_linkintegrity.robot
++++ b/Products/CMFPlone/tests/robot/test_linkintegrity.robot
+@@ -17,7 +17,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_livesearch.robot b/Products/CMFPlone/tests/robot/test_livesearch.robot
+index d6dc731..994a6dd 100644
+--- a/Products/CMFPlone/tests/robot/test_livesearch.robot
++++ b/Products/CMFPlone/tests/robot/test_livesearch.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_overlays.robot b/Products/CMFPlone/tests/robot/test_overlays.robot
+index ccc0f25..50696c3 100644
+--- a/Products/CMFPlone/tests/robot/test_overlays.robot
++++ b/Products/CMFPlone/tests/robot/test_overlays.robot
+@@ -13,7 +13,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  common.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser  Background
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources  Background
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -196,7 +196,7 @@ Scenario: New user overlay closes on valid data
+ #      When I click the 'Content Info' link
+ #       And I click the 'History' link
+ #      Then overlay should open
+-# 
++#
+ # Scenario: History overlay closes
+ #     Given a logged-in site administrator
+ #       And the test folder
+@@ -204,7 +204,7 @@ Scenario: New user overlay closes on valid data
+ #       And I click the 'History' link
+ #      When I close the overlay
+ #      Then overlay should close
+-# 
++#
+ *** Keywords ***
+ 
+ Background
+diff --git a/Products/CMFPlone/tests/robot/test_portlets.robot b/Products/CMFPlone/tests/robot/test_portlets.robot
+index c521774..f6fa67b 100644
+--- a/Products/CMFPlone/tests/robot/test_portlets.robot
++++ b/Products/CMFPlone/tests/robot/test_portlets.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+diff --git a/Products/CMFPlone/tests/robot/test_querystring.robot b/Products/CMFPlone/tests/robot/test_querystring.robot
+index f9d5804..73c6c8e 100644
+--- a/Products/CMFPlone/tests/robot/test_querystring.robot
++++ b/Products/CMFPlone/tests/robot/test_querystring.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ *** Test Cases **************************************************************
+diff --git a/Products/CMFPlone/tests/robot/test_thememapper.robot b/Products/CMFPlone/tests/robot/test_thememapper.robot
+index 7d0eef6..8be1299 100644
+--- a/Products/CMFPlone/tests/robot/test_thememapper.robot
++++ b/Products/CMFPlone/tests/robot/test_thememapper.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ *** Variables ***
+diff --git a/Products/CMFPlone/tests/robot/test_tinymce.robot b/Products/CMFPlone/tests/robot/test_tinymce.robot
+index dc4c702..481ebfb 100644
+--- a/Products/CMFPlone/tests/robot/test_tinymce.robot
++++ b/Products/CMFPlone/tests/robot/test_tinymce.robot
+@@ -7,7 +7,7 @@ Library  Remote  ${PLONE_URL}/RobotRemote
+ 
+ Resource  keywords.robot
+ 
+-Test Setup  Run keywords  Open SauceLabs test browser
++Test Setup  Run keywords  Open SauceLabs test browser  Refresh JS/CSS resources
+ Test Teardown  Run keywords  Report test status  Close all browsers
+ 
+ 
+@@ -26,7 +26,7 @@ Scenario: A page is opened to edit
+       and text inserted into wysiwyg
+       and insert link
+       and insert image
+-    
++
+     Click Button  css=#form-buttons-save
+     Element Should Be Visible  css=#parent-fieldname-text img[alt="SomeAlt"]
+     Element Should Be Visible  css=#parent-fieldname-text img[title="SomeTitle"]
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index fc8ea51..86b20db 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -311,22 +311,26 @@ def test_scripts_viewlet(self):
+         scripts = ScriptsView(self.layer['portal'], self.layer['request'], None)
+         scripts.update()
+         results = scripts.scripts()
+-        self.assertEqual(
+-            results[0],
+-            {'src': 'http://nohost/plone/++plone++static/components/jquery/dist/jquery.min.js',
+-             'conditionalcomment': None, 'bundle': 'basic'})
+-        self.assertEqual(len(results), 6)
++        self.assertEqual(results[0]['bundle'], 'production')
++        self.assertTrue(results[0]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[0]['src'].endswith('/default.js'))
++        self.assertEqual(results[1]['bundle'], 'production')
++        self.assertTrue(results[1]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[1]['src'].endswith('/logged-in.js'))
++        self.assertEqual(len(results), 2)
+ 
+     def test_scripts_viewlet_anonymous(self):
+         logout()
+         scripts = ScriptsView(self.layer['portal'], self.layer['request'], None)
+         scripts.update()
+         results = scripts.scripts()
+-        self.assertEqual(
+-            results[0],
+-            {'src': 'http://nohost/plone/++plone++static/components/jquery/dist/jquery.min.js',
+-             'conditionalcomment': None, 'bundle': 'basic'})
+-        self.assertEqual(len(results), 5)
++        self.assertEqual(results[0]['bundle'], 'production')
++        self.assertTrue(results[0]['src'].startswith(
++            'http://nohost/plone/++plone++production/++unique++'))
++        self.assertTrue(results[0]['src'].endswith('/default.js'))
++        self.assertEqual(len(results), 1)
+ 
+     @mock.patch.object(ScriptsView,
+                        'get_resources',
+diff --git a/Products/CMFPlone/tests/test_metabundles.py b/Products/CMFPlone/tests/test_metabundles.py
+new file mode 100644
+index 0000000..35d2346
+--- /dev/null
++++ b/Products/CMFPlone/tests/test_metabundles.py
+@@ -0,0 +1,40 @@
++# -*- coding: utf-8 -*-
++from plone.resource.interfaces import IResourceDirectory
++from Products.CMFPlone.interfaces.resources import (
++    OVERRIDE_RESOURCE_DIRECTORY_NAME,
++)
++from Products.CMFPlone.tests.PloneTestCase import PloneTestCase
++from zope.component import getUtility
++
++from Products.CMFPlone.resources.browser.combine import (
++    PRODUCTION_RESOURCE_DIRECTORY,
++    combine_bundles,
++)
++
++
++class ProductsCMFPloneSetupTest(PloneTestCase):
++
++    def afterSetUp(self):
++        combine_bundles(self.portal)
++        persistent_directory = getUtility(
++            IResourceDirectory, name="persistent")
++        container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++        self.production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
++
++    def test_production_directory(self):
++        self.assertEquals(
++            self.production_folder.listDirectory(),
++            [
++                'default.css',
++                'default.js',
++                'logged-in.css',
++                'logged-in.js',
++                'timestamp.txt'
++            ]
++        )
++
++    def test_default_js_bundle(self):
++        self.assertIn(
++            "jQuery",
++            self.production_folder.readFile('default.js')
++        )
+diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
+index da58edc..4b64550 100644
+--- a/Products/CMFPlone/traversal.py
++++ b/Products/CMFPlone/traversal.py
+@@ -14,7 +14,7 @@ class PloneBundlesTraverser(ResourceTraverser):
+     def traverse(self, name, remaining):
+         # in case its not a request get the default one
+         req = getRequest()
+-        if 'PATH_INFO' not in req.environ:
++        if not req or 'PATH_INFO' not in req.environ:
+             return super(PloneBundlesTraverser, self).traverse(name, remaining)
+ 
+         resource_path = req.environ['PATH_INFO'].split('++plone++')[-1]
 
 
