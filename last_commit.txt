@@ -1,372 +1,250 @@
-Repository: plone.app.vocabularies
+Repository: plone.app.widgets
 
 
 Branch: refs/heads/master
-Date: 2016-02-18T16:23:37-08:00
+Date: 2016-02-18T16:19:32-08:00
 Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/911bb2004535abd9ac386cfe8295d6d83c2a5728
+Commit: https://github.com/plone/plone.app.widgets/commit/9aa25defbf736bc6ae480c88020267b4d17bb0b7
 
-Restrict catalog vocabulary to context navigation root unless path is specified.
+Add navigation root support to related items widget. Fix incorrect options merge for TinyMCE widget. Allow context url lookup to work with a wider variety of form types.
 
 Files changed:
 M CHANGES.rst
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/tests/base.py
+M plone/app/widgets/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6c7b2c9..ed225b1 100644
+index 0c8f956..d8ba9e2 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ New:
+@@ -6,11 +6,14 @@ Changelog
+ 
+ New:
+ 
+-- *add item here*
++- Add navigation root support to related items widget. Fix incorrect options
++  merge for TinyMCE widget.
++  [alecm]
  
  Fixes:
  
 -- *add item here*
-+- Restrict Catalog vocabulary to search current Navigation Root unless
-+  path is specified.
++- Ensure vocabulary lookup works on add forms for related items widget.
 +  [alecm]
  
  
- 2.2.1 (2015-12-03)
-diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
-index 7be9884..23a0092 100644
---- a/plone/app/vocabularies/catalog.py
-+++ b/plone/app/vocabularies/catalog.py
+ 2.0.3 (2016-02-14)
+diff --git a/plone/app/widgets/utils.py b/plone/app/widgets/utils.py
+index daec100..2d3dd27 100644
+--- a/plone/app/widgets/utils.py
++++ b/plone/app/widgets/utils.py
 @@ -1,5 +1,6 @@
  # -*- coding: utf-8 -*-
- from binascii import b2a_qp
-+from plone.app.layout.navigation.root import getNavigationRootObject
- from plone.app.querystring import queryparser
- from plone.app.vocabularies import SlicableVocabulary
- from plone.app.vocabularies.terms import BrowsableTerm
-@@ -526,6 +527,34 @@ def _terms(self):
  
- @implementer(IVocabularyFactory)
- class CatalogVocabularyFactory(object):
-+    """
-+    Test application of Navigation Root:
-+
-+      >>> from plone.app.vocabularies.tests.base import create_context
-+      >>> from plone.app.vocabularies.tests.base import DummyUrlTool
-+      >>> from plone.app.vocabularies.tests.base import DummyCatalog
-+      >>> class DummyPathCatalog(DummyCatalog):
-+      ...     def __call__(self, **query):
-+      ...         if 'path' in query and 'query' in query['path']:
-+      ...             return [v for v in self.values() if
-+      ...                     v.getPath().startswith(query['path']['query'])]
-+      ...         return self.values()
-+      >>> catalog = DummyPathCatalog(['/abcd', '/defg', '/dummy/sub-site',
-+      ...                             '/dummy/sub-site/ghij'])
-+      >>> context = create_context()
-+      >>> context.portal_catalog = catalog
-+      >>> context.portal_url = DummyUrlTool(context)
-+      >>> factory = CatalogVocabularyFactory()
-+
-+      >>> [t.token for t in factory(context)]
-+      ['/dummy/sub-site', '/abcd', '/dummy/sub-site/ghij', '/defg']
-+
-+      >>> from plone.app.vocabularies.tests.base import DummyNavRoot
-+      >>> nav_root = DummyNavRoot('sub-site', parent=context)
-+      >>> [t.token for t in factory(nav_root)]
-+      ['/dummy/sub-site', '/dummy/sub-site/ghij']
-+
-+    """
-     # We want to get rid of this and use CatalogSource instead,
-     # but we can't in Plone versions that support
-     # plone.app.widgets < 1.6.0
-@@ -541,7 +570,19 @@ def __call__(self, context, query=None):
-         try:
-             catalog = getToolByName(context, 'portal_catalog')
-         except AttributeError:
--            catalog = getToolByName(getSite(), 'portal_catalog')
-+            context = getSite()
-+            catalog = getToolByName(context, 'portal_catalog')
-+
-+        # If no path is specified check if we are in a sub-site and use that
-+        # as the path root for catalog searches
-+        if 'path' not in parsed:
-+            portal = getToolByName(context, 'portal_url').getPortalObject()
-+            nav_root = getNavigationRootObject(context, portal)
-+            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
-+                parsed['path'] = {
-+                    'query': '/'.join(nav_root.getPhysicalPath()),
-+                    'depth': -1
-+                }
-         brains = catalog(**parsed)
-         return CatalogVocabulary.fromItems(brains, context)
++from Acquisition import aq_base
+ from Products.CMFCore.interfaces import ISiteRoot
+ from Products.CMFCore.utils import getToolByName
+ from datetime import datetime
+@@ -10,7 +11,7 @@
+ from zope.i18n import translate
+ from zope.i18nmessageid import MessageFactory
+ from zope.schema.interfaces import IVocabularyFactory
+-from z3c.form.interfaces import IAddForm
++from z3c.form.interfaces import IForm
+ from zope.component import getMultiAdapter
+ from zope.component import ComponentLookupError
+ import json
+@@ -119,11 +120,11 @@ def get_ajaxselect_options(context, value, separator, vocabulary_name,
  
-diff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py
-index 25bf05e..86973ba 100644
---- a/plone/app/vocabularies/tests/base.py
-+++ b/plone/app/vocabularies/tests/base.py
-@@ -1,5 +1,8 @@
- # -*- coding: utf-8 -*-
- from Products.ZCTextIndex.ParseTree import ParseError
-+from plone.app.layout.navigation.interfaces import INavigationRoot
-+from OFS.interfaces import IItem
-+from zope.interface import implements
- from zope.site.hooks import setSite
+ def get_relateditems_options(context, value, separator, vocabulary_name,
+                              vocabulary_view, field_name=None):
+-    portal = get_portal()
+-    options = get_ajaxselect_options(portal, value, separator,
++    options = get_ajaxselect_options(context, value, separator,
+                                      vocabulary_name, vocabulary_view,
+                                      field_name)
+-
++    if IForm.providedBy(context):
++        context = context.context
+     request = getRequest()
+     msgstr = translate(_(u'Search'), context=request)
+     options.setdefault('searchText', msgstr)
+@@ -134,6 +135,12 @@ def get_relateditems_options(context, value, separator, vocabulary_name,
+                        context=request)
+     options.setdefault('homeText', msgstr)
+     options.setdefault('folderTypes', ['Folder'])
++
++    nav_root = getNavigationRootObject(context, get_portal())
++    options['rootPath'] = (
++        '/'.join(nav_root.getPhysicalPath()) if nav_root else '/'
++    )
++
+     return options
  
  
-@@ -26,6 +29,27 @@ def queryUtility(self, iface, name='', default=None):
-         """
-         return default
+@@ -155,15 +162,15 @@ def get_tinymce_options(context, field, request):
+     We're just going to be looking up settings from
+     plone pattern options
+     """
+-    args = {'pattern_options': {}}
++    options = {}
+     try:
+         pattern_options = getMultiAdapter(
+             (context, request, field),
+             name="plone_settings").tinymce()['data-pat-tinymce']
+-        args['pattern_options'] = json.loads(pattern_options)
++        options = json.loads(pattern_options)
+     except (ComponentLookupError, AttributeError):
+         pass
+-    return args
++    return options
  
-+    def getPhysicalPath(self):
-+        return ['', self.__name__]
-+
-+    def absolute_url(self, relative=False):
-+        return '/'.join(self.getPhysicalPath())
-+
-+
-+
-+class DummyUrlTool(object):
-+
-+    name = 'portal_url'
-+
-+    def __init__(self, context):
-+        self.portal = context
-+
-+    def __call__(self):
-+        return self.portal.__name__
-+
-+    def getPortalObject(self):
-+        return self.portal
-+
  
- class DummyTool(object):
+ def get_portal():
+@@ -189,7 +196,7 @@ def get_portal_url(context):
  
-@@ -78,8 +102,13 @@ def __init__(self, rid):
-     def getPath(self):
-         return self.rid
  
-+    @property
-+    def UID(self):
-+        return self.rid
-+
- 
- class DummyCatalog(dict):
-+    implements(IItem)
- 
-     def __init__(self, values):
-         self.indexes = {}
-@@ -114,3 +143,30 @@ def Title(self):
- 
-     def Subject(self):
-         return self.subjects
+ def get_context_url(context):
+-    if IAddForm.providedBy(context):
++    if IForm.providedBy(context):
+         # Use the request URL if we are looking at an addform
+         url = context.request.get('URL')
+     elif hasattr(context, 'absolute_url'):
+@@ -199,3 +206,10 @@ def get_context_url(context):
+     else:
+         url = get_portal_url(context)
+     return url
 +
 +
-+class DummyNavRoot(object):
-+    implements(INavigationRoot)
-+    __parent__ = None
-+
-+    def __init__(self, _id, title=None, parent=None):
-+        self.__name__ = _id
-+        self.title = title or _id
-+        if parent:
-+            self.__parent__ = parent
-+
-+    def getPhysicalPath(self):
-+        return ['', self.__parent__.__name__, self.__name__]
-+
-+    def absolute_url(self, relative=False):
-+        return '/'.join(self.getPhysicalPath())
-+
-+    @property
-+    def portal_catalog(self):
-+        # fake tool acquisition
-+        return self.__parent__.portal_catalog
-+
-+    @property
-+    def portal_url(self):
-+        # fake tool acquisition
-+        return self.__parent__.portal_url
++def get_widget_form(widget):
++    form = getattr(widget, 'form', None)
++    if getattr(aq_base(form), 'parentForm', None) is not None:
++        form = form.parentForm
++    return form
 
 
-Repository: plone.app.vocabularies
+Repository: plone.app.widgets
 
 
 Branch: refs/heads/master
-Date: 2016-02-22T15:59:13+01:00
+Date: 2016-02-22T15:59:17+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/d282414b59c513d3fb90fc8036bd8e7632f7c8e0
+Commit: https://github.com/plone/plone.app.widgets/commit/fb28d6a43730311ccd2262781ed1b9a7124a9262
 
-Merge pull request #27 from plone/navroot-fixes
+Merge pull request #131 from plone/navroot-fixes
 
-Restrict catalog vocabulary to context navigation root unless path is specified.
+Add navigation root support to related items widget.
 
 Files changed:
 M CHANGES.rst
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/tests/base.py
+M plone/app/widgets/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6c7b2c9..ed225b1 100644
+index 0c8f956..d8ba9e2 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ New:
+@@ -6,11 +6,14 @@ Changelog
+ 
+ New:
+ 
+-- *add item here*
++- Add navigation root support to related items widget. Fix incorrect options
++  merge for TinyMCE widget.
++  [alecm]
  
  Fixes:
  
 -- *add item here*
-+- Restrict Catalog vocabulary to search current Navigation Root unless
-+  path is specified.
++- Ensure vocabulary lookup works on add forms for related items widget.
 +  [alecm]
  
  
- 2.2.1 (2015-12-03)
-diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
-index 7be9884..23a0092 100644
---- a/plone/app/vocabularies/catalog.py
-+++ b/plone/app/vocabularies/catalog.py
+ 2.0.3 (2016-02-14)
+diff --git a/plone/app/widgets/utils.py b/plone/app/widgets/utils.py
+index daec100..2d3dd27 100644
+--- a/plone/app/widgets/utils.py
++++ b/plone/app/widgets/utils.py
 @@ -1,5 +1,6 @@
  # -*- coding: utf-8 -*-
- from binascii import b2a_qp
-+from plone.app.layout.navigation.root import getNavigationRootObject
- from plone.app.querystring import queryparser
- from plone.app.vocabularies import SlicableVocabulary
- from plone.app.vocabularies.terms import BrowsableTerm
-@@ -526,6 +527,34 @@ def _terms(self):
  
- @implementer(IVocabularyFactory)
- class CatalogVocabularyFactory(object):
-+    """
-+    Test application of Navigation Root:
-+
-+      >>> from plone.app.vocabularies.tests.base import create_context
-+      >>> from plone.app.vocabularies.tests.base import DummyUrlTool
-+      >>> from plone.app.vocabularies.tests.base import DummyCatalog
-+      >>> class DummyPathCatalog(DummyCatalog):
-+      ...     def __call__(self, **query):
-+      ...         if 'path' in query and 'query' in query['path']:
-+      ...             return [v for v in self.values() if
-+      ...                     v.getPath().startswith(query['path']['query'])]
-+      ...         return self.values()
-+      >>> catalog = DummyPathCatalog(['/abcd', '/defg', '/dummy/sub-site',
-+      ...                             '/dummy/sub-site/ghij'])
-+      >>> context = create_context()
-+      >>> context.portal_catalog = catalog
-+      >>> context.portal_url = DummyUrlTool(context)
-+      >>> factory = CatalogVocabularyFactory()
-+
-+      >>> [t.token for t in factory(context)]
-+      ['/dummy/sub-site', '/abcd', '/dummy/sub-site/ghij', '/defg']
-+
-+      >>> from plone.app.vocabularies.tests.base import DummyNavRoot
-+      >>> nav_root = DummyNavRoot('sub-site', parent=context)
-+      >>> [t.token for t in factory(nav_root)]
-+      ['/dummy/sub-site', '/dummy/sub-site/ghij']
-+
-+    """
-     # We want to get rid of this and use CatalogSource instead,
-     # but we can't in Plone versions that support
-     # plone.app.widgets < 1.6.0
-@@ -541,7 +570,19 @@ def __call__(self, context, query=None):
-         try:
-             catalog = getToolByName(context, 'portal_catalog')
-         except AttributeError:
--            catalog = getToolByName(getSite(), 'portal_catalog')
-+            context = getSite()
-+            catalog = getToolByName(context, 'portal_catalog')
-+
-+        # If no path is specified check if we are in a sub-site and use that
-+        # as the path root for catalog searches
-+        if 'path' not in parsed:
-+            portal = getToolByName(context, 'portal_url').getPortalObject()
-+            nav_root = getNavigationRootObject(context, portal)
-+            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
-+                parsed['path'] = {
-+                    'query': '/'.join(nav_root.getPhysicalPath()),
-+                    'depth': -1
-+                }
-         brains = catalog(**parsed)
-         return CatalogVocabulary.fromItems(brains, context)
++from Acquisition import aq_base
+ from Products.CMFCore.interfaces import ISiteRoot
+ from Products.CMFCore.utils import getToolByName
+ from datetime import datetime
+@@ -10,7 +11,7 @@
+ from zope.i18n import translate
+ from zope.i18nmessageid import MessageFactory
+ from zope.schema.interfaces import IVocabularyFactory
+-from z3c.form.interfaces import IAddForm
++from z3c.form.interfaces import IForm
+ from zope.component import getMultiAdapter
+ from zope.component import ComponentLookupError
+ import json
+@@ -119,11 +120,11 @@ def get_ajaxselect_options(context, value, separator, vocabulary_name,
  
-diff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py
-index 25bf05e..86973ba 100644
---- a/plone/app/vocabularies/tests/base.py
-+++ b/plone/app/vocabularies/tests/base.py
-@@ -1,5 +1,8 @@
- # -*- coding: utf-8 -*-
- from Products.ZCTextIndex.ParseTree import ParseError
-+from plone.app.layout.navigation.interfaces import INavigationRoot
-+from OFS.interfaces import IItem
-+from zope.interface import implements
- from zope.site.hooks import setSite
+ def get_relateditems_options(context, value, separator, vocabulary_name,
+                              vocabulary_view, field_name=None):
+-    portal = get_portal()
+-    options = get_ajaxselect_options(portal, value, separator,
++    options = get_ajaxselect_options(context, value, separator,
+                                      vocabulary_name, vocabulary_view,
+                                      field_name)
+-
++    if IForm.providedBy(context):
++        context = context.context
+     request = getRequest()
+     msgstr = translate(_(u'Search'), context=request)
+     options.setdefault('searchText', msgstr)
+@@ -134,6 +135,12 @@ def get_relateditems_options(context, value, separator, vocabulary_name,
+                        context=request)
+     options.setdefault('homeText', msgstr)
+     options.setdefault('folderTypes', ['Folder'])
++
++    nav_root = getNavigationRootObject(context, get_portal())
++    options['rootPath'] = (
++        '/'.join(nav_root.getPhysicalPath()) if nav_root else '/'
++    )
++
+     return options
  
  
-@@ -26,6 +29,27 @@ def queryUtility(self, iface, name='', default=None):
-         """
-         return default
+@@ -155,15 +162,15 @@ def get_tinymce_options(context, field, request):
+     We're just going to be looking up settings from
+     plone pattern options
+     """
+-    args = {'pattern_options': {}}
++    options = {}
+     try:
+         pattern_options = getMultiAdapter(
+             (context, request, field),
+             name="plone_settings").tinymce()['data-pat-tinymce']
+-        args['pattern_options'] = json.loads(pattern_options)
++        options = json.loads(pattern_options)
+     except (ComponentLookupError, AttributeError):
+         pass
+-    return args
++    return options
  
-+    def getPhysicalPath(self):
-+        return ['', self.__name__]
-+
-+    def absolute_url(self, relative=False):
-+        return '/'.join(self.getPhysicalPath())
-+
-+
-+
-+class DummyUrlTool(object):
-+
-+    name = 'portal_url'
-+
-+    def __init__(self, context):
-+        self.portal = context
-+
-+    def __call__(self):
-+        return self.portal.__name__
-+
-+    def getPortalObject(self):
-+        return self.portal
-+
  
- class DummyTool(object):
+ def get_portal():
+@@ -189,7 +196,7 @@ def get_portal_url(context):
  
-@@ -78,8 +102,13 @@ def __init__(self, rid):
-     def getPath(self):
-         return self.rid
  
-+    @property
-+    def UID(self):
-+        return self.rid
-+
- 
- class DummyCatalog(dict):
-+    implements(IItem)
- 
-     def __init__(self, values):
-         self.indexes = {}
-@@ -114,3 +143,30 @@ def Title(self):
- 
-     def Subject(self):
-         return self.subjects
+ def get_context_url(context):
+-    if IAddForm.providedBy(context):
++    if IForm.providedBy(context):
+         # Use the request URL if we are looking at an addform
+         url = context.request.get('URL')
+     elif hasattr(context, 'absolute_url'):
+@@ -199,3 +206,10 @@ def get_context_url(context):
+     else:
+         url = get_portal_url(context)
+     return url
 +
 +
-+class DummyNavRoot(object):
-+    implements(INavigationRoot)
-+    __parent__ = None
-+
-+    def __init__(self, _id, title=None, parent=None):
-+        self.__name__ = _id
-+        self.title = title or _id
-+        if parent:
-+            self.__parent__ = parent
-+
-+    def getPhysicalPath(self):
-+        return ['', self.__parent__.__name__, self.__name__]
-+
-+    def absolute_url(self, relative=False):
-+        return '/'.join(self.getPhysicalPath())
-+
-+    @property
-+    def portal_catalog(self):
-+        # fake tool acquisition
-+        return self.__parent__.portal_catalog
-+
-+    @property
-+    def portal_url(self):
-+        # fake tool acquisition
-+        return self.__parent__.portal_url
++def get_widget_form(widget):
++    form = getattr(widget, 'form', None)
++    if getattr(aq_base(form), 'parentForm', None) is not None:
++        form = form.parentForm
++    return form
 
 
