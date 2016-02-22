@@ -1,208 +1,372 @@
-Repository: plone.protect
+Repository: plone.app.vocabularies
 
 
 Branch: refs/heads/master
-Date: 2016-02-22T08:14:55+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.protect/commit/ea5a476be1331c13d964c867abd77c694c5d5d3e
+Date: 2016-02-18T16:23:37-08:00
+Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/911bb2004535abd9ac386cfe8295d6d83c2a5728
 
-Fixed AttributeError when calling safeWrite on a TestRequest.
-
-This has no environ.
+Restrict catalog vocabulary to context navigation root unless path is specified.
 
 Files changed:
 M CHANGES.rst
-M plone/protect/utils.py
+M plone/app/vocabularies/catalog.py
+M plone/app/vocabularies/tests/base.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 9a20ce1..c85ce46 100644
+index 6c7b2c9..ed225b1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ New:
+@@ -10,7 +10,9 @@ New:
  
  Fixes:
  
 -- *add item here*
-+- Fixed AttributeError when calling ``safeWrite`` on a
-+  ``TestRequest``, because this has no ``environ.``.  [maurits]
++- Restrict Catalog vocabulary to search current Navigation Root unless
++  path is specified.
++  [alecm]
  
  
- 3.0.17 (2015-12-07)
-diff --git a/plone/protect/utils.py b/plone/protect/utils.py
-index 8476fb9..d3888e8 100644
---- a/plone/protect/utils.py
-+++ b/plone/protect/utils.py
-@@ -110,7 +110,8 @@ def getRoot(context):
- def safeWrite(obj, request=None):
-     if request is None:
-         request = getRequest()
--    if request is None:
-+    if request is None or getattr(request, 'environ', _default) is _default:
-+        # Request not found or it is a TestRequest without an environment.
-         LOGGER.debug('could not mark object as a safe write')
-         return
-     if SAFE_WRITE_KEY not in request.environ:
-@@ -119,4 +120,4 @@ def safeWrite(obj, request=None):
-         if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
-             request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
-     except AttributeError:
--        LOGGER.debug('object you attempted to mark safe does not have an oid')
-\ No newline at end of file
-+        LOGGER.debug('object you attempted to mark safe does not have an oid')
+ 2.2.1 (2015-12-03)
+diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
+index 7be9884..23a0092 100644
+--- a/plone/app/vocabularies/catalog.py
++++ b/plone/app/vocabularies/catalog.py
+@@ -1,5 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from binascii import b2a_qp
++from plone.app.layout.navigation.root import getNavigationRootObject
+ from plone.app.querystring import queryparser
+ from plone.app.vocabularies import SlicableVocabulary
+ from plone.app.vocabularies.terms import BrowsableTerm
+@@ -526,6 +527,34 @@ def _terms(self):
+ 
+ @implementer(IVocabularyFactory)
+ class CatalogVocabularyFactory(object):
++    """
++    Test application of Navigation Root:
++
++      >>> from plone.app.vocabularies.tests.base import create_context
++      >>> from plone.app.vocabularies.tests.base import DummyUrlTool
++      >>> from plone.app.vocabularies.tests.base import DummyCatalog
++      >>> class DummyPathCatalog(DummyCatalog):
++      ...     def __call__(self, **query):
++      ...         if 'path' in query and 'query' in query['path']:
++      ...             return [v for v in self.values() if
++      ...                     v.getPath().startswith(query['path']['query'])]
++      ...         return self.values()
++      >>> catalog = DummyPathCatalog(['/abcd', '/defg', '/dummy/sub-site',
++      ...                             '/dummy/sub-site/ghij'])
++      >>> context = create_context()
++      >>> context.portal_catalog = catalog
++      >>> context.portal_url = DummyUrlTool(context)
++      >>> factory = CatalogVocabularyFactory()
++
++      >>> [t.token for t in factory(context)]
++      ['/dummy/sub-site', '/abcd', '/dummy/sub-site/ghij', '/defg']
++
++      >>> from plone.app.vocabularies.tests.base import DummyNavRoot
++      >>> nav_root = DummyNavRoot('sub-site', parent=context)
++      >>> [t.token for t in factory(nav_root)]
++      ['/dummy/sub-site', '/dummy/sub-site/ghij']
++
++    """
+     # We want to get rid of this and use CatalogSource instead,
+     # but we can't in Plone versions that support
+     # plone.app.widgets < 1.6.0
+@@ -541,7 +570,19 @@ def __call__(self, context, query=None):
+         try:
+             catalog = getToolByName(context, 'portal_catalog')
+         except AttributeError:
+-            catalog = getToolByName(getSite(), 'portal_catalog')
++            context = getSite()
++            catalog = getToolByName(context, 'portal_catalog')
++
++        # If no path is specified check if we are in a sub-site and use that
++        # as the path root for catalog searches
++        if 'path' not in parsed:
++            portal = getToolByName(context, 'portal_url').getPortalObject()
++            nav_root = getNavigationRootObject(context, portal)
++            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
++                parsed['path'] = {
++                    'query': '/'.join(nav_root.getPhysicalPath()),
++                    'depth': -1
++                }
+         brains = catalog(**parsed)
+         return CatalogVocabulary.fromItems(brains, context)
+ 
+diff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py
+index 25bf05e..86973ba 100644
+--- a/plone/app/vocabularies/tests/base.py
++++ b/plone/app/vocabularies/tests/base.py
+@@ -1,5 +1,8 @@
+ # -*- coding: utf-8 -*-
+ from Products.ZCTextIndex.ParseTree import ParseError
++from plone.app.layout.navigation.interfaces import INavigationRoot
++from OFS.interfaces import IItem
++from zope.interface import implements
+ from zope.site.hooks import setSite
+ 
+ 
+@@ -26,6 +29,27 @@ def queryUtility(self, iface, name='', default=None):
+         """
+         return default
+ 
++    def getPhysicalPath(self):
++        return ['', self.__name__]
++
++    def absolute_url(self, relative=False):
++        return '/'.join(self.getPhysicalPath())
++
++
++
++class DummyUrlTool(object):
++
++    name = 'portal_url'
++
++    def __init__(self, context):
++        self.portal = context
++
++    def __call__(self):
++        return self.portal.__name__
++
++    def getPortalObject(self):
++        return self.portal
++
+ 
+ class DummyTool(object):
+ 
+@@ -78,8 +102,13 @@ def __init__(self, rid):
+     def getPath(self):
+         return self.rid
+ 
++    @property
++    def UID(self):
++        return self.rid
++
+ 
+ class DummyCatalog(dict):
++    implements(IItem)
+ 
+     def __init__(self, values):
+         self.indexes = {}
+@@ -114,3 +143,30 @@ def Title(self):
+ 
+     def Subject(self):
+         return self.subjects
++
++
++class DummyNavRoot(object):
++    implements(INavigationRoot)
++    __parent__ = None
++
++    def __init__(self, _id, title=None, parent=None):
++        self.__name__ = _id
++        self.title = title or _id
++        if parent:
++            self.__parent__ = parent
++
++    def getPhysicalPath(self):
++        return ['', self.__parent__.__name__, self.__name__]
++
++    def absolute_url(self, relative=False):
++        return '/'.join(self.getPhysicalPath())
++
++    @property
++    def portal_catalog(self):
++        # fake tool acquisition
++        return self.__parent__.portal_catalog
++
++    @property
++    def portal_url(self):
++        # fake tool acquisition
++        return self.__parent__.portal_url
 
 
-Repository: plone.protect
+Repository: plone.app.vocabularies
 
 
 Branch: refs/heads/master
-Date: 2016-02-22T08:23:04+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.protect/commit/e156eb1d7e81b99a81ea048ef79bd58da55ca73b
+Date: 2016-02-22T15:59:13+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/d282414b59c513d3fb90fc8036bd8e7632f7c8e0
 
-Fixed more possible spots where we required an environ on the request.
+Merge pull request #27 from plone/navroot-fixes
 
-Again, TestRequests have no environ.
-We have not hit these spots in the tests so far, but it might happen.
-
-Files changed:
-M plone/protect/auto.py
-M plone/protect/utils.py
-
-diff --git a/plone/protect/auto.py b/plone/protect/auto.py
-index 6e4d784..3367c91 100644
---- a/plone/protect/auto.py
-+++ b/plone/protect/auto.py
-@@ -213,7 +213,7 @@ def _check(self):
-                 # need to be portlet assignments. XXX needs to be fixed
-                 # somehow...
-                 safe_oids = []
--                if SAFE_WRITE_KEY in self.request.environ:
-+                if SAFE_WRITE_KEY in getattr(self.request, 'environ', {}):
-                     safe_oids = self.request.environ[SAFE_WRITE_KEY]
-                 safe = True
-                 for obj in registered:
-diff --git a/plone/protect/utils.py b/plone/protect/utils.py
-index d3888e8..ff4fdae 100644
---- a/plone/protect/utils.py
-+++ b/plone/protect/utils.py
-@@ -71,14 +71,19 @@ def addTokenToUrl(url, req=None, manager=None):
-         return url
-     if req is None:
-         req = getRequest()
--    if not url.startswith(req.SERVER_URL):
-+    if req is None or not url.startswith(req.SERVER_URL):
-         # only transforms urls to same site
-         return url
--    if '_auth_token' not in req.environ:
--        # let's cache this value since this could be called
--        # many times for one request
--        req.environ['_auth_token'] = createToken(manager=manager)
--    token = req.environ['_auth_token']
-+    if getattr(req, 'environ', _default) is _default:
-+        # TestRequests have no environ.
-+        token = createToken(manager=manager)
-+    elif '_auth_token' not in req.environ:
-+        # Let's cache this value since this could be called
-+        # many times for one request.
-+        token = createToken(manager=manager)
-+        req.environ['_auth_token'] = token
-+    else:
-+        token = req.environ['_auth_token']
- 
-     if '_authenticator' not in url:
-         if '?' not in url:
-
-
-Repository: plone.protect
-
-
-Branch: refs/heads/master
-Date: 2016-02-22T07:55:29-06:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.protect/commit/b8d25c320560a2e8b2be4e4d5b5fef885f4977f1
-
-Merge pull request #39 from plone/test-request-missing-environ
-
-Test request missing environ
+Restrict catalog vocabulary to context navigation root unless path is specified.
 
 Files changed:
 M CHANGES.rst
-M plone/protect/auto.py
-M plone/protect/utils.py
+M plone/app/vocabularies/catalog.py
+M plone/app/vocabularies/tests/base.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 9a20ce1..c85ce46 100644
+index 6c7b2c9..ed225b1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ New:
+@@ -10,7 +10,9 @@ New:
  
  Fixes:
  
 -- *add item here*
-+- Fixed AttributeError when calling ``safeWrite`` on a
-+  ``TestRequest``, because this has no ``environ.``.  [maurits]
++- Restrict Catalog vocabulary to search current Navigation Root unless
++  path is specified.
++  [alecm]
  
  
- 3.0.17 (2015-12-07)
-diff --git a/plone/protect/auto.py b/plone/protect/auto.py
-index 6e4d784..3367c91 100644
---- a/plone/protect/auto.py
-+++ b/plone/protect/auto.py
-@@ -213,7 +213,7 @@ def _check(self):
-                 # need to be portlet assignments. XXX needs to be fixed
-                 # somehow...
-                 safe_oids = []
--                if SAFE_WRITE_KEY in self.request.environ:
-+                if SAFE_WRITE_KEY in getattr(self.request, 'environ', {}):
-                     safe_oids = self.request.environ[SAFE_WRITE_KEY]
-                 safe = True
-                 for obj in registered:
-diff --git a/plone/protect/utils.py b/plone/protect/utils.py
-index 8476fb9..ff4fdae 100644
---- a/plone/protect/utils.py
-+++ b/plone/protect/utils.py
-@@ -71,14 +71,19 @@ def addTokenToUrl(url, req=None, manager=None):
-         return url
-     if req is None:
-         req = getRequest()
--    if not url.startswith(req.SERVER_URL):
-+    if req is None or not url.startswith(req.SERVER_URL):
-         # only transforms urls to same site
-         return url
--    if '_auth_token' not in req.environ:
--        # let's cache this value since this could be called
--        # many times for one request
--        req.environ['_auth_token'] = createToken(manager=manager)
--    token = req.environ['_auth_token']
-+    if getattr(req, 'environ', _default) is _default:
-+        # TestRequests have no environ.
-+        token = createToken(manager=manager)
-+    elif '_auth_token' not in req.environ:
-+        # Let's cache this value since this could be called
-+        # many times for one request.
-+        token = createToken(manager=manager)
-+        req.environ['_auth_token'] = token
-+    else:
-+        token = req.environ['_auth_token']
+ 2.2.1 (2015-12-03)
+diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
+index 7be9884..23a0092 100644
+--- a/plone/app/vocabularies/catalog.py
++++ b/plone/app/vocabularies/catalog.py
+@@ -1,5 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from binascii import b2a_qp
++from plone.app.layout.navigation.root import getNavigationRootObject
+ from plone.app.querystring import queryparser
+ from plone.app.vocabularies import SlicableVocabulary
+ from plone.app.vocabularies.terms import BrowsableTerm
+@@ -526,6 +527,34 @@ def _terms(self):
  
-     if '_authenticator' not in url:
-         if '?' not in url:
-@@ -110,7 +115,8 @@ def getRoot(context):
- def safeWrite(obj, request=None):
-     if request is None:
-         request = getRequest()
--    if request is None:
-+    if request is None or getattr(request, 'environ', _default) is _default:
-+        # Request not found or it is a TestRequest without an environment.
-         LOGGER.debug('could not mark object as a safe write')
-         return
-     if SAFE_WRITE_KEY not in request.environ:
-@@ -119,4 +125,4 @@ def safeWrite(obj, request=None):
-         if obj._p_oid not in request.environ[SAFE_WRITE_KEY]:
-             request.environ[SAFE_WRITE_KEY].append(obj._p_oid)
-     except AttributeError:
--        LOGGER.debug('object you attempted to mark safe does not have an oid')
-\ No newline at end of file
-+        LOGGER.debug('object you attempted to mark safe does not have an oid')
+ @implementer(IVocabularyFactory)
+ class CatalogVocabularyFactory(object):
++    """
++    Test application of Navigation Root:
++
++      >>> from plone.app.vocabularies.tests.base import create_context
++      >>> from plone.app.vocabularies.tests.base import DummyUrlTool
++      >>> from plone.app.vocabularies.tests.base import DummyCatalog
++      >>> class DummyPathCatalog(DummyCatalog):
++      ...     def __call__(self, **query):
++      ...         if 'path' in query and 'query' in query['path']:
++      ...             return [v for v in self.values() if
++      ...                     v.getPath().startswith(query['path']['query'])]
++      ...         return self.values()
++      >>> catalog = DummyPathCatalog(['/abcd', '/defg', '/dummy/sub-site',
++      ...                             '/dummy/sub-site/ghij'])
++      >>> context = create_context()
++      >>> context.portal_catalog = catalog
++      >>> context.portal_url = DummyUrlTool(context)
++      >>> factory = CatalogVocabularyFactory()
++
++      >>> [t.token for t in factory(context)]
++      ['/dummy/sub-site', '/abcd', '/dummy/sub-site/ghij', '/defg']
++
++      >>> from plone.app.vocabularies.tests.base import DummyNavRoot
++      >>> nav_root = DummyNavRoot('sub-site', parent=context)
++      >>> [t.token for t in factory(nav_root)]
++      ['/dummy/sub-site', '/dummy/sub-site/ghij']
++
++    """
+     # We want to get rid of this and use CatalogSource instead,
+     # but we can't in Plone versions that support
+     # plone.app.widgets < 1.6.0
+@@ -541,7 +570,19 @@ def __call__(self, context, query=None):
+         try:
+             catalog = getToolByName(context, 'portal_catalog')
+         except AttributeError:
+-            catalog = getToolByName(getSite(), 'portal_catalog')
++            context = getSite()
++            catalog = getToolByName(context, 'portal_catalog')
++
++        # If no path is specified check if we are in a sub-site and use that
++        # as the path root for catalog searches
++        if 'path' not in parsed:
++            portal = getToolByName(context, 'portal_url').getPortalObject()
++            nav_root = getNavigationRootObject(context, portal)
++            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
++                parsed['path'] = {
++                    'query': '/'.join(nav_root.getPhysicalPath()),
++                    'depth': -1
++                }
+         brains = catalog(**parsed)
+         return CatalogVocabulary.fromItems(brains, context)
+ 
+diff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py
+index 25bf05e..86973ba 100644
+--- a/plone/app/vocabularies/tests/base.py
++++ b/plone/app/vocabularies/tests/base.py
+@@ -1,5 +1,8 @@
+ # -*- coding: utf-8 -*-
+ from Products.ZCTextIndex.ParseTree import ParseError
++from plone.app.layout.navigation.interfaces import INavigationRoot
++from OFS.interfaces import IItem
++from zope.interface import implements
+ from zope.site.hooks import setSite
+ 
+ 
+@@ -26,6 +29,27 @@ def queryUtility(self, iface, name='', default=None):
+         """
+         return default
+ 
++    def getPhysicalPath(self):
++        return ['', self.__name__]
++
++    def absolute_url(self, relative=False):
++        return '/'.join(self.getPhysicalPath())
++
++
++
++class DummyUrlTool(object):
++
++    name = 'portal_url'
++
++    def __init__(self, context):
++        self.portal = context
++
++    def __call__(self):
++        return self.portal.__name__
++
++    def getPortalObject(self):
++        return self.portal
++
+ 
+ class DummyTool(object):
+ 
+@@ -78,8 +102,13 @@ def __init__(self, rid):
+     def getPath(self):
+         return self.rid
+ 
++    @property
++    def UID(self):
++        return self.rid
++
+ 
+ class DummyCatalog(dict):
++    implements(IItem)
+ 
+     def __init__(self, values):
+         self.indexes = {}
+@@ -114,3 +143,30 @@ def Title(self):
+ 
+     def Subject(self):
+         return self.subjects
++
++
++class DummyNavRoot(object):
++    implements(INavigationRoot)
++    __parent__ = None
++
++    def __init__(self, _id, title=None, parent=None):
++        self.__name__ = _id
++        self.title = title or _id
++        if parent:
++            self.__parent__ = parent
++
++    def getPhysicalPath(self):
++        return ['', self.__parent__.__name__, self.__name__]
++
++    def absolute_url(self, relative=False):
++        return '/'.join(self.getPhysicalPath())
++
++    @property
++    def portal_catalog(self):
++        # fake tool acquisition
++        return self.__parent__.portal_catalog
++
++    @property
++    def portal_url(self):
++        # fake tool acquisition
++        return self.__parent__.portal_url
 
 
