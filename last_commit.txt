@@ -1,35 +1,729 @@
-Repository: plone.app.users
+Repository: Products.ATContentTypes
 
 
-Branch: refs/heads/1.2.x
-Date: 2016-02-21T19:10:29+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.users/commit/41a24eb491f2690778a2c0b1273fdc5001e1632f
+Branch: refs/heads/2.1.x
+Date: 2016-01-04T06:58:36+01:00
+Author: Gil Forcada (gforcada) <gforcada@gnome.org>
+Commit: https://github.com/plone/Products.ATContentTypes/commit/e7d9ee442618abc0783ff9e65fb0c3dcf4b55631
 
-Get more info from error_log in csrf test failure.
+Backport CSRF fix from @vangheem
+
+Original commit: https://github.com/plone/Products.ATContentTypes/commit/2958b34ec5f97a14f4c1e3136b5b92608f3ec3fb
 
 Files changed:
-M plone/app/users/tests/userdata_prefs_user_details.txt
+M CHANGES.rst
+M Products/ATContentTypes/tests/atctftestcase.py
+M Products/ATContentTypes/tests/editing.txt
+M Products/ATContentTypes/tests/portaltype_criterion.txt
+M Products/ATContentTypes/tests/test_atdocument.py
+M Products/ATContentTypes/tests/test_atfolder.py
+M Products/ATContentTypes/tests/uploading.txt
 
-diff --git a/plone/app/users/tests/userdata_prefs_user_details.txt b/plone/app/users/tests/userdata_prefs_user_details.txt
-index b35cd6f..dee4012 100644
---- a/plone/app/users/tests/userdata_prefs_user_details.txt
-+++ b/plone/app/users/tests/userdata_prefs_user_details.txt
-@@ -56,7 +56,14 @@ Modifying user data
-     >>> portrait_file = self.get_test_file('onepixel.jpg')
-     >>> self.browser.getControl(name='form.portrait').add_file(portrait_file, "image/jpg", "onepixel.jpg")
+diff --git a/CHANGES.rst b/CHANGES.rst
+index df96f8b..eafa3d1 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.18 (unreleased)
+ -------------------
  
--    >>> self.browser.getControl(name="form.actions.save").click()
-+    >>> from urllib2 import HTTPError
-+    >>> try:
-+    ...     self.browser.getControl(name="form.actions.save").click()
-+    ... except HTTPError as e:
-+    ...     # get the error just thrown
-+    ...     err = self.portal.error_log.getLogEntries()[0]
-+    ...     msg = "%s:\n %s" % (e, err['tb_text'])
-+    ...     self.fail(msg)
-     >>> 'Required input is missing.' in self.browser.contents
-     False
-     >>> 'No changes made.' in self.browser.contents
+-- Nothing changed yet.
++- Backport CSRF fixes.
++  [vangheem] [gforcada]
+ 
+ 
+ 2.1.17 (2015-09-28)
+diff --git a/Products/ATContentTypes/tests/atctftestcase.py b/Products/ATContentTypes/tests/atctftestcase.py
+index 7d3861a..49894c2 100644
+--- a/Products/ATContentTypes/tests/atctftestcase.py
++++ b/Products/ATContentTypes/tests/atctftestcase.py
+@@ -1,3 +1,6 @@
++from zope.component import getUtility
++from plone.keyring.interfaces import IKeyManager
++
+ from Products.ATContentTypes.tests import atcttestcase
+ 
+ from Products.CMFCore.utils import getToolByName
+@@ -7,6 +10,12 @@
+ 
+ from Products.ATContentTypes.config import HAS_LINGUA_PLONE
+ 
++import hmac
++try:
++    from hashlib import sha1 as sha
++except ImportError:
++    import sha
++
+ 
+ class IntegrationTestCase(atcttestcase.ATCTFunctionalSiteTestCase):
+ 
+@@ -33,6 +42,16 @@ def setupTestObject(self):
+         self.obj_url = self.obj.absolute_url()
+         self.obj_path = '/%s' % self.obj.absolute_url(1)
+ 
++    def getAuthToken(self, user=default_user):
++        manager = getUtility(IKeyManager)
++        try:
++            ring = manager[u"_forms"]
++        except KeyError:
++            ring = manager[u'_system']
++
++        secret = ring.random()
++        return hmac.new(secret, user, sha).hexdigest()
++
+ 
+ class ATCTIntegrationTestCase(IntegrationTestCase):
+     """Integration tests for view and edit templates
+@@ -51,9 +70,11 @@ def setupTestObject(self):
+ 
+     def test_createObject(self):
+         # create an object using the createObject script
+-        response = self.publish(self.folder_path +
+-                                '/createObject?type_name=%s' % self.portal_type,
+-                                self.basic_auth)
++        auth = self.getAuthToken()
++        response = self.publish(
++            '%s/createObject?type_name=%s&_authenticator=%s' % (
++                self.folder_path, self.portal_type, auth),
++            self.basic_auth)
+ 
+         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
+ 
+@@ -61,7 +82,7 @@ def test_createObject(self):
+ 
+         self.assertTrue(body.startswith(self.folder_url), body)
+         # The url may end with /edit or /atct_edit depending on method aliases
+-        self.assertTrue(body.endswith('edit'), body)
++        self.assertTrue('edit' in body, body)
+ 
+         # Perform the redirect
+         edit_form_path = body[len(self.app.REQUEST.SERVER_URL):]
+@@ -78,7 +99,10 @@ def check_newly_created(self):
+ 
+     def test_edit_view(self):
+         # edit should work
+-        response = self.publish('%s/atct_edit' % self.obj_path, self.basic_auth)
++        response = self.publish(
++            '%s/atct_edit?_authenticator=%s' % (
++                self.obj_path, self.getAuthToken()),
++            self.basic_auth)
+         self.assertEqual(response.getStatus(), 200)  # OK
+ 
+     def test_base_view(self):
+diff --git a/Products/ATContentTypes/tests/editing.txt b/Products/ATContentTypes/tests/editing.txt
+index 2baa469..c604966 100644
+--- a/Products/ATContentTypes/tests/editing.txt
++++ b/Products/ATContentTypes/tests/editing.txt
+@@ -37,7 +37,8 @@ We'll try and set the title (a required field) to the empty string:
+   
+   >>> document.Schema().getField('title').required
+   1
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Title').value = ''
+   >>> browser.getControl('Save').click()
+ 
+@@ -56,7 +57,8 @@ we want to make sure all of them are validated.
+ 
+   >>> document.Schema().getField('title').schemata
+   'categorization'
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Title').value = ''
+   >>> browser.getControl('Save').click()
+   >>> document.title_or_id()
+@@ -70,7 +72,8 @@ Buttons name verification
+ 
+ Let's verify that the buttons have the correct name:
+   
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Save').name
+   'form.button.save'
+   
+@@ -95,7 +98,8 @@ and change the schemata of one of its fields
+   >>> document.Schema().getField('text').schemata
+   'someschemata'
+   
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Next').name
+   'form.button.next'
+   
+diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
+index 8056f99..1f86447 100644
+--- a/Products/ATContentTypes/tests/portaltype_criterion.txt
++++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
+@@ -52,7 +52,7 @@ We edit the criteria:
+ 
+     >>> browser.getLink('Criteria').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/criterion_edit_form'
++    'http://nohost/plone/my-collection/criterion_edit_form?_auth...'
+     >>> 'Add New Search Criteria' in browser.contents
+     True
+ 
+@@ -103,7 +103,7 @@ We now view the collection.
+ 
+     >>> browser.getLink('View').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/'
++    'http://nohost/plone/my-collection/?_auth...'
+ 
+ The test document should be in the collection.
+ 
+diff --git a/Products/ATContentTypes/tests/test_atdocument.py b/Products/ATContentTypes/tests/test_atdocument.py
+index c943e7c..8a220ae 100644
+--- a/Products/ATContentTypes/tests/test_atdocument.py
++++ b/Products/ATContentTypes/tests/test_atdocument.py
+@@ -275,16 +275,17 @@ class TestATDocumentFunctional(atctftestcase.ATCTIntegrationTestCase):
+     def test_id_change_on_initial_edit(self):
+         """Make sure Id is taken from title on initial edit and not otherwise"""
+         # first create an object using the createObject script
+-
+-        response = self.publish(self.folder_path +
+-                                '/createObject?type_name=%s' % self.portal_type,
+-                                self.basic_auth)
++        auth = self.getAuthToken()
++        response = self.publish(
++            '%s/createObject?type_name=%s&_authenticator=%s' % (
++                self.folder_path, self.portal_type, auth),
++            self.basic_auth)
+ 
+         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
+ 
+         location = response.getHeader('Location')
+         self.assertTrue(location.startswith(self.folder_url), location)
+-        self.assertTrue(location.endswith('edit'), location)
++        self.assertTrue('edit' in location, location)
+ 
+         # Perform the redirect
+         edit_form_path = location[len(self.app.REQUEST.SERVER_URL):]
+@@ -299,12 +300,12 @@ def test_id_change_on_initial_edit(self):
+         new_obj_path = '/%s' % new_obj.absolute_url(1)
+         self.assertEqual(new_obj.checkCreationFlag(), True)  # object is not yet edited
+ 
+-        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % (new_obj_path, obj_title,), self.basic_auth)  # Edit object
++        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % (new_obj_path, obj_title, auth), self.basic_auth)  # Edit object
+         self.assertEqual(response.getStatus(), 302)  # OK
+         self.assertEqual(new_obj.getId(), new_id)  # does id match
+         self.assertEqual(new_obj.checkCreationFlag(), False)  # object is fully created
+         new_title = "Second Title"
+-        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % ('/%s' % new_obj.absolute_url(1), new_title,), self.basic_auth)  # Edit object
++        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % ('/%s' % new_obj.absolute_url(1), new_title, auth), self.basic_auth)  # Edit object
+         self.assertEqual(response.getStatus(), 302)  # OK
+         self.assertEqual(new_obj.getId(), new_id)  # id shouldn't have changed
+ 
+diff --git a/Products/ATContentTypes/tests/test_atfolder.py b/Products/ATContentTypes/tests/test_atfolder.py
+index 3b19ff3..2d03905 100644
+--- a/Products/ATContentTypes/tests/test_atfolder.py
++++ b/Products/ATContentTypes/tests/test_atfolder.py
+@@ -9,6 +9,7 @@
+ from OFS.interfaces import IOrderedContainer as IOrderedContainer
+ from Products.ATContentTypes.interfaces import IATFolder
+ from Products.ATContentTypes.interfaces import IATBTreeFolder
++from Products.PloneTestCase.setup import portal_owner
+ 
+ from zope.interface.verify import verifyObject
+ from Products.ATContentTypes.interfaces import ISelectableConstrainTypes
+@@ -175,9 +176,10 @@ def test_dynamic_view_without_view(self):
+ 
+     def test_selectViewTemplate(self):
+         # create an object using the createObject script
+-        self.publish(self.obj_path +
+-                     '/selectViewTemplate?templateId=atct_album_view',
+-                     self.owner_auth)
++        self.publish(
++            '%s/selectViewTemplate?templateId=atct_album_view&_authenticator=%s' % (
++                self.obj_path, self.getAuthToken(portal_owner)),
++            self.owner_auth)
+         self.assertEqual(self.obj.getLayout(), 'atct_album_view')
+ 
+ tests.append(TestATFolderFunctional)
+diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
+index d76b1b9..e410db9 100644
+--- a/Products/ATContentTypes/tests/uploading.txt
++++ b/Products/ATContentTypes/tests/uploading.txt
+@@ -75,7 +75,7 @@ Now try to empty value of the text field (#7324)
+ 
+     >>> browser.getLink('Edit').click()
+     >>> browser.url
+-    'http://nohost/plone/test-collection/edit'
++    'http://nohost/plone/test-collection/edit?_auth...'
+     >>> browser.getControl(name='text').value = ''
+     >>> browser.getControl('Save').click()
+     >>> 'file contents' in browser.contents
+
+
+Repository: Products.ATContentTypes
+
+
+Branch: refs/heads/2.1.x
+Date: 2016-01-04T07:35:57+01:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/Products.ATContentTypes/commit/2f932af58a2c4eee9a3de0f662d139ff8973e471
+
+fix tests relating to edit urls
+
+Files changed:
+M Products/ATContentTypes/tests/portaltype_criterion.txt
+M Products/ATContentTypes/tests/uploading.txt
+
+diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
+index 1f86447..11a8cf1 100644
+--- a/Products/ATContentTypes/tests/portaltype_criterion.txt
++++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
+@@ -36,7 +36,7 @@ What we do next is we
+     >>> browser.getControl('Add').click()
+     >>> #'Edit Collection' in browser.contents # ouch, Plone has <span> around 'Collection'
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Topic/topic.../edit'
++    'http://nohost/plone/portal_factory/Topic/topic.../edit...'
+ 
+ Now that the collection has been added, we can edit it, but we pretend
+ we don't know better and forget to type in a Title:
+diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
+index e410db9..faed466 100644
+--- a/Products/ATContentTypes/tests/uploading.txt
++++ b/Products/ATContentTypes/tests/uploading.txt
+@@ -30,7 +30,7 @@ Let's create a new document, ending up at its edit form.
+     >>> browser.getControl('Page').click()
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Document/document.../edit'
++    'http://nohost/plone/portal_factory/Document/document.../edit...'
+     
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+@@ -55,7 +55,7 @@ Let's create a new collection, ending up at its edit form.
+     >>> browser.getControl('Collection', index=-1).click()
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Topic/topic.../edit'
++    'http://nohost/plone/portal_factory/Topic/topic.../edit...'
+     
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+
+
+Repository: Products.ATContentTypes
+
+
+Branch: refs/heads/2.1.x
+Date: 2016-02-13T01:00:18+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.ATContentTypes/commit/bcf88745e31125c94fb0ed8aab7cf524811b1322
+
+In tests do not explicitly test if authenticator is in the url.
+
+This keeps it compatible with plone.protect 2.x.
+
+Files changed:
+M Products/ATContentTypes/tests/portaltype_criterion.txt
+M Products/ATContentTypes/tests/uploading.txt
+
+diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
+index 11a8cf1..2228aed 100644
+--- a/Products/ATContentTypes/tests/portaltype_criterion.txt
++++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
+@@ -21,7 +21,7 @@ First, we need to log in.
+ Add Collection
+ --------------
+ 
+-What we do next is we 
++What we do next is we
+ 
+   - add a new collection,
+   - ...edit some values,
+@@ -52,7 +52,7 @@ We edit the criteria:
+ 
+     >>> browser.getLink('Criteria').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/criterion_edit_form?_auth...'
++    'http://nohost/plone/my-collection/criterion_edit_form...'
+     >>> 'Add New Search Criteria' in browser.contents
+     True
+ 
+@@ -78,7 +78,7 @@ Make sure that sorting by the getObjPositionInParent index is an option.
+ We select Page and save our selection.
+ 
+     >>> browser.getControl(name='crit__Type_ATPortalTypeCriterion_value:list').value = ['Page']
+-    >>> browser.getControl('Save', index=0).click() 
++    >>> browser.getControl('Save', index=0).click()
+     >>> 'Changes saved.' in browser.contents
+     True
+ 
+@@ -103,7 +103,7 @@ We now view the collection.
+ 
+     >>> browser.getLink('View').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/?_auth...'
++    'http://nohost/plone/my-collection/...'
+ 
+ The test document should be in the collection.
+ 
+diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
+index faed466..5cc81d9 100644
+--- a/Products/ATContentTypes/tests/uploading.txt
++++ b/Products/ATContentTypes/tests/uploading.txt
+@@ -20,7 +20,7 @@ Log in.
+     >>> browser.getControl('Login Name').value = portal_owner
+     >>> browser.getControl('Password').value = default_password
+     >>> browser.getControl('Log in').click()
+-    
++
+ Let's create a new document, ending up at its edit form.
+ 
+     >>> browser.open('http://nohost/plone')
+@@ -31,7 +31,7 @@ Let's create a new document, ending up at its edit form.
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+     'http://nohost/plone/portal_factory/Document/document.../edit...'
+-    
++
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+ 
+@@ -56,7 +56,7 @@ Let's create a new collection, ending up at its edit form.
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+     'http://nohost/plone/portal_factory/Topic/topic.../edit...'
+-    
++
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+ 
+@@ -75,7 +75,7 @@ Now try to empty value of the text field (#7324)
+ 
+     >>> browser.getLink('Edit').click()
+     >>> browser.url
+-    'http://nohost/plone/test-collection/edit?_auth...'
++    'http://nohost/plone/test-collection/edit...'
+     >>> browser.getControl(name='text').value = ''
+     >>> browser.getControl('Save').click()
+     >>> 'file contents' in browser.contents
+
+
+Repository: Products.ATContentTypes
+
+
+Branch: refs/heads/2.1.x
+Date: 2016-02-23T13:38:13-05:00
+Author: Eric Steele (esteele) <eric@esteele.net>
+Commit: https://github.com/plone/Products.ATContentTypes/commit/f46b273a9ae168215d72a6688fa8adc836f83eb6
+
+Merge pull request #29 from plone/write-on-read2
+
+Backport CSRF fix from @vangheem
+
+Files changed:
+M CHANGES.rst
+M Products/ATContentTypes/tests/atctftestcase.py
+M Products/ATContentTypes/tests/editing.txt
+M Products/ATContentTypes/tests/portaltype_criterion.txt
+M Products/ATContentTypes/tests/test_atdocument.py
+M Products/ATContentTypes/tests/test_atfolder.py
+M Products/ATContentTypes/tests/uploading.txt
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index df96f8b..eafa3d1 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,7 +4,8 @@ Changelog
+ 2.1.18 (unreleased)
+ -------------------
+ 
+-- Nothing changed yet.
++- Backport CSRF fixes.
++  [vangheem] [gforcada]
+ 
+ 
+ 2.1.17 (2015-09-28)
+diff --git a/Products/ATContentTypes/tests/atctftestcase.py b/Products/ATContentTypes/tests/atctftestcase.py
+index 7d3861a..49894c2 100644
+--- a/Products/ATContentTypes/tests/atctftestcase.py
++++ b/Products/ATContentTypes/tests/atctftestcase.py
+@@ -1,3 +1,6 @@
++from zope.component import getUtility
++from plone.keyring.interfaces import IKeyManager
++
+ from Products.ATContentTypes.tests import atcttestcase
+ 
+ from Products.CMFCore.utils import getToolByName
+@@ -7,6 +10,12 @@
+ 
+ from Products.ATContentTypes.config import HAS_LINGUA_PLONE
+ 
++import hmac
++try:
++    from hashlib import sha1 as sha
++except ImportError:
++    import sha
++
+ 
+ class IntegrationTestCase(atcttestcase.ATCTFunctionalSiteTestCase):
+ 
+@@ -33,6 +42,16 @@ def setupTestObject(self):
+         self.obj_url = self.obj.absolute_url()
+         self.obj_path = '/%s' % self.obj.absolute_url(1)
+ 
++    def getAuthToken(self, user=default_user):
++        manager = getUtility(IKeyManager)
++        try:
++            ring = manager[u"_forms"]
++        except KeyError:
++            ring = manager[u'_system']
++
++        secret = ring.random()
++        return hmac.new(secret, user, sha).hexdigest()
++
+ 
+ class ATCTIntegrationTestCase(IntegrationTestCase):
+     """Integration tests for view and edit templates
+@@ -51,9 +70,11 @@ def setupTestObject(self):
+ 
+     def test_createObject(self):
+         # create an object using the createObject script
+-        response = self.publish(self.folder_path +
+-                                '/createObject?type_name=%s' % self.portal_type,
+-                                self.basic_auth)
++        auth = self.getAuthToken()
++        response = self.publish(
++            '%s/createObject?type_name=%s&_authenticator=%s' % (
++                self.folder_path, self.portal_type, auth),
++            self.basic_auth)
+ 
+         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
+ 
+@@ -61,7 +82,7 @@ def test_createObject(self):
+ 
+         self.assertTrue(body.startswith(self.folder_url), body)
+         # The url may end with /edit or /atct_edit depending on method aliases
+-        self.assertTrue(body.endswith('edit'), body)
++        self.assertTrue('edit' in body, body)
+ 
+         # Perform the redirect
+         edit_form_path = body[len(self.app.REQUEST.SERVER_URL):]
+@@ -78,7 +99,10 @@ def check_newly_created(self):
+ 
+     def test_edit_view(self):
+         # edit should work
+-        response = self.publish('%s/atct_edit' % self.obj_path, self.basic_auth)
++        response = self.publish(
++            '%s/atct_edit?_authenticator=%s' % (
++                self.obj_path, self.getAuthToken()),
++            self.basic_auth)
+         self.assertEqual(response.getStatus(), 200)  # OK
+ 
+     def test_base_view(self):
+diff --git a/Products/ATContentTypes/tests/editing.txt b/Products/ATContentTypes/tests/editing.txt
+index 2baa469..c604966 100644
+--- a/Products/ATContentTypes/tests/editing.txt
++++ b/Products/ATContentTypes/tests/editing.txt
+@@ -37,7 +37,8 @@ We'll try and set the title (a required field) to the empty string:
+   
+   >>> document.Schema().getField('title').required
+   1
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Title').value = ''
+   >>> browser.getControl('Save').click()
+ 
+@@ -56,7 +57,8 @@ we want to make sure all of them are validated.
+ 
+   >>> document.Schema().getField('title').schemata
+   'categorization'
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Title').value = ''
+   >>> browser.getControl('Save').click()
+   >>> document.title_or_id()
+@@ -70,7 +72,8 @@ Buttons name verification
+ 
+ Let's verify that the buttons have the correct name:
+   
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Save').name
+   'form.button.save'
+   
+@@ -95,7 +98,8 @@ and change the schemata of one of its fields
+   >>> document.Schema().getField('text').schemata
+   'someschemata'
+   
+-  >>> browser.open(url+'/edit')
++  >>> browser.open(url)
++  >>> browser.getLink('Edit').click()
+   >>> browser.getControl('Next').name
+   'form.button.next'
+   
+diff --git a/Products/ATContentTypes/tests/portaltype_criterion.txt b/Products/ATContentTypes/tests/portaltype_criterion.txt
+index 8056f99..2228aed 100644
+--- a/Products/ATContentTypes/tests/portaltype_criterion.txt
++++ b/Products/ATContentTypes/tests/portaltype_criterion.txt
+@@ -21,7 +21,7 @@ First, we need to log in.
+ Add Collection
+ --------------
+ 
+-What we do next is we 
++What we do next is we
+ 
+   - add a new collection,
+   - ...edit some values,
+@@ -36,7 +36,7 @@ What we do next is we
+     >>> browser.getControl('Add').click()
+     >>> #'Edit Collection' in browser.contents # ouch, Plone has <span> around 'Collection'
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Topic/topic.../edit'
++    'http://nohost/plone/portal_factory/Topic/topic.../edit...'
+ 
+ Now that the collection has been added, we can edit it, but we pretend
+ we don't know better and forget to type in a Title:
+@@ -52,7 +52,7 @@ We edit the criteria:
+ 
+     >>> browser.getLink('Criteria').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/criterion_edit_form'
++    'http://nohost/plone/my-collection/criterion_edit_form...'
+     >>> 'Add New Search Criteria' in browser.contents
+     True
+ 
+@@ -78,7 +78,7 @@ Make sure that sorting by the getObjPositionInParent index is an option.
+ We select Page and save our selection.
+ 
+     >>> browser.getControl(name='crit__Type_ATPortalTypeCriterion_value:list').value = ['Page']
+-    >>> browser.getControl('Save', index=0).click() 
++    >>> browser.getControl('Save', index=0).click()
+     >>> 'Changes saved.' in browser.contents
+     True
+ 
+@@ -103,7 +103,7 @@ We now view the collection.
+ 
+     >>> browser.getLink('View').click()
+     >>> browser.url
+-    'http://nohost/plone/my-collection/'
++    'http://nohost/plone/my-collection/...'
+ 
+ The test document should be in the collection.
+ 
+diff --git a/Products/ATContentTypes/tests/test_atdocument.py b/Products/ATContentTypes/tests/test_atdocument.py
+index c943e7c..8a220ae 100644
+--- a/Products/ATContentTypes/tests/test_atdocument.py
++++ b/Products/ATContentTypes/tests/test_atdocument.py
+@@ -275,16 +275,17 @@ class TestATDocumentFunctional(atctftestcase.ATCTIntegrationTestCase):
+     def test_id_change_on_initial_edit(self):
+         """Make sure Id is taken from title on initial edit and not otherwise"""
+         # first create an object using the createObject script
+-
+-        response = self.publish(self.folder_path +
+-                                '/createObject?type_name=%s' % self.portal_type,
+-                                self.basic_auth)
++        auth = self.getAuthToken()
++        response = self.publish(
++            '%s/createObject?type_name=%s&_authenticator=%s' % (
++                self.folder_path, self.portal_type, auth),
++            self.basic_auth)
+ 
+         self.assertEqual(response.getStatus(), 302)  # Redirect to edit
+ 
+         location = response.getHeader('Location')
+         self.assertTrue(location.startswith(self.folder_url), location)
+-        self.assertTrue(location.endswith('edit'), location)
++        self.assertTrue('edit' in location, location)
+ 
+         # Perform the redirect
+         edit_form_path = location[len(self.app.REQUEST.SERVER_URL):]
+@@ -299,12 +300,12 @@ def test_id_change_on_initial_edit(self):
+         new_obj_path = '/%s' % new_obj.absolute_url(1)
+         self.assertEqual(new_obj.checkCreationFlag(), True)  # object is not yet edited
+ 
+-        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % (new_obj_path, obj_title,), self.basic_auth)  # Edit object
++        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % (new_obj_path, obj_title, auth), self.basic_auth)  # Edit object
+         self.assertEqual(response.getStatus(), 302)  # OK
+         self.assertEqual(new_obj.getId(), new_id)  # does id match
+         self.assertEqual(new_obj.checkCreationFlag(), False)  # object is fully created
+         new_title = "Second Title"
+-        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank' % ('/%s' % new_obj.absolute_url(1), new_title,), self.basic_auth)  # Edit object
++        response = self.publish('%s/atct_edit?form.submitted=1&title=%s&text=Blank&_authenticator=%s' % ('/%s' % new_obj.absolute_url(1), new_title, auth), self.basic_auth)  # Edit object
+         self.assertEqual(response.getStatus(), 302)  # OK
+         self.assertEqual(new_obj.getId(), new_id)  # id shouldn't have changed
+ 
+diff --git a/Products/ATContentTypes/tests/test_atfolder.py b/Products/ATContentTypes/tests/test_atfolder.py
+index 3b19ff3..2d03905 100644
+--- a/Products/ATContentTypes/tests/test_atfolder.py
++++ b/Products/ATContentTypes/tests/test_atfolder.py
+@@ -9,6 +9,7 @@
+ from OFS.interfaces import IOrderedContainer as IOrderedContainer
+ from Products.ATContentTypes.interfaces import IATFolder
+ from Products.ATContentTypes.interfaces import IATBTreeFolder
++from Products.PloneTestCase.setup import portal_owner
+ 
+ from zope.interface.verify import verifyObject
+ from Products.ATContentTypes.interfaces import ISelectableConstrainTypes
+@@ -175,9 +176,10 @@ def test_dynamic_view_without_view(self):
+ 
+     def test_selectViewTemplate(self):
+         # create an object using the createObject script
+-        self.publish(self.obj_path +
+-                     '/selectViewTemplate?templateId=atct_album_view',
+-                     self.owner_auth)
++        self.publish(
++            '%s/selectViewTemplate?templateId=atct_album_view&_authenticator=%s' % (
++                self.obj_path, self.getAuthToken(portal_owner)),
++            self.owner_auth)
+         self.assertEqual(self.obj.getLayout(), 'atct_album_view')
+ 
+ tests.append(TestATFolderFunctional)
+diff --git a/Products/ATContentTypes/tests/uploading.txt b/Products/ATContentTypes/tests/uploading.txt
+index d76b1b9..5cc81d9 100644
+--- a/Products/ATContentTypes/tests/uploading.txt
++++ b/Products/ATContentTypes/tests/uploading.txt
+@@ -20,7 +20,7 @@ Log in.
+     >>> browser.getControl('Login Name').value = portal_owner
+     >>> browser.getControl('Password').value = default_password
+     >>> browser.getControl('Log in').click()
+-    
++
+ Let's create a new document, ending up at its edit form.
+ 
+     >>> browser.open('http://nohost/plone')
+@@ -30,8 +30,8 @@ Let's create a new document, ending up at its edit form.
+     >>> browser.getControl('Page').click()
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Document/document.../edit'
+-    
++    'http://nohost/plone/portal_factory/Document/document.../edit...'
++
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+ 
+@@ -55,8 +55,8 @@ Let's create a new collection, ending up at its edit form.
+     >>> browser.getControl('Collection', index=-1).click()
+     >>> browser.getControl('Add').click()
+     >>> browser.url
+-    'http://nohost/plone/portal_factory/Topic/topic.../edit'
+-    
++    'http://nohost/plone/portal_factory/Topic/topic.../edit...'
++
+ Now upload a file.  The uploaded file should take precedence over the
+ contents of the text field, if any.
+ 
+@@ -75,7 +75,7 @@ Now try to empty value of the text field (#7324)
+ 
+     >>> browser.getLink('Edit').click()
+     >>> browser.url
+-    'http://nohost/plone/test-collection/edit'
++    'http://nohost/plone/test-collection/edit...'
+     >>> browser.getControl(name='text').value = ''
+     >>> browser.getControl('Save').click()
+     >>> 'file contents' in browser.contents
 
 
