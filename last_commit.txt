@@ -1,106 +1,265 @@
-Repository: plone.app.z3cform
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-02-25T15:07:03+01:00
-Author: Gagaro (Gagaro) <gagaro42@gmail.com>
-Commit: https://github.com/plone/plone.app.z3cform/commit/95fcf95c1d760cca6e4967217f3960c374b0f838
+Date: 2016-02-25T22:43:34+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/66bf70ab858eeed6dddcf1f4cded25b5e2f9efa9
 
-fix: relateditems test for plone.app.widgets
+Do not fail when viewing any page, when the persistent resource directory is not registered.
+
+This can happen if Diazo is not installed.
+We might want to install it when migrating to Plone 5,
+but meanwhile this fixes the immediate error in Plone 5.
+
+With the meta-bundles plip, added in Plone 5.0.3,
+it would already fail during migration.
+
+Fixes https://github.com/plone/Products.CMFPlone/issues/1187
 
 Files changed:
 M CHANGES.rst
-M plone/app/z3cform/tests/test_widgets.py
+M Products/CMFPlone/resources/browser/combine.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+M Products/CMFPlone/traversal.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ec5953f..2370b52 100644
+index 08f6db7..c2e0192 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -24,6 +24,9 @@ Fixes:
- - Fixed test for plone.app.widgets.
-   [Gagaro]
+@@ -28,6 +28,12 @@ New:
  
-+- Used assertDictEqual instead of assertEqual for RelatedItemsWidgetTests.test_widget
-+  [Gagaro]
+ Fixes:
+ 
++- Do not fail when viewing any page, or during migration, when Diazo
++  is not installed and the persistent resource directory is not
++  registered.  Fixes
++  https://github.com/plone/Products.CMFPlone/issues/1187
++  [maurits]
 +
- 1.1.8 (2016-01-08)
- ------------------
+ - Move hero on welcome page from theme into managed content.
+   Issue https://github.com/plone/Products.CMFPlone/issues/974
+   [gyst]
+@@ -59,7 +65,7 @@ Fixes:
  
-diff --git a/plone/app/z3cform/tests/test_widgets.py b/plone/app/z3cform/tests/test_widgets.py
-index ab464af..28818ef 100644
---- a/plone/app/z3cform/tests/test_widgets.py
-+++ b/plone/app/z3cform/tests/test_widgets.py
-@@ -948,7 +948,7 @@ def test_widget(self):
-         widget.context = Mock(absolute_url=lambda: 'fake_url',
-                               getPhysicalPath=lambda: ['', 'site'])
-         widget.update()
--        self.assertEqual(
-+        self.assertDictEqual(
-             {
-                 'name': None,
-                 'value': u'',
-@@ -964,6 +964,8 @@ def test_widget(self):
-                     'rootPath': '/site',
-                     'treeVocabularyUrl':  '/@@getVocabulary?name='
-                                           'plone.app.vocabularies.Catalog',
-+                    'sort_on': 'sortable_title',
-+                    'sort_order': 'ascending'
-                 },
-             },
-             widget._base_args()
+ - Mock MailHost on testing.py so that tests relying on mails can use it.
+   [gforcada]
+-  
++
+ - Fix `aria-hidden` attribute control problem on toolbar
+   https://github.com/plone/Products.CMFPlone/issues/866
+   [terapyon]
+diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
+index 8d5c2d4..d0f9540 100644
+--- a/Products/CMFPlone/resources/browser/combine.py
++++ b/Products/CMFPlone/resources/browser/combine.py
+@@ -9,12 +9,15 @@
+ )
+ from StringIO import StringIO
+ from zope.component import getUtility
++from zope.component import queryUtility
+ 
+ PRODUCTION_RESOURCE_DIRECTORY = "production"
+ 
+ 
+ def get_production_resource_directory():
+-    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    persistent_directory = queryUtility(IResourceDirectory, name="persistent")
++    if persistent_directory is None:
++        return ''
+     container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+     production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
+     timestamp = production_folder.readFile('timestamp.txt')
+@@ -81,7 +84,9 @@ def write_css(context, folder, meta_bundle):
+ 
+ 
+ def combine_bundles(context):
+-    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    persistent_directory = queryUtility(IResourceDirectory, name="persistent")
++    if persistent_directory is None:
++        return
+     if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
+         persistent_directory.makeDirectory(OVERRIDE_RESOURCE_DIRECTORY_NAME)
+     container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 280e06a..0a8d60a 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -111,7 +111,7 @@ def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
+         """
+-        if self.development:
++        if self.development or not self.production_path:
+             result = self.default_resources()
+             result.extend(self.ordered_bundles_result())
+         else:
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index be93a6b..663f7a9 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -89,7 +89,7 @@ def styles(self):
+         """
+         Get all the styles
+         """
+-        if self.development:
++        if self.development or not self.production_path:
+             result = self.ordered_bundles_result()
+         else:
+             result = [{
+diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
+index 4b64550..81eb635 100644
+--- a/Products/CMFPlone/traversal.py
++++ b/Products/CMFPlone/traversal.py
+@@ -1,5 +1,5 @@
+ from plone.resource.traversal import ResourceTraverser
+-from zope.component import getUtility
++from zope.component import queryUtility
+ from plone.resource.interfaces import IResourceDirectory
+ from plone.resource.interfaces import IUniqueResourceRequest
+ from Products.CMFPlone.interfaces.resources import (
+@@ -27,9 +27,10 @@ def traverse(self, name, remaining):
+         if more_traversal:
+             resource_filepath = resource_filepath.split('/')[-1]
+ 
+-        persistentDirectory = getUtility(IResourceDirectory, name="persistent")
++        persistentDirectory = queryUtility(IResourceDirectory, name="persistent")
+         directory = None
+-        if OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory:
++        if (persistentDirectory is not None and
++                OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory):
+             container = persistentDirectory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+             if resource_name in container:
+                 directory = container[resource_name]
 
 
-Repository: plone.app.z3cform
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-02-25T08:45:03-06:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.z3cform/commit/c1437a0fa05c839908158bc850e4807f70f7b5d7
+Date: 2016-02-26T09:23:47+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/0d5172a98e64688b490b9ed77beb4f3c717d6f27
 
-Merge pull request #42 from plone/fix-relateditems-tests
+Merge pull request #1412 from plone/issue-1187
 
-fix: relateditems test for plone.app.widgets
+Do not fail when viewing any page, when the persistent resource directory is not registered.
 
 Files changed:
 M CHANGES.rst
-M plone/app/z3cform/tests/test_widgets.py
+M Products/CMFPlone/resources/browser/combine.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/resources/browser/styles.py
+M Products/CMFPlone/traversal.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ec5953f..2370b52 100644
+index 08f6db7..c2e0192 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -24,6 +24,9 @@ Fixes:
- - Fixed test for plone.app.widgets.
-   [Gagaro]
+@@ -28,6 +28,12 @@ New:
  
-+- Used assertDictEqual instead of assertEqual for RelatedItemsWidgetTests.test_widget
-+  [Gagaro]
+ Fixes:
+ 
++- Do not fail when viewing any page, or during migration, when Diazo
++  is not installed and the persistent resource directory is not
++  registered.  Fixes
++  https://github.com/plone/Products.CMFPlone/issues/1187
++  [maurits]
 +
- 1.1.8 (2016-01-08)
- ------------------
+ - Move hero on welcome page from theme into managed content.
+   Issue https://github.com/plone/Products.CMFPlone/issues/974
+   [gyst]
+@@ -59,7 +65,7 @@ Fixes:
  
-diff --git a/plone/app/z3cform/tests/test_widgets.py b/plone/app/z3cform/tests/test_widgets.py
-index ab464af..28818ef 100644
---- a/plone/app/z3cform/tests/test_widgets.py
-+++ b/plone/app/z3cform/tests/test_widgets.py
-@@ -948,7 +948,7 @@ def test_widget(self):
-         widget.context = Mock(absolute_url=lambda: 'fake_url',
-                               getPhysicalPath=lambda: ['', 'site'])
-         widget.update()
--        self.assertEqual(
-+        self.assertDictEqual(
-             {
-                 'name': None,
-                 'value': u'',
-@@ -964,6 +964,8 @@ def test_widget(self):
-                     'rootPath': '/site',
-                     'treeVocabularyUrl':  '/@@getVocabulary?name='
-                                           'plone.app.vocabularies.Catalog',
-+                    'sort_on': 'sortable_title',
-+                    'sort_order': 'ascending'
-                 },
-             },
-             widget._base_args()
+ - Mock MailHost on testing.py so that tests relying on mails can use it.
+   [gforcada]
+-  
++
+ - Fix `aria-hidden` attribute control problem on toolbar
+   https://github.com/plone/Products.CMFPlone/issues/866
+   [terapyon]
+diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
+index 8d5c2d4..d0f9540 100644
+--- a/Products/CMFPlone/resources/browser/combine.py
++++ b/Products/CMFPlone/resources/browser/combine.py
+@@ -9,12 +9,15 @@
+ )
+ from StringIO import StringIO
+ from zope.component import getUtility
++from zope.component import queryUtility
+ 
+ PRODUCTION_RESOURCE_DIRECTORY = "production"
+ 
+ 
+ def get_production_resource_directory():
+-    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    persistent_directory = queryUtility(IResourceDirectory, name="persistent")
++    if persistent_directory is None:
++        return ''
+     container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+     production_folder = container[PRODUCTION_RESOURCE_DIRECTORY]
+     timestamp = production_folder.readFile('timestamp.txt')
+@@ -81,7 +84,9 @@ def write_css(context, folder, meta_bundle):
+ 
+ 
+ def combine_bundles(context):
+-    persistent_directory = getUtility(IResourceDirectory, name="persistent")
++    persistent_directory = queryUtility(IResourceDirectory, name="persistent")
++    if persistent_directory is None:
++        return
+     if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
+         persistent_directory.makeDirectory(OVERRIDE_RESOURCE_DIRECTORY_NAME)
+     container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 280e06a..0a8d60a 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -111,7 +111,7 @@ def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
+         """
+-        if self.development:
++        if self.development or not self.production_path:
+             result = self.default_resources()
+             result.extend(self.ordered_bundles_result())
+         else:
+diff --git a/Products/CMFPlone/resources/browser/styles.py b/Products/CMFPlone/resources/browser/styles.py
+index be93a6b..663f7a9 100644
+--- a/Products/CMFPlone/resources/browser/styles.py
++++ b/Products/CMFPlone/resources/browser/styles.py
+@@ -89,7 +89,7 @@ def styles(self):
+         """
+         Get all the styles
+         """
+-        if self.development:
++        if self.development or not self.production_path:
+             result = self.ordered_bundles_result()
+         else:
+             result = [{
+diff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py
+index 4b64550..81eb635 100644
+--- a/Products/CMFPlone/traversal.py
++++ b/Products/CMFPlone/traversal.py
+@@ -1,5 +1,5 @@
+ from plone.resource.traversal import ResourceTraverser
+-from zope.component import getUtility
++from zope.component import queryUtility
+ from plone.resource.interfaces import IResourceDirectory
+ from plone.resource.interfaces import IUniqueResourceRequest
+ from Products.CMFPlone.interfaces.resources import (
+@@ -27,9 +27,10 @@ def traverse(self, name, remaining):
+         if more_traversal:
+             resource_filepath = resource_filepath.split('/')[-1]
+ 
+-        persistentDirectory = getUtility(IResourceDirectory, name="persistent")
++        persistentDirectory = queryUtility(IResourceDirectory, name="persistent")
+         directory = None
+-        if OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory:
++        if (persistentDirectory is not None and
++                OVERRIDE_RESOURCE_DIRECTORY_NAME in persistentDirectory):
+             container = persistentDirectory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+             if resource_name in container:
+                 directory = container[resource_name]
 
 
