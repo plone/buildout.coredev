@@ -57,9 +57,6 @@ people as they know what they are doing.  These are:
 ``plone.app.locales``:
   Please leave this to the i18n team lead, Vincent Fretin.
 
-``mockup``:
-  Needs special handling, please leave to Eric Steele or Nathan van Gheem.
-
 
 Plone core release process checklist
 ====================================
