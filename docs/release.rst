@@ -40,6 +40,24 @@ More information:
 * `High quality automated package releases for Python with zest.releaser <http://opensourcehacker.com/2012/08/14/high-quality-automated-package-releases-for-python-with-zest-releaser/>`_.
 
 
+Special packages
+================
+
+The Plone Release Team releases the core Plone packages.  Several
+others also have the rights to release individual packages on
+https://pypi.python.org.  If you have those rights on your account, you
+should feel free to make releases.
+
+Some packages need special care or should be done only by specific
+people as they know what they are doing.  These are:
+
+``Products.CMFPlone``, ``Plone``, and ``plone.app.upgrade``:
+  Please leave these to the release manager, Eric Steele.
+
+``plone.app.locales``:
+  Please leave this to the i18n team lead, Vincent Fretin.
+
+
 Plone core release process checklist
 ====================================
 
