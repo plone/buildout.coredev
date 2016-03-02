@@ -77,7 +77,9 @@ We tried to find a label system that is not too complex but covers several use c
 43 lvl: complex
     for wizards
 
-.. figure:: /_static/githublabels.png
+Colors codes are used as shown in the image.
+
+.. img:: /_static/githublabels.png
    :align: center
    :alt: Github labels with its color codes explained
 
