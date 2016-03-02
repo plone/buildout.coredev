@@ -36,7 +36,7 @@ Contents
    plips
    issues
    release
-   githublabels
+   labels
    git
    updateme
 
