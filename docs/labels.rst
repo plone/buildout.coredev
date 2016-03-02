@@ -27,7 +27,7 @@ We have a well defined set of labels for all Plone core packages and some relate
 We tried to find a label system that is not too complex but covers several use cases.
 
 01 type: bug
-    Something that i supposed to work does not work.
+    Something that were supposed to work does not work.
 02 type :regression
     Something that used to be available or worked in a former version,
     is not available any more or does not work anymore.
