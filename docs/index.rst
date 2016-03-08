@@ -36,8 +36,9 @@ Contents
    plips
    issues
    release
-   updateme
+   labels
    git
+   updateme
 
 
 Additional Material
