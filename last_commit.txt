@@ -1,114 +1,875 @@
-Repository: plone.app.testing
+Repository: plone.formwidget.namedfile
 
 
 Branch: refs/heads/master
-Date: 2016-03-08T13:39:47-06:00
-Author: nathan.vangheem () <nathan.vangheem@wildcardcorp.com>
-Commit: https://github.com/plone/plone.app.testing/commit/bb442f7a2aef93ce5272aedc06c661fe36720e80
+Date: 2016-03-08T15:45:51+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.formwidget.namedfile/commit/40f95a9762d4df0255d45c084ed7861ab64f1773
 
-Do not use install Products.SecureMailHost in the PloneFixture if it isn't available
+Fix Custom Site-Logo will be deleted on re-edit
+Fix issue, where NamedFileWidget and NamedImageWidget on ``zope.schema.ASCII`` fields cleared the field values on resubmit with action ``nochange``.
+Fixes: plone/Products.CMFPlone#1144
+
+Introduces horrible doctest :/
+z3c.form must die!
 
 Files changed:
 M CHANGES.rst
-M plone/app/testing/layers.py
+M plone/formwidget/namedfile/tests.py
+M plone/formwidget/namedfile/widget.py
+M plone/formwidget/namedfile/widget.rst
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6486e6d..d5ca4f6 100644
+index 473756a..73a7ce2 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New:
+@@ -10,7 +10,9 @@ New:
  
  Fixes:
  
 -- *add item here*
-+- Do not use install Products.SecureMailHost in the PloneFixture if it isn't available
-+  [vangheem]
++- Fix issue, where NamedFileWidget and NamedImageWidget on ``zope.schema.ASCII`` fields cleared the field values on resubmit with action ``nochange``.
++  Fixes: plone/Products.CMFPlone#1144
++  [thet]
  
  
- 5.0.1 (2016-02-26)
-diff --git a/plone/app/testing/layers.py b/plone/app/testing/layers.py
-index 5dc418d..c7c73f4 100644
---- a/plone/app/testing/layers.py
-+++ b/plone/app/testing/layers.py
-@@ -60,7 +60,6 @@ class PloneFixture(Layer):
-         ('Products.ExternalEditor',              {'loadZCML': True}, ),
-         ('Products.ExtendedPathIndex',           {'loadZCML': True}, ),
-         ('Products.ResourceRegistries',          {'loadZCML': True}, ),
--        ('Products.SecureMailHost',              {'loadZCML': True}, ),
-         ('Products.SiteAccess',                  {'loadZCML': False}, ),
- 
-         ('Products.PasswordResetTool',           {'loadZCML': True}, ),
-@@ -79,6 +78,13 @@ class PloneFixture(Layer):
- 
-     )
- 
-+    try:
-+        import Products.SecureMailHost  # noqa
-+        products = products + (
-+            ('Products.SecureMailHost', {'loadZCML': True}, ),)
-+    except ImportError:
-+        pass
+ 1.0.14 (2016-02-12)
+diff --git a/plone/formwidget/namedfile/tests.py b/plone/formwidget/namedfile/tests.py
+index b0e3e3b..63bb38e 100644
+--- a/plone/formwidget/namedfile/tests.py
++++ b/plone/formwidget/namedfile/tests.py
+@@ -1,16 +1,55 @@
+ # -*- coding: utf-8 -*-
+-from z3c.form import testing
+ import doctest
+ import unittest
++# import interlude
 +
-     # Extension profiles to be installed with site setup
-     extensionProfiles = (
-         'plonetheme.barceloneta:default',
++
++def setUp(self):
++    """Test setUp based on z3c.form.testing.setUp minus their globals.
++    """
++    from zope.component.testing import setUp
++    setUp()
++    from zope.container.testing import setUp
++    setUp()
++    from zope.component import hooks
++    hooks.setHooks()
++    from zope.traversing.testing import setUp
++    setUp()
++
++    from zope.publisher.browser import BrowserLanguages
++    from zope.publisher.interfaces.http import IHTTPRequest
++    from zope.i18n.interfaces import IUserPreferredLanguages
++    import zope.component
++    zope.component.provideAdapter(
++        BrowserLanguages, [IHTTPRequest], IUserPreferredLanguages)
++
++    from zope.site.folder import rootFolder
++    site = rootFolder()
++    from zope.site.site import LocalSiteManager
++    from zope.component.interfaces import ISite
++    if not ISite.providedBy(site):
++        site.setSiteManager(LocalSiteManager(site))
++    hooks.setSite(site)
++
++
++def tearDown(self):
++    """Test tearDown based on z3c.form.testing.tearDown minus their globals.
++    """
++    from zope.testing import cleanup
++    from zope.component import hooks
++    cleanup.cleanUp()
++    hooks.resetHooks()
++    hooks.setSite()
+ 
+ 
+ def test_suite():
+-    return unittest.TestSuite((
+-        doctest.DocFileSuite(
+-            'widget.rst',
+-            setUp=testing.setUp,
+-            tearDown=testing.tearDown,
+-            optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS,
+-            encoding='utf-8'
+-        ),
++    suite = unittest.TestSuite()
++    suite.addTest(doctest.DocFileSuite(
++        'widget.rst',
++        setUp=setUp,
++        tearDown=tearDown,
++        optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS,
++        encoding='utf-8',
++        # globs={'interact': interlude.interact},
+     ))
++    return suite
+diff --git a/plone/formwidget/namedfile/widget.py b/plone/formwidget/namedfile/widget.py
+index 5153c14..af5b69d 100644
+--- a/plone/formwidget/namedfile/widget.py
++++ b/plone/formwidget/namedfile/widget.py
+@@ -41,6 +41,19 @@
+     from posixfile import SEEK_END
+ 
+ 
++def _make_namedfile(value, field, widget):
++    """Return a NamedImage or NamedFile instance, if it isn't already one -
++    e.g. when it's base64 encoded data.
++    """
++    if isinstance(value, basestring) and IASCII.providedBy(field):
++        filename, data = b64decode_file(value)
++        if INamedImageWidget.providedBy(widget):
++            value = NamedImage(data=data, filename=filename)
++        else:
++            value = NamedFile(data=data, filename=filename)
++    return value
++
++
+ class NamedFileWidget(Explicit, file.FileWidget):
+     """A widget for a named file object
+     """
+@@ -160,7 +173,9 @@ def extract(self, default=NOVALUE):
+                 return default
+             dm = getMultiAdapter((self.context, self.field,), IDataManager)
+             # For sub-widgets to function use a query() not get()
+-            return dm.query(default)
++            data = dm.query(default)
++            data = _make_namedfile(data, self.field, self.context)
++            return data
+ 
+         # empty unnamed FileUploads should not count as a value
+         value = super(NamedFileWidget, self).extract(default)
+@@ -250,15 +265,7 @@ def __call__(self):
+ 
+         dm = getMultiAdapter((content, field,), IDataManager)
+         file_ = dm.get()
+-
+-        if isinstance(file_, basestring) and IASCII.providedBy(field):
+-            """Encoded data.
+-            """
+-            filename, data = b64decode_file(file_)
+-            if INamedImageWidget.providedBy(self.context):
+-                file_ = NamedImage(data=data, filename=filename)
+-            else:
+-                file_ = NamedFile(data=data, filename=filename)
++        file_ = _make_namedfile(file_, field, self.context)
+ 
+         if file_ is None:
+             raise NotFound(self, self.filename, self.request)
+diff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst
+index 0bcb6dc..1133c16 100644
+--- a/plone/formwidget/namedfile/widget.rst
++++ b/plone/formwidget/namedfile/widget.rst
+@@ -555,6 +555,249 @@ being returned::
+   True
+ 
+ 
++Rendering ASCII field widgets
++-----------------------------
++
++The widgets let the user to upload file and image data and select, if previous data should be kept, deleted or overwritten.
++
++First, let's do the setup::
++
++  >>> class ASCIIContent(object):
++  ...     implements(IASCIIContent)
++  ...     def __init__(self, file, image):
++  ...         self.file_field = file
++  ...         self.image_field = image
++  ...
++  ...     def absolute_url(self):
++  ...         return 'http://example.com/content1'
++
++  >>> content = ASCIIContent(None, None)
++
++  >>> from z3c.form.datamanager import AttributeField
++  >>> from zope.component import provideAdapter
++  >>> provideAdapter(AttributeField)
++
++  >>> from plone.formwidget.namedfile import NamedFileFieldWidget
++  >>> from plone.formwidget.namedfile import NamedImageFieldWidget
++
++  >>> def setup_widget(widget_type, context, set_widget_value=False):
++  ...     if widget_type == 'image':
++  ...         widget = NamedImageFieldWidget
++  ...     else:
++  ...         widget = NamedFileFieldWidget
++  ...     widget = widget(
++  ...         IASCIIContent['{0}_field'.format(widget_type)],
++  ...         TestRequest()
++  ...     )
++  ...     widget.context = context
++  ...     widget.id = 'widget.id.{0}'.format(widget_type)
++  ...     widget.name = 'widget.name.{0}'.format(widget_type)
++  ...
++  ...     if set_widget_value:
++  ...         converter = globals()['ascii_{0}_converter'.format(widget_type)]
++  ...         value = getattr(context, '{0}_field'.format(widget_type))
++  ...         widget.value = converter.toWidgetValue(value)
++  ...
++  ...     return widget
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content)
++
++
++Our content has no value yet::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <span class="named-file-widget required ascii-field" id="widget.id.file">
++      <input type="file" id="widget.id.file-input" name="widget.name.file" />
++  </span>
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <span class="named-image-widget required ascii-field" id="widget.id.image">
++      <input type="file" id="widget.id.image-input" name="widget.name.image" />
++  </span>
++
++
++Let's upload data::
++
++  >>> data = cStringIO.StringIO('file 1 content.')
++  >>> field_storage = FieldStorageStub(data, filename='file1.txt')
++  >>> upload = FileUpload(field_storage)
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': upload})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:ZmlsZTEudHh0;datab64:ZmlsZSAxIGNvbnRlbnQu'
++
++
++  >>> data = cStringIO.StringIO('image 1 content.')
++  >>> field_storage = FieldStorageStub(data, filename='image1.png')
++  >>> upload = FileUpload(field_storage)
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': upload})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:aW1hZ2UxLnBuZw==;datab64:aW1hZ2UgMSBjb250ZW50Lg=='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The upload shows up in the rendered widget::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/file1.txt">file1.txt</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/image1.png"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/image1.png">image1.png</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content)
++  >>> image_widget = setup_widget('image', content)
++
++
++Now overwrite with other data::
++
++  >>> data = cStringIO.StringIO('random file content')
++  >>> field_storage = FieldStorageStub(data, filename='plone.pdf')
++  >>> upload = FileUpload(field_storage)
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': upload, 'widget.name.file.action': 'replace'})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:cGxvbmUucGRm;datab64:cmFuZG9tIGZpbGUgY29udGVudA=='
++
++
++  >>> data = cStringIO.StringIO('no image')
++  >>> field_storage = FieldStorageStub(data, filename='logo.tiff')
++  >>> upload = FileUpload(field_storage)
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': upload, 'widget.name.image.action': 'replace'})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:bG9nby50aWZm;datab64:bm8gaW1hZ2U='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The new image/file shows up in the rendered widget::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/plone.pdf">plone.pdf</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff">logo.tiff</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content)
++  >>> image_widget = setup_widget('image', content)
++
++#  >>> interact(locals())
++
++Resubmit, but keep the data::
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': '', 'widget.name.file.action': 'nochange'})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <plone.namedfile.file.NamedFile object at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:cGxvbmUucGRm;datab64:cmFuZG9tIGZpbGUgY29udGVudA=='
++
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': '', 'widget.name.image.action': 'nochange'})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <plone.namedfile.file.NamedFile object at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:bG9nby50aWZm;datab64:bm8gaW1hZ2U='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The previous image/file should be kept::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/plone.pdf">plone.pdf</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff">logo.tiff</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
+ The Download view on ASCII fields
+ ---------------------------------
+ ::
+@@ -587,7 +830,7 @@ The Download view on ASCII fields
+ 
+   >>> request.response.getHeader('Content-Disposition')
+   "attachment; filename*=UTF-8''test.txt"
+-  
++
+   >>> view = Download(ascii_image_widget, request)
+   >>> view()
+   'testimage'
+diff --git a/setup.py b/setup.py
+index b9c19e3..43ba2f9 100644
+--- a/setup.py
++++ b/setup.py
+@@ -35,7 +35,10 @@
+         'z3c.form',
+     ],
+     extras_require={
+-        'test': ['z3c.form [test]'],
++        'test': [
++            'z3c.form [test]',
++            # 'interlude'
++        ],
+     },
+     entry_points="""
+     [z3c.autoinclude.plugin]
 
 
-Repository: plone.app.testing
+Repository: plone.formwidget.namedfile
 
 
 Branch: refs/heads/master
-Date: 2016-03-08T23:43:03-06:00
-Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
-Commit: https://github.com/plone/plone.app.testing/commit/1255bedd0d450fe1ce02429c6294b5e1c65fb900
+Date: 2016-03-09T12:35:37+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.formwidget.namedfile/commit/ab41c209258b81d133ec05dd154db23a1a9a39a0
 
-Merge pull request #28 from plone/secure-mail-host
+Merge pull request #20 from plone/thet-fix-cmfplone1144
 
-Do not use install Products.SecureMailHost in the PloneFixture if it isn't available
+Fix Custom Site-Logo will be deleted on re-edit
 
 Files changed:
 M CHANGES.rst
-M plone/app/testing/layers.py
+M plone/formwidget/namedfile/tests.py
+M plone/formwidget/namedfile/widget.py
+M plone/formwidget/namedfile/widget.rst
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6486e6d..d5ca4f6 100644
+index 473756a..73a7ce2 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New:
+@@ -10,7 +10,9 @@ New:
  
  Fixes:
  
 -- *add item here*
-+- Do not use install Products.SecureMailHost in the PloneFixture if it isn't available
-+  [vangheem]
++- Fix issue, where NamedFileWidget and NamedImageWidget on ``zope.schema.ASCII`` fields cleared the field values on resubmit with action ``nochange``.
++  Fixes: plone/Products.CMFPlone#1144
++  [thet]
  
  
- 5.0.1 (2016-02-26)
-diff --git a/plone/app/testing/layers.py b/plone/app/testing/layers.py
-index 5dc418d..c7c73f4 100644
---- a/plone/app/testing/layers.py
-+++ b/plone/app/testing/layers.py
-@@ -60,7 +60,6 @@ class PloneFixture(Layer):
-         ('Products.ExternalEditor',              {'loadZCML': True}, ),
-         ('Products.ExtendedPathIndex',           {'loadZCML': True}, ),
-         ('Products.ResourceRegistries',          {'loadZCML': True}, ),
--        ('Products.SecureMailHost',              {'loadZCML': True}, ),
-         ('Products.SiteAccess',                  {'loadZCML': False}, ),
- 
-         ('Products.PasswordResetTool',           {'loadZCML': True}, ),
-@@ -79,6 +78,13 @@ class PloneFixture(Layer):
- 
-     )
- 
-+    try:
-+        import Products.SecureMailHost  # noqa
-+        products = products + (
-+            ('Products.SecureMailHost', {'loadZCML': True}, ),)
-+    except ImportError:
-+        pass
+ 1.0.14 (2016-02-12)
+diff --git a/plone/formwidget/namedfile/tests.py b/plone/formwidget/namedfile/tests.py
+index b0e3e3b..63bb38e 100644
+--- a/plone/formwidget/namedfile/tests.py
++++ b/plone/formwidget/namedfile/tests.py
+@@ -1,16 +1,55 @@
+ # -*- coding: utf-8 -*-
+-from z3c.form import testing
+ import doctest
+ import unittest
++# import interlude
 +
-     # Extension profiles to be installed with site setup
-     extensionProfiles = (
-         'plonetheme.barceloneta:default',
++
++def setUp(self):
++    """Test setUp based on z3c.form.testing.setUp minus their globals.
++    """
++    from zope.component.testing import setUp
++    setUp()
++    from zope.container.testing import setUp
++    setUp()
++    from zope.component import hooks
++    hooks.setHooks()
++    from zope.traversing.testing import setUp
++    setUp()
++
++    from zope.publisher.browser import BrowserLanguages
++    from zope.publisher.interfaces.http import IHTTPRequest
++    from zope.i18n.interfaces import IUserPreferredLanguages
++    import zope.component
++    zope.component.provideAdapter(
++        BrowserLanguages, [IHTTPRequest], IUserPreferredLanguages)
++
++    from zope.site.folder import rootFolder
++    site = rootFolder()
++    from zope.site.site import LocalSiteManager
++    from zope.component.interfaces import ISite
++    if not ISite.providedBy(site):
++        site.setSiteManager(LocalSiteManager(site))
++    hooks.setSite(site)
++
++
++def tearDown(self):
++    """Test tearDown based on z3c.form.testing.tearDown minus their globals.
++    """
++    from zope.testing import cleanup
++    from zope.component import hooks
++    cleanup.cleanUp()
++    hooks.resetHooks()
++    hooks.setSite()
+ 
+ 
+ def test_suite():
+-    return unittest.TestSuite((
+-        doctest.DocFileSuite(
+-            'widget.rst',
+-            setUp=testing.setUp,
+-            tearDown=testing.tearDown,
+-            optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS,
+-            encoding='utf-8'
+-        ),
++    suite = unittest.TestSuite()
++    suite.addTest(doctest.DocFileSuite(
++        'widget.rst',
++        setUp=setUp,
++        tearDown=tearDown,
++        optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS,
++        encoding='utf-8',
++        # globs={'interact': interlude.interact},
+     ))
++    return suite
+diff --git a/plone/formwidget/namedfile/widget.py b/plone/formwidget/namedfile/widget.py
+index 5153c14..af5b69d 100644
+--- a/plone/formwidget/namedfile/widget.py
++++ b/plone/formwidget/namedfile/widget.py
+@@ -41,6 +41,19 @@
+     from posixfile import SEEK_END
+ 
+ 
++def _make_namedfile(value, field, widget):
++    """Return a NamedImage or NamedFile instance, if it isn't already one -
++    e.g. when it's base64 encoded data.
++    """
++    if isinstance(value, basestring) and IASCII.providedBy(field):
++        filename, data = b64decode_file(value)
++        if INamedImageWidget.providedBy(widget):
++            value = NamedImage(data=data, filename=filename)
++        else:
++            value = NamedFile(data=data, filename=filename)
++    return value
++
++
+ class NamedFileWidget(Explicit, file.FileWidget):
+     """A widget for a named file object
+     """
+@@ -160,7 +173,9 @@ def extract(self, default=NOVALUE):
+                 return default
+             dm = getMultiAdapter((self.context, self.field,), IDataManager)
+             # For sub-widgets to function use a query() not get()
+-            return dm.query(default)
++            data = dm.query(default)
++            data = _make_namedfile(data, self.field, self.context)
++            return data
+ 
+         # empty unnamed FileUploads should not count as a value
+         value = super(NamedFileWidget, self).extract(default)
+@@ -250,15 +265,7 @@ def __call__(self):
+ 
+         dm = getMultiAdapter((content, field,), IDataManager)
+         file_ = dm.get()
+-
+-        if isinstance(file_, basestring) and IASCII.providedBy(field):
+-            """Encoded data.
+-            """
+-            filename, data = b64decode_file(file_)
+-            if INamedImageWidget.providedBy(self.context):
+-                file_ = NamedImage(data=data, filename=filename)
+-            else:
+-                file_ = NamedFile(data=data, filename=filename)
++        file_ = _make_namedfile(file_, field, self.context)
+ 
+         if file_ is None:
+             raise NotFound(self, self.filename, self.request)
+diff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst
+index 0bcb6dc..1133c16 100644
+--- a/plone/formwidget/namedfile/widget.rst
++++ b/plone/formwidget/namedfile/widget.rst
+@@ -555,6 +555,249 @@ being returned::
+   True
+ 
+ 
++Rendering ASCII field widgets
++-----------------------------
++
++The widgets let the user to upload file and image data and select, if previous data should be kept, deleted or overwritten.
++
++First, let's do the setup::
++
++  >>> class ASCIIContent(object):
++  ...     implements(IASCIIContent)
++  ...     def __init__(self, file, image):
++  ...         self.file_field = file
++  ...         self.image_field = image
++  ...
++  ...     def absolute_url(self):
++  ...         return 'http://example.com/content1'
++
++  >>> content = ASCIIContent(None, None)
++
++  >>> from z3c.form.datamanager import AttributeField
++  >>> from zope.component import provideAdapter
++  >>> provideAdapter(AttributeField)
++
++  >>> from plone.formwidget.namedfile import NamedFileFieldWidget
++  >>> from plone.formwidget.namedfile import NamedImageFieldWidget
++
++  >>> def setup_widget(widget_type, context, set_widget_value=False):
++  ...     if widget_type == 'image':
++  ...         widget = NamedImageFieldWidget
++  ...     else:
++  ...         widget = NamedFileFieldWidget
++  ...     widget = widget(
++  ...         IASCIIContent['{0}_field'.format(widget_type)],
++  ...         TestRequest()
++  ...     )
++  ...     widget.context = context
++  ...     widget.id = 'widget.id.{0}'.format(widget_type)
++  ...     widget.name = 'widget.name.{0}'.format(widget_type)
++  ...
++  ...     if set_widget_value:
++  ...         converter = globals()['ascii_{0}_converter'.format(widget_type)]
++  ...         value = getattr(context, '{0}_field'.format(widget_type))
++  ...         widget.value = converter.toWidgetValue(value)
++  ...
++  ...     return widget
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content)
++
++
++Our content has no value yet::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <span class="named-file-widget required ascii-field" id="widget.id.file">
++      <input type="file" id="widget.id.file-input" name="widget.name.file" />
++  </span>
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <span class="named-image-widget required ascii-field" id="widget.id.image">
++      <input type="file" id="widget.id.image-input" name="widget.name.image" />
++  </span>
++
++
++Let's upload data::
++
++  >>> data = cStringIO.StringIO('file 1 content.')
++  >>> field_storage = FieldStorageStub(data, filename='file1.txt')
++  >>> upload = FileUpload(field_storage)
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': upload})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:ZmlsZTEudHh0;datab64:ZmlsZSAxIGNvbnRlbnQu'
++
++
++  >>> data = cStringIO.StringIO('image 1 content.')
++  >>> field_storage = FieldStorageStub(data, filename='image1.png')
++  >>> upload = FileUpload(field_storage)
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': upload})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:aW1hZ2UxLnBuZw==;datab64:aW1hZ2UgMSBjb250ZW50Lg=='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The upload shows up in the rendered widget::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/file1.txt">file1.txt</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/image1.png"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/image1.png">image1.png</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content)
++  >>> image_widget = setup_widget('image', content)
++
++
++Now overwrite with other data::
++
++  >>> data = cStringIO.StringIO('random file content')
++  >>> field_storage = FieldStorageStub(data, filename='plone.pdf')
++  >>> upload = FileUpload(field_storage)
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': upload, 'widget.name.file.action': 'replace'})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:cGxvbmUucGRm;datab64:cmFuZG9tIGZpbGUgY29udGVudA=='
++
++
++  >>> data = cStringIO.StringIO('no image')
++  >>> field_storage = FieldStorageStub(data, filename='logo.tiff')
++  >>> upload = FileUpload(field_storage)
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': upload, 'widget.name.image.action': 'replace'})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <ZPublisher.HTTPRequest.FileUpload instance at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:bG9nby50aWZm;datab64:bm8gaW1hZ2U='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The new image/file shows up in the rendered widget::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/plone.pdf">plone.pdf</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff">logo.tiff</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content)
++  >>> image_widget = setup_widget('image', content)
++
++#  >>> interact(locals())
++
++Resubmit, but keep the data::
++
++  >>> file_widget.request = TestRequest(form={'widget.name.file': '', 'widget.name.file.action': 'nochange'})
++  >>> file_widget.update()
++  >>> uploaded = file_widget.extract()
++  >>> uploaded
++  <plone.namedfile.file.NamedFile object at ...>
++
++  >>> content.file_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.file_field
++  'filenameb64:cGxvbmUucGRm;datab64:cmFuZG9tIGZpbGUgY29udGVudA=='
++
++
++  >>> image_widget.request = TestRequest(form={'widget.name.image': '', 'widget.name.image.action': 'nochange'})
++  >>> image_widget.update()
++  >>> uploaded = image_widget.extract()
++  >>> uploaded
++  <plone.namedfile.file.NamedFile object at ...>
++
++  >>> content.image_field = ascii_file_converter.toFieldValue(uploaded)
++  >>> content.image_field
++  'filenameb64:bG9nby50aWZm;datab64:bm8gaW1hZ2U='
++
++
++Prepare for a new request cycle::
++
++  >>> file_widget = setup_widget('file', content, True)
++  >>> image_widget = setup_widget('image', content, True)
++
++
++The previous image/file should be kept::
++
++  >>> file_widget.update()
++  >>> print(file_widget.render())
++  <... class="named-file-widget required ascii-field" id="widget.id.file">...
++  <a href="http://127.0.0.1/++widget++widget.name.file/@@download/plone.pdf">plone.pdf</a>...
++  <input type="radio"... id="widget.id.file-nochange"...
++  <input type="radio"... id="widget.id.file-replace"...
++  <input type="file"... id="widget.id.file-input"...
++
++  >>> image_widget.update()
++  >>> print(image_widget.render())
++  <... class="named-image-widget required ascii-field" id="widget.id.image">...
++  <img src="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff"...
++  <a href="http://127.0.0.1/++widget++widget.name.image/@@download/logo.tiff">logo.tiff</a>...
++  <input type="radio"... id="widget.id.image-nochange"...
++  <input type="radio"... id="widget.id.image-replace"...
++  <input type="file"... id="widget.id.image-input"...
++
++
+ The Download view on ASCII fields
+ ---------------------------------
+ ::
+@@ -587,7 +830,7 @@ The Download view on ASCII fields
+ 
+   >>> request.response.getHeader('Content-Disposition')
+   "attachment; filename*=UTF-8''test.txt"
+-  
++
+   >>> view = Download(ascii_image_widget, request)
+   >>> view()
+   'testimage'
+diff --git a/setup.py b/setup.py
+index b9c19e3..43ba2f9 100644
+--- a/setup.py
++++ b/setup.py
+@@ -35,7 +35,10 @@
+         'z3c.form',
+     ],
+     extras_require={
+-        'test': ['z3c.form [test]'],
++        'test': [
++            'z3c.form [test]',
++            # 'interlude'
++        ],
+     },
+     entry_points="""
+     [z3c.autoinclude.plugin]
 
 
