@@ -19,7 +19,12 @@ PR_RE = r'https://github.com/(.*)/(.*)/pull/(.*)'
 job_run_successfully = True
 
 # bare basic way to know if there was any test failure
-files = [f for f in os.listdir(tests_folder)]
+try:
+    files = [f for f in os.listdir(tests_folder)]
+except OSError:
+    files = []
+    job_run_successfully = False
+
 for f in files:
     with open('{0}/{1}'.format(tests_folder, f)) as xml_file:
         first_line = xml_file.read().split('\n')[0]
