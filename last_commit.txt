@@ -1,98 +1,680 @@
-Repository: plone.app.contenttypes
+Repository: plone.app.layout
 
 
 Branch: refs/heads/master
-Date: 2016-03-11T13:05:27+01:00
+Date: 2016-03-11T13:55:42+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/4909d9ff16a78347ea01248509a490e0779cde90
+Commit: https://github.com/plone/plone.app.layout/commit/e96a0566ea7b206e905c33b410b1f9c3d6250519
 
-Made xpath expression in test less restrictive.
+Fixed invalid html of social viewlet.
 
-This test was looking for a section with an id, but we should just look for an id.
+Moved the schema.org tags to the body in a new viewlet
+plone.abovecontenttitle.socialtags and added itemScope and itemType
+there.
 
-There is a pull request in CMFPlone for changing the section back to a div,
-and the tests would fail if that gets merged.
-See https://github.com/plone/Products.CMFPlone/issues/1431
+Fixes https://github.com/plone/Products.CMFPlone/issues/1087
 
 Files changed:
+A plone/app/layout/viewlets/social_tags_body.pt
 M CHANGES.rst
-M plone/app/contenttypes/tests/robot/keywords.txt
+M plone/app/layout/viewlets/configure.zcml
+M plone/app/layout/viewlets/social.py
+M plone/app/layout/viewlets/tests/test_social.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8a3c9bd..b2d0069 100644
+index 7a3f4f7..6e5ec76 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New:
+@@ -15,6 +15,12 @@ Fixes:
+ - Fixed html validation: element nav does not need a role attribute.
+   [maurits]
  
- Fixes:
- 
-+- Made xpath expression in test less restrictive.
++- Fixed invalid html of social viewlet by moving the schema.org tags
++  to the body in a new viewlet ``plone.abovecontenttitle.socialtags``
++  and adding ``itemScope`` and ``itemType`` there.
++  Fixes https://github.com/plone/Products.CMFPlone/issues/1087
 +  [maurits]
 +
- - Register explicitly plone.app.event dependency on configure.zcml.
-   [hvelarde]
+ - Fix test isolation problems: if a test calls transaction.commit() directly or
+   indirectly it can not be an integration test, either avoid the commit or
+   change the layer into a functional one.
+diff --git a/plone/app/layout/viewlets/configure.zcml b/plone/app/layout/viewlets/configure.zcml
+index bb1dd74..1d9d590 100644
+--- a/plone/app/layout/viewlets/configure.zcml
++++ b/plone/app/layout/viewlets/configure.zcml
+@@ -222,6 +222,16 @@
+         name="plone.htmlhead.socialtags"
+         manager=".interfaces.IHtmlHead"
+         class=".social.SocialTagsViewlet"
++        template="social_tags.pt"
++        permission="zope2.View"
++        />
++
++    <!-- Render the social media body tags -->
++    <browser:viewlet
++        name="plone.abovecontenttitle.socialtags"
++        manager=".interfaces.IAboveContentTitle"
++        class=".social.SocialTagsViewlet"
++        template="social_tags_body.pt"
+         permission="zope2.View"
+         />
  
-diff --git a/plone/app/contenttypes/tests/robot/keywords.txt b/plone/app/contenttypes/tests/robot/keywords.txt
-index d6aed53..4856ff9 100644
---- a/plone/app/contenttypes/tests/robot/keywords.txt
-+++ b/plone/app/contenttypes/tests/robot/keywords.txt
-@@ -83,8 +83,8 @@ the content area should not contain
+diff --git a/plone/app/layout/viewlets/social.py b/plone/app/layout/viewlets/social.py
+index a02c050..4256cc4 100644
+--- a/plone/app/layout/viewlets/social.py
++++ b/plone/app/layout/viewlets/social.py
+@@ -3,9 +3,8 @@
+ from Products.CMFPlone.utils import getSiteLogo
+ from Products.CMFPlone.browser.syndication.adapters import FolderFeed, BaseItem
  
- the collection should contain
-   [Arguments]  ${title}
--  Wait until page contains element  xpath=//section[@id='content-core']
--  xpath should match x times  //section[@id='content-core']//*[@class='entry']//a[contains(text(), '${title}')]  1
-+  Wait until page contains element  xpath=//*[@id='content-core']
-+  xpath should match x times  //*[@id='content-core']//*[@class='entry']//a[contains(text(), '${title}')]  1
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-
+ from plone.app.layout.viewlets.common import TitleViewlet
++from plone.memoize.view import memoize
+ from plone.registry.interfaces import IRegistry
+ 
+ from zope.component import queryMultiAdapter
+@@ -14,34 +13,52 @@
  
  
- the collection should not contain
+ class SocialTagsViewlet(TitleViewlet):
+-    index = ViewPageTemplateFile('social_tags.pt')
+ 
+-    def update(self):
+-        super(SocialTagsViewlet, self).update()
++    def head_tag_filter(self, value):
++        if not isinstance(value, dict):
++            return
++        return 'itemprop' not in value
++
++    def body_tag_filter(self, value):
++        if not isinstance(value, dict):
++            return
++        return 'itemprop' in value
++
++    @property
++    def tags(self):
++        # Do not show items with 'itemprop'.
++        return filter(self.head_tag_filter, self._get_tags())
++
++    @property
++    def body_tags(self):
++        # Show only items without 'itemprop'.
++        return filter(self.body_tag_filter, self._get_tags())
++
++    @memoize
++    def _get_tags(self):
+         registry = getUtility(IRegistry)
+         settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+                                          check=False)
+ 
+         if not settings.share_social_data:
+-            self.tags = []
+-            return
++            return []
+ 
+-        self.tags = [
++        tags = [
++            dict(itemprop="name", content=self.page_title),
+             dict(name="twitter:card", content="summary"),
+             dict(name="twitter:title", content=self.page_title),
++            dict(property="og:site_name", content=self.site_title_setting),
+             dict(property="og:title", content=self.page_title),
+-            dict(itemprop="name", content=self.page_title),
+             dict(property="og:type", content="website"),
+-            dict(property="og:site_name", content=self.site_title_setting),
+         ]
+         if settings.twitter_username:
+-            self.tags.append(dict(name="twitter:site",
+-                                  content="@" + settings.twitter_username))
++            tags.append(dict(name="twitter:site",
++                             content="@" + settings.twitter_username))
+         if settings.facebook_app_id:
+-            self.tags.append(dict(property="fb:app_id",
+-                                  content=settings.facebook_app_id))
++            tags.append(dict(property="fb:app_id",
++                             content=settings.facebook_app_id))
+         if settings.facebook_username:
+-            self.tags.append(
++            tags.append(
+                 dict(property="og:article:publisher",
+                      content="https://www.facebook.com/" +
+                      settings.facebook_username))
+@@ -54,11 +71,12 @@ def update(self):
+         if item is None:
+             item = BaseItem(self.context, feed)
+ 
+-        self.tags.extend([
+-            dict(name="twitter:description", content=item.description),
+-            dict(property="og:description", content=item.description),
++        tags.extend([
+             dict(itemprop="description", content=item.description),
++            dict(itemprop="url", content=item.link),
++            dict(name="twitter:description", content=item.description),
+             dict(name="twitter:url", content=item.link),
++            dict(property="og:description", content=item.description),
+             dict(property="og:url", content=item.link),
+         ])
+ 
+@@ -66,7 +84,7 @@ def update(self):
+         if item.has_enclosure and item.file_length > 0:
+             if item.file_type.startswith('image'):
+                 found_image = True
+-                self.tags.extend([
++                tags.extend([
+                     dict(name="twitter:image", content=item.file_url),
+                     dict(property="og:image", content=item.file_url),
+                     dict(itemprop="image", content=item.file_url),
+@@ -74,21 +92,22 @@ def update(self):
+                 ])
+             elif (item.file_type.startswith('video') or
+                     item.file_type == "application/x-shockwave-flash"):
+-                self.tags.extend([
++                tags.extend([
+                     dict(property="og:video", content=item.file_url),
+                     dict(property="og:video:type", content=item.file_type)
+                 ])
+             elif item.file_type.startswith('audio'):
+-                self.tags.extend([
++                tags.extend([
+                     dict(property="og:audio", content=item.file_url),
+                     dict(property="og:audio:type", content=item.file_type)
+                 ])
+ 
+         if not found_image:
+             url = getSiteLogo()
+-            self.tags.extend([
++            tags.extend([
+                 dict(name="twitter:image", content=url),
+                 dict(property="og:image", content=url),
+                 dict(itemprop="image", content=url),
+                 dict(property="og:image:type", content='image/png')
+             ])
++        return tags
+diff --git a/plone/app/layout/viewlets/social_tags_body.pt b/plone/app/layout/viewlets/social_tags_body.pt
+new file mode 100644
+index 0000000..a461df7
+--- /dev/null
++++ b/plone/app/layout/viewlets/social_tags_body.pt
+@@ -0,0 +1,6 @@
++<span id="social-tags-body" style="display: none"
++      itemscope itemtype="http://schema.org/WebPage">
++  <span tal:repeat="tag view/body_tags"
++        tal:attributes="itemprop tag/itemprop|nothing"
++        tal:content="tag/content|nothing" />
++</span>
+diff --git a/plone/app/layout/viewlets/tests/test_social.py b/plone/app/layout/viewlets/tests/test_social.py
+index 5f258bf..d670854 100644
+--- a/plone/app/layout/viewlets/tests/test_social.py
++++ b/plone/app/layout/viewlets/tests/test_social.py
+@@ -16,35 +16,70 @@ def afterSetUp(self):
+                                   title='News Item')
+         self.news = self.folder['news-item']
+ 
+-    def tagFound(self, viewlet, attr, name, value):
+-        for meta in viewlet.tags:
++    def _tagFound(self, tags, attr, name=None, value=None):
++        for meta in tags:
+             if attr in meta:
++                if name is None:
++                    # only checking for existence
++                    return True
+                 if meta[attr] == name:
++                    if value is None:
++                        # only checking for existence
++                        return True
+                     return meta['content'] == value
+         return False
+ 
+-    def hasTag(self, viewlet, attr, name):
+-        for meta in viewlet.tags:
+-            if attr in meta:
+-                return meta[attr] == name
+-        return False
++    def tagFound(self, viewlet, attr, name=None, value=None):
++        return self._tagFound(viewlet.tags, attr, name=name, value=value)
++
++    def bodyTagFound(self, viewlet, attr, name=None, value=None):
++        return self._tagFound(viewlet.body_tags, attr, name=name, value=value)
+ 
+     def testBasicTags(self):
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:card', "summary"))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:title',
+-                          viewlet.page_title))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property', 'og:site_name',
+-                          viewlet.site_title_setting))
++        description = self.folder.Description()
++        folder_url = self.folder.absolute_url()
++        # Twitter
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:card', "summary"))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:title', viewlet.page_title))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:description', description))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:url', folder_url))
++        # OpenGraph/Facebook
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:site_name', viewlet.site_title_setting))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:description', description))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:url', folder_url))
++        # No schema.org itemprops
++        self.assertFalse(self.tagFound(viewlet, 'itemprop'))
++
++    def testBasicItemProps(self):
++        viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
++        viewlet.update()
++        description = self.folder.Description()
++        folder_url = self.folder.absolute_url()
++        # No Twitter
++        self.assertFalse(self.bodyTagFound(viewlet, 'name'))
++        # No OpenGraph/Facebook
++        self.assertFalse(self.bodyTagFound(viewlet, 'property'))
++        # schema.org itemprops
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'name', viewlet.page_title))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'description', description))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'url', folder_url))
+ 
+     def testDisabled(self):
+         registry = getUtility(IRegistry)
+-        settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+-                                         check=False)
++        settings = registry.forInterface(
++            ISocialMediaSchema, prefix='plone', check=False)
+         settings.share_social_data = False
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+@@ -52,26 +87,29 @@ def testDisabled(self):
+ 
+     def testIncludeSocialSettings(self):
+         registry = getUtility(IRegistry)
+-        settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+-                                         check=False)
++        settings = registry.forInterface(
++            ISocialMediaSchema, prefix='plone', check=False)
+         settings.twitter_username = u'foobar'
+         settings.facebook_app_id = u'foobar'
+         settings.facebook_username = u'foobar'
+ 
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:site', "@foobar"))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property', 'fb:app_id', 'foobar'))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property',
+-                          'og:article:publisher',
+-                          'https://www.facebook.com/foobar'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:site', "@foobar"))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'fb:app_id', 'foobar'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:article:publisher',
++            'https://www.facebook.com/foobar'))
+ 
+     def testLogo(self):
+         viewlet = SocialTagsViewlet(self.news, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property',
+-                          'og:image', 'http://nohost/plone/logo.png'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:image', 'http://nohost/plone/logo.png'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:image', 'http://nohost/plone/logo.png'))
++        self.assertFalse(self.tagFound(viewlet, 'itemprop'))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'image', 'http://nohost/plone/logo.png'))
 
 
-Repository: plone.app.contenttypes
+Repository: plone.app.layout
 
 
 Branch: refs/heads/master
-Date: 2016-03-11T13:05:43+01:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/3b19bd44025e92e7cb55592caca9276850ba1d52
+Date: 2016-03-11T13:56:11+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.layout/commit/73d588ef105bae26abdcd9120ffc02c0d7f0043a
 
-Merge pull request #329 from plone/maurits-fix-html-validation
+Merge pull request #78 from plone/maurits-issue-1087
 
-Made xpath expression in test less restrictive.
+Fixed invalid html of social viewlet
 
 Files changed:
+A plone/app/layout/viewlets/social_tags_body.pt
 M CHANGES.rst
-M plone/app/contenttypes/tests/robot/keywords.txt
+M plone/app/layout/viewlets/configure.zcml
+M plone/app/layout/viewlets/social.py
+M plone/app/layout/viewlets/tests/test_social.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 8a3c9bd..b2d0069 100644
+index 7a3f4f7..6e5ec76 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New:
+@@ -15,6 +15,12 @@ Fixes:
+ - Fixed html validation: element nav does not need a role attribute.
+   [maurits]
  
- Fixes:
- 
-+- Made xpath expression in test less restrictive.
++- Fixed invalid html of social viewlet by moving the schema.org tags
++  to the body in a new viewlet ``plone.abovecontenttitle.socialtags``
++  and adding ``itemScope`` and ``itemType`` there.
++  Fixes https://github.com/plone/Products.CMFPlone/issues/1087
 +  [maurits]
 +
- - Register explicitly plone.app.event dependency on configure.zcml.
-   [hvelarde]
+ - Fix test isolation problems: if a test calls transaction.commit() directly or
+   indirectly it can not be an integration test, either avoid the commit or
+   change the layer into a functional one.
+diff --git a/plone/app/layout/viewlets/configure.zcml b/plone/app/layout/viewlets/configure.zcml
+index bb1dd74..1d9d590 100644
+--- a/plone/app/layout/viewlets/configure.zcml
++++ b/plone/app/layout/viewlets/configure.zcml
+@@ -222,6 +222,16 @@
+         name="plone.htmlhead.socialtags"
+         manager=".interfaces.IHtmlHead"
+         class=".social.SocialTagsViewlet"
++        template="social_tags.pt"
++        permission="zope2.View"
++        />
++
++    <!-- Render the social media body tags -->
++    <browser:viewlet
++        name="plone.abovecontenttitle.socialtags"
++        manager=".interfaces.IAboveContentTitle"
++        class=".social.SocialTagsViewlet"
++        template="social_tags_body.pt"
+         permission="zope2.View"
+         />
  
-diff --git a/plone/app/contenttypes/tests/robot/keywords.txt b/plone/app/contenttypes/tests/robot/keywords.txt
-index d6aed53..4856ff9 100644
---- a/plone/app/contenttypes/tests/robot/keywords.txt
-+++ b/plone/app/contenttypes/tests/robot/keywords.txt
-@@ -83,8 +83,8 @@ the content area should not contain
+diff --git a/plone/app/layout/viewlets/social.py b/plone/app/layout/viewlets/social.py
+index a02c050..4256cc4 100644
+--- a/plone/app/layout/viewlets/social.py
++++ b/plone/app/layout/viewlets/social.py
+@@ -3,9 +3,8 @@
+ from Products.CMFPlone.utils import getSiteLogo
+ from Products.CMFPlone.browser.syndication.adapters import FolderFeed, BaseItem
  
- the collection should contain
-   [Arguments]  ${title}
--  Wait until page contains element  xpath=//section[@id='content-core']
--  xpath should match x times  //section[@id='content-core']//*[@class='entry']//a[contains(text(), '${title}')]  1
-+  Wait until page contains element  xpath=//*[@id='content-core']
-+  xpath should match x times  //*[@id='content-core']//*[@class='entry']//a[contains(text(), '${title}')]  1
+-from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-
+ from plone.app.layout.viewlets.common import TitleViewlet
++from plone.memoize.view import memoize
+ from plone.registry.interfaces import IRegistry
+ 
+ from zope.component import queryMultiAdapter
+@@ -14,34 +13,52 @@
  
  
- the collection should not contain
+ class SocialTagsViewlet(TitleViewlet):
+-    index = ViewPageTemplateFile('social_tags.pt')
+ 
+-    def update(self):
+-        super(SocialTagsViewlet, self).update()
++    def head_tag_filter(self, value):
++        if not isinstance(value, dict):
++            return
++        return 'itemprop' not in value
++
++    def body_tag_filter(self, value):
++        if not isinstance(value, dict):
++            return
++        return 'itemprop' in value
++
++    @property
++    def tags(self):
++        # Do not show items with 'itemprop'.
++        return filter(self.head_tag_filter, self._get_tags())
++
++    @property
++    def body_tags(self):
++        # Show only items without 'itemprop'.
++        return filter(self.body_tag_filter, self._get_tags())
++
++    @memoize
++    def _get_tags(self):
+         registry = getUtility(IRegistry)
+         settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+                                          check=False)
+ 
+         if not settings.share_social_data:
+-            self.tags = []
+-            return
++            return []
+ 
+-        self.tags = [
++        tags = [
++            dict(itemprop="name", content=self.page_title),
+             dict(name="twitter:card", content="summary"),
+             dict(name="twitter:title", content=self.page_title),
++            dict(property="og:site_name", content=self.site_title_setting),
+             dict(property="og:title", content=self.page_title),
+-            dict(itemprop="name", content=self.page_title),
+             dict(property="og:type", content="website"),
+-            dict(property="og:site_name", content=self.site_title_setting),
+         ]
+         if settings.twitter_username:
+-            self.tags.append(dict(name="twitter:site",
+-                                  content="@" + settings.twitter_username))
++            tags.append(dict(name="twitter:site",
++                             content="@" + settings.twitter_username))
+         if settings.facebook_app_id:
+-            self.tags.append(dict(property="fb:app_id",
+-                                  content=settings.facebook_app_id))
++            tags.append(dict(property="fb:app_id",
++                             content=settings.facebook_app_id))
+         if settings.facebook_username:
+-            self.tags.append(
++            tags.append(
+                 dict(property="og:article:publisher",
+                      content="https://www.facebook.com/" +
+                      settings.facebook_username))
+@@ -54,11 +71,12 @@ def update(self):
+         if item is None:
+             item = BaseItem(self.context, feed)
+ 
+-        self.tags.extend([
+-            dict(name="twitter:description", content=item.description),
+-            dict(property="og:description", content=item.description),
++        tags.extend([
+             dict(itemprop="description", content=item.description),
++            dict(itemprop="url", content=item.link),
++            dict(name="twitter:description", content=item.description),
+             dict(name="twitter:url", content=item.link),
++            dict(property="og:description", content=item.description),
+             dict(property="og:url", content=item.link),
+         ])
+ 
+@@ -66,7 +84,7 @@ def update(self):
+         if item.has_enclosure and item.file_length > 0:
+             if item.file_type.startswith('image'):
+                 found_image = True
+-                self.tags.extend([
++                tags.extend([
+                     dict(name="twitter:image", content=item.file_url),
+                     dict(property="og:image", content=item.file_url),
+                     dict(itemprop="image", content=item.file_url),
+@@ -74,21 +92,22 @@ def update(self):
+                 ])
+             elif (item.file_type.startswith('video') or
+                     item.file_type == "application/x-shockwave-flash"):
+-                self.tags.extend([
++                tags.extend([
+                     dict(property="og:video", content=item.file_url),
+                     dict(property="og:video:type", content=item.file_type)
+                 ])
+             elif item.file_type.startswith('audio'):
+-                self.tags.extend([
++                tags.extend([
+                     dict(property="og:audio", content=item.file_url),
+                     dict(property="og:audio:type", content=item.file_type)
+                 ])
+ 
+         if not found_image:
+             url = getSiteLogo()
+-            self.tags.extend([
++            tags.extend([
+                 dict(name="twitter:image", content=url),
+                 dict(property="og:image", content=url),
+                 dict(itemprop="image", content=url),
+                 dict(property="og:image:type", content='image/png')
+             ])
++        return tags
+diff --git a/plone/app/layout/viewlets/social_tags_body.pt b/plone/app/layout/viewlets/social_tags_body.pt
+new file mode 100644
+index 0000000..a461df7
+--- /dev/null
++++ b/plone/app/layout/viewlets/social_tags_body.pt
+@@ -0,0 +1,6 @@
++<span id="social-tags-body" style="display: none"
++      itemscope itemtype="http://schema.org/WebPage">
++  <span tal:repeat="tag view/body_tags"
++        tal:attributes="itemprop tag/itemprop|nothing"
++        tal:content="tag/content|nothing" />
++</span>
+diff --git a/plone/app/layout/viewlets/tests/test_social.py b/plone/app/layout/viewlets/tests/test_social.py
+index 5f258bf..d670854 100644
+--- a/plone/app/layout/viewlets/tests/test_social.py
++++ b/plone/app/layout/viewlets/tests/test_social.py
+@@ -16,35 +16,70 @@ def afterSetUp(self):
+                                   title='News Item')
+         self.news = self.folder['news-item']
+ 
+-    def tagFound(self, viewlet, attr, name, value):
+-        for meta in viewlet.tags:
++    def _tagFound(self, tags, attr, name=None, value=None):
++        for meta in tags:
+             if attr in meta:
++                if name is None:
++                    # only checking for existence
++                    return True
+                 if meta[attr] == name:
++                    if value is None:
++                        # only checking for existence
++                        return True
+                     return meta['content'] == value
+         return False
+ 
+-    def hasTag(self, viewlet, attr, name):
+-        for meta in viewlet.tags:
+-            if attr in meta:
+-                return meta[attr] == name
+-        return False
++    def tagFound(self, viewlet, attr, name=None, value=None):
++        return self._tagFound(viewlet.tags, attr, name=name, value=value)
++
++    def bodyTagFound(self, viewlet, attr, name=None, value=None):
++        return self._tagFound(viewlet.body_tags, attr, name=name, value=value)
+ 
+     def testBasicTags(self):
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:card', "summary"))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:title',
+-                          viewlet.page_title))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property', 'og:site_name',
+-                          viewlet.site_title_setting))
++        description = self.folder.Description()
++        folder_url = self.folder.absolute_url()
++        # Twitter
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:card', "summary"))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:title', viewlet.page_title))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:description', description))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:url', folder_url))
++        # OpenGraph/Facebook
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:site_name', viewlet.site_title_setting))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:description', description))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:url', folder_url))
++        # No schema.org itemprops
++        self.assertFalse(self.tagFound(viewlet, 'itemprop'))
++
++    def testBasicItemProps(self):
++        viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
++        viewlet.update()
++        description = self.folder.Description()
++        folder_url = self.folder.absolute_url()
++        # No Twitter
++        self.assertFalse(self.bodyTagFound(viewlet, 'name'))
++        # No OpenGraph/Facebook
++        self.assertFalse(self.bodyTagFound(viewlet, 'property'))
++        # schema.org itemprops
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'name', viewlet.page_title))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'description', description))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'url', folder_url))
+ 
+     def testDisabled(self):
+         registry = getUtility(IRegistry)
+-        settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+-                                         check=False)
++        settings = registry.forInterface(
++            ISocialMediaSchema, prefix='plone', check=False)
+         settings.share_social_data = False
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+@@ -52,26 +87,29 @@ def testDisabled(self):
+ 
+     def testIncludeSocialSettings(self):
+         registry = getUtility(IRegistry)
+-        settings = registry.forInterface(ISocialMediaSchema, prefix="plone",
+-                                         check=False)
++        settings = registry.forInterface(
++            ISocialMediaSchema, prefix='plone', check=False)
+         settings.twitter_username = u'foobar'
+         settings.facebook_app_id = u'foobar'
+         settings.facebook_username = u'foobar'
+ 
+         viewlet = SocialTagsViewlet(self.folder, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'name', 'twitter:site', "@foobar"))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property', 'fb:app_id', 'foobar'))
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property',
+-                          'og:article:publisher',
+-                          'https://www.facebook.com/foobar'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:site', "@foobar"))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'fb:app_id', 'foobar'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:article:publisher',
++            'https://www.facebook.com/foobar'))
+ 
+     def testLogo(self):
+         viewlet = SocialTagsViewlet(self.news, self.app.REQUEST, None)
+         viewlet.update()
+-        self.assertTrue(
+-            self.tagFound(viewlet, 'property',
+-                          'og:image', 'http://nohost/plone/logo.png'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'property', 'og:image', 'http://nohost/plone/logo.png'))
++        self.assertTrue(self.tagFound(
++            viewlet, 'name', 'twitter:image', 'http://nohost/plone/logo.png'))
++        self.assertFalse(self.tagFound(viewlet, 'itemprop'))
++        self.assertTrue(self.bodyTagFound(
++            viewlet, 'itemprop', 'image', 'http://nohost/plone/logo.png'))
 
 
