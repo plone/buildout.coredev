@@ -8,7 +8,7 @@ Expectations
 ============
 A good PLIP review takes about 4 hours so please plan accordingly.
 When you are done,
-if you have access to core please commit the review to the plips folder and reference the PLIP in your commit message.
+if you have access to core please commit the review to the PLIPs folder and reference the PLIP in your commit message.
 If you do not have access,
 please attach your review to the PLIP ticket itself.
 
@@ -17,7 +17,7 @@ Setting up the environment
 Follow the instructions on :ref:`setup-development-environment`.
 You will need to checkout the branch to which the PLIP is assigned.
 Instead of running the buildout with the default buildout file,
-you will run the config specific to that plip::
+you will run the config specific to that PLIP::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
@@ -71,7 +71,7 @@ Documentation Issues
   sufficient?
 * Is the change itself properly documented?
 
-Please report bugs/issues in Trac as you would for any Plone bug.
+Please report bugs/issues on GitHub as you would for any Plone bug.
 Reference the PLIP in the bug,
 assign to its implementer,
 and add a tag for the PLIP in the form of plip-xxx.
