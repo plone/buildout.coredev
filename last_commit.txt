@@ -1,154 +1,294 @@
-Repository: Products.CMFEditions
+Repository: plone.app.workflow
 
 
 Branch: refs/heads/master
-Date: 2016-03-17T06:45:31+01:00
-Author: Markus Hilbert () <m.hilbert@akbild.ac.at>
-Commit: https://github.com/plone/Products.CMFEditions/commit/68807c85ee7b0c71eff624a824225cf9089c89a1
+Date: 2016-04-01T16:22:04+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.workflow/commit/6284c81157813f2830611285b26a47312c890138
 
-Fixed CloneBlobs modifier to only react on Archetypes.
+Add a direct link from a group name on Sharing tab to that group's member list
 
 Files changed:
 M CHANGES.rst
-M Products/CMFEditions/StandardModifiers.py
+M plone/app/workflow/browser/sharing.pt
+M plone/app/workflow/tests/test_sharing_view.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 63c3d03..43bfa06 100644
+index 832f9f7..ad24b07 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ New:
+@@ -6,7 +6,9 @@ Changelog
+ 
+ New:
+ 
+-- *add item here*
++- Add a direct link from a group name on Sharing ab to that group's
++  member list for users with sufficient permissions [PLIP #1310]
++  [datakurre]
  
  Fixes:
  
--- *add item here*
-+- Fixed CloneBlobs modifier to only react on Archetypes.
-+  This fix allows Dexterity Blob-Types (e.g. File, Image) to be versioned.
-+  [iham]
+diff --git a/plone/app/workflow/browser/sharing.pt b/plone/app/workflow/browser/sharing.pt
+index 409e83c..57cdfc4 100644
+--- a/plone/app/workflow/browser/sharing.pt
++++ b/plone/app/workflow/browser/sharing.pt
+@@ -8,7 +8,12 @@
+ 
+ <body>
+ <metal:main fill-slot="main"
+-     tal:define="context_state context/@@plone_context_state">
++     tal:define="context_state context/@@plone_context_state;
++                 portal_state context/@@plone_portal_state;
++                 portal portal_state/portal;
++                 portal_url portal_state/portal_url;
++                 checkPermission nocall:context/portal_membership/checkPermission;
++                 can_view_groups python:checkPermission('Plone Site Setup: Users and Groups', portal)">
+ 
+     <div class="portalMessage info" tal:condition="context_state/is_default_page">
+         <strong i18n:translate="">
+@@ -93,6 +98,8 @@
+                             <img tal:condition="is_group" tal:replace="structure context/group.png" />
+                             <img tal:condition="not:is_group" tal:replace="structure context/user.png" />
+ 
++                            <a tal:omit-tag="python:not is_group or not can_view_groups"
++                               tal:attributes="href string:${portal_url}/@@usergroup-groupmembership?groupname=${entry/id}">
+                             <tal:sticky condition="sticky">
+                               <span tal:replace="entry/title" />
+                             </tal:sticky>
+@@ -102,6 +109,7 @@
+                                 (<span tal:replace="entry/login" />)
+                               </tal:title>
+                             </tal:nonsticky>
++                            </a>
+ 
+                             <input
+                                 tal:condition="not:disabled"
+diff --git a/plone/app/workflow/tests/test_sharing_view.py b/plone/app/workflow/tests/test_sharing_view.py
+index e4eb010..960bb06 100644
+--- a/plone/app/workflow/tests/test_sharing_view.py
++++ b/plone/app/workflow/tests/test_sharing_view.py
+@@ -2,15 +2,16 @@
+ # Test the sharing browser view.
+ #
+ 
+-from zope.component import getMultiAdapter
+-
+ from base import WorkflowTestCase
++from plone.testing import z2
++from zope.component import getMultiAdapter
  
  
- 2.2.19 (2016-02-14)
-diff --git a/Products/CMFEditions/StandardModifiers.py b/Products/CMFEditions/StandardModifiers.py
-index 0481e68..ec2169d 100644
---- a/Products/CMFEditions/StandardModifiers.py
-+++ b/Products/CMFEditions/StandardModifiers.py
-@@ -54,6 +54,11 @@
- from Products.CMFEditions.Modifiers import ConditionalTalesModifier
+ class TestSharingView(WorkflowTestCase):
  
- try:
-+    from Products.Archetypes.interfaces.base import IBaseContent
-+except ImportError:
-+    class IBaseContent(Interface):
-+        pass
-+try:
-     from Products.Archetypes.interfaces.referenceable import IReferenceable
-     from Products.Archetypes.config import UUID_ATTR, REFERENCE_ANNOTATION
- except ImportError:
-@@ -1167,9 +1172,16 @@ class CloneBlobs:
-     implements(IAttributeModifier, ICloneModifier)
+     def afterSetUp(self):
+         self.portal.acl_users._doAddUser('testuser', 'secret', ['Member'], [])
++        self.portal.acl_users._doAddUser('testreviewer', 'secret', ['Reviewer'], [])
+         self.portal.acl_users._doAddUser('nonasciiuser', 'secret', ['Member'], [])
+         self.portal.acl_users._doAddGroup('testgroup', [], title='Some meaningful title')
+         testuser = self.portal.portal_membership.getMemberById('testuser')
+@@ -82,6 +83,26 @@ def test_search_for_group_by_title(self):
+         self.assertTrue(len(results) and results[0].get('title') == 'Some meaningful title',
+             msg="Didn't find testuser when I searched by group title.")
  
-     def getReferencedAttributes(self, obj):
++    def test_group_name_links_to_prefs_for_admin(self):
++        """ Make sure that for admins  group name links to group prefs """
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertIn('<a href="http://nohost/plone/'
++                      '@@usergroup-groupmembership?groupname=testgroup">',
++                      view(), msg="Group name was not linked to group prefs.")
 +
-+        file_data = {}
++    def test_group_name_doesnt_link_to_prefs_for_reviewer(self):
++        """ Make sure that for admins  group name links to group prefs """
++        z2.login(self.portal['acl_users'], 'testreviewer')
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertNotIn('<a href="http://nohost/plone/'
++                         '@@usergroup-groupmembership?groupname=testgroup">',
++                         view(), msg="Group name link was unexpectedly shown "
++                                      "to reviewer.")
 +
-+        # This modifier should only be used for ATCT
-+        # so return the empty file_data if not an ATCT
-+        if not IBaseContent.providedBy(obj):
-+            return file_data
-+
-         blob_fields = (f for f in obj.Schema().fields()
-                        if IBlobField.providedBy(f))
--        file_data = {}
-         # try to get last revision, only store a new blob if the
-         # contents differ from the prior one, otherwise store a
-         # reference to the prior one
-@@ -1221,6 +1233,10 @@ def reattachReferencedAttributes(self, obj, attrs_dict):
-     def getOnCloneModifiers(self, obj):
-         """Removes references to blobs.
-         """
-+        # Fix for Dexterity Types
-+        if not IBaseContent.providedBy(obj):
-+            return None
-+
-         blob_refs = dict((id(f.getUnwrapped(obj, raw=True).getBlob()), True)
-                          for f in obj.Schema().fields()
-                          if IBlobField.providedBy(f))
+     def test_local_manager_removes_inheritance(self):
+         """When a user that inherits the right to remove inheritance do it,
+         its roles are locally set on content
 
 
-Repository: Products.CMFEditions
+Repository: plone.app.workflow
 
 
 Branch: refs/heads/master
-Date: 2016-04-04T09:26:14+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFEditions/commit/fb2ded6fd3ea9f0a7f3d9c0161bba929191bf486
+Date: 2016-04-04T11:02:27+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.workflow/commit/8ba2e69117d051b42545bf2d984545b1408c7120
 
-Merge pull request #36 from iham/master
+Fix to not link 'Authenticated Users'-group on sharing view
 
-Fixed CloneBlobs modifier to only react on Archetypes.
+Files changed:
+M plone/app/workflow/browser/sharing.pt
+M plone/app/workflow/tests/test_sharing_view.py
+
+diff --git a/plone/app/workflow/browser/sharing.pt b/plone/app/workflow/browser/sharing.pt
+index 57cdfc4..2afb4af 100644
+--- a/plone/app/workflow/browser/sharing.pt
++++ b/plone/app/workflow/browser/sharing.pt
+@@ -98,7 +98,7 @@
+                             <img tal:condition="is_group" tal:replace="structure context/group.png" />
+                             <img tal:condition="not:is_group" tal:replace="structure context/user.png" />
+ 
+-                            <a tal:omit-tag="python:not is_group or not can_view_groups"
++                            <a tal:omit-tag="python:not is_group or not can_view_groups or entry.get('id') == 'AuthenticatedUsers'"
+                                tal:attributes="href string:${portal_url}/@@usergroup-groupmembership?groupname=${entry/id}">
+                             <tal:sticky condition="sticky">
+                               <span tal:replace="entry/title" />
+diff --git a/plone/app/workflow/tests/test_sharing_view.py b/plone/app/workflow/tests/test_sharing_view.py
+index 960bb06..aa40e31 100644
+--- a/plone/app/workflow/tests/test_sharing_view.py
++++ b/plone/app/workflow/tests/test_sharing_view.py
+@@ -92,6 +92,15 @@ def test_group_name_links_to_prefs_for_admin(self):
+                       '@@usergroup-groupmembership?groupname=testgroup">',
+                       view(), msg="Group name was not linked to group prefs.")
+ 
++    def test_group_name_links_not_include_authusers(self):
++        """ Make sure that for admins  group name links to group prefs """
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertNotIn('<a href="http://nohost/plone/'
++                          '@@usergroup-groupmembership?groupname=AuthenticatedUsers">',  # noqa
++                      view(), msg="AuthenticatedUsers was linked to group prefs.")  # noqa
++
+     def test_group_name_doesnt_link_to_prefs_for_reviewer(self):
+         """ Make sure that for admins  group name links to group prefs """
+         z2.login(self.portal['acl_users'], 'testreviewer')
+
+
+Repository: plone.app.workflow
+
+
+Branch: refs/heads/master
+Date: 2016-04-04T11:57:22+02:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/plone.app.workflow/commit/006ff412bd65de0407f2e4fef6128d04bf422370
+
+Merge pull request #7 from plone/datakurre-plip1310
+
+Add a direct link from a group name on Sharing tab to that group's members list
 
 Files changed:
 M CHANGES.rst
-M Products/CMFEditions/StandardModifiers.py
+M plone/app/workflow/browser/sharing.pt
+M plone/app/workflow/tests/test_sharing_view.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 63c3d03..43bfa06 100644
+index 832f9f7..ad24b07 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ New:
+@@ -6,7 +6,9 @@ Changelog
+ 
+ New:
+ 
+-- *add item here*
++- Add a direct link from a group name on Sharing ab to that group's
++  member list for users with sufficient permissions [PLIP #1310]
++  [datakurre]
  
  Fixes:
  
--- *add item here*
-+- Fixed CloneBlobs modifier to only react on Archetypes.
-+  This fix allows Dexterity Blob-Types (e.g. File, Image) to be versioned.
-+  [iham]
+diff --git a/plone/app/workflow/browser/sharing.pt b/plone/app/workflow/browser/sharing.pt
+index 409e83c..2afb4af 100644
+--- a/plone/app/workflow/browser/sharing.pt
++++ b/plone/app/workflow/browser/sharing.pt
+@@ -8,7 +8,12 @@
+ 
+ <body>
+ <metal:main fill-slot="main"
+-     tal:define="context_state context/@@plone_context_state">
++     tal:define="context_state context/@@plone_context_state;
++                 portal_state context/@@plone_portal_state;
++                 portal portal_state/portal;
++                 portal_url portal_state/portal_url;
++                 checkPermission nocall:context/portal_membership/checkPermission;
++                 can_view_groups python:checkPermission('Plone Site Setup: Users and Groups', portal)">
+ 
+     <div class="portalMessage info" tal:condition="context_state/is_default_page">
+         <strong i18n:translate="">
+@@ -93,6 +98,8 @@
+                             <img tal:condition="is_group" tal:replace="structure context/group.png" />
+                             <img tal:condition="not:is_group" tal:replace="structure context/user.png" />
+ 
++                            <a tal:omit-tag="python:not is_group or not can_view_groups or entry.get('id') == 'AuthenticatedUsers'"
++                               tal:attributes="href string:${portal_url}/@@usergroup-groupmembership?groupname=${entry/id}">
+                             <tal:sticky condition="sticky">
+                               <span tal:replace="entry/title" />
+                             </tal:sticky>
+@@ -102,6 +109,7 @@
+                                 (<span tal:replace="entry/login" />)
+                               </tal:title>
+                             </tal:nonsticky>
++                            </a>
+ 
+                             <input
+                                 tal:condition="not:disabled"
+diff --git a/plone/app/workflow/tests/test_sharing_view.py b/plone/app/workflow/tests/test_sharing_view.py
+index e4eb010..aa40e31 100644
+--- a/plone/app/workflow/tests/test_sharing_view.py
++++ b/plone/app/workflow/tests/test_sharing_view.py
+@@ -2,15 +2,16 @@
+ # Test the sharing browser view.
+ #
+ 
+-from zope.component import getMultiAdapter
+-
+ from base import WorkflowTestCase
++from plone.testing import z2
++from zope.component import getMultiAdapter
  
  
- 2.2.19 (2016-02-14)
-diff --git a/Products/CMFEditions/StandardModifiers.py b/Products/CMFEditions/StandardModifiers.py
-index 0481e68..ec2169d 100644
---- a/Products/CMFEditions/StandardModifiers.py
-+++ b/Products/CMFEditions/StandardModifiers.py
-@@ -54,6 +54,11 @@
- from Products.CMFEditions.Modifiers import ConditionalTalesModifier
+ class TestSharingView(WorkflowTestCase):
  
- try:
-+    from Products.Archetypes.interfaces.base import IBaseContent
-+except ImportError:
-+    class IBaseContent(Interface):
-+        pass
-+try:
-     from Products.Archetypes.interfaces.referenceable import IReferenceable
-     from Products.Archetypes.config import UUID_ATTR, REFERENCE_ANNOTATION
- except ImportError:
-@@ -1167,9 +1172,16 @@ class CloneBlobs:
-     implements(IAttributeModifier, ICloneModifier)
+     def afterSetUp(self):
+         self.portal.acl_users._doAddUser('testuser', 'secret', ['Member'], [])
++        self.portal.acl_users._doAddUser('testreviewer', 'secret', ['Reviewer'], [])
+         self.portal.acl_users._doAddUser('nonasciiuser', 'secret', ['Member'], [])
+         self.portal.acl_users._doAddGroup('testgroup', [], title='Some meaningful title')
+         testuser = self.portal.portal_membership.getMemberById('testuser')
+@@ -82,6 +83,35 @@ def test_search_for_group_by_title(self):
+         self.assertTrue(len(results) and results[0].get('title') == 'Some meaningful title',
+             msg="Didn't find testuser when I searched by group title.")
  
-     def getReferencedAttributes(self, obj):
++    def test_group_name_links_to_prefs_for_admin(self):
++        """ Make sure that for admins  group name links to group prefs """
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertIn('<a href="http://nohost/plone/'
++                      '@@usergroup-groupmembership?groupname=testgroup">',
++                      view(), msg="Group name was not linked to group prefs.")
 +
-+        file_data = {}
++    def test_group_name_links_not_include_authusers(self):
++        """ Make sure that for admins  group name links to group prefs """
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertNotIn('<a href="http://nohost/plone/'
++                          '@@usergroup-groupmembership?groupname=AuthenticatedUsers">',  # noqa
++                      view(), msg="AuthenticatedUsers was linked to group prefs.")  # noqa
 +
-+        # This modifier should only be used for ATCT
-+        # so return the empty file_data if not an ATCT
-+        if not IBaseContent.providedBy(obj):
-+            return file_data
++    def test_group_name_doesnt_link_to_prefs_for_reviewer(self):
++        """ Make sure that for admins  group name links to group prefs """
++        z2.login(self.portal['acl_users'], 'testreviewer')
++        request = self.app.REQUEST
++        request.form['search_term'] = 'testgroup'
++        view = getMultiAdapter((self.portal, request), name='sharing')
++        self.assertNotIn('<a href="http://nohost/plone/'
++                         '@@usergroup-groupmembership?groupname=testgroup">',
++                         view(), msg="Group name link was unexpectedly shown "
++                                      "to reviewer.")
 +
-         blob_fields = (f for f in obj.Schema().fields()
-                        if IBlobField.providedBy(f))
--        file_data = {}
-         # try to get last revision, only store a new blob if the
-         # contents differ from the prior one, otherwise store a
-         # reference to the prior one
-@@ -1221,6 +1233,10 @@ def reattachReferencedAttributes(self, obj, attrs_dict):
-     def getOnCloneModifiers(self, obj):
-         """Removes references to blobs.
-         """
-+        # Fix for Dexterity Types
-+        if not IBaseContent.providedBy(obj):
-+            return None
-+
-         blob_refs = dict((id(f.getUnwrapped(obj, raw=True).getBlob()), True)
-                          for f in obj.Schema().fields()
-                          if IBlobField.providedBy(f))
+     def test_local_manager_removes_inheritance(self):
+         """When a user that inherits the right to remove inheritance do it,
+         its roles are locally set on content
 
 
