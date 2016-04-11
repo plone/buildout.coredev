@@ -1,140 +1,382 @@
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2016-04-08T15:22:37+02:00
+Date: 2016-04-08T17:59:07+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/47ca719967936a69301bb2c0c905216fa62754ae
+Commit: https://github.com/plone/plone.app.dexterity/commit/5edc2d27ac24dcc422fbd6a865a2492edfda6c2e
 
-Moved ./utils/validate_json to the only place where it was used in order to avoid circular imports between ./interfaces/* and ./utils. Now relocated to ./interfaces/controlpanel.py
+Remove dups from TTW behavior FTI editor.
 
 Files changed:
-M Products/CMFPlone/interfaces/controlpanel.py
-M Products/CMFPlone/utils.py
+M CHANGES.rst
+M plone/app/dexterity/browser/behaviors.py
+M plone/app/dexterity/tests/editing.txt
 
-diff --git a/Products/CMFPlone/interfaces/controlpanel.py b/Products/CMFPlone/interfaces/controlpanel.py
-index 7fe1766..4845774 100644
---- a/Products/CMFPlone/interfaces/controlpanel.py
-+++ b/Products/CMFPlone/interfaces/controlpanel.py
-@@ -1,15 +1,15 @@
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 58e7072..2ba00a1 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -15,6 +15,9 @@ New:
+ 
+ Fixes:
+ 
++- Remove dups from TTW behavior FTI editor.
++  [jensens]
++
+ - Fix problem in ConstrainTypesBehavior: 
+   when mode was ENABLED but only setLocallyAllowedTypes were set, 
+   then getImmediatelyAddableTypes returned None, 
+diff --git a/plone/app/dexterity/browser/behaviors.py b/plone/app/dexterity/browser/behaviors.py
+index 02a67e5..7c193b9 100644
+--- a/plone/app/dexterity/browser/behaviors.py
++++ b/plone/app/dexterity/browser/behaviors.py
+@@ -1,11 +1,16 @@
  # -*- coding: utf-8 -*-
--import json
--
--from Products.CMFPlone import PloneMessageFactory as _  # NOQA
--from Products.CMFPlone.utils import validate_json
- from basetool import IPloneBaseTool
- from plone.supermodel import model
-+from Products.CMFPlone import PloneMessageFactory as _  # NOQA
++from collections import Counter
++from operator import attrgetter
+ from copy import deepcopy
+ from plone.app.dexterity import _
+ from plone.app.dexterity.browser.layout import TypeFormLayout
+ from plone.app.dexterity.interfaces import ITypeSchemaContext
+ from plone.behavior.interfaces import IBehavior
++from plone.behavior.registration import lookup_behavior_registration
++from plone.behavior.registration import BehaviorRegistrationNotFound
+ from plone.dexterity.fti import DexterityFTIModificationDescription
+-from z3c.form import field, form
++from z3c.form import field
++from z3c.form import form
+ from z3c.form.browser.checkbox import SingleCheckBoxFieldWidget
  from zope import schema
--from zope.interface import Interface, implements
-+from zope.interface import Interface
-+from zope.interface import implementer
- from zope.schema.vocabulary import SimpleTerm
- from zope.schema.vocabulary import SimpleVocabulary
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile
+@@ -13,6 +18,11 @@
+ from zope.component import getUtilitiesFor
+ from zope.lifecycleevent import modified
  
-+import json
++TTW_BEHAVIOR_BLACKLIST = [
++    # skip deprecated behavior
++    'plone.app.dexterity.behaviors.related.IRelatedItems',
++]
 +
  
- ROBOTS_TXT = u"""Sitemap: {portal_url}/sitemap.xml.gz
+ def behaviorConfigurationModified(object, event):
+     description = DexterityFTIModificationDescription("behaviors", "")
+@@ -27,26 +37,42 @@ def __init__(self, context):
+         self.__dict__['fti'] = self.context.fti
  
-@@ -47,6 +47,20 @@
- """
+     def __getattr__(self, name):
+-        # return True if the behavior is present
+-        # (sanity check: don't try unless the name has a period in it)
+-        if '.' in name:
+-            return name in self.fti.behaviors
+-        else:
+-            raise AttributeError
++        # be sure to get a valid value
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        return (
++            iid in self.fti.behaviors or
++            reg.name.encode('utf8') in self.fti.behaviors
++        )
+ 
+     def __setattr__(self, name, value):
+         # add or remove the behavior based on the value from the form
+         behaviors = list(self.fti.behaviors)
+-        if value and name not in behaviors:
+-            behaviors.append(name)
+-        elif not value and name in behaviors:
+-            behaviors.remove(name)
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        if reg.name and iid in self.fti.behaviors:
++            behaviors.remove(iid)
++            bname = reg.name.encode('utf8')
++        else:
++            bname = iid
++        if value and bname not in behaviors:
++            behaviors.append(bname)
++        elif not value and bname in behaviors:
++            behaviors.remove(bname)
+         self.fti.behaviors = behaviors
+ 
+     def __iter__(self):
+         # iterate through the present behaviors
+-        for b in self.fti.behaviors:
+-            yield b
++        for name in self.fti.behaviors:
++            try:
++                reg = lookup_behavior_registration(name=name)
++            except BehaviorRegistrationNotFound:
++                # ignore wrong names
++                continue
++            if reg.name:
++                yield reg.name.encode('utf8')
++            else:
++                yield name
  
  
-+def validate_json(value):
-+    try:
-+        json.loads(value)
-+    except ValueError, exc:
-+        class JSONError(schema.ValidationError):
-+            __doc__ = _(u"Must be empty or a valid JSON-formatted "
-+                        u"configuration – ${message}.", mapping={
-+                            'message': unicode(exc)})
-+
-+        raise JSONError(value)
-+
-+    return True
-+
-+
- class IControlPanel(IPloneBaseTool):
-     """ Interface for the ControlPanel """
+ class TypeBehaviorsForm(form.EditForm):
+@@ -64,25 +90,32 @@ def getContent(self):
  
-@@ -240,7 +254,9 @@ class ILanguageSchema(Interface):
-                 default=(u"Use cookie for manual override")),
-         description=_(
-             u"description_cookie_manual_override",
--            default=(u"Required for the language selector viewlet to be rendered.")
-+            default=(
-+                u"Required for the language selector viewlet to be rendered."
-+            )
-         ),
-         default=False,
-         required=False,
-@@ -263,7 +279,11 @@ class ILanguageSchema(Interface):
-             default=(u"Set the language cookie always")),
-         description=_(
-             u"description_set_language_cookie_always",
--            default=(u"i.e. also when the 'set_language' request parameter is absent")),
-+            default=(
-+                u"i.e. also when the 'set_language' request parameter is "
-+                u"absent"
-+            )
-+        ),
-         default=False,
-         required=False,
-     )
-@@ -301,10 +321,9 @@ class ITagAttrPair(Interface):
-     attributes = schema.TextLine(title=u"attributes")
- 
- 
-+@implementer(ITagAttrPair)
- class TagAttrPair(object):
- 
--    implements(ITagAttrPair)
+     @property
+     def fields(self):
++        counts = Counter(
++            [reg.interface for name, reg in getUtilitiesFor(IBehavior)]
++        )
+         fields = []
+         for name, reg in getUtilitiesFor(IBehavior):
+-            if name == 'plone.app.dexterity.behaviors.related.IRelatedItems':
+-                # skip deprecated behavior
++            if name in TTW_BEHAVIOR_BLACKLIST:
++                # skip blacklisted
+                 continue
 -
-     def __init__(self, tags='', attributes=''):
-         self.tags = tags
-         self.attributes = attributes
-@@ -1117,7 +1136,7 @@ class ISiteSchema(Interface):
-             SimpleTerm('authenticated', 'authenticated',
-                        _('For authenticated users only'))]),
-         required=True)
--    
+-            f = schema.Bool(
+-                __name__=str(name),
+-                title=reg.title,
+-                description=reg.description,
+-                required=False
++            with_name = counts[reg.interface] == 2
++            if with_name and reg.name != name:
++                continue
++            fname = reg.name if reg.name else name
++            if isinstance(fname, unicode):
++                fname = fname.encode('utf8')
++            fields.append(
++                schema.Bool(
++                    __name__=fname,
++                    title=reg.title,
++                    description=reg.description,
++                    required=False
++                )
+             )
+-            fields.append(f)
+-        fields = sorted(fields, key=lambda x: x.title)
+-        fields = field.Fields(*fields)
+-
+-        for f in fields.values():
+-            f.widgetFactory = SingleCheckBoxFieldWidget
+-        return fields
++        form_fields = field.Fields(*sorted(fields, key=attrgetter('title')))
++        for ff in form_fields.values():
++            ff.widgetFactory = SingleCheckBoxFieldWidget
++        return form_fields
+ 
+ 
+ class TypeBehaviorsPage(TypeFormLayout):
+diff --git a/plone/app/dexterity/tests/editing.txt b/plone/app/dexterity/tests/editing.txt
+index 6e77707..40eb745 100644
+--- a/plone/app/dexterity/tests/editing.txt
++++ b/plone/app/dexterity/tests/editing.txt
+@@ -244,7 +244,7 @@ We should be providing a link back to the fields editor::
+ Enabling a behavior
+ -------------------
+ 
+-For each content type, a number of behaviors may be enabled.  Let's disable a
++For each content type, a number of behaviors may be enabled. Let's disable a
+ behavior for 'plonista' and make sure that the change is reflected on the
+ FTI::
+ 
+@@ -252,7 +252,7 @@ FTI::
+   >>> browser.url
+   'http://nohost/plone/dexterity-types/plonista/@@behaviors'
+ 
+-  >>> browser.getControl(name='form.widgets.plone.app.dexterity.behaviors.metadata.IDublinCore:list').value = []
++  >>> browser.getControl(name='form.widgets.plone.dublincore:list').value = []
+   >>> browser.getControl('Save').click()
+   >>> portal.portal_types.plonista.behaviors
+   ['plone.app.content.interfaces.INameFromTitle']
+
+
+Repository: plone.app.dexterity
+
+
+Branch: refs/heads/master
+Date: 2016-04-11T12:07:08+02:00
+Author: agitator (agitator) <hpeter@agitator.com>
+Commit: https://github.com/plone/plone.app.dexterity/commit/a523c550137905b990a7a08c40e65bb4a1b3c691
+
+Merge pull request #210 from plone/fix-ttw-behavior-editor
+
+Remove dups from TTW behavior FTI editor.
+
+Files changed:
+M CHANGES.rst
+M plone/app/dexterity/browser/behaviors.py
+M plone/app/dexterity/tests/editing.txt
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 58e7072..2ba00a1 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -15,6 +15,9 @@ New:
+ 
+ Fixes:
+ 
++- Remove dups from TTW behavior FTI editor.
++  [jensens]
 +
-     thumb_visibility = schema.Choice(
-         title=_(u'Thumb visibility'),
-         description=_(u'Show thumbs in listings'),
-@@ -1128,7 +1147,7 @@ class ISiteSchema(Interface):
-             SimpleTerm('authenticated', 'authenticated',
-                        _(u'For authenticated users only'))]),
-         required=True)
--    
+ - Fix problem in ConstrainTypesBehavior: 
+   when mode was ENABLED but only setLocallyAllowedTypes were set, 
+   then getImmediatelyAddableTypes returned None, 
+diff --git a/plone/app/dexterity/browser/behaviors.py b/plone/app/dexterity/browser/behaviors.py
+index 02a67e5..7c193b9 100644
+--- a/plone/app/dexterity/browser/behaviors.py
++++ b/plone/app/dexterity/browser/behaviors.py
+@@ -1,11 +1,16 @@
+ # -*- coding: utf-8 -*-
++from collections import Counter
++from operator import attrgetter
+ from copy import deepcopy
+ from plone.app.dexterity import _
+ from plone.app.dexterity.browser.layout import TypeFormLayout
+ from plone.app.dexterity.interfaces import ITypeSchemaContext
+ from plone.behavior.interfaces import IBehavior
++from plone.behavior.registration import lookup_behavior_registration
++from plone.behavior.registration import BehaviorRegistrationNotFound
+ from plone.dexterity.fti import DexterityFTIModificationDescription
+-from z3c.form import field, form
++from z3c.form import field
++from z3c.form import form
+ from z3c.form.browser.checkbox import SingleCheckBoxFieldWidget
+ from zope import schema
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile
+@@ -13,6 +18,11 @@
+ from zope.component import getUtilitiesFor
+ from zope.lifecycleevent import modified
+ 
++TTW_BEHAVIOR_BLACKLIST = [
++    # skip deprecated behavior
++    'plone.app.dexterity.behaviors.related.IRelatedItems',
++]
 +
-     toolbar_position = schema.Choice(
-         title=_(u'Position where the toolbar is displayed'),
-         description=_(
-diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
-index 4f0bd60..01ff8c4 100644
---- a/Products/CMFPlone/utils.py
-+++ b/Products/CMFPlone/utils.py
-@@ -40,6 +40,7 @@
- import pkg_resources
- import re
- import transaction
-+import warnings
- import zope.interface
  
- deprecated_import(
-@@ -629,6 +630,11 @@ def ajax_load_url(url):
+ def behaviorConfigurationModified(object, event):
+     description = DexterityFTIModificationDescription("behaviors", "")
+@@ -27,26 +37,42 @@ def __init__(self, context):
+         self.__dict__['fti'] = self.context.fti
+ 
+     def __getattr__(self, name):
+-        # return True if the behavior is present
+-        # (sanity check: don't try unless the name has a period in it)
+-        if '.' in name:
+-            return name in self.fti.behaviors
+-        else:
+-            raise AttributeError
++        # be sure to get a valid value
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        return (
++            iid in self.fti.behaviors or
++            reg.name.encode('utf8') in self.fti.behaviors
++        )
+ 
+     def __setattr__(self, name, value):
+         # add or remove the behavior based on the value from the form
+         behaviors = list(self.fti.behaviors)
+-        if value and name not in behaviors:
+-            behaviors.append(name)
+-        elif not value and name in behaviors:
+-            behaviors.remove(name)
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        if reg.name and iid in self.fti.behaviors:
++            behaviors.remove(iid)
++            bname = reg.name.encode('utf8')
++        else:
++            bname = iid
++        if value and bname not in behaviors:
++            behaviors.append(bname)
++        elif not value and bname in behaviors:
++            behaviors.remove(bname)
+         self.fti.behaviors = behaviors
+ 
+     def __iter__(self):
+         # iterate through the present behaviors
+-        for b in self.fti.behaviors:
+-            yield b
++        for name in self.fti.behaviors:
++            try:
++                reg = lookup_behavior_registration(name=name)
++            except BehaviorRegistrationNotFound:
++                # ignore wrong names
++                continue
++            if reg.name:
++                yield reg.name.encode('utf8')
++            else:
++                yield name
  
  
- def validate_json(value):
-+    warnings.warn(
-+        'Moved to the only place where it was used in order to avoid circular '
-+        'imports between ./interfaces/* and ./utils. Now relocated to '
-+        '"./interfaces/controlpanel.py"',
-+        DeprecationWarning)
-     try:
-         json.loads(value)
-     except ValueError, exc:
+ class TypeBehaviorsForm(form.EditForm):
+@@ -64,25 +90,32 @@ def getContent(self):
+ 
+     @property
+     def fields(self):
++        counts = Counter(
++            [reg.interface for name, reg in getUtilitiesFor(IBehavior)]
++        )
+         fields = []
+         for name, reg in getUtilitiesFor(IBehavior):
+-            if name == 'plone.app.dexterity.behaviors.related.IRelatedItems':
+-                # skip deprecated behavior
++            if name in TTW_BEHAVIOR_BLACKLIST:
++                # skip blacklisted
+                 continue
+-
+-            f = schema.Bool(
+-                __name__=str(name),
+-                title=reg.title,
+-                description=reg.description,
+-                required=False
++            with_name = counts[reg.interface] == 2
++            if with_name and reg.name != name:
++                continue
++            fname = reg.name if reg.name else name
++            if isinstance(fname, unicode):
++                fname = fname.encode('utf8')
++            fields.append(
++                schema.Bool(
++                    __name__=fname,
++                    title=reg.title,
++                    description=reg.description,
++                    required=False
++                )
+             )
+-            fields.append(f)
+-        fields = sorted(fields, key=lambda x: x.title)
+-        fields = field.Fields(*fields)
+-
+-        for f in fields.values():
+-            f.widgetFactory = SingleCheckBoxFieldWidget
+-        return fields
++        form_fields = field.Fields(*sorted(fields, key=attrgetter('title')))
++        for ff in form_fields.values():
++            ff.widgetFactory = SingleCheckBoxFieldWidget
++        return form_fields
+ 
+ 
+ class TypeBehaviorsPage(TypeFormLayout):
+diff --git a/plone/app/dexterity/tests/editing.txt b/plone/app/dexterity/tests/editing.txt
+index 6e77707..40eb745 100644
+--- a/plone/app/dexterity/tests/editing.txt
++++ b/plone/app/dexterity/tests/editing.txt
+@@ -244,7 +244,7 @@ We should be providing a link back to the fields editor::
+ Enabling a behavior
+ -------------------
+ 
+-For each content type, a number of behaviors may be enabled.  Let's disable a
++For each content type, a number of behaviors may be enabled. Let's disable a
+ behavior for 'plonista' and make sure that the change is reflected on the
+ FTI::
+ 
+@@ -252,7 +252,7 @@ FTI::
+   >>> browser.url
+   'http://nohost/plone/dexterity-types/plonista/@@behaviors'
+ 
+-  >>> browser.getControl(name='form.widgets.plone.app.dexterity.behaviors.metadata.IDublinCore:list').value = []
++  >>> browser.getControl(name='form.widgets.plone.dublincore:list').value = []
+   >>> browser.getControl('Save').click()
+   >>> portal.portal_types.plonista.behaviors
+   ['plone.app.content.interfaces.INameFromTitle']
 
 
