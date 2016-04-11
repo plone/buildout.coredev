@@ -173,3 +173,5 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 21. Send out announcement to plone-announce
 
 22. Update #plone topic
+
+23. Ask the security team to update the https://plone.org/security/hotfixes/ page in the configuration control panel.
