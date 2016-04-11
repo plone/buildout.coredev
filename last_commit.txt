@@ -1,203 +1,382 @@
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
-Branch: refs/heads/5.0.x
-Date: 2016-04-08T19:04:20+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/b950ac0b026088efdb9403be61f98501e152517e
+Branch: refs/heads/master
+Date: 2016-04-08T17:59:07+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.dexterity/commit/5edc2d27ac24dcc422fbd6a865a2492edfda6c2e
 
-Ensured front-page is English when creating an English site.
-
-Previously, when creating an English site with a browser that
-prefers a different language, the body text ended up being in the
-browser language.
-
-For languages without a front-page text translation the same happened:
-they got the other language instead of English.
+Remove dups from TTW behavior FTI editor.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/factory.py
-M Products/CMFPlone/tests/testPortalCreation.py
+M plone/app/dexterity/browser/behaviors.py
+M plone/app/dexterity/tests/editing.txt
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6a2c1ca..02db48e 100644
+index 58e7072..2ba00a1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -18,7 +18,12 @@ New:
+@@ -15,6 +15,9 @@ New:
  
  Fixes:
  
--- *add item here*
-+- Ensured front-page is English when creating an English site.
-+  Previously, when creating an English site with a browser that
-+  prefers a different language, the body text ended up being in the
-+  browser language.  For languages without a front-page text
-+  translation the same happened: they got the other language instead
-+  of English.  [maurits]
++- Remove dups from TTW behavior FTI editor.
++  [jensens]
++
+ - Fix problem in ConstrainTypesBehavior: 
+   when mode was ENABLED but only setLocallyAllowedTypes were set, 
+   then getImmediatelyAddableTypes returned None, 
+diff --git a/plone/app/dexterity/browser/behaviors.py b/plone/app/dexterity/browser/behaviors.py
+index 02a67e5..7c193b9 100644
+--- a/plone/app/dexterity/browser/behaviors.py
++++ b/plone/app/dexterity/browser/behaviors.py
+@@ -1,11 +1,16 @@
+ # -*- coding: utf-8 -*-
++from collections import Counter
++from operator import attrgetter
+ from copy import deepcopy
+ from plone.app.dexterity import _
+ from plone.app.dexterity.browser.layout import TypeFormLayout
+ from plone.app.dexterity.interfaces import ITypeSchemaContext
+ from plone.behavior.interfaces import IBehavior
++from plone.behavior.registration import lookup_behavior_registration
++from plone.behavior.registration import BehaviorRegistrationNotFound
+ from plone.dexterity.fti import DexterityFTIModificationDescription
+-from z3c.form import field, form
++from z3c.form import field
++from z3c.form import form
+ from z3c.form.browser.checkbox import SingleCheckBoxFieldWidget
+ from zope import schema
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile
+@@ -13,6 +18,11 @@
+ from zope.component import getUtilitiesFor
+ from zope.lifecycleevent import modified
  
- - Bundle aggregation must use ++plone++static overrided versions if any.
-   [ebrehault]
-diff --git a/Products/CMFPlone/factory.py b/Products/CMFPlone/factory.py
-index 6a897cc..ac650ad 100644
---- a/Products/CMFPlone/factory.py
-+++ b/Products/CMFPlone/factory.py
-@@ -81,6 +81,12 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     context._setObject(site_id, PloneSite(site_id))
-     site = context._getOb(site_id)
-     site.setLanguage(default_language)
-+    # Set the accepted language for the rest of the request.  This makes sure
-+    # the front-page text gets the correct translation also when your browser
-+    # prefers non-English and you choose English as language for the Plone
-+    # Site.
-+    request = context.REQUEST
-+    request['HTTP_ACCEPT_LANGUAGE'] = default_language
++TTW_BEHAVIOR_BLACKLIST = [
++    # skip deprecated behavior
++    'plone.app.dexterity.behaviors.related.IRelatedItems',
++]
++
  
-     site[_TOOL_ID] = SetupTool(_TOOL_ID)
-     setup_tool = site[_TOOL_ID]
-diff --git a/Products/CMFPlone/tests/testPortalCreation.py b/Products/CMFPlone/tests/testPortalCreation.py
-index 2761df0..a8be7a8 100644
---- a/Products/CMFPlone/tests/testPortalCreation.py
-+++ b/Products/CMFPlone/tests/testPortalCreation.py
-@@ -34,6 +34,7 @@
- from plone.portlets.interfaces import IPortletManager
- from plone.portlets.interfaces import ILocalPortletAssignmentManager
- from plone.portlets.constants import CONTEXT_CATEGORY as CONTEXT_PORTLETS
-+from plone.protect import createToken
- from plone.registry.interfaces import IRegistry
+ def behaviorConfigurationModified(object, event):
+     description = DexterityFTIModificationDescription("behaviors", "")
+@@ -27,26 +37,42 @@ def __init__(self, context):
+         self.__dict__['fti'] = self.context.fti
+ 
+     def __getattr__(self, name):
+-        # return True if the behavior is present
+-        # (sanity check: don't try unless the name has a period in it)
+-        if '.' in name:
+-            return name in self.fti.behaviors
+-        else:
+-            raise AttributeError
++        # be sure to get a valid value
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        return (
++            iid in self.fti.behaviors or
++            reg.name.encode('utf8') in self.fti.behaviors
++        )
+ 
+     def __setattr__(self, name, value):
+         # add or remove the behavior based on the value from the form
+         behaviors = list(self.fti.behaviors)
+-        if value and name not in behaviors:
+-            behaviors.append(name)
+-        elif not value and name in behaviors:
+-            behaviors.remove(name)
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        if reg.name and iid in self.fti.behaviors:
++            behaviors.remove(iid)
++            bname = reg.name.encode('utf8')
++        else:
++            bname = iid
++        if value and bname not in behaviors:
++            behaviors.append(bname)
++        elif not value and bname in behaviors:
++            behaviors.remove(bname)
+         self.fti.behaviors = behaviors
+ 
+     def __iter__(self):
+         # iterate through the present behaviors
+-        for b in self.fti.behaviors:
+-            yield b
++        for name in self.fti.behaviors:
++            try:
++                reg = lookup_behavior_registration(name=name)
++            except BehaviorRegistrationNotFound:
++                # ignore wrong names
++                continue
++            if reg.name:
++                yield reg.name.encode('utf8')
++            else:
++                yield name
  
  
-@@ -922,3 +923,32 @@ def testManagementPageCharset(self):
-         manage_charset = getattr(self.portal, 'management_page_charset', None)
-         self.assertTrue(manage_charset)
-         self.assertEqual(manage_charset, 'utf-8')
-+
-+
-+class TestAddPloneSite(PloneTestCase.PloneTestCase):
-+
-+    def afterSetUp(self):
-+        self.request = self.app.REQUEST
-+
-+    def addsite(self):
-+        self.loginAsPortalOwner()
-+        # Set up a request for the plone-addsite view.
-+        form = self.request.form
-+        form['form.submitted'] = 1
-+        form['site_id'] = 'plonesite1'
-+        form['setup_content'] = 1
-+        self.request['_authenticator'] = createToken()
-+        addsite = self.app.restrictedTraverse('@@plone-addsite')
-+        addsite()
-+
-+    def test_addsite_en_as_nl(self):
-+        # Add an English site with a Dutch browser.
-+        self.request['HTTP_ACCEPT_LANGUAGE'] = 'nl'
-+        self.request.form['default_language'] = 'en'
-+        self.addsite()
-+        plonesite = self.app.plonesite1
-+        fp = plonesite['front-page']
-+        # Unfortunately, the next test passes even without the fix (overriding
-+        # HTTP_ACCEPT_LANGUAGE on the request in factory.py).  This seems to be
-+        # because translations are not available in the tests.
-+        self.assertIn('Learn more about Plone', fp.text.raw)
+ class TypeBehaviorsForm(form.EditForm):
+@@ -64,25 +90,32 @@ def getContent(self):
+ 
+     @property
+     def fields(self):
++        counts = Counter(
++            [reg.interface for name, reg in getUtilitiesFor(IBehavior)]
++        )
+         fields = []
+         for name, reg in getUtilitiesFor(IBehavior):
+-            if name == 'plone.app.dexterity.behaviors.related.IRelatedItems':
+-                # skip deprecated behavior
++            if name in TTW_BEHAVIOR_BLACKLIST:
++                # skip blacklisted
+                 continue
+-
+-            f = schema.Bool(
+-                __name__=str(name),
+-                title=reg.title,
+-                description=reg.description,
+-                required=False
++            with_name = counts[reg.interface] == 2
++            if with_name and reg.name != name:
++                continue
++            fname = reg.name if reg.name else name
++            if isinstance(fname, unicode):
++                fname = fname.encode('utf8')
++            fields.append(
++                schema.Bool(
++                    __name__=fname,
++                    title=reg.title,
++                    description=reg.description,
++                    required=False
++                )
+             )
+-            fields.append(f)
+-        fields = sorted(fields, key=lambda x: x.title)
+-        fields = field.Fields(*fields)
+-
+-        for f in fields.values():
+-            f.widgetFactory = SingleCheckBoxFieldWidget
+-        return fields
++        form_fields = field.Fields(*sorted(fields, key=attrgetter('title')))
++        for ff in form_fields.values():
++            ff.widgetFactory = SingleCheckBoxFieldWidget
++        return form_fields
+ 
+ 
+ class TypeBehaviorsPage(TypeFormLayout):
+diff --git a/plone/app/dexterity/tests/editing.txt b/plone/app/dexterity/tests/editing.txt
+index 6e77707..40eb745 100644
+--- a/plone/app/dexterity/tests/editing.txt
++++ b/plone/app/dexterity/tests/editing.txt
+@@ -244,7 +244,7 @@ We should be providing a link back to the fields editor::
+ Enabling a behavior
+ -------------------
+ 
+-For each content type, a number of behaviors may be enabled.  Let's disable a
++For each content type, a number of behaviors may be enabled. Let's disable a
+ behavior for 'plonista' and make sure that the change is reflected on the
+ FTI::
+ 
+@@ -252,7 +252,7 @@ FTI::
+   >>> browser.url
+   'http://nohost/plone/dexterity-types/plonista/@@behaviors'
+ 
+-  >>> browser.getControl(name='form.widgets.plone.app.dexterity.behaviors.metadata.IDublinCore:list').value = []
++  >>> browser.getControl(name='form.widgets.plone.dublincore:list').value = []
+   >>> browser.getControl('Save').click()
+   >>> portal.portal_types.plonista.behaviors
+   ['plone.app.content.interfaces.INameFromTitle']
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
-Branch: refs/heads/5.0.x
-Date: 2016-04-08T21:28:19+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/ca60346781d5cbb75e144be0119b81ca2b00d7cb
+Branch: refs/heads/master
+Date: 2016-04-11T12:07:08+02:00
+Author: agitator (agitator) <hpeter@agitator.com>
+Commit: https://github.com/plone/plone.app.dexterity/commit/a523c550137905b990a7a08c40e65bb4a1b3c691
 
-Merge pull request #1517 from plone/fix-english-front-page-50
+Merge pull request #210 from plone/fix-ttw-behavior-editor
 
-Ensured front-page is English when creating an English site. [Plone 5.0]
+Remove dups from TTW behavior FTI editor.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/factory.py
-M Products/CMFPlone/tests/testPortalCreation.py
+M plone/app/dexterity/browser/behaviors.py
+M plone/app/dexterity/tests/editing.txt
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6a2c1ca..02db48e 100644
+index 58e7072..2ba00a1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -18,7 +18,12 @@ New:
+@@ -15,6 +15,9 @@ New:
  
  Fixes:
  
--- *add item here*
-+- Ensured front-page is English when creating an English site.
-+  Previously, when creating an English site with a browser that
-+  prefers a different language, the body text ended up being in the
-+  browser language.  For languages without a front-page text
-+  translation the same happened: they got the other language instead
-+  of English.  [maurits]
++- Remove dups from TTW behavior FTI editor.
++  [jensens]
++
+ - Fix problem in ConstrainTypesBehavior: 
+   when mode was ENABLED but only setLocallyAllowedTypes were set, 
+   then getImmediatelyAddableTypes returned None, 
+diff --git a/plone/app/dexterity/browser/behaviors.py b/plone/app/dexterity/browser/behaviors.py
+index 02a67e5..7c193b9 100644
+--- a/plone/app/dexterity/browser/behaviors.py
++++ b/plone/app/dexterity/browser/behaviors.py
+@@ -1,11 +1,16 @@
+ # -*- coding: utf-8 -*-
++from collections import Counter
++from operator import attrgetter
+ from copy import deepcopy
+ from plone.app.dexterity import _
+ from plone.app.dexterity.browser.layout import TypeFormLayout
+ from plone.app.dexterity.interfaces import ITypeSchemaContext
+ from plone.behavior.interfaces import IBehavior
++from plone.behavior.registration import lookup_behavior_registration
++from plone.behavior.registration import BehaviorRegistrationNotFound
+ from plone.dexterity.fti import DexterityFTIModificationDescription
+-from z3c.form import field, form
++from z3c.form import field
++from z3c.form import form
+ from z3c.form.browser.checkbox import SingleCheckBoxFieldWidget
+ from zope import schema
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile
+@@ -13,6 +18,11 @@
+ from zope.component import getUtilitiesFor
+ from zope.lifecycleevent import modified
  
- - Bundle aggregation must use ++plone++static overrided versions if any.
-   [ebrehault]
-diff --git a/Products/CMFPlone/factory.py b/Products/CMFPlone/factory.py
-index 6a897cc..ac650ad 100644
---- a/Products/CMFPlone/factory.py
-+++ b/Products/CMFPlone/factory.py
-@@ -81,6 +81,12 @@ def addPloneSite(context, site_id, title='Plone site', description='',
-     context._setObject(site_id, PloneSite(site_id))
-     site = context._getOb(site_id)
-     site.setLanguage(default_language)
-+    # Set the accepted language for the rest of the request.  This makes sure
-+    # the front-page text gets the correct translation also when your browser
-+    # prefers non-English and you choose English as language for the Plone
-+    # Site.
-+    request = context.REQUEST
-+    request['HTTP_ACCEPT_LANGUAGE'] = default_language
++TTW_BEHAVIOR_BLACKLIST = [
++    # skip deprecated behavior
++    'plone.app.dexterity.behaviors.related.IRelatedItems',
++]
++
  
-     site[_TOOL_ID] = SetupTool(_TOOL_ID)
-     setup_tool = site[_TOOL_ID]
-diff --git a/Products/CMFPlone/tests/testPortalCreation.py b/Products/CMFPlone/tests/testPortalCreation.py
-index 2761df0..a8be7a8 100644
---- a/Products/CMFPlone/tests/testPortalCreation.py
-+++ b/Products/CMFPlone/tests/testPortalCreation.py
-@@ -34,6 +34,7 @@
- from plone.portlets.interfaces import IPortletManager
- from plone.portlets.interfaces import ILocalPortletAssignmentManager
- from plone.portlets.constants import CONTEXT_CATEGORY as CONTEXT_PORTLETS
-+from plone.protect import createToken
- from plone.registry.interfaces import IRegistry
+ def behaviorConfigurationModified(object, event):
+     description = DexterityFTIModificationDescription("behaviors", "")
+@@ -27,26 +37,42 @@ def __init__(self, context):
+         self.__dict__['fti'] = self.context.fti
+ 
+     def __getattr__(self, name):
+-        # return True if the behavior is present
+-        # (sanity check: don't try unless the name has a period in it)
+-        if '.' in name:
+-            return name in self.fti.behaviors
+-        else:
+-            raise AttributeError
++        # be sure to get a valid value
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        return (
++            iid in self.fti.behaviors or
++            reg.name.encode('utf8') in self.fti.behaviors
++        )
+ 
+     def __setattr__(self, name, value):
+         # add or remove the behavior based on the value from the form
+         behaviors = list(self.fti.behaviors)
+-        if value and name not in behaviors:
+-            behaviors.append(name)
+-        elif not value and name in behaviors:
+-            behaviors.remove(name)
++        reg = lookup_behavior_registration(name=name)
++        iid = reg.interface.__identifier__
++        if reg.name and iid in self.fti.behaviors:
++            behaviors.remove(iid)
++            bname = reg.name.encode('utf8')
++        else:
++            bname = iid
++        if value and bname not in behaviors:
++            behaviors.append(bname)
++        elif not value and bname in behaviors:
++            behaviors.remove(bname)
+         self.fti.behaviors = behaviors
+ 
+     def __iter__(self):
+         # iterate through the present behaviors
+-        for b in self.fti.behaviors:
+-            yield b
++        for name in self.fti.behaviors:
++            try:
++                reg = lookup_behavior_registration(name=name)
++            except BehaviorRegistrationNotFound:
++                # ignore wrong names
++                continue
++            if reg.name:
++                yield reg.name.encode('utf8')
++            else:
++                yield name
  
  
-@@ -922,3 +923,32 @@ def testManagementPageCharset(self):
-         manage_charset = getattr(self.portal, 'management_page_charset', None)
-         self.assertTrue(manage_charset)
-         self.assertEqual(manage_charset, 'utf-8')
-+
-+
-+class TestAddPloneSite(PloneTestCase.PloneTestCase):
-+
-+    def afterSetUp(self):
-+        self.request = self.app.REQUEST
-+
-+    def addsite(self):
-+        self.loginAsPortalOwner()
-+        # Set up a request for the plone-addsite view.
-+        form = self.request.form
-+        form['form.submitted'] = 1
-+        form['site_id'] = 'plonesite1'
-+        form['setup_content'] = 1
-+        self.request['_authenticator'] = createToken()
-+        addsite = self.app.restrictedTraverse('@@plone-addsite')
-+        addsite()
-+
-+    def test_addsite_en_as_nl(self):
-+        # Add an English site with a Dutch browser.
-+        self.request['HTTP_ACCEPT_LANGUAGE'] = 'nl'
-+        self.request.form['default_language'] = 'en'
-+        self.addsite()
-+        plonesite = self.app.plonesite1
-+        fp = plonesite['front-page']
-+        # Unfortunately, the next test passes even without the fix (overriding
-+        # HTTP_ACCEPT_LANGUAGE on the request in factory.py).  This seems to be
-+        # because translations are not available in the tests.
-+        self.assertIn('Learn more about Plone', fp.text.raw)
+ class TypeBehaviorsForm(form.EditForm):
+@@ -64,25 +90,32 @@ def getContent(self):
+ 
+     @property
+     def fields(self):
++        counts = Counter(
++            [reg.interface for name, reg in getUtilitiesFor(IBehavior)]
++        )
+         fields = []
+         for name, reg in getUtilitiesFor(IBehavior):
+-            if name == 'plone.app.dexterity.behaviors.related.IRelatedItems':
+-                # skip deprecated behavior
++            if name in TTW_BEHAVIOR_BLACKLIST:
++                # skip blacklisted
+                 continue
+-
+-            f = schema.Bool(
+-                __name__=str(name),
+-                title=reg.title,
+-                description=reg.description,
+-                required=False
++            with_name = counts[reg.interface] == 2
++            if with_name and reg.name != name:
++                continue
++            fname = reg.name if reg.name else name
++            if isinstance(fname, unicode):
++                fname = fname.encode('utf8')
++            fields.append(
++                schema.Bool(
++                    __name__=fname,
++                    title=reg.title,
++                    description=reg.description,
++                    required=False
++                )
+             )
+-            fields.append(f)
+-        fields = sorted(fields, key=lambda x: x.title)
+-        fields = field.Fields(*fields)
+-
+-        for f in fields.values():
+-            f.widgetFactory = SingleCheckBoxFieldWidget
+-        return fields
++        form_fields = field.Fields(*sorted(fields, key=attrgetter('title')))
++        for ff in form_fields.values():
++            ff.widgetFactory = SingleCheckBoxFieldWidget
++        return form_fields
+ 
+ 
+ class TypeBehaviorsPage(TypeFormLayout):
+diff --git a/plone/app/dexterity/tests/editing.txt b/plone/app/dexterity/tests/editing.txt
+index 6e77707..40eb745 100644
+--- a/plone/app/dexterity/tests/editing.txt
++++ b/plone/app/dexterity/tests/editing.txt
+@@ -244,7 +244,7 @@ We should be providing a link back to the fields editor::
+ Enabling a behavior
+ -------------------
+ 
+-For each content type, a number of behaviors may be enabled.  Let's disable a
++For each content type, a number of behaviors may be enabled. Let's disable a
+ behavior for 'plonista' and make sure that the change is reflected on the
+ FTI::
+ 
+@@ -252,7 +252,7 @@ FTI::
+   >>> browser.url
+   'http://nohost/plone/dexterity-types/plonista/@@behaviors'
+ 
+-  >>> browser.getControl(name='form.widgets.plone.app.dexterity.behaviors.metadata.IDublinCore:list').value = []
++  >>> browser.getControl(name='form.widgets.plone.dublincore:list').value = []
+   >>> browser.getControl('Save').click()
+   >>> portal.portal_types.plonista.behaviors
+   ['plone.app.content.interfaces.INameFromTitle']
 
 
