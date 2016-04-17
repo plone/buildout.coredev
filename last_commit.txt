@@ -2,105 +2,265 @@ Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-04-14T11:43:48+02:00
+Date: 2016-04-15T16:21:10+02:00
 Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/45bd7db88ce578a76e1510ef7fe720ce1fb17c37
+Commit: https://github.com/plone/Products.CMFPlone/commit/5fa25ba9cac7d8796c4909cbbf3f1d17bd8d6c53
 
-Fix #1462 use full path for url() when aggregating CSS
+Fix #1530 compute requirejs config baseUrl on client-side
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/resources/browser/combine.py
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+M Products/CMFPlone/resources/browser/configjs.py
+M Products/CMFPlone/resources/browser/scripts.pt
+M Products/CMFPlone/resources/browser/scripts.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 30f7efe..312ae09 100644
+index 312ae09..6117468 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -52,6 +52,9 @@ Fixes:
- - Fix bundle aggregation when bundle has no CSS (or no JS)
+@@ -55,6 +55,9 @@ Fixes:
+ - Fix relative url in CSS in bundle aggregation
    [ebrehault]
  
-+- Fix relative url in CSS in bundle aggregation
++- Do not hard-code baseUrl in bundle to avoid bad URL when switching domains.
 +  [ebrehault]
 +
  
  5.1a1 (2016-03-31)
  ------------------
-diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
-index 10fa079..1a799f6 100644
---- a/Products/CMFPlone/resources/browser/combine.py
-+++ b/Products/CMFPlone/resources/browser/combine.py
-@@ -89,12 +89,13 @@ def write_css(context, folder, meta_bundle):
-     for bundle in bundles.values():
-         if bundle.merge_with == meta_bundle and bundle.csscompilation:
-             css = get_resource(context, bundle.csscompilation)
--            # Preserve relative urls:
--            # we prefix with '../'' any url not starting with '/'
--            # or http: or data:
-+            (path, sep, filename) = bundle.csscompilation.rpartition('/')
-+            # Process relative urls:
-+            # we prefix with current resource path any url not starting with
-+            # '/' or http: or data:
-             css = re.sub(
-                 r"""(url\(['"]?(?!['"]?([a-z]+:|\/)))""",
--                r'\1../',
-+                r'\1%s/' % path,
-                 css)
-             resources.append(css)
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index d4de75c..9fda35a 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -287,7 +287,7 @@ def less_build_config(self):
+         })
  
+     def js_build_config(self):
+-        (baseUrl, paths, shims) = self.get_requirejs_config()
++        (paths, shims) = self.get_requirejs_config()
+         bundles = self.get_bundles()
+         resources = self.get_resources()
+ 
+diff --git a/Products/CMFPlone/resources/browser/configjs.py b/Products/CMFPlone/resources/browser/configjs.py
+index 7ee3db7..4fa690c 100644
+--- a/Products/CMFPlone/resources/browser/configjs.py
++++ b/Products/CMFPlone/resources/browser/configjs.py
+@@ -4,12 +4,11 @@
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from Products.Five.browser import BrowserView
+ from plone.registry.interfaces import IRegistry
+-from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ 
+ 
+ configjs = """requirejs.config({
+-    baseUrl: '%s',
++    baseUrl: PORTAL_URL,
+     paths: %s,
+     shim: %s,
+     optimize: 'uglify',
+@@ -52,12 +51,6 @@ def registryResources(self):
+         return self.registry.collectionOfInterface(
+             IResourceRegistry, prefix="plone.resources", check=False)
+ 
+-    def base_url(self):
+-        portal_state = getMultiAdapter((self.context, self.request),
+-                                       name=u'plone_portal_state')
+-        site_url = portal_state.portal_url()
+-        return site_url
+-
+     def get_requirejs_config(self):
+         """
+         Returns the information for requirejs configuration
+@@ -85,18 +78,17 @@ def get_requirejs_config(self):
+                 # Resources available under name-url name
+                 src = script.url
+                 paths[name + '-url'] = src
+-        return (self.base_url(), paths, shims)
++        return (paths, shims)
+ 
+ 
+ class ConfigJsView(RequireJsView):
+     """ config.js for requirejs for script rendering. """
+ 
+     def __call__(self):
+-        (baseUrl, paths, shims) = self.get_requirejs_config()
++        (paths, shims) = self.get_requirejs_config()
+         self.request.response.setHeader("Content-Type",
+                                         "application/javascript")
+         return configjs % (
+-            baseUrl,
+             json.dumps(paths, indent=4),
+             _format_shims(shims)
+         )
+diff --git a/Products/CMFPlone/resources/browser/scripts.pt b/Products/CMFPlone/resources/browser/scripts.pt
+index e1c3bf7..73b8639 100644
+--- a/Products/CMFPlone/resources/browser/scripts.pt
++++ b/Products/CMFPlone/resources/browser/scripts.pt
+@@ -1,3 +1,4 @@
++<script type="text/javascript" tal:content="string:PORTAL_URL = '${view/base_url}';"></script>
+ <tal:scripts repeat="script view/scripts"
+   ><tal:block define="condcomment script/conditionalcomment"
+     ><tal:wcondcomment tal:condition="condcomment">
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 0a8d60a..52ab2cb 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -3,6 +3,7 @@
+ 
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.CMFPlone.resources.browser.resource import ResourceView
++from zope.component import getMultiAdapter
+ 
+ 
+ class ScriptsView(ResourceView):
+@@ -107,6 +108,12 @@ def default_resources(self):
+         })
+         return result
+ 
++    def base_url(self):
++        portal_state = getMultiAdapter((self.context, self.request),
++                                       name=u'plone_portal_state')
++        site_url = portal_state.portal_url()
++        return site_url
++
+     def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
 
 
 Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-04-14T14:30:37+02:00
+Date: 2016-04-17T15:48:47+02:00
 Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/78f894e5315f20d5353ebdfe1a89120775245fd5
+Commit: https://github.com/plone/Products.CMFPlone/commit/cf5cec8167a098707a2c98c853039d120afe658d
 
-Merge pull request #1528 from plone/fix-bundle-relative-urls
+Merge pull request #1531 from plone/fix-1530
 
-Fix #1462 use full path for url() when aggregating CSS
+Fix #1530 compute requirejs config baseUrl on client-side
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/resources/browser/combine.py
+M Products/CMFPlone/controlpanel/browser/resourceregistry.py
+M Products/CMFPlone/resources/browser/configjs.py
+M Products/CMFPlone/resources/browser/scripts.pt
+M Products/CMFPlone/resources/browser/scripts.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 30f7efe..312ae09 100644
+index 312ae09..6117468 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -52,6 +52,9 @@ Fixes:
- - Fix bundle aggregation when bundle has no CSS (or no JS)
+@@ -55,6 +55,9 @@ Fixes:
+ - Fix relative url in CSS in bundle aggregation
    [ebrehault]
  
-+- Fix relative url in CSS in bundle aggregation
++- Do not hard-code baseUrl in bundle to avoid bad URL when switching domains.
 +  [ebrehault]
 +
  
  5.1a1 (2016-03-31)
  ------------------
-diff --git a/Products/CMFPlone/resources/browser/combine.py b/Products/CMFPlone/resources/browser/combine.py
-index 10fa079..1a799f6 100644
---- a/Products/CMFPlone/resources/browser/combine.py
-+++ b/Products/CMFPlone/resources/browser/combine.py
-@@ -89,12 +89,13 @@ def write_css(context, folder, meta_bundle):
-     for bundle in bundles.values():
-         if bundle.merge_with == meta_bundle and bundle.csscompilation:
-             css = get_resource(context, bundle.csscompilation)
--            # Preserve relative urls:
--            # we prefix with '../'' any url not starting with '/'
--            # or http: or data:
-+            (path, sep, filename) = bundle.csscompilation.rpartition('/')
-+            # Process relative urls:
-+            # we prefix with current resource path any url not starting with
-+            # '/' or http: or data:
-             css = re.sub(
-                 r"""(url\(['"]?(?!['"]?([a-z]+:|\/)))""",
--                r'\1../',
-+                r'\1%s/' % path,
-                 css)
-             resources.append(css)
+diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+index d4de75c..9fda35a 100644
+--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py
++++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py
+@@ -287,7 +287,7 @@ def less_build_config(self):
+         })
  
+     def js_build_config(self):
+-        (baseUrl, paths, shims) = self.get_requirejs_config()
++        (paths, shims) = self.get_requirejs_config()
+         bundles = self.get_bundles()
+         resources = self.get_resources()
+ 
+diff --git a/Products/CMFPlone/resources/browser/configjs.py b/Products/CMFPlone/resources/browser/configjs.py
+index 7ee3db7..4fa690c 100644
+--- a/Products/CMFPlone/resources/browser/configjs.py
++++ b/Products/CMFPlone/resources/browser/configjs.py
+@@ -4,12 +4,11 @@
+ from Products.CMFPlone.interfaces import IResourceRegistry
+ from Products.Five.browser import BrowserView
+ from plone.registry.interfaces import IRegistry
+-from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ 
+ 
+ configjs = """requirejs.config({
+-    baseUrl: '%s',
++    baseUrl: PORTAL_URL,
+     paths: %s,
+     shim: %s,
+     optimize: 'uglify',
+@@ -52,12 +51,6 @@ def registryResources(self):
+         return self.registry.collectionOfInterface(
+             IResourceRegistry, prefix="plone.resources", check=False)
+ 
+-    def base_url(self):
+-        portal_state = getMultiAdapter((self.context, self.request),
+-                                       name=u'plone_portal_state')
+-        site_url = portal_state.portal_url()
+-        return site_url
+-
+     def get_requirejs_config(self):
+         """
+         Returns the information for requirejs configuration
+@@ -85,18 +78,17 @@ def get_requirejs_config(self):
+                 # Resources available under name-url name
+                 src = script.url
+                 paths[name + '-url'] = src
+-        return (self.base_url(), paths, shims)
++        return (paths, shims)
+ 
+ 
+ class ConfigJsView(RequireJsView):
+     """ config.js for requirejs for script rendering. """
+ 
+     def __call__(self):
+-        (baseUrl, paths, shims) = self.get_requirejs_config()
++        (paths, shims) = self.get_requirejs_config()
+         self.request.response.setHeader("Content-Type",
+                                         "application/javascript")
+         return configjs % (
+-            baseUrl,
+             json.dumps(paths, indent=4),
+             _format_shims(shims)
+         )
+diff --git a/Products/CMFPlone/resources/browser/scripts.pt b/Products/CMFPlone/resources/browser/scripts.pt
+index e1c3bf7..73b8639 100644
+--- a/Products/CMFPlone/resources/browser/scripts.pt
++++ b/Products/CMFPlone/resources/browser/scripts.pt
+@@ -1,3 +1,4 @@
++<script type="text/javascript" tal:content="string:PORTAL_URL = '${view/base_url}';"></script>
+ <tal:scripts repeat="script view/scripts"
+   ><tal:block define="condcomment script/conditionalcomment"
+     ><tal:wcondcomment tal:condition="condcomment">
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index 0a8d60a..52ab2cb 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -3,6 +3,7 @@
+ 
+ from Products.CMFPlone.resources.browser.cook import cookWhenChangingSettings
+ from Products.CMFPlone.resources.browser.resource import ResourceView
++from zope.component import getMultiAdapter
+ 
+ 
+ class ScriptsView(ResourceView):
+@@ -107,6 +108,12 @@ def default_resources(self):
+         })
+         return result
+ 
++    def base_url(self):
++        portal_state = getMultiAdapter((self.context, self.request),
++                                       name=u'plone_portal_state')
++        site_url = portal_state.portal_url()
++        return site_url
++
+     def scripts(self):
+         """The requirejs scripts, the ones that are not resources are loaded on
+         configjs.py
 
 
