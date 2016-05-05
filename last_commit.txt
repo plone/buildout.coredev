@@ -2,51 +2,415 @@ Repository: plone.autoform
 
 
 Branch: refs/heads/master
-Date: 2016-05-05T15:28:25+02:00
+Date: 2016-05-05T15:30:24+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.autoform/commit/a77bbe053d70de771e62cc7e5f5c7cc76b60a26f
+Commit: https://github.com/plone/plone.autoform/commit/e14da5fd2e2ed5d17823b2ed9a26fa24424c97ad
 
-more happyness for Jenkins CI reporting about code analysis - use single quotes - double quotes are now neccessary in xml output
+Enable override of label/description in a subsequent directive.
 
 Files changed:
-M plone/autoform/tests/test_supermodel_handler.py
+M CHANGES.rst
+M plone/autoform/utils.py
 
-diff --git a/plone/autoform/tests/test_supermodel_handler.py b/plone/autoform/tests/test_supermodel_handler.py
-index 61dfc2c..f49fd7f 100644
---- a/plone/autoform/tests/test_supermodel_handler.py
-+++ b/plone/autoform/tests/test_supermodel_handler.py
-@@ -348,8 +348,8 @@ class IDummy(Interface):
-         self.assertEqual(
-             etree.tostring(fieldNode),
-             '<field><ns0:widget'
--            ' xmlns:ns0=\'http://namespaces.plone.org/supermodel/form\''
--            ' type=\'foo\'/></field>'
-+            ' xmlns:ns0="http://namespaces.plone.org/supermodel/form"'
-+            ' type="foo"/></field>'
-         )
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 6a0e863..8de0aa5 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -16,7 +16,12 @@ Incompatibilities:
  
-     def test_write_parameterized_widget_default(self):
-@@ -384,9 +384,9 @@ class IDummy(Interface):
-         self.assertEqual(
-             etree.tostring(fieldNode),
-             '<field><ns0:widget'
--            ' xmlns:ns0=\'http://namespaces.plone.org/supermodel/form\''
--            ' type=\'plone.autoform.tests.test_supermodel_handler.'
--            'DummyWidget\'>'
-+            ' xmlns:ns0="http://namespaces.plone.org/supermodel/form"'
-+            ' type="plone.autoform.tests.test_supermodel_handler.'
-+            'DummyWidget">'
-             '<klass>custom</klass>'
-             '</ns0:widget></field>')
+ New:
  
-@@ -405,7 +405,7 @@ class IDummy(Interface):
-         self.assertEqual(
-             etree.tostring(fieldNode),
-             '<field><ns0:widget'
--            ' xmlns:ns0=\'http://namespaces.plone.org/supermodel/form\'>'
-+            ' xmlns:ns0="http://namespaces.plone.org/supermodel/form">'
-             '<klass>custom</klass></ns0:widget></field>')
+-- *add item here*
++- Fieldset labels/descriptions we're taken from first occurence.
++  It was not possible to override them in a subsequent directive.
++  Also it was not possible to set them in a subsequent directive, if it was not set before.
++  Now subsequent directives w/o a label/description are just adding the field to the fieldset.
++  If a different label and/or description is given, it replaces the existing prior loaded one.
++  [jensens]
+ 
+ Fixes:
+ 
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index 9d47c03..bbe3c56 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -68,7 +68,7 @@ def mergedTaggedValuesForForm(schema, name, form):
+ 
+ # Some helper functions
+ 
+-def _fn(prefix, fieldName):
++def _process_prefixed_name(prefix, fieldName):
+     """Give prefixed fieldname if applicable
+     """
+     if prefix:
+@@ -78,7 +78,7 @@ def _fn(prefix, fieldName):
  
  
+ def _bn(fieldInstance):
+-    """Give base (non-prefixed) fieldname
++    """Base Name: Give base (non-prefixed) fieldname
+     """
+     prefix = fieldInstance.prefix
+     fieldName = fieldInstance.__name__
+@@ -117,6 +117,78 @@ def _processWidgets(form, widgets, modes, newFields):
+             newFields[fieldName].mode = widgetMode
+ 
+ 
++def _process_fieldsets(
++    form,
++    schema,
++    groups,
++    all_fields,
++    prefix,
++    default_group
++):
++    """ Keep track of which fields are in a fieldset, and, by elimination,
++    which ones are not
++    """
++    # { name => e.g. 'hidden' }
++    modes = mergedTaggedValuesForForm(schema, MODES_KEY, form)
++
++    # { name => widget/dotted name }
++    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
++
++    # list of IFieldset instances
++    fieldsets = mergedTaggedValueList(schema, FIELDSETS_KEY)
++
++    # process primary schema fieldsets
++    fieldset_fields = []
++    for fieldset in fieldsets:
++        for field_name in fieldset.fields:
++            fieldset_fields.append(_process_prefixed_name(prefix, field_name))
++
++    # Set up the default fields, widget factories and widget modes
++    new_fields = all_fields.omit(*fieldset_fields)
++    _processWidgets(form, widgets, modes, new_fields)
++
++    if not default_group:
++        form.fields += new_fields
++    else:
++        groups[default_group].fields += new_fields
++
++    # Set up fields for fieldsets
++
++    for fieldset in fieldsets:
++        new_fields = all_fields.select(
++            *[_process_prefixed_name(prefix, name) for name in fieldset.fields
++              if _process_prefixed_name(prefix, name) in all_fields]
++        )
++        if not (
++            getattr(form, 'showEmptyGroups', False) or
++            len(new_fields) > 0
++        ):
++            continue
++        _processWidgets(form, widgets, modes, new_fields)
++
++        if fieldset.__name__ not in groups:
++            group = GroupFactory(fieldset.__name__,
++                                 label=fieldset.label,
++                                 description=fieldset.description,
++                                 fields=new_fields)
++            form.groups.append(group)
++            groups[group.__name__] = group
++        else:
++            group = groups[fieldset.__name__]
++            group.fields += new_fields
++            if (
++                fieldset.label and
++                group.label != fieldset.label and
++                group.__name__ != fieldset.label  # defaults to name!
++            ):
++                group.label = fieldset.label
++            if (
++                fieldset.description and
++                group.description != fieldset.description
++            ):
++                group.description = fieldset.description
++
++
+ def processFields(form, schema, prefix='', defaultGroup=None,
+                   permissionChecks=True):
+     """Add the fields from the schema to the form, taking into account
+@@ -136,15 +208,6 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+     # { name => True }
+     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+ 
+-    # { name => e.g. 'hidden' }
+-    modes = mergedTaggedValuesForForm(schema, MODES_KEY, form)
+-
+-    # { name => widget/dotted name }
+-    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
+-
+-    # list of IFieldset instances
+-    fieldsets = mergedTaggedValueList(schema, FIELDSETS_KEY)
+-
+     # Get either read or write permissions depending on what type of
+     # form this is
+     readPermissions = {}  # field name -> permission name
+@@ -171,7 +234,7 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+ 
+     for fieldName, status in omitted.items():
+         if status and status != 'false':
+-            doNotProcess.append(_fn(prefix, fieldName))
++            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
+ 
+     for group in form.groups:
+         doNotProcess.extend(list(group.fields.keys()))
+@@ -217,45 +280,7 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+                     disallowedFields.append(fieldName)
+ 
+         allFields = allFields.omit(*disallowedFields)
+-
+-    # Keep track of which fields are in a fieldset, and, by elimination,
+-    # which ones are not
+-
+-    fieldsetFields = []
+-    for fieldset in fieldsets:
+-        for fieldName in fieldset.fields:
+-            fieldsetFields.append(_fn(prefix, fieldName))
+-
+-    # Set up the default fields, widget factories and widget modes
+-
+-    newFields = allFields.omit(*fieldsetFields)
+-    _processWidgets(form, widgets, modes, newFields)
+-
+-    if not defaultGroup:
+-        form.fields += newFields
+-    else:
+-        groups[defaultGroup].fields += newFields
+-
+-    # Set up fields for fieldsets
+-
+-    for fieldset in fieldsets:
+-
+-        newFields = allFields.select(*[_fn(prefix, fieldName)
+-                                       for fieldName in fieldset.fields
+-                                       if _fn(prefix, fieldName) in allFields])
+-
+-        if getattr(form, 'showEmptyGroups', False) or (len(newFields) > 0):
+-            _processWidgets(form, widgets, modes, newFields)
+-
+-            if fieldset.__name__ not in groups:
+-                group = GroupFactory(fieldset.__name__,
+-                                     label=fieldset.label,
+-                                     description=fieldset.description,
+-                                     fields=newFields)
+-                form.groups.append(group)
+-                groups[group.__name__] = group
+-            else:
+-                groups[fieldset.__name__].fields += newFields
++    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
+ 
+ 
+ @deprecate(
+
+
+Repository: plone.autoform
+
+
+Branch: refs/heads/master
+Date: 2016-05-05T16:42:44+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.autoform/commit/1709d09410dd984b0d36f51b724131fb2114570c
+
+Merge pull request #13 from plone/jensens-fieldsets
+
+Enable override of fieldset label/description in a subsequent directive.
+
+Files changed:
+M CHANGES.rst
+M plone/autoform/utils.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 6a0e863..8de0aa5 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -16,7 +16,12 @@ Incompatibilities:
+ 
+ New:
+ 
+-- *add item here*
++- Fieldset labels/descriptions we're taken from first occurence.
++  It was not possible to override them in a subsequent directive.
++  Also it was not possible to set them in a subsequent directive, if it was not set before.
++  Now subsequent directives w/o a label/description are just adding the field to the fieldset.
++  If a different label and/or description is given, it replaces the existing prior loaded one.
++  [jensens]
+ 
+ Fixes:
+ 
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index 9d47c03..bbe3c56 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -68,7 +68,7 @@ def mergedTaggedValuesForForm(schema, name, form):
+ 
+ # Some helper functions
+ 
+-def _fn(prefix, fieldName):
++def _process_prefixed_name(prefix, fieldName):
+     """Give prefixed fieldname if applicable
+     """
+     if prefix:
+@@ -78,7 +78,7 @@ def _fn(prefix, fieldName):
+ 
+ 
+ def _bn(fieldInstance):
+-    """Give base (non-prefixed) fieldname
++    """Base Name: Give base (non-prefixed) fieldname
+     """
+     prefix = fieldInstance.prefix
+     fieldName = fieldInstance.__name__
+@@ -117,6 +117,78 @@ def _processWidgets(form, widgets, modes, newFields):
+             newFields[fieldName].mode = widgetMode
+ 
+ 
++def _process_fieldsets(
++    form,
++    schema,
++    groups,
++    all_fields,
++    prefix,
++    default_group
++):
++    """ Keep track of which fields are in a fieldset, and, by elimination,
++    which ones are not
++    """
++    # { name => e.g. 'hidden' }
++    modes = mergedTaggedValuesForForm(schema, MODES_KEY, form)
++
++    # { name => widget/dotted name }
++    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
++
++    # list of IFieldset instances
++    fieldsets = mergedTaggedValueList(schema, FIELDSETS_KEY)
++
++    # process primary schema fieldsets
++    fieldset_fields = []
++    for fieldset in fieldsets:
++        for field_name in fieldset.fields:
++            fieldset_fields.append(_process_prefixed_name(prefix, field_name))
++
++    # Set up the default fields, widget factories and widget modes
++    new_fields = all_fields.omit(*fieldset_fields)
++    _processWidgets(form, widgets, modes, new_fields)
++
++    if not default_group:
++        form.fields += new_fields
++    else:
++        groups[default_group].fields += new_fields
++
++    # Set up fields for fieldsets
++
++    for fieldset in fieldsets:
++        new_fields = all_fields.select(
++            *[_process_prefixed_name(prefix, name) for name in fieldset.fields
++              if _process_prefixed_name(prefix, name) in all_fields]
++        )
++        if not (
++            getattr(form, 'showEmptyGroups', False) or
++            len(new_fields) > 0
++        ):
++            continue
++        _processWidgets(form, widgets, modes, new_fields)
++
++        if fieldset.__name__ not in groups:
++            group = GroupFactory(fieldset.__name__,
++                                 label=fieldset.label,
++                                 description=fieldset.description,
++                                 fields=new_fields)
++            form.groups.append(group)
++            groups[group.__name__] = group
++        else:
++            group = groups[fieldset.__name__]
++            group.fields += new_fields
++            if (
++                fieldset.label and
++                group.label != fieldset.label and
++                group.__name__ != fieldset.label  # defaults to name!
++            ):
++                group.label = fieldset.label
++            if (
++                fieldset.description and
++                group.description != fieldset.description
++            ):
++                group.description = fieldset.description
++
++
+ def processFields(form, schema, prefix='', defaultGroup=None,
+                   permissionChecks=True):
+     """Add the fields from the schema to the form, taking into account
+@@ -136,15 +208,6 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+     # { name => True }
+     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+ 
+-    # { name => e.g. 'hidden' }
+-    modes = mergedTaggedValuesForForm(schema, MODES_KEY, form)
+-
+-    # { name => widget/dotted name }
+-    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
+-
+-    # list of IFieldset instances
+-    fieldsets = mergedTaggedValueList(schema, FIELDSETS_KEY)
+-
+     # Get either read or write permissions depending on what type of
+     # form this is
+     readPermissions = {}  # field name -> permission name
+@@ -171,7 +234,7 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+ 
+     for fieldName, status in omitted.items():
+         if status and status != 'false':
+-            doNotProcess.append(_fn(prefix, fieldName))
++            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
+ 
+     for group in form.groups:
+         doNotProcess.extend(list(group.fields.keys()))
+@@ -217,45 +280,7 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+                     disallowedFields.append(fieldName)
+ 
+         allFields = allFields.omit(*disallowedFields)
+-
+-    # Keep track of which fields are in a fieldset, and, by elimination,
+-    # which ones are not
+-
+-    fieldsetFields = []
+-    for fieldset in fieldsets:
+-        for fieldName in fieldset.fields:
+-            fieldsetFields.append(_fn(prefix, fieldName))
+-
+-    # Set up the default fields, widget factories and widget modes
+-
+-    newFields = allFields.omit(*fieldsetFields)
+-    _processWidgets(form, widgets, modes, newFields)
+-
+-    if not defaultGroup:
+-        form.fields += newFields
+-    else:
+-        groups[defaultGroup].fields += newFields
+-
+-    # Set up fields for fieldsets
+-
+-    for fieldset in fieldsets:
+-
+-        newFields = allFields.select(*[_fn(prefix, fieldName)
+-                                       for fieldName in fieldset.fields
+-                                       if _fn(prefix, fieldName) in allFields])
+-
+-        if getattr(form, 'showEmptyGroups', False) or (len(newFields) > 0):
+-            _processWidgets(form, widgets, modes, newFields)
+-
+-            if fieldset.__name__ not in groups:
+-                group = GroupFactory(fieldset.__name__,
+-                                     label=fieldset.label,
+-                                     description=fieldset.description,
+-                                     fields=newFields)
+-                form.groups.append(group)
+-                groups[group.__name__] = group
+-            else:
+-                groups[fieldset.__name__].fields += newFields
++    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
+ 
+ 
+ @deprecate(
 
 
