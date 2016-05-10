@@ -1,122 +1,682 @@
-Repository: plone.app.contenttypes
+Repository: plone.autoform
 
 
 Branch: refs/heads/master
-Date: 2016-05-08T23:06:32+02:00
+Date: 2016-05-10T16:11:39+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/2e0be405c803aace1d82d258d72fdfccd6086fa5
+Commit: https://github.com/plone/plone.autoform/commit/a795cb74e8e31b88a6050506f83bfde8b011da88
 
-deferred initialize to reduce costs of adapter lookup.
+Orderable fieldsets support. Fixes #14.
 
 Files changed:
 M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
+M plone/autoform/base.py
+M plone/autoform/directives.py
+M plone/autoform/utils.py
+M plone/autoform/widgets.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 0df3471..a9fe553 100644
+index 8de0aa5..6d0609a 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,11 @@ New:
+@@ -23,6 +23,10 @@ New:
+   If a different label and/or description is given, it replaces the existing prior loaded one.
+   [jensens]
  
- Fixes:
- 
-+- Deferred adapter lookup in collection view.
-+  This was looked up for contentmenu/toolbar at every authenticated request.
-+  It also had side effects if custom collection behaviors are used.
++- The order of the fieldsets can be defined now explictly with the ``plone.supermodel.directives.fieldset`` directive.
++  ``plone.autoform`` now does the sorting while fieldset processing.
 +  [jensens]
 +
- - Fixed unstable robot test for location criterion.  [maurits]
+ Fixes:
  
- - Don't fail for ``utils.replace_link_variables_by_paths``, if value is ``None``.
-diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py
-index 55b3333..8ce752f 100644
---- a/plone/app/contenttypes/browser/collection.py
-+++ b/plone/app/contenttypes/browser/collection.py
-@@ -10,11 +10,18 @@
+ - Implementation on how field ordering happens was unreproducible if same schemas are coming in in different orders.
+diff --git a/plone/autoform/base.py b/plone/autoform/base.py
+index 1a68788..b06d5d4 100644
+--- a/plone/autoform/base.py
++++ b/plone/autoform/base.py
+@@ -1,7 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from collections import OrderedDict
++from operator import attrgetter
+ from plone.autoform.interfaces import ORDER_KEY
+ from plone.autoform.utils import processFields
++from plone.supermodel.interfaces import DEFAULT_ORDER
+ from plone.supermodel.utils import mergedTaggedValueList
+ from plone.z3cform.fieldsets.group import GroupFactory
+ from plone.z3cform.fieldsets.utils import move
+@@ -98,8 +100,9 @@ def updateFieldsFromSchemata(self):
+                     fieldset_group = GroupFactory(
+                         group_name,
+                         field.Fields(),
+-                        group_name,
+-                        schema.__doc__
++                        label=group_name,
++                        description=schema.__doc__,
++                        order=DEFAULT_ORDER,
+                     )
+                     self.groups.append(fieldset_group)
  
- class CollectionView(FolderView):
+@@ -129,6 +132,7 @@ def updateFieldsFromSchemata(self):
+             rules = self._calculate_field_moves(order, rules=rules)
+         self._cleanup_rules(rules)
+         self._process_field_moves(rules)
++        self._process_group_order()
  
--    def __init__(self, *args, **kwargs):
--        super(CollectionView, self).__init__(*args, **kwargs)
--        context = aq_inner(self.context)
--        self.collection_behavior = ICollection(context)
--        self.b_size = self.collection_behavior.item_count
-+    @property
-+    def collection_behavior(self):
-+        return ICollection(aq_inner(self.context))
+     def getPrefix(self, schema):
+         """Get the preferred prefix for the given schema
+@@ -247,3 +251,6 @@ def _process_field_moves(self, rules):
+                         )
+                     )
+             self._process_field_moves(rule.get('with', {}))
 +
-+    @property
-+    def b_size(self):
-+        return getattr(self, '_b_size', self.collection_behavior.item_count)
-+
-+    @b_size.setter
-+    def b_size(self, value):
-+        # ignore, FolderView tries to set on init
-+        pass
++    def _process_group_order(self):
++        self.groups.sort(key=attrgetter('order'))
+diff --git a/plone/autoform/directives.py b/plone/autoform/directives.py
+index 607e1a3..6fbd95c 100644
+--- a/plone/autoform/directives.py
++++ b/plone/autoform/directives.py
+@@ -120,7 +120,10 @@ def factory(self, field_name=None, widget_class=None, **kw):
+         if field_name is None:  # Usage 3
+             for field_name, widget in kw.items():
+                 if not isinstance(widget, basestring):
+-                    widget = '%s.%s' % (widget.__module__, widget.__name__)
++                    widget = '{0}.{1}'.format(
++                        widget.__module__,
++                        widget.__name__
++                    )
+                 widgets[field_name] = widget
+         else:
+             if widget_class is not None \
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index bbe3c56..defe059 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -7,6 +7,7 @@
+ from plone.autoform.interfaces import READ_PERMISSIONS_KEY
+ from plone.autoform.interfaces import WIDGETS_KEY
+ from plone.autoform.interfaces import WRITE_PERMISSIONS_KEY
++from plone.supermodel.interfaces import DEFAULT_ORDER
+ from plone.supermodel.interfaces import FIELDSETS_KEY
+ from plone.supermodel.utils import mergedTaggedValueDict
+ from plone.supermodel.utils import mergedTaggedValueList
+@@ -88,7 +89,7 @@ def _bn(fieldInstance):
+         return fieldName
  
-     def results(self, **kwargs):
-         """Return a content listing based result set with results from the
+ 
+-def _processWidgets(form, widgets, modes, newFields):
++def _process_widgets(form, widgets, modes, newFields):
+     """Update the fields list with widgets
+     """
+ 
+@@ -145,7 +146,7 @@ def _process_fieldsets(
+ 
+     # Set up the default fields, widget factories and widget modes
+     new_fields = all_fields.omit(*fieldset_fields)
+-    _processWidgets(form, widgets, modes, new_fields)
++    _process_widgets(form, widgets, modes, new_fields)
+ 
+     if not default_group:
+         form.fields += new_fields
+@@ -164,12 +165,12 @@ def _process_fieldsets(
+             len(new_fields) > 0
+         ):
+             continue
+-        _processWidgets(form, widgets, modes, new_fields)
+-
++        _process_widgets(form, widgets, modes, new_fields)
+         if fieldset.__name__ not in groups:
+             group = GroupFactory(fieldset.__name__,
+                                  label=fieldset.label,
+                                  description=fieldset.description,
++                                 order=fieldset.order,
+                                  fields=new_fields)
+             form.groups.append(group)
+             groups[group.__name__] = group
+@@ -187,6 +188,57 @@ def _process_fieldsets(
+                 group.description != fieldset.description
+             ):
+                 group.description = fieldset.description
++            if (
++                fieldset.order and
++                fieldset.order != DEFAULT_ORDER and
++                fieldset.order != group.order
++            ):
++                group.order = fieldset.order
++
++
++def _process_permissions(schema, form, all_fields):
++    # Get either read or write permissions depending on what type of
++    # form this is
++    permission_cache = {}  # permission name -> allowed/disallowed
++
++    # name => permission name
++    read_permissions = mergedTaggedValueDict(
++        schema,
++        READ_PERMISSIONS_KEY
++    )
++    # name => permission name
++    write_permissions = mergedTaggedValueDict(
++        schema,
++        WRITE_PERMISSIONS_KEY
++    )
++    security_manager = getSecurityManager()
++    disallowed_fields = []
++
++    for field_name, field_instance in all_fields.items():
++        field_mode = field_instance.mode or form.mode
++        permission_name = None
++        base_name = _bn(field_instance)
++        if field_mode == DISPLAY_MODE:
++            permission_name = read_permissions.get(base_name, None)
++        elif field_mode == INPUT_MODE:
++            permission_name = write_permissions.get(base_name, None)
++        if permission_name is None:
++            continue
++        if permission_name not in permission_cache:
++            permission = queryUtility(IPermission, name=permission_name)
++            if permission is None:
++                permission_cache[permission_name] = True
++            else:
++                permission_cache[permission_name] = bool(
++                    security_manager.checkPermission(
++                        permission.title,
++                        form.context
++                    )
++                )
++        if not permission_cache.get(permission_name, True):
++            disallowed_fields.append(field_name)
++
++    return all_fields.omit(*disallowed_fields)
+ 
+ 
+ def processFields(form, schema, prefix='', defaultGroup=None,
+@@ -208,79 +260,29 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+     # { name => True }
+     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+ 
+-    # Get either read or write permissions depending on what type of
+-    # form this is
+-    readPermissions = {}  # field name -> permission name
+-    writePermissions = {}  # field name -> permission name
+-    permissionCache = {}  # permission name -> allowed/disallowed
+-
+-    if permissionChecks:
+-        # name => permission name
+-        readPermissions = mergedTaggedValueDict(
+-            schema,
+-            READ_PERMISSIONS_KEY
+-        )
+-        # name => permission name
+-        writePermissions = mergedTaggedValueDict(
+-            schema,
+-            WRITE_PERMISSIONS_KEY
+-        )
+-        securityManager = getSecurityManager()
+-
+     # Find the fields we should not worry about
+-
+     groups = {}
+-    doNotProcess = list(form.fields.keys())
++    do_not_process = list(form.fields.keys())
+ 
+-    for fieldName, status in omitted.items():
++    for field_name, status in omitted.items():
+         if status and status != 'false':
+-            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
++            do_not_process.append(_process_prefixed_name(prefix, field_name))
+ 
+     for group in form.groups:
+-        doNotProcess.extend(list(group.fields.keys()))
+-
+-        groupName = getattr(group, '__name__', group.label)
+-        groups[groupName] = group
++        do_not_process.extend(list(group.fields.keys()))
++        groups[getattr(group, '__name__', group.label)] = group
+ 
+     # Find all allowed fields so that we have something to select from
+-    omitReadOnly = form.mode != DISPLAY_MODE
+-    allFields = field.Fields(
++    omit_read_only = form.mode != DISPLAY_MODE
++    all_fields = field.Fields(
+         schema,
+         prefix=prefix,
+-        omitReadOnly=omitReadOnly
+-    ).omit(*doNotProcess)
++        omitReadOnly=omit_read_only
++    ).omit(*do_not_process)
+ 
+-    # Check permissions
+     if permissionChecks:
+-
+-        disallowedFields = []
+-
+-        for fieldName, fieldInstance in allFields.items():
+-            fieldName = fieldInstance.__name__
+-            fieldMode = fieldInstance.mode or form.mode
+-
+-            permissionName = None
+-            if fieldMode == DISPLAY_MODE:
+-                permissionName = readPermissions.get(_bn(fieldInstance), None)
+-            elif fieldMode == INPUT_MODE:
+-                permissionName = writePermissions.get(_bn(fieldInstance), None)
+-            if permissionName is not None:
+-                if permissionName not in permissionCache:
+-                    permission = queryUtility(IPermission, name=permissionName)
+-                    if permission is None:
+-                        permissionCache[permissionName] = True
+-                    else:
+-                        permissionCache[permissionName] = bool(
+-                            securityManager.checkPermission(
+-                                permission.title,
+-                                form.context
+-                            )
+-                        )
+-                if not permissionCache.get(permissionName, True):
+-                    disallowedFields.append(fieldName)
+-
+-        allFields = allFields.omit(*disallowedFields)
+-    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
++        all_fields = _process_permissions(schema, form, all_fields)
++    _process_fieldsets(form, schema, groups, all_fields, prefix, defaultGroup)
+ 
+ 
+ @deprecate(
+@@ -299,7 +301,7 @@ def processFieldMoves(form, schema, prefix=''):
+ 
+     # (name, 'before'/'after', other name)
+     order = mergedTaggedValueList(schema, ORDER_KEY)
+-    for fieldName, direction, relative_to in order:
++    for field_name, direction, relative_to in order:
+ 
+         # Handle shortcut: leading . means 'in this schema'. May be useful
+         # if you want to move a field relative to one in the current
+@@ -313,9 +315,9 @@ def processFieldMoves(form, schema, prefix=''):
+ 
+         try:
+             if direction == 'before':
+-                move(form, fieldName, before=relative_to, prefix=prefix)
++                move(form, field_name, before=relative_to, prefix=prefix)
+             elif direction == 'after':
+-                move(form, fieldName, after=relative_to, prefix=prefix)
++                move(form, field_name, after=relative_to, prefix=prefix)
+         except KeyError:
+             # The relative_to field doesn't exist
+             pass
+diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
+index aede2db..0ed195a 100644
+--- a/plone/autoform/widgets.py
++++ b/plone/autoform/widgets.py
+@@ -67,8 +67,11 @@ def __call__(self, field, request):
+         return widget
+ 
+     def __repr__(self):
+-        return '%s(%s, %s)' % (self.__class__.__name__,
+-                               self.widget_factory, self.params)
++        return '{0}({1}, {2})'.format(
++            self.__class__.__name__,
++            self.widget_factory,
++            self.params
++        )
+ 
+     def getWidgetFactoryName(self):
+         """Returns the dotted path of the widget factory for serialization.
+diff --git a/setup.py b/setup.py
+index f0a6890..f788b63 100644
+--- a/setup.py
++++ b/setup.py
+@@ -44,8 +44,8 @@ def read(*rnames):
+         'zope.schema',
+         'zope.security',
+         'zope.dottedname',
+-        'plone.supermodel>=1.1dev',
+-        'plone.z3cform',
++        'plone.supermodel>=1.3.dev0',
++        'plone.z3cform>=0.9.0.dev0',
+         'z3c.form',
+         # 'AccessControl',
+         # -*- Extra requirements: -*-
 
 
-Repository: plone.app.contenttypes
+Repository: plone.autoform
 
 
 Branch: refs/heads/master
-Date: 2016-05-09T01:16:01+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/1ec22b9556879741a630ff4b72bec86838da8990
+Date: 2016-05-10T18:24:04+02:00
+Author: agitator (agitator) <hpeter@agitator.com>
+Commit: https://github.com/plone/plone.autoform/commit/dcd4147f24448be48a4cd5c296475eac6561adb9
 
-Merge pull request #348 from plone/jensens-deferred-adapter-lookup
+Merge pull request #15 from plone/jensens-sort-fieldsets
 
-deferred initialize to reduce costs of adapter lookup.
+orderable fieldsets
 
 Files changed:
 M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
+M plone/autoform/base.py
+M plone/autoform/directives.py
+M plone/autoform/utils.py
+M plone/autoform/widgets.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 0df3471..a9fe553 100644
+index 8de0aa5..6d0609a 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,11 @@ New:
+@@ -23,6 +23,10 @@ New:
+   If a different label and/or description is given, it replaces the existing prior loaded one.
+   [jensens]
  
- Fixes:
- 
-+- Deferred adapter lookup in collection view.
-+  This was looked up for contentmenu/toolbar at every authenticated request.
-+  It also had side effects if custom collection behaviors are used.
++- The order of the fieldsets can be defined now explictly with the ``plone.supermodel.directives.fieldset`` directive.
++  ``plone.autoform`` now does the sorting while fieldset processing.
 +  [jensens]
 +
- - Fixed unstable robot test for location criterion.  [maurits]
+ Fixes:
  
- - Don't fail for ``utils.replace_link_variables_by_paths``, if value is ``None``.
-diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py
-index 55b3333..8ce752f 100644
---- a/plone/app/contenttypes/browser/collection.py
-+++ b/plone/app/contenttypes/browser/collection.py
-@@ -10,11 +10,18 @@
+ - Implementation on how field ordering happens was unreproducible if same schemas are coming in in different orders.
+diff --git a/plone/autoform/base.py b/plone/autoform/base.py
+index 1a68788..b06d5d4 100644
+--- a/plone/autoform/base.py
++++ b/plone/autoform/base.py
+@@ -1,7 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from collections import OrderedDict
++from operator import attrgetter
+ from plone.autoform.interfaces import ORDER_KEY
+ from plone.autoform.utils import processFields
++from plone.supermodel.interfaces import DEFAULT_ORDER
+ from plone.supermodel.utils import mergedTaggedValueList
+ from plone.z3cform.fieldsets.group import GroupFactory
+ from plone.z3cform.fieldsets.utils import move
+@@ -98,8 +100,9 @@ def updateFieldsFromSchemata(self):
+                     fieldset_group = GroupFactory(
+                         group_name,
+                         field.Fields(),
+-                        group_name,
+-                        schema.__doc__
++                        label=group_name,
++                        description=schema.__doc__,
++                        order=DEFAULT_ORDER,
+                     )
+                     self.groups.append(fieldset_group)
  
- class CollectionView(FolderView):
+@@ -129,6 +132,7 @@ def updateFieldsFromSchemata(self):
+             rules = self._calculate_field_moves(order, rules=rules)
+         self._cleanup_rules(rules)
+         self._process_field_moves(rules)
++        self._process_group_order()
  
--    def __init__(self, *args, **kwargs):
--        super(CollectionView, self).__init__(*args, **kwargs)
--        context = aq_inner(self.context)
--        self.collection_behavior = ICollection(context)
--        self.b_size = self.collection_behavior.item_count
-+    @property
-+    def collection_behavior(self):
-+        return ICollection(aq_inner(self.context))
+     def getPrefix(self, schema):
+         """Get the preferred prefix for the given schema
+@@ -247,3 +251,6 @@ def _process_field_moves(self, rules):
+                         )
+                     )
+             self._process_field_moves(rule.get('with', {}))
 +
-+    @property
-+    def b_size(self):
-+        return getattr(self, '_b_size', self.collection_behavior.item_count)
-+
-+    @b_size.setter
-+    def b_size(self, value):
-+        # ignore, FolderView tries to set on init
-+        pass
++    def _process_group_order(self):
++        self.groups.sort(key=attrgetter('order'))
+diff --git a/plone/autoform/directives.py b/plone/autoform/directives.py
+index 607e1a3..6fbd95c 100644
+--- a/plone/autoform/directives.py
++++ b/plone/autoform/directives.py
+@@ -120,7 +120,10 @@ def factory(self, field_name=None, widget_class=None, **kw):
+         if field_name is None:  # Usage 3
+             for field_name, widget in kw.items():
+                 if not isinstance(widget, basestring):
+-                    widget = '%s.%s' % (widget.__module__, widget.__name__)
++                    widget = '{0}.{1}'.format(
++                        widget.__module__,
++                        widget.__name__
++                    )
+                 widgets[field_name] = widget
+         else:
+             if widget_class is not None \
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index bbe3c56..defe059 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -7,6 +7,7 @@
+ from plone.autoform.interfaces import READ_PERMISSIONS_KEY
+ from plone.autoform.interfaces import WIDGETS_KEY
+ from plone.autoform.interfaces import WRITE_PERMISSIONS_KEY
++from plone.supermodel.interfaces import DEFAULT_ORDER
+ from plone.supermodel.interfaces import FIELDSETS_KEY
+ from plone.supermodel.utils import mergedTaggedValueDict
+ from plone.supermodel.utils import mergedTaggedValueList
+@@ -88,7 +89,7 @@ def _bn(fieldInstance):
+         return fieldName
  
-     def results(self, **kwargs):
-         """Return a content listing based result set with results from the
+ 
+-def _processWidgets(form, widgets, modes, newFields):
++def _process_widgets(form, widgets, modes, newFields):
+     """Update the fields list with widgets
+     """
+ 
+@@ -145,7 +146,7 @@ def _process_fieldsets(
+ 
+     # Set up the default fields, widget factories and widget modes
+     new_fields = all_fields.omit(*fieldset_fields)
+-    _processWidgets(form, widgets, modes, new_fields)
++    _process_widgets(form, widgets, modes, new_fields)
+ 
+     if not default_group:
+         form.fields += new_fields
+@@ -164,12 +165,12 @@ def _process_fieldsets(
+             len(new_fields) > 0
+         ):
+             continue
+-        _processWidgets(form, widgets, modes, new_fields)
+-
++        _process_widgets(form, widgets, modes, new_fields)
+         if fieldset.__name__ not in groups:
+             group = GroupFactory(fieldset.__name__,
+                                  label=fieldset.label,
+                                  description=fieldset.description,
++                                 order=fieldset.order,
+                                  fields=new_fields)
+             form.groups.append(group)
+             groups[group.__name__] = group
+@@ -187,6 +188,57 @@ def _process_fieldsets(
+                 group.description != fieldset.description
+             ):
+                 group.description = fieldset.description
++            if (
++                fieldset.order and
++                fieldset.order != DEFAULT_ORDER and
++                fieldset.order != group.order
++            ):
++                group.order = fieldset.order
++
++
++def _process_permissions(schema, form, all_fields):
++    # Get either read or write permissions depending on what type of
++    # form this is
++    permission_cache = {}  # permission name -> allowed/disallowed
++
++    # name => permission name
++    read_permissions = mergedTaggedValueDict(
++        schema,
++        READ_PERMISSIONS_KEY
++    )
++    # name => permission name
++    write_permissions = mergedTaggedValueDict(
++        schema,
++        WRITE_PERMISSIONS_KEY
++    )
++    security_manager = getSecurityManager()
++    disallowed_fields = []
++
++    for field_name, field_instance in all_fields.items():
++        field_mode = field_instance.mode or form.mode
++        permission_name = None
++        base_name = _bn(field_instance)
++        if field_mode == DISPLAY_MODE:
++            permission_name = read_permissions.get(base_name, None)
++        elif field_mode == INPUT_MODE:
++            permission_name = write_permissions.get(base_name, None)
++        if permission_name is None:
++            continue
++        if permission_name not in permission_cache:
++            permission = queryUtility(IPermission, name=permission_name)
++            if permission is None:
++                permission_cache[permission_name] = True
++            else:
++                permission_cache[permission_name] = bool(
++                    security_manager.checkPermission(
++                        permission.title,
++                        form.context
++                    )
++                )
++        if not permission_cache.get(permission_name, True):
++            disallowed_fields.append(field_name)
++
++    return all_fields.omit(*disallowed_fields)
+ 
+ 
+ def processFields(form, schema, prefix='', defaultGroup=None,
+@@ -208,79 +260,29 @@ def processFields(form, schema, prefix='', defaultGroup=None,
+     # { name => True }
+     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+ 
+-    # Get either read or write permissions depending on what type of
+-    # form this is
+-    readPermissions = {}  # field name -> permission name
+-    writePermissions = {}  # field name -> permission name
+-    permissionCache = {}  # permission name -> allowed/disallowed
+-
+-    if permissionChecks:
+-        # name => permission name
+-        readPermissions = mergedTaggedValueDict(
+-            schema,
+-            READ_PERMISSIONS_KEY
+-        )
+-        # name => permission name
+-        writePermissions = mergedTaggedValueDict(
+-            schema,
+-            WRITE_PERMISSIONS_KEY
+-        )
+-        securityManager = getSecurityManager()
+-
+     # Find the fields we should not worry about
+-
+     groups = {}
+-    doNotProcess = list(form.fields.keys())
++    do_not_process = list(form.fields.keys())
+ 
+-    for fieldName, status in omitted.items():
++    for field_name, status in omitted.items():
+         if status and status != 'false':
+-            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
++            do_not_process.append(_process_prefixed_name(prefix, field_name))
+ 
+     for group in form.groups:
+-        doNotProcess.extend(list(group.fields.keys()))
+-
+-        groupName = getattr(group, '__name__', group.label)
+-        groups[groupName] = group
++        do_not_process.extend(list(group.fields.keys()))
++        groups[getattr(group, '__name__', group.label)] = group
+ 
+     # Find all allowed fields so that we have something to select from
+-    omitReadOnly = form.mode != DISPLAY_MODE
+-    allFields = field.Fields(
++    omit_read_only = form.mode != DISPLAY_MODE
++    all_fields = field.Fields(
+         schema,
+         prefix=prefix,
+-        omitReadOnly=omitReadOnly
+-    ).omit(*doNotProcess)
++        omitReadOnly=omit_read_only
++    ).omit(*do_not_process)
+ 
+-    # Check permissions
+     if permissionChecks:
+-
+-        disallowedFields = []
+-
+-        for fieldName, fieldInstance in allFields.items():
+-            fieldName = fieldInstance.__name__
+-            fieldMode = fieldInstance.mode or form.mode
+-
+-            permissionName = None
+-            if fieldMode == DISPLAY_MODE:
+-                permissionName = readPermissions.get(_bn(fieldInstance), None)
+-            elif fieldMode == INPUT_MODE:
+-                permissionName = writePermissions.get(_bn(fieldInstance), None)
+-            if permissionName is not None:
+-                if permissionName not in permissionCache:
+-                    permission = queryUtility(IPermission, name=permissionName)
+-                    if permission is None:
+-                        permissionCache[permissionName] = True
+-                    else:
+-                        permissionCache[permissionName] = bool(
+-                            securityManager.checkPermission(
+-                                permission.title,
+-                                form.context
+-                            )
+-                        )
+-                if not permissionCache.get(permissionName, True):
+-                    disallowedFields.append(fieldName)
+-
+-        allFields = allFields.omit(*disallowedFields)
+-    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
++        all_fields = _process_permissions(schema, form, all_fields)
++    _process_fieldsets(form, schema, groups, all_fields, prefix, defaultGroup)
+ 
+ 
+ @deprecate(
+@@ -299,7 +301,7 @@ def processFieldMoves(form, schema, prefix=''):
+ 
+     # (name, 'before'/'after', other name)
+     order = mergedTaggedValueList(schema, ORDER_KEY)
+-    for fieldName, direction, relative_to in order:
++    for field_name, direction, relative_to in order:
+ 
+         # Handle shortcut: leading . means 'in this schema'. May be useful
+         # if you want to move a field relative to one in the current
+@@ -313,9 +315,9 @@ def processFieldMoves(form, schema, prefix=''):
+ 
+         try:
+             if direction == 'before':
+-                move(form, fieldName, before=relative_to, prefix=prefix)
++                move(form, field_name, before=relative_to, prefix=prefix)
+             elif direction == 'after':
+-                move(form, fieldName, after=relative_to, prefix=prefix)
++                move(form, field_name, after=relative_to, prefix=prefix)
+         except KeyError:
+             # The relative_to field doesn't exist
+             pass
+diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
+index aede2db..0ed195a 100644
+--- a/plone/autoform/widgets.py
++++ b/plone/autoform/widgets.py
+@@ -67,8 +67,11 @@ def __call__(self, field, request):
+         return widget
+ 
+     def __repr__(self):
+-        return '%s(%s, %s)' % (self.__class__.__name__,
+-                               self.widget_factory, self.params)
++        return '{0}({1}, {2})'.format(
++            self.__class__.__name__,
++            self.widget_factory,
++            self.params
++        )
+ 
+     def getWidgetFactoryName(self):
+         """Returns the dotted path of the widget factory for serialization.
+diff --git a/setup.py b/setup.py
+index f0a6890..f788b63 100644
+--- a/setup.py
++++ b/setup.py
+@@ -44,8 +44,8 @@ def read(*rnames):
+         'zope.schema',
+         'zope.security',
+         'zope.dottedname',
+-        'plone.supermodel>=1.1dev',
+-        'plone.z3cform',
++        'plone.supermodel>=1.3.dev0',
++        'plone.z3cform>=0.9.0.dev0',
+         'z3c.form',
+         # 'AccessControl',
+         # -*- Extra requirements: -*-
 
 
