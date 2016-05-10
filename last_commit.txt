@@ -1,682 +1,378 @@
-Repository: plone.autoform
+Repository: plone.app.versioningbehavior
 
 
 Branch: refs/heads/master
-Date: 2016-05-10T16:11:39+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.autoform/commit/a795cb74e8e31b88a6050506f83bfde8b011da88
+Date: 2016-05-10T13:25:26-03:00
+Author: Rafael Oliveira (rafaelbco) <rafaelbco@gmail.com>
+Commit: https://github.com/plone/plone.app.versioningbehavior/commit/683668d756e3d7202291dcfc83d63c0acdd1ca0f
 
-Orderable fieldsets support. Fixes #14.
+Improve conversion of download URLs on @@version-view by always using the context URL
 
 Files changed:
-M CHANGES.rst
-M plone/autoform/base.py
-M plone/autoform/directives.py
-M plone/autoform/utils.py
-M plone/autoform/widgets.py
-M setup.py
+M plone/app/versioningbehavior/browser.py
+M plone/app/versioningbehavior/tests/test_browser.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 8de0aa5..6d0609a 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -23,6 +23,10 @@ New:
-   If a different label and/or description is given, it replaces the existing prior loaded one.
-   [jensens]
+diff --git a/plone/app/versioningbehavior/browser.py b/plone/app/versioningbehavior/browser.py
+index ed80975..1edf23c 100644
+--- a/plone/app/versioningbehavior/browser.py
++++ b/plone/app/versioningbehavior/browser.py
+@@ -24,22 +24,20 @@ def __init__(self, context, request):
+         self.request = request
  
-+- The order of the fieldsets can be defined now explictly with the ``plone.supermodel.directives.fieldset`` directive.
-+  ``plone.autoform`` now does the sorting while fieldset processing.
-+  [jensens]
-+
- Fixes:
+     _download_url_patterns = (
+-        # Behavior name before field name, like "LeadImage.image"
+-        # Example: /++widget++form.widgets.my_field/@@download/my_file.txt
+-        # Example: /++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
+-        # Example: /versions_history_form/++widget++form.widgets.my_field/@@download/my_file.txt
+-        re.compile(
+-            r'/'
+-            r'(versions_history_form/)?'
++        # Example: ++widget++form.widgets.my_field/@@download/my_file.txt
++        # Example: ++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
++        # Example: view-name/++widget++form.widgets.my_field/@@download/my_file.txt
++        (
++            r'([@a-zA-Z0-9_-]+/)?'
+             r'\+\+widget\+\+form\.widgets\.([a-zA-Z0-9_-]+\.)?(?P<field_id>[a-zA-Z0-9_-]+)'
+             r'/@@download/(?P<filename>[^"\']+)'
+         ),
  
- - Implementation on how field ordering happens was unreproducible if same schemas are coming in in different orders.
-diff --git a/plone/autoform/base.py b/plone/autoform/base.py
-index 1a68788..b06d5d4 100644
---- a/plone/autoform/base.py
-+++ b/plone/autoform/base.py
-@@ -1,7 +1,9 @@
- # -*- coding: utf-8 -*-
- from collections import OrderedDict
-+from operator import attrgetter
- from plone.autoform.interfaces import ORDER_KEY
- from plone.autoform.utils import processFields
-+from plone.supermodel.interfaces import DEFAULT_ORDER
- from plone.supermodel.utils import mergedTaggedValueList
- from plone.z3cform.fieldsets.group import GroupFactory
- from plone.z3cform.fieldsets.utils import move
-@@ -98,8 +100,9 @@ def updateFieldsFromSchemata(self):
-                     fieldset_group = GroupFactory(
-                         group_name,
-                         field.Fields(),
--                        group_name,
--                        schema.__doc__
-+                        label=group_name,
-+                        description=schema.__doc__,
-+                        order=DEFAULT_ORDER,
-                     )
-                     self.groups.append(fieldset_group)
+-        # Example: /@@download/my_field/my_file.txt
+-        re.compile(r'/@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)'),
++        # Example: @@download/my_field/my_file.txt
++        r'@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)',
  
-@@ -129,6 +132,7 @@ def updateFieldsFromSchemata(self):
-             rules = self._calculate_field_moves(order, rules=rules)
-         self._cleanup_rules(rules)
-         self._process_field_moves(rules)
-+        self._process_group_order()
+-        # Example: /@@images/aedf-0123.png
+-        re.compile(r'/@@images/[0-9a-f\-]+\.[a-z]+'),
++        # Example: @@images/aedf-0123.png
++        r'@@images/[0-9a-f\-]+\.[a-z]+',
+     )
  
-     def getPrefix(self, schema):
-         """Get the preferred prefix for the given schema
-@@ -247,3 +251,6 @@ def _process_field_moves(self, rules):
-                         )
-                     )
-             self._process_field_moves(rule.get('with', {}))
-+
-+    def _process_group_order(self):
-+        self.groups.sort(key=attrgetter('order'))
-diff --git a/plone/autoform/directives.py b/plone/autoform/directives.py
-index 607e1a3..6fbd95c 100644
---- a/plone/autoform/directives.py
-+++ b/plone/autoform/directives.py
-@@ -120,7 +120,10 @@ def factory(self, field_name=None, widget_class=None, **kw):
-         if field_name is None:  # Usage 3
-             for field_name, widget in kw.items():
-                 if not isinstance(widget, basestring):
--                    widget = '%s.%s' % (widget.__module__, widget.__name__)
-+                    widget = '{0}.{1}'.format(
-+                        widget.__module__,
-+                        widget.__name__
-+                    )
-                 widgets[field_name] = widget
-         else:
-             if widget_class is not None \
-diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
-index bbe3c56..defe059 100644
---- a/plone/autoform/utils.py
-+++ b/plone/autoform/utils.py
-@@ -7,6 +7,7 @@
- from plone.autoform.interfaces import READ_PERMISSIONS_KEY
- from plone.autoform.interfaces import WIDGETS_KEY
- from plone.autoform.interfaces import WRITE_PERMISSIONS_KEY
-+from plone.supermodel.interfaces import DEFAULT_ORDER
- from plone.supermodel.interfaces import FIELDSETS_KEY
- from plone.supermodel.utils import mergedTaggedValueDict
- from plone.supermodel.utils import mergedTaggedValueList
-@@ -88,7 +89,7 @@ def _bn(fieldInstance):
-         return fieldName
+     def __call__(self):
+@@ -62,8 +60,10 @@ def repl(match):
+                 filename=groups.get('filename'),
+             )
+ 
++        context_url = self.context.absolute_url()
+         for pattern in self._download_url_patterns:
+-            transformed_html = pattern.sub(repl, transformed_html)
++            compiled_pattern = re.compile(context_url + '/' + pattern)
++            transformed_html = compiled_pattern.sub(repl, transformed_html)
+ 
+         return transformed_html
+ 
+@@ -77,7 +77,7 @@ def _get_download_version_link(self, version_id, field_id=None, filename=None):
+             parameters.append(('filename', filename))
+ 
+         query_string = urlencode(parameters)
+-        return '/@@download-version?{}'.format(query_string)
++        return '{}/@@download-version?{}'.format(self.context.absolute_url(), query_string)
  
  
--def _processWidgets(form, widgets, modes, newFields):
-+def _process_widgets(form, widgets, modes, newFields):
-     """Update the fields list with widgets
-     """
- 
-@@ -145,7 +146,7 @@ def _process_fieldsets(
- 
-     # Set up the default fields, widget factories and widget modes
-     new_fields = all_fields.omit(*fieldset_fields)
--    _processWidgets(form, widgets, modes, new_fields)
-+    _process_widgets(form, widgets, modes, new_fields)
- 
-     if not default_group:
-         form.fields += new_fields
-@@ -164,12 +165,12 @@ def _process_fieldsets(
-             len(new_fields) > 0
-         ):
-             continue
--        _processWidgets(form, widgets, modes, new_fields)
+ class DownloadVersion(object):
+diff --git a/plone/app/versioningbehavior/tests/test_browser.py b/plone/app/versioningbehavior/tests/test_browser.py
+index a2ec600..8ed5879 100644
+--- a/plone/app/versioningbehavior/tests/test_browser.py
++++ b/plone/app/versioningbehavior/tests/test_browser.py
+@@ -4,10 +4,10 @@
+ from ..testing import VERSIONING_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID, TEST_USER_ROLES, setRoles
+ from plone.app.versioningbehavior.testing import TEST_CONTENT_TYPE_ID
++from plone.namedfile import NamedBlobFile
+ from zope.component import getMultiAdapter
++import re
+ import unittest
+-from plone.namedfile import NamedBlobFile
 -
-+        _process_widgets(form, widgets, modes, new_fields)
-         if fieldset.__name__ not in groups:
-             group = GroupFactory(fieldset.__name__,
-                                  label=fieldset.label,
-                                  description=fieldset.description,
-+                                 order=fieldset.order,
-                                  fields=new_fields)
-             form.groups.append(group)
-             groups[group.__name__] = group
-@@ -187,6 +188,57 @@ def _process_fieldsets(
-                 group.description != fieldset.description
-             ):
-                 group.description = fieldset.description
-+            if (
-+                fieldset.order and
-+                fieldset.order != DEFAULT_ORDER and
-+                fieldset.order != group.order
-+            ):
-+                group.order = fieldset.order
-+
-+
-+def _process_permissions(schema, form, all_fields):
-+    # Get either read or write permissions depending on what type of
-+    # form this is
-+    permission_cache = {}  # permission name -> allowed/disallowed
-+
-+    # name => permission name
-+    read_permissions = mergedTaggedValueDict(
-+        schema,
-+        READ_PERMISSIONS_KEY
-+    )
-+    # name => permission name
-+    write_permissions = mergedTaggedValueDict(
-+        schema,
-+        WRITE_PERMISSIONS_KEY
-+    )
-+    security_manager = getSecurityManager()
-+    disallowed_fields = []
-+
-+    for field_name, field_instance in all_fields.items():
-+        field_mode = field_instance.mode or form.mode
-+        permission_name = None
-+        base_name = _bn(field_instance)
-+        if field_mode == DISPLAY_MODE:
-+            permission_name = read_permissions.get(base_name, None)
-+        elif field_mode == INPUT_MODE:
-+            permission_name = write_permissions.get(base_name, None)
-+        if permission_name is None:
-+            continue
-+        if permission_name not in permission_cache:
-+            permission = queryUtility(IPermission, name=permission_name)
-+            if permission is None:
-+                permission_cache[permission_name] = True
-+            else:
-+                permission_cache[permission_name] = bool(
-+                    security_manager.checkPermission(
-+                        permission.title,
-+                        form.context
-+                    )
-+                )
-+        if not permission_cache.get(permission_name, True):
-+            disallowed_fields.append(field_name)
-+
-+    return all_fields.omit(*disallowed_fields)
  
+ class BaseViewTestCase(unittest.TestCase):
  
- def processFields(form, schema, prefix='', defaultGroup=None,
-@@ -208,79 +260,29 @@ def processFields(form, schema, prefix='', defaultGroup=None,
-     # { name => True }
-     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+@@ -55,7 +55,7 @@ def _assert(old_path, version, field=None, filename=None):
+             old_url = obj.absolute_url() + old_path
+             old = href_template.format(old_url)
+             new = view._convert_download_links(old, version)
+-            correct_url = obj.absolute_url() + view._get_download_version_link(
++            correct_url = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+@@ -111,6 +111,26 @@ def _assert(old_path, version, field=None, filename=None):
+         )
  
--    # Get either read or write permissions depending on what type of
--    # form this is
--    readPermissions = {}  # field name -> permission name
--    writePermissions = {}  # field name -> permission name
--    permissionCache = {}  # permission name -> allowed/disallowed
--
--    if permissionChecks:
--        # name => permission name
--        readPermissions = mergedTaggedValueDict(
--            schema,
--            READ_PERMISSIONS_KEY
--        )
--        # name => permission name
--        writePermissions = mergedTaggedValueDict(
--            schema,
--            WRITE_PERMISSIONS_KEY
--        )
--        securityManager = getSecurityManager()
--
-     # Find the fields we should not worry about
--
-     groups = {}
--    doNotProcess = list(form.fields.keys())
-+    do_not_process = list(form.fields.keys())
- 
--    for fieldName, status in omitted.items():
-+    for field_name, status in omitted.items():
-         if status and status != 'false':
--            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
-+            do_not_process.append(_process_prefixed_name(prefix, field_name))
- 
-     for group in form.groups:
--        doNotProcess.extend(list(group.fields.keys()))
--
--        groupName = getattr(group, '__name__', group.label)
--        groups[groupName] = group
-+        do_not_process.extend(list(group.fields.keys()))
-+        groups[getattr(group, '__name__', group.label)] = group
- 
-     # Find all allowed fields so that we have something to select from
--    omitReadOnly = form.mode != DISPLAY_MODE
--    allFields = field.Fields(
-+    omit_read_only = form.mode != DISPLAY_MODE
-+    all_fields = field.Fields(
-         schema,
-         prefix=prefix,
--        omitReadOnly=omitReadOnly
--    ).omit(*doNotProcess)
-+        omitReadOnly=omit_read_only
-+    ).omit(*do_not_process)
- 
--    # Check permissions
-     if permissionChecks:
--
--        disallowedFields = []
--
--        for fieldName, fieldInstance in allFields.items():
--            fieldName = fieldInstance.__name__
--            fieldMode = fieldInstance.mode or form.mode
--
--            permissionName = None
--            if fieldMode == DISPLAY_MODE:
--                permissionName = readPermissions.get(_bn(fieldInstance), None)
--            elif fieldMode == INPUT_MODE:
--                permissionName = writePermissions.get(_bn(fieldInstance), None)
--            if permissionName is not None:
--                if permissionName not in permissionCache:
--                    permission = queryUtility(IPermission, name=permissionName)
--                    if permission is None:
--                        permissionCache[permissionName] = True
--                    else:
--                        permissionCache[permissionName] = bool(
--                            securityManager.checkPermission(
--                                permission.title,
--                                form.context
--                            )
--                        )
--                if not permissionCache.get(permissionName, True):
--                    disallowedFields.append(fieldName)
--
--        allFields = allFields.omit(*disallowedFields)
--    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
-+        all_fields = _process_permissions(schema, form, all_fields)
-+    _process_fieldsets(form, schema, groups, all_fields, prefix, defaultGroup)
- 
- 
- @deprecate(
-@@ -299,7 +301,7 @@ def processFieldMoves(form, schema, prefix=''):
- 
-     # (name, 'before'/'after', other name)
-     order = mergedTaggedValueList(schema, ORDER_KEY)
--    for fieldName, direction, relative_to in order:
-+    for field_name, direction, relative_to in order:
- 
-         # Handle shortcut: leading . means 'in this schema'. May be useful
-         # if you want to move a field relative to one in the current
-@@ -313,9 +315,9 @@ def processFieldMoves(form, schema, prefix=''):
- 
-         try:
-             if direction == 'before':
--                move(form, fieldName, before=relative_to, prefix=prefix)
-+                move(form, field_name, before=relative_to, prefix=prefix)
-             elif direction == 'after':
--                move(form, fieldName, after=relative_to, prefix=prefix)
-+                move(form, field_name, after=relative_to, prefix=prefix)
-         except KeyError:
-             # The relative_to field doesn't exist
-             pass
-diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
-index aede2db..0ed195a 100644
---- a/plone/autoform/widgets.py
-+++ b/plone/autoform/widgets.py
-@@ -67,8 +67,11 @@ def __call__(self, field, request):
-         return widget
- 
-     def __repr__(self):
--        return '%s(%s, %s)' % (self.__class__.__name__,
--                               self.widget_factory, self.params)
-+        return '{0}({1}, {2})'.format(
-+            self.__class__.__name__,
-+            self.widget_factory,
-+            self.params
+         _assert(
++            (
++                '/my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
 +        )
++
++        _assert(
++            (
++                '/@@my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
++
++        _assert(
+             '/@@images/abde-01fa.png',
+             version='my_version',
+         )
+@@ -120,36 +140,37 @@ def test_get_download_version_link(self):
+         obj = self.obj1
+         view = browser.VersionView(obj, self.request)
  
-     def getWidgetFactoryName(self):
-         """Returns the dotted path of the widget factory for serialization.
-diff --git a/setup.py b/setup.py
-index f0a6890..f788b63 100644
---- a/setup.py
-+++ b/setup.py
-@@ -44,8 +44,8 @@ def read(*rnames):
-         'zope.schema',
-         'zope.security',
-         'zope.dottedname',
--        'plone.supermodel>=1.1dev',
--        'plone.z3cform',
-+        'plone.supermodel>=1.3.dev0',
-+        'plone.z3cform>=0.9.0.dev0',
-         'z3c.form',
-         # 'AccessControl',
-         # -*- Extra requirements: -*-
+-        def _assert(version, correct_url, field=None, filename=None):
++        def _assert(version, correct_path, field=None, filename=None):
+             actual = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+             )
++            correct_url = obj.absolute_url() + '/' + correct_path
+             self.assertEqual(actual, correct_url)
+ 
+         _assert(
+             version='my_version',
+             field='my_field',
+             filename='my_file.txt',
+-            correct_url=(
+-                '/@@download-version?'
++            correct_path=(
++                '@@download-version?'
+                 'version_id=my_version&field_id=my_field&filename=my_file.txt'
+             ),
+         )
+         _assert(
+             version='my_version',
+             filename='my_file.txt',
+-            correct_url='/@@download-version?version_id=my_version&filename=my_file.txt',
++            correct_path='@@download-version?version_id=my_version&filename=my_file.txt',
+         )
+         _assert(
+             version='my_version',
+             field='my_field',
+-            correct_url='/@@download-version?version_id=my_version&field_id=my_field',
++            correct_path='@@download-version?version_id=my_version&field_id=my_field',
+         )
+         _assert(
+             version='my_version',
+-            correct_url='/@@download-version?version_id=my_version',
++            correct_path='@@download-version?version_id=my_version',
+         )
+ 
+     def test_call(self):
+@@ -158,11 +179,13 @@ def test_call(self):
+         view = browser.VersionView(obj, self.request)
+ 
+         html = self._render_view(view=obj, url=obj.absolute_url())
+-        download_url = '{}/++widget++form.widgets.file/@@download/{}'.format(
+-            obj.absolute_url(),
+-            obj.file.filename,
++        download_url_pattern = re.compile(
++            obj.absolute_url() +
++            r'(/[@A-Za-z0-9-_]+)?/' +  # View name can be present or not.
++            r'\+\+widget\+\+form\.widgets\.file/@@download/' +
++            obj.file.filename
+         )
+-        self.assertTrue(download_url in html)
++        self.assertTrue(download_url_pattern.search(html))
+ 
+         html = self._render_view(view=view, url=obj.absolute_url(), params={'version_id': '0'})
+         download_url = '{}/@@download-version?version_id=0&field_id=file&filename={}'.format(
 
 
-Repository: plone.autoform
+Repository: plone.app.versioningbehavior
 
 
 Branch: refs/heads/master
-Date: 2016-05-10T18:24:04+02:00
-Author: agitator (agitator) <hpeter@agitator.com>
-Commit: https://github.com/plone/plone.autoform/commit/dcd4147f24448be48a4cd5c296475eac6561adb9
+Date: 2016-05-10T15:05:40-03:00
+Author: Rafael Oliveira (rafaelbco) <rafaelbco@gmail.com>
+Commit: https://github.com/plone/plone.app.versioningbehavior/commit/eee6d863552b7d5d9e67da151ff721be754b1ab9
 
-Merge pull request #15 from plone/jensens-sort-fieldsets
+Merge pull request #27 from plone/improve_download_url_conversion
 
-orderable fieldsets
+Improve conversion of download URLs on @@version-view
 
 Files changed:
-M CHANGES.rst
-M plone/autoform/base.py
-M plone/autoform/directives.py
-M plone/autoform/utils.py
-M plone/autoform/widgets.py
-M setup.py
+M plone/app/versioningbehavior/browser.py
+M plone/app/versioningbehavior/tests/test_browser.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 8de0aa5..6d0609a 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -23,6 +23,10 @@ New:
-   If a different label and/or description is given, it replaces the existing prior loaded one.
-   [jensens]
+diff --git a/plone/app/versioningbehavior/browser.py b/plone/app/versioningbehavior/browser.py
+index ed80975..1edf23c 100644
+--- a/plone/app/versioningbehavior/browser.py
++++ b/plone/app/versioningbehavior/browser.py
+@@ -24,22 +24,20 @@ def __init__(self, context, request):
+         self.request = request
  
-+- The order of the fieldsets can be defined now explictly with the ``plone.supermodel.directives.fieldset`` directive.
-+  ``plone.autoform`` now does the sorting while fieldset processing.
-+  [jensens]
-+
- Fixes:
+     _download_url_patterns = (
+-        # Behavior name before field name, like "LeadImage.image"
+-        # Example: /++widget++form.widgets.my_field/@@download/my_file.txt
+-        # Example: /++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
+-        # Example: /versions_history_form/++widget++form.widgets.my_field/@@download/my_file.txt
+-        re.compile(
+-            r'/'
+-            r'(versions_history_form/)?'
++        # Example: ++widget++form.widgets.my_field/@@download/my_file.txt
++        # Example: ++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
++        # Example: view-name/++widget++form.widgets.my_field/@@download/my_file.txt
++        (
++            r'([@a-zA-Z0-9_-]+/)?'
+             r'\+\+widget\+\+form\.widgets\.([a-zA-Z0-9_-]+\.)?(?P<field_id>[a-zA-Z0-9_-]+)'
+             r'/@@download/(?P<filename>[^"\']+)'
+         ),
  
- - Implementation on how field ordering happens was unreproducible if same schemas are coming in in different orders.
-diff --git a/plone/autoform/base.py b/plone/autoform/base.py
-index 1a68788..b06d5d4 100644
---- a/plone/autoform/base.py
-+++ b/plone/autoform/base.py
-@@ -1,7 +1,9 @@
- # -*- coding: utf-8 -*-
- from collections import OrderedDict
-+from operator import attrgetter
- from plone.autoform.interfaces import ORDER_KEY
- from plone.autoform.utils import processFields
-+from plone.supermodel.interfaces import DEFAULT_ORDER
- from plone.supermodel.utils import mergedTaggedValueList
- from plone.z3cform.fieldsets.group import GroupFactory
- from plone.z3cform.fieldsets.utils import move
-@@ -98,8 +100,9 @@ def updateFieldsFromSchemata(self):
-                     fieldset_group = GroupFactory(
-                         group_name,
-                         field.Fields(),
--                        group_name,
--                        schema.__doc__
-+                        label=group_name,
-+                        description=schema.__doc__,
-+                        order=DEFAULT_ORDER,
-                     )
-                     self.groups.append(fieldset_group)
+-        # Example: /@@download/my_field/my_file.txt
+-        re.compile(r'/@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)'),
++        # Example: @@download/my_field/my_file.txt
++        r'@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)',
  
-@@ -129,6 +132,7 @@ def updateFieldsFromSchemata(self):
-             rules = self._calculate_field_moves(order, rules=rules)
-         self._cleanup_rules(rules)
-         self._process_field_moves(rules)
-+        self._process_group_order()
+-        # Example: /@@images/aedf-0123.png
+-        re.compile(r'/@@images/[0-9a-f\-]+\.[a-z]+'),
++        # Example: @@images/aedf-0123.png
++        r'@@images/[0-9a-f\-]+\.[a-z]+',
+     )
  
-     def getPrefix(self, schema):
-         """Get the preferred prefix for the given schema
-@@ -247,3 +251,6 @@ def _process_field_moves(self, rules):
-                         )
-                     )
-             self._process_field_moves(rule.get('with', {}))
-+
-+    def _process_group_order(self):
-+        self.groups.sort(key=attrgetter('order'))
-diff --git a/plone/autoform/directives.py b/plone/autoform/directives.py
-index 607e1a3..6fbd95c 100644
---- a/plone/autoform/directives.py
-+++ b/plone/autoform/directives.py
-@@ -120,7 +120,10 @@ def factory(self, field_name=None, widget_class=None, **kw):
-         if field_name is None:  # Usage 3
-             for field_name, widget in kw.items():
-                 if not isinstance(widget, basestring):
--                    widget = '%s.%s' % (widget.__module__, widget.__name__)
-+                    widget = '{0}.{1}'.format(
-+                        widget.__module__,
-+                        widget.__name__
-+                    )
-                 widgets[field_name] = widget
-         else:
-             if widget_class is not None \
-diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
-index bbe3c56..defe059 100644
---- a/plone/autoform/utils.py
-+++ b/plone/autoform/utils.py
-@@ -7,6 +7,7 @@
- from plone.autoform.interfaces import READ_PERMISSIONS_KEY
- from plone.autoform.interfaces import WIDGETS_KEY
- from plone.autoform.interfaces import WRITE_PERMISSIONS_KEY
-+from plone.supermodel.interfaces import DEFAULT_ORDER
- from plone.supermodel.interfaces import FIELDSETS_KEY
- from plone.supermodel.utils import mergedTaggedValueDict
- from plone.supermodel.utils import mergedTaggedValueList
-@@ -88,7 +89,7 @@ def _bn(fieldInstance):
-         return fieldName
+     def __call__(self):
+@@ -62,8 +60,10 @@ def repl(match):
+                 filename=groups.get('filename'),
+             )
+ 
++        context_url = self.context.absolute_url()
+         for pattern in self._download_url_patterns:
+-            transformed_html = pattern.sub(repl, transformed_html)
++            compiled_pattern = re.compile(context_url + '/' + pattern)
++            transformed_html = compiled_pattern.sub(repl, transformed_html)
+ 
+         return transformed_html
+ 
+@@ -77,7 +77,7 @@ def _get_download_version_link(self, version_id, field_id=None, filename=None):
+             parameters.append(('filename', filename))
+ 
+         query_string = urlencode(parameters)
+-        return '/@@download-version?{}'.format(query_string)
++        return '{}/@@download-version?{}'.format(self.context.absolute_url(), query_string)
  
  
--def _processWidgets(form, widgets, modes, newFields):
-+def _process_widgets(form, widgets, modes, newFields):
-     """Update the fields list with widgets
-     """
- 
-@@ -145,7 +146,7 @@ def _process_fieldsets(
- 
-     # Set up the default fields, widget factories and widget modes
-     new_fields = all_fields.omit(*fieldset_fields)
--    _processWidgets(form, widgets, modes, new_fields)
-+    _process_widgets(form, widgets, modes, new_fields)
- 
-     if not default_group:
-         form.fields += new_fields
-@@ -164,12 +165,12 @@ def _process_fieldsets(
-             len(new_fields) > 0
-         ):
-             continue
--        _processWidgets(form, widgets, modes, new_fields)
+ class DownloadVersion(object):
+diff --git a/plone/app/versioningbehavior/tests/test_browser.py b/plone/app/versioningbehavior/tests/test_browser.py
+index a2ec600..8ed5879 100644
+--- a/plone/app/versioningbehavior/tests/test_browser.py
++++ b/plone/app/versioningbehavior/tests/test_browser.py
+@@ -4,10 +4,10 @@
+ from ..testing import VERSIONING_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID, TEST_USER_ROLES, setRoles
+ from plone.app.versioningbehavior.testing import TEST_CONTENT_TYPE_ID
++from plone.namedfile import NamedBlobFile
+ from zope.component import getMultiAdapter
++import re
+ import unittest
+-from plone.namedfile import NamedBlobFile
 -
-+        _process_widgets(form, widgets, modes, new_fields)
-         if fieldset.__name__ not in groups:
-             group = GroupFactory(fieldset.__name__,
-                                  label=fieldset.label,
-                                  description=fieldset.description,
-+                                 order=fieldset.order,
-                                  fields=new_fields)
-             form.groups.append(group)
-             groups[group.__name__] = group
-@@ -187,6 +188,57 @@ def _process_fieldsets(
-                 group.description != fieldset.description
-             ):
-                 group.description = fieldset.description
-+            if (
-+                fieldset.order and
-+                fieldset.order != DEFAULT_ORDER and
-+                fieldset.order != group.order
-+            ):
-+                group.order = fieldset.order
-+
-+
-+def _process_permissions(schema, form, all_fields):
-+    # Get either read or write permissions depending on what type of
-+    # form this is
-+    permission_cache = {}  # permission name -> allowed/disallowed
-+
-+    # name => permission name
-+    read_permissions = mergedTaggedValueDict(
-+        schema,
-+        READ_PERMISSIONS_KEY
-+    )
-+    # name => permission name
-+    write_permissions = mergedTaggedValueDict(
-+        schema,
-+        WRITE_PERMISSIONS_KEY
-+    )
-+    security_manager = getSecurityManager()
-+    disallowed_fields = []
-+
-+    for field_name, field_instance in all_fields.items():
-+        field_mode = field_instance.mode or form.mode
-+        permission_name = None
-+        base_name = _bn(field_instance)
-+        if field_mode == DISPLAY_MODE:
-+            permission_name = read_permissions.get(base_name, None)
-+        elif field_mode == INPUT_MODE:
-+            permission_name = write_permissions.get(base_name, None)
-+        if permission_name is None:
-+            continue
-+        if permission_name not in permission_cache:
-+            permission = queryUtility(IPermission, name=permission_name)
-+            if permission is None:
-+                permission_cache[permission_name] = True
-+            else:
-+                permission_cache[permission_name] = bool(
-+                    security_manager.checkPermission(
-+                        permission.title,
-+                        form.context
-+                    )
-+                )
-+        if not permission_cache.get(permission_name, True):
-+            disallowed_fields.append(field_name)
-+
-+    return all_fields.omit(*disallowed_fields)
  
+ class BaseViewTestCase(unittest.TestCase):
  
- def processFields(form, schema, prefix='', defaultGroup=None,
-@@ -208,79 +260,29 @@ def processFields(form, schema, prefix='', defaultGroup=None,
-     # { name => True }
-     omitted = mergedTaggedValuesForForm(schema, OMITTED_KEY, form)
+@@ -55,7 +55,7 @@ def _assert(old_path, version, field=None, filename=None):
+             old_url = obj.absolute_url() + old_path
+             old = href_template.format(old_url)
+             new = view._convert_download_links(old, version)
+-            correct_url = obj.absolute_url() + view._get_download_version_link(
++            correct_url = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+@@ -111,6 +111,26 @@ def _assert(old_path, version, field=None, filename=None):
+         )
  
--    # Get either read or write permissions depending on what type of
--    # form this is
--    readPermissions = {}  # field name -> permission name
--    writePermissions = {}  # field name -> permission name
--    permissionCache = {}  # permission name -> allowed/disallowed
--
--    if permissionChecks:
--        # name => permission name
--        readPermissions = mergedTaggedValueDict(
--            schema,
--            READ_PERMISSIONS_KEY
--        )
--        # name => permission name
--        writePermissions = mergedTaggedValueDict(
--            schema,
--            WRITE_PERMISSIONS_KEY
--        )
--        securityManager = getSecurityManager()
--
-     # Find the fields we should not worry about
--
-     groups = {}
--    doNotProcess = list(form.fields.keys())
-+    do_not_process = list(form.fields.keys())
- 
--    for fieldName, status in omitted.items():
-+    for field_name, status in omitted.items():
-         if status and status != 'false':
--            doNotProcess.append(_process_prefixed_name(prefix, fieldName))
-+            do_not_process.append(_process_prefixed_name(prefix, field_name))
- 
-     for group in form.groups:
--        doNotProcess.extend(list(group.fields.keys()))
--
--        groupName = getattr(group, '__name__', group.label)
--        groups[groupName] = group
-+        do_not_process.extend(list(group.fields.keys()))
-+        groups[getattr(group, '__name__', group.label)] = group
- 
-     # Find all allowed fields so that we have something to select from
--    omitReadOnly = form.mode != DISPLAY_MODE
--    allFields = field.Fields(
-+    omit_read_only = form.mode != DISPLAY_MODE
-+    all_fields = field.Fields(
-         schema,
-         prefix=prefix,
--        omitReadOnly=omitReadOnly
--    ).omit(*doNotProcess)
-+        omitReadOnly=omit_read_only
-+    ).omit(*do_not_process)
- 
--    # Check permissions
-     if permissionChecks:
--
--        disallowedFields = []
--
--        for fieldName, fieldInstance in allFields.items():
--            fieldName = fieldInstance.__name__
--            fieldMode = fieldInstance.mode or form.mode
--
--            permissionName = None
--            if fieldMode == DISPLAY_MODE:
--                permissionName = readPermissions.get(_bn(fieldInstance), None)
--            elif fieldMode == INPUT_MODE:
--                permissionName = writePermissions.get(_bn(fieldInstance), None)
--            if permissionName is not None:
--                if permissionName not in permissionCache:
--                    permission = queryUtility(IPermission, name=permissionName)
--                    if permission is None:
--                        permissionCache[permissionName] = True
--                    else:
--                        permissionCache[permissionName] = bool(
--                            securityManager.checkPermission(
--                                permission.title,
--                                form.context
--                            )
--                        )
--                if not permissionCache.get(permissionName, True):
--                    disallowedFields.append(fieldName)
--
--        allFields = allFields.omit(*disallowedFields)
--    _process_fieldsets(form, schema, groups, allFields, prefix, defaultGroup)
-+        all_fields = _process_permissions(schema, form, all_fields)
-+    _process_fieldsets(form, schema, groups, all_fields, prefix, defaultGroup)
- 
- 
- @deprecate(
-@@ -299,7 +301,7 @@ def processFieldMoves(form, schema, prefix=''):
- 
-     # (name, 'before'/'after', other name)
-     order = mergedTaggedValueList(schema, ORDER_KEY)
--    for fieldName, direction, relative_to in order:
-+    for field_name, direction, relative_to in order:
- 
-         # Handle shortcut: leading . means 'in this schema'. May be useful
-         # if you want to move a field relative to one in the current
-@@ -313,9 +315,9 @@ def processFieldMoves(form, schema, prefix=''):
- 
-         try:
-             if direction == 'before':
--                move(form, fieldName, before=relative_to, prefix=prefix)
-+                move(form, field_name, before=relative_to, prefix=prefix)
-             elif direction == 'after':
--                move(form, fieldName, after=relative_to, prefix=prefix)
-+                move(form, field_name, after=relative_to, prefix=prefix)
-         except KeyError:
-             # The relative_to field doesn't exist
-             pass
-diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
-index aede2db..0ed195a 100644
---- a/plone/autoform/widgets.py
-+++ b/plone/autoform/widgets.py
-@@ -67,8 +67,11 @@ def __call__(self, field, request):
-         return widget
- 
-     def __repr__(self):
--        return '%s(%s, %s)' % (self.__class__.__name__,
--                               self.widget_factory, self.params)
-+        return '{0}({1}, {2})'.format(
-+            self.__class__.__name__,
-+            self.widget_factory,
-+            self.params
+         _assert(
++            (
++                '/my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
 +        )
++
++        _assert(
++            (
++                '/@@my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
++
++        _assert(
+             '/@@images/abde-01fa.png',
+             version='my_version',
+         )
+@@ -120,36 +140,37 @@ def test_get_download_version_link(self):
+         obj = self.obj1
+         view = browser.VersionView(obj, self.request)
  
-     def getWidgetFactoryName(self):
-         """Returns the dotted path of the widget factory for serialization.
-diff --git a/setup.py b/setup.py
-index f0a6890..f788b63 100644
---- a/setup.py
-+++ b/setup.py
-@@ -44,8 +44,8 @@ def read(*rnames):
-         'zope.schema',
-         'zope.security',
-         'zope.dottedname',
--        'plone.supermodel>=1.1dev',
--        'plone.z3cform',
-+        'plone.supermodel>=1.3.dev0',
-+        'plone.z3cform>=0.9.0.dev0',
-         'z3c.form',
-         # 'AccessControl',
-         # -*- Extra requirements: -*-
+-        def _assert(version, correct_url, field=None, filename=None):
++        def _assert(version, correct_path, field=None, filename=None):
+             actual = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+             )
++            correct_url = obj.absolute_url() + '/' + correct_path
+             self.assertEqual(actual, correct_url)
+ 
+         _assert(
+             version='my_version',
+             field='my_field',
+             filename='my_file.txt',
+-            correct_url=(
+-                '/@@download-version?'
++            correct_path=(
++                '@@download-version?'
+                 'version_id=my_version&field_id=my_field&filename=my_file.txt'
+             ),
+         )
+         _assert(
+             version='my_version',
+             filename='my_file.txt',
+-            correct_url='/@@download-version?version_id=my_version&filename=my_file.txt',
++            correct_path='@@download-version?version_id=my_version&filename=my_file.txt',
+         )
+         _assert(
+             version='my_version',
+             field='my_field',
+-            correct_url='/@@download-version?version_id=my_version&field_id=my_field',
++            correct_path='@@download-version?version_id=my_version&field_id=my_field',
+         )
+         _assert(
+             version='my_version',
+-            correct_url='/@@download-version?version_id=my_version',
++            correct_path='@@download-version?version_id=my_version',
+         )
+ 
+     def test_call(self):
+@@ -158,11 +179,13 @@ def test_call(self):
+         view = browser.VersionView(obj, self.request)
+ 
+         html = self._render_view(view=obj, url=obj.absolute_url())
+-        download_url = '{}/++widget++form.widgets.file/@@download/{}'.format(
+-            obj.absolute_url(),
+-            obj.file.filename,
++        download_url_pattern = re.compile(
++            obj.absolute_url() +
++            r'(/[@A-Za-z0-9-_]+)?/' +  # View name can be present or not.
++            r'\+\+widget\+\+form\.widgets\.file/@@download/' +
++            obj.file.filename
+         )
+-        self.assertTrue(download_url in html)
++        self.assertTrue(download_url_pattern.search(html))
+ 
+         html = self._render_view(view=view, url=obj.absolute_url(), params={'version_id': '0'})
+         download_url = '{}/@@download-version?version_id=0&field_id=file&filename={}'.format(
 
 
