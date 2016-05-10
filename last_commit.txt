@@ -1,122 +1,378 @@
-Repository: plone.app.contenttypes
+Repository: plone.app.versioningbehavior
 
 
 Branch: refs/heads/master
-Date: 2016-05-08T23:06:32+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/2e0be405c803aace1d82d258d72fdfccd6086fa5
+Date: 2016-05-10T13:25:26-03:00
+Author: Rafael Oliveira (rafaelbco) <rafaelbco@gmail.com>
+Commit: https://github.com/plone/plone.app.versioningbehavior/commit/683668d756e3d7202291dcfc83d63c0acdd1ca0f
 
-deferred initialize to reduce costs of adapter lookup.
+Improve conversion of download URLs on @@version-view by always using the context URL
 
 Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
+M plone/app/versioningbehavior/browser.py
+M plone/app/versioningbehavior/tests/test_browser.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 0df3471..a9fe553 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,6 +14,11 @@ New:
+diff --git a/plone/app/versioningbehavior/browser.py b/plone/app/versioningbehavior/browser.py
+index ed80975..1edf23c 100644
+--- a/plone/app/versioningbehavior/browser.py
++++ b/plone/app/versioningbehavior/browser.py
+@@ -24,22 +24,20 @@ def __init__(self, context, request):
+         self.request = request
  
- Fixes:
+     _download_url_patterns = (
+-        # Behavior name before field name, like "LeadImage.image"
+-        # Example: /++widget++form.widgets.my_field/@@download/my_file.txt
+-        # Example: /++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
+-        # Example: /versions_history_form/++widget++form.widgets.my_field/@@download/my_file.txt
+-        re.compile(
+-            r'/'
+-            r'(versions_history_form/)?'
++        # Example: ++widget++form.widgets.my_field/@@download/my_file.txt
++        # Example: ++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
++        # Example: view-name/++widget++form.widgets.my_field/@@download/my_file.txt
++        (
++            r'([@a-zA-Z0-9_-]+/)?'
+             r'\+\+widget\+\+form\.widgets\.([a-zA-Z0-9_-]+\.)?(?P<field_id>[a-zA-Z0-9_-]+)'
+             r'/@@download/(?P<filename>[^"\']+)'
+         ),
  
-+- Deferred adapter lookup in collection view.
-+  This was looked up for contentmenu/toolbar at every authenticated request.
-+  It also had side effects if custom collection behaviors are used.
-+  [jensens]
+-        # Example: /@@download/my_field/my_file.txt
+-        re.compile(r'/@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)'),
++        # Example: @@download/my_field/my_file.txt
++        r'@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)',
+ 
+-        # Example: /@@images/aedf-0123.png
+-        re.compile(r'/@@images/[0-9a-f\-]+\.[a-z]+'),
++        # Example: @@images/aedf-0123.png
++        r'@@images/[0-9a-f\-]+\.[a-z]+',
+     )
+ 
+     def __call__(self):
+@@ -62,8 +60,10 @@ def repl(match):
+                 filename=groups.get('filename'),
+             )
+ 
++        context_url = self.context.absolute_url()
+         for pattern in self._download_url_patterns:
+-            transformed_html = pattern.sub(repl, transformed_html)
++            compiled_pattern = re.compile(context_url + '/' + pattern)
++            transformed_html = compiled_pattern.sub(repl, transformed_html)
+ 
+         return transformed_html
+ 
+@@ -77,7 +77,7 @@ def _get_download_version_link(self, version_id, field_id=None, filename=None):
+             parameters.append(('filename', filename))
+ 
+         query_string = urlencode(parameters)
+-        return '/@@download-version?{}'.format(query_string)
++        return '{}/@@download-version?{}'.format(self.context.absolute_url(), query_string)
+ 
+ 
+ class DownloadVersion(object):
+diff --git a/plone/app/versioningbehavior/tests/test_browser.py b/plone/app/versioningbehavior/tests/test_browser.py
+index a2ec600..8ed5879 100644
+--- a/plone/app/versioningbehavior/tests/test_browser.py
++++ b/plone/app/versioningbehavior/tests/test_browser.py
+@@ -4,10 +4,10 @@
+ from ..testing import VERSIONING_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID, TEST_USER_ROLES, setRoles
+ from plone.app.versioningbehavior.testing import TEST_CONTENT_TYPE_ID
++from plone.namedfile import NamedBlobFile
+ from zope.component import getMultiAdapter
++import re
+ import unittest
+-from plone.namedfile import NamedBlobFile
+-
+ 
+ class BaseViewTestCase(unittest.TestCase):
+ 
+@@ -55,7 +55,7 @@ def _assert(old_path, version, field=None, filename=None):
+             old_url = obj.absolute_url() + old_path
+             old = href_template.format(old_url)
+             new = view._convert_download_links(old, version)
+-            correct_url = obj.absolute_url() + view._get_download_version_link(
++            correct_url = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+@@ -111,6 +111,26 @@ def _assert(old_path, version, field=None, filename=None):
+         )
+ 
+         _assert(
++            (
++                '/my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
 +
- - Fixed unstable robot test for location criterion.  [maurits]
- 
- - Don't fail for ``utils.replace_link_variables_by_paths``, if value is ``None``.
-diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py
-index 55b3333..8ce752f 100644
---- a/plone/app/contenttypes/browser/collection.py
-+++ b/plone/app/contenttypes/browser/collection.py
-@@ -10,11 +10,18 @@
- 
- class CollectionView(FolderView):
- 
--    def __init__(self, *args, **kwargs):
--        super(CollectionView, self).__init__(*args, **kwargs)
--        context = aq_inner(self.context)
--        self.collection_behavior = ICollection(context)
--        self.b_size = self.collection_behavior.item_count
-+    @property
-+    def collection_behavior(self):
-+        return ICollection(aq_inner(self.context))
++        _assert(
++            (
++                '/@@my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
 +
-+    @property
-+    def b_size(self):
-+        return getattr(self, '_b_size', self.collection_behavior.item_count)
-+
-+    @b_size.setter
-+    def b_size(self, value):
-+        # ignore, FolderView tries to set on init
-+        pass
++        _assert(
+             '/@@images/abde-01fa.png',
+             version='my_version',
+         )
+@@ -120,36 +140,37 @@ def test_get_download_version_link(self):
+         obj = self.obj1
+         view = browser.VersionView(obj, self.request)
  
-     def results(self, **kwargs):
-         """Return a content listing based result set with results from the
+-        def _assert(version, correct_url, field=None, filename=None):
++        def _assert(version, correct_path, field=None, filename=None):
+             actual = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+             )
++            correct_url = obj.absolute_url() + '/' + correct_path
+             self.assertEqual(actual, correct_url)
+ 
+         _assert(
+             version='my_version',
+             field='my_field',
+             filename='my_file.txt',
+-            correct_url=(
+-                '/@@download-version?'
++            correct_path=(
++                '@@download-version?'
+                 'version_id=my_version&field_id=my_field&filename=my_file.txt'
+             ),
+         )
+         _assert(
+             version='my_version',
+             filename='my_file.txt',
+-            correct_url='/@@download-version?version_id=my_version&filename=my_file.txt',
++            correct_path='@@download-version?version_id=my_version&filename=my_file.txt',
+         )
+         _assert(
+             version='my_version',
+             field='my_field',
+-            correct_url='/@@download-version?version_id=my_version&field_id=my_field',
++            correct_path='@@download-version?version_id=my_version&field_id=my_field',
+         )
+         _assert(
+             version='my_version',
+-            correct_url='/@@download-version?version_id=my_version',
++            correct_path='@@download-version?version_id=my_version',
+         )
+ 
+     def test_call(self):
+@@ -158,11 +179,13 @@ def test_call(self):
+         view = browser.VersionView(obj, self.request)
+ 
+         html = self._render_view(view=obj, url=obj.absolute_url())
+-        download_url = '{}/++widget++form.widgets.file/@@download/{}'.format(
+-            obj.absolute_url(),
+-            obj.file.filename,
++        download_url_pattern = re.compile(
++            obj.absolute_url() +
++            r'(/[@A-Za-z0-9-_]+)?/' +  # View name can be present or not.
++            r'\+\+widget\+\+form\.widgets\.file/@@download/' +
++            obj.file.filename
+         )
+-        self.assertTrue(download_url in html)
++        self.assertTrue(download_url_pattern.search(html))
+ 
+         html = self._render_view(view=view, url=obj.absolute_url(), params={'version_id': '0'})
+         download_url = '{}/@@download-version?version_id=0&field_id=file&filename={}'.format(
 
 
-Repository: plone.app.contenttypes
+Repository: plone.app.versioningbehavior
 
 
 Branch: refs/heads/master
-Date: 2016-05-09T01:16:01+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/1ec22b9556879741a630ff4b72bec86838da8990
+Date: 2016-05-10T15:05:40-03:00
+Author: Rafael Oliveira (rafaelbco) <rafaelbco@gmail.com>
+Commit: https://github.com/plone/plone.app.versioningbehavior/commit/eee6d863552b7d5d9e67da151ff721be754b1ab9
 
-Merge pull request #348 from plone/jensens-deferred-adapter-lookup
+Merge pull request #27 from plone/improve_download_url_conversion
 
-deferred initialize to reduce costs of adapter lookup.
+Improve conversion of download URLs on @@version-view
 
 Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
+M plone/app/versioningbehavior/browser.py
+M plone/app/versioningbehavior/tests/test_browser.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 0df3471..a9fe553 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,6 +14,11 @@ New:
+diff --git a/plone/app/versioningbehavior/browser.py b/plone/app/versioningbehavior/browser.py
+index ed80975..1edf23c 100644
+--- a/plone/app/versioningbehavior/browser.py
++++ b/plone/app/versioningbehavior/browser.py
+@@ -24,22 +24,20 @@ def __init__(self, context, request):
+         self.request = request
  
- Fixes:
+     _download_url_patterns = (
+-        # Behavior name before field name, like "LeadImage.image"
+-        # Example: /++widget++form.widgets.my_field/@@download/my_file.txt
+-        # Example: /++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
+-        # Example: /versions_history_form/++widget++form.widgets.my_field/@@download/my_file.txt
+-        re.compile(
+-            r'/'
+-            r'(versions_history_form/)?'
++        # Example: ++widget++form.widgets.my_field/@@download/my_file.txt
++        # Example: ++widget++form.widgets.my_interface.my_field/@@download/my_file.txt
++        # Example: view-name/++widget++form.widgets.my_field/@@download/my_file.txt
++        (
++            r'([@a-zA-Z0-9_-]+/)?'
+             r'\+\+widget\+\+form\.widgets\.([a-zA-Z0-9_-]+\.)?(?P<field_id>[a-zA-Z0-9_-]+)'
+             r'/@@download/(?P<filename>[^"\']+)'
+         ),
  
-+- Deferred adapter lookup in collection view.
-+  This was looked up for contentmenu/toolbar at every authenticated request.
-+  It also had side effects if custom collection behaviors are used.
-+  [jensens]
+-        # Example: /@@download/my_field/my_file.txt
+-        re.compile(r'/@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)'),
++        # Example: @@download/my_field/my_file.txt
++        r'@@download/(?P<field_id>[a-zA-Z0-9_-]+)/(?P<filename>[^"\']+)',
+ 
+-        # Example: /@@images/aedf-0123.png
+-        re.compile(r'/@@images/[0-9a-f\-]+\.[a-z]+'),
++        # Example: @@images/aedf-0123.png
++        r'@@images/[0-9a-f\-]+\.[a-z]+',
+     )
+ 
+     def __call__(self):
+@@ -62,8 +60,10 @@ def repl(match):
+                 filename=groups.get('filename'),
+             )
+ 
++        context_url = self.context.absolute_url()
+         for pattern in self._download_url_patterns:
+-            transformed_html = pattern.sub(repl, transformed_html)
++            compiled_pattern = re.compile(context_url + '/' + pattern)
++            transformed_html = compiled_pattern.sub(repl, transformed_html)
+ 
+         return transformed_html
+ 
+@@ -77,7 +77,7 @@ def _get_download_version_link(self, version_id, field_id=None, filename=None):
+             parameters.append(('filename', filename))
+ 
+         query_string = urlencode(parameters)
+-        return '/@@download-version?{}'.format(query_string)
++        return '{}/@@download-version?{}'.format(self.context.absolute_url(), query_string)
+ 
+ 
+ class DownloadVersion(object):
+diff --git a/plone/app/versioningbehavior/tests/test_browser.py b/plone/app/versioningbehavior/tests/test_browser.py
+index a2ec600..8ed5879 100644
+--- a/plone/app/versioningbehavior/tests/test_browser.py
++++ b/plone/app/versioningbehavior/tests/test_browser.py
+@@ -4,10 +4,10 @@
+ from ..testing import VERSIONING_INTEGRATION_TESTING
+ from plone.app.testing import TEST_USER_ID, TEST_USER_ROLES, setRoles
+ from plone.app.versioningbehavior.testing import TEST_CONTENT_TYPE_ID
++from plone.namedfile import NamedBlobFile
+ from zope.component import getMultiAdapter
++import re
+ import unittest
+-from plone.namedfile import NamedBlobFile
+-
+ 
+ class BaseViewTestCase(unittest.TestCase):
+ 
+@@ -55,7 +55,7 @@ def _assert(old_path, version, field=None, filename=None):
+             old_url = obj.absolute_url() + old_path
+             old = href_template.format(old_url)
+             new = view._convert_download_links(old, version)
+-            correct_url = obj.absolute_url() + view._get_download_version_link(
++            correct_url = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+@@ -111,6 +111,26 @@ def _assert(old_path, version, field=None, filename=None):
+         )
+ 
+         _assert(
++            (
++                '/my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
 +
- - Fixed unstable robot test for location criterion.  [maurits]
- 
- - Don't fail for ``utils.replace_link_variables_by_paths``, if value is ``None``.
-diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py
-index 55b3333..8ce752f 100644
---- a/plone/app/contenttypes/browser/collection.py
-+++ b/plone/app/contenttypes/browser/collection.py
-@@ -10,11 +10,18 @@
- 
- class CollectionView(FolderView):
- 
--    def __init__(self, *args, **kwargs):
--        super(CollectionView, self).__init__(*args, **kwargs)
--        context = aq_inner(self.context)
--        self.collection_behavior = ICollection(context)
--        self.b_size = self.collection_behavior.item_count
-+    @property
-+    def collection_behavior(self):
-+        return ICollection(aq_inner(self.context))
++        _assert(
++            (
++                '/@@my-view/++widget++form.widgets.my_field'
++                '/@@download/my_file.txt'
++            ),
++            version='my_version',
++            field='my_field',
++            filename='my_file.txt',
++        )
 +
-+    @property
-+    def b_size(self):
-+        return getattr(self, '_b_size', self.collection_behavior.item_count)
-+
-+    @b_size.setter
-+    def b_size(self, value):
-+        # ignore, FolderView tries to set on init
-+        pass
++        _assert(
+             '/@@images/abde-01fa.png',
+             version='my_version',
+         )
+@@ -120,36 +140,37 @@ def test_get_download_version_link(self):
+         obj = self.obj1
+         view = browser.VersionView(obj, self.request)
  
-     def results(self, **kwargs):
-         """Return a content listing based result set with results from the
+-        def _assert(version, correct_url, field=None, filename=None):
++        def _assert(version, correct_path, field=None, filename=None):
+             actual = view._get_download_version_link(
+                 version_id=version,
+                 field_id=field,
+                 filename=filename,
+             )
++            correct_url = obj.absolute_url() + '/' + correct_path
+             self.assertEqual(actual, correct_url)
+ 
+         _assert(
+             version='my_version',
+             field='my_field',
+             filename='my_file.txt',
+-            correct_url=(
+-                '/@@download-version?'
++            correct_path=(
++                '@@download-version?'
+                 'version_id=my_version&field_id=my_field&filename=my_file.txt'
+             ),
+         )
+         _assert(
+             version='my_version',
+             filename='my_file.txt',
+-            correct_url='/@@download-version?version_id=my_version&filename=my_file.txt',
++            correct_path='@@download-version?version_id=my_version&filename=my_file.txt',
+         )
+         _assert(
+             version='my_version',
+             field='my_field',
+-            correct_url='/@@download-version?version_id=my_version&field_id=my_field',
++            correct_path='@@download-version?version_id=my_version&field_id=my_field',
+         )
+         _assert(
+             version='my_version',
+-            correct_url='/@@download-version?version_id=my_version',
++            correct_path='@@download-version?version_id=my_version',
+         )
+ 
+     def test_call(self):
+@@ -158,11 +179,13 @@ def test_call(self):
+         view = browser.VersionView(obj, self.request)
+ 
+         html = self._render_view(view=obj, url=obj.absolute_url())
+-        download_url = '{}/++widget++form.widgets.file/@@download/{}'.format(
+-            obj.absolute_url(),
+-            obj.file.filename,
++        download_url_pattern = re.compile(
++            obj.absolute_url() +
++            r'(/[@A-Za-z0-9-_]+)?/' +  # View name can be present or not.
++            r'\+\+widget\+\+form\.widgets\.file/@@download/' +
++            obj.file.filename
+         )
+-        self.assertTrue(download_url in html)
++        self.assertTrue(download_url_pattern.search(html))
+ 
+         html = self._render_view(view=view, url=obj.absolute_url(), params={'version_id': '0'})
+         download_url = '{}/@@download-version?version_id=0&field_id=file&filename={}'.format(
 
 
