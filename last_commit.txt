@@ -1,144 +1,270 @@
-Repository: plone.formwidget.contenttree
+Repository: Products.TinyMCE
 
 
-Branch: refs/heads/master
-Date: 2016-05-02T09:37:34+02:00
-Author: Elio Schmutz (elioschmutz) <e.schmutz@4teamwork.ch>
-Commit: https://github.com/plone/plone.formwidget.contenttree/commit/5aed0ae8e28655578e4c8283c3a40549b99cea24
+Branch: refs/heads/1.3.x
+Date: 2016-05-11T18:51:43+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.TinyMCE/commit/62c4d9abafd2166a189009c3f5d1d55a0b70a3f8
 
-Slice search results in `PathSource` object to limit the search results correctly.
+Export and import selections.
 
-http://docs.plone.org/develop/plone/searching_and_indexing/query.html#sorting-and-limiting-the-number-of-results
+This is for plugins, link_shortcuts, and image_shortcuts.
+These were completely ignored during export and import until now.
+Issue https://github.com/plone/Products.TinyMCE/issues/141
 
 Files changed:
-M CHANGES.rst
-M plone/formwidget/contenttree/source.py
+M HISTORY.rst
+M Products/TinyMCE/exportimport.py
+M Products/TinyMCE/tests/test_exportimport.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index f97f352..588e199 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,8 +10,9 @@ New:
+diff --git a/HISTORY.rst b/HISTORY.rst
+index e1ec2df..0b94db5 100644
+--- a/HISTORY.rst
++++ b/HISTORY.rst
+@@ -15,8 +15,9 @@ New features:
  
- Fixes:
+ Bug fixes:
  
 -- *add item here*
 -
-+- Slice search results in `PathSource` object to limit the search results correctly.
-+  http://docs.plone.org/develop/plone/searching_and_indexing/query.html#sorting-and-limiting-the-number-of-results
-+  [elioschmutz]
++- Export and import plugins, link_shortcuts, and image_shortcuts.
++  Issue https://github.com/plone/Products.TinyMCE/issues/141
++  [maurits]
  
- 1.0.13 (2016-02-09)
+ 1.3.20 (2016-04-25)
  -------------------
-@@ -26,7 +27,7 @@ New:
- -------------------
+diff --git a/Products/TinyMCE/exportimport.py b/Products/TinyMCE/exportimport.py
+index 3f95bba..832c488 100644
+--- a/Products/TinyMCE/exportimport.py
++++ b/Products/TinyMCE/exportimport.py
+@@ -84,12 +84,15 @@ class TinyMCESettingsXMLAdapter(XMLAdapterBase):
+             'containsanchors': {'type': 'List', 'default': u'ATEvent\nATNewsItem\nATDocument\nATRelativePathCriterion'},
+             'linkable': {'type': 'List', 'default': u'ATTopic\nATEvent\nATFile\nATFolder\nATImage\nATBTreeFolder\nATNewsItem\nATDocument'},
+             'imageobjects': {'type': 'List', 'default': u'ATImage'},
++            'plugins': {'type': 'Selection', 'default': []},
+             'customplugins': {'type': 'List', 'default': u''},
+             'entity_encoding': {'type': 'Text', 'default': u'raw'},
+             'rooted': {'type': 'Bool', 'default': False},
+         },
+         'contentbrowser': {
+             'anchor_selector': {'type': 'Text', 'default': u'h2,h3'},
++            'link_shortcuts': {'type': 'Selection', 'default': []},
++            'image_shortcuts': {'type': 'Selection', 'default': []},
+         }
+     }
  
- - Remove unnecessary test setup.
--  [timo] 
-+  [timo]
+@@ -126,6 +129,15 @@ def _exportNode(self):
+                                 child = self._doc.createElement('element')
+                                 child.setAttribute('value', value)
+                                 fieldnode.appendChild(child)
++                elif category[field]['type'] == 'Selection':
++                    if not fieldvalue:
++                        fieldnode.setAttribute('value', '')
++                    else:
++                        for value in fieldvalue:
++                            if value:
++                                child = self._doc.createElement('element')
++                                child.setAttribute('value', value)
++                                fieldnode.appendChild(child)
+                 categorynode.appendChild(fieldnode)
+             object.appendChild(categorynode)
+         return object
+@@ -169,6 +181,30 @@ def _importNode(self, node):
+                                 string = string.decode("utf-8", "ignore")
  
- - Fix HTML entities in browse button title
-   [gaudenz]
-diff --git a/plone/formwidget/contenttree/source.py b/plone/formwidget/contenttree/source.py
-index 6ae80b0..8c5e998 100644
---- a/plone/formwidget/contenttree/source.py
-+++ b/plone/formwidget/contenttree/source.py
-@@ -66,7 +66,7 @@ class PathSource(object):
- 
-     def __init__(self, context, selectable_filter, navigation_tree_query=None, default=None, defaultFactory=None):
-         self.context = context
--        
+                             setattr(self.context, fieldnode.nodeName, string)
++                        elif self.attributes[categorynode.nodeName][fieldnode.nodeName]['type'] == 'Selection':
++                            field = getattr(self.context, fieldnode.nodeName)
++                            if field is None or fieldnode.getAttribute("purge").lower() == 'true':
++                                items = []
++                            else:
++                                items = field
++                            for element in fieldnode.childNodes:
++                                if element.nodeName != '#text' and element.nodeName != '#comment':
++                                    remove = element.getAttribute('remove').lower() == 'true'
++                                    value = element.getAttribute('value')
++                                    if remove and value in items:
++                                        items.remove(value)
++                                    if not remove and value not in items:
++                                        items.append(value)
 +
-         nav_root = getNavigationRootObject(context, None)
-         query_builder = getMultiAdapter((nav_root, self),
-                                         INavigationQueryBuilder)
-@@ -153,12 +153,10 @@ def search(self, query, limit=20):
-             catalog_query['sort_limit'] = limit
++                            for index, key in enumerate(items):
++                                # Don't break on international characters or otherwise
++                                # funky data -
++                                if isinstance(key, str):
++                                    # On Plone 4.1 this should not be reached
++                                    # as string is unicode in any case
++                                    items[index] = key.decode("utf-8", "ignore")
++
++                            setattr(self.context, fieldnode.nodeName, items)
  
-         try:
--            results = (self.getTermByBrain(brain, real_value=False)
--                       for brain in self.catalog(**catalog_query))
-+            for brain in self.catalog(**catalog_query)[:limit]:
-+                yield self.getTermByBrain(brain, real_value=False)
-         except ParseError:
--            return []
--
--        return results
-+            pass
+         self._logger.info('TinyMCE Settings imported.')
  
-     def isBrainSelectable(self, brain):
-         if brain is None:
+diff --git a/Products/TinyMCE/tests/test_exportimport.py b/Products/TinyMCE/tests/test_exportimport.py
+index 1893ea1..abbedb2 100644
+--- a/Products/TinyMCE/tests/test_exportimport.py
++++ b/Products/TinyMCE/tests/test_exportimport.py
+@@ -27,7 +27,15 @@ def test_import_export(self):
+             <customplugins purge="True">
+               <element value="testplugin"/>
+             </customplugins>
++            <plugins>
++              <element value="ploneinlinestyles"/>
++              <element value="plonebrowser"/>
++            </plugins>
+           </resourcetypes>
++          <contentbrowser>
++            <anchor_selector value="h2,h3"/>
++            <link_shortcuts />
++          </contentbrowser>
+         </object>
+         """
+ 
+@@ -41,6 +49,11 @@ def test_import_export(self):
+ 
+         tinymce_utility = getUtility(ITinyMCE)
+         self.assertIn('testplugin', tinymce_utility.customplugins)
++        self.assertIn('ploneinlinestyles', tinymce_utility.plugins)
++        self.assertIn('plonebrowser', tinymce_utility.plugins)
++        self.assertTrue(isinstance(tinymce_utility.plugins, (list, tuple)))
++        self.assertFalse(tinymce_utility.link_shortcuts)
++        self.assertTrue(isinstance(tinymce_utility.link_shortcuts, (list, tuple)))
+ 
+         # Let's create a dummy export context.
+         context = DummyExportContext(self.portal)
 
 
-Repository: plone.formwidget.contenttree
+Repository: Products.TinyMCE
 
 
-Branch: refs/heads/master
-Date: 2016-05-12T09:24:24+02:00
+Branch: refs/heads/1.3.x
+Date: 2016-05-12T23:38:44+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.formwidget.contenttree/commit/65ad175810abf5ef41683fdf022569c19586696f
+Commit: https://github.com/plone/Products.TinyMCE/commit/d316de4e342c3075ce575e50c7e5fc62bf30a04b
 
-Merge pull request #25 from plone/es-slice-search-results
+Merge pull request #142 from plone/maurits-export-import-selections-13
 
-Slice search results in `PathSource` object to limit the search results correctly.
+Export and import selections.
 
 Files changed:
-M CHANGES.rst
-M plone/formwidget/contenttree/source.py
+M HISTORY.rst
+M Products/TinyMCE/exportimport.py
+M Products/TinyMCE/tests/test_exportimport.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index f97f352..588e199 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,8 +10,9 @@ New:
+diff --git a/HISTORY.rst b/HISTORY.rst
+index e1ec2df..0b94db5 100644
+--- a/HISTORY.rst
++++ b/HISTORY.rst
+@@ -15,8 +15,9 @@ New features:
  
- Fixes:
+ Bug fixes:
  
 -- *add item here*
 -
-+- Slice search results in `PathSource` object to limit the search results correctly.
-+  http://docs.plone.org/develop/plone/searching_and_indexing/query.html#sorting-and-limiting-the-number-of-results
-+  [elioschmutz]
++- Export and import plugins, link_shortcuts, and image_shortcuts.
++  Issue https://github.com/plone/Products.TinyMCE/issues/141
++  [maurits]
  
- 1.0.13 (2016-02-09)
+ 1.3.20 (2016-04-25)
  -------------------
-@@ -26,7 +27,7 @@ New:
- -------------------
+diff --git a/Products/TinyMCE/exportimport.py b/Products/TinyMCE/exportimport.py
+index 3f95bba..832c488 100644
+--- a/Products/TinyMCE/exportimport.py
++++ b/Products/TinyMCE/exportimport.py
+@@ -84,12 +84,15 @@ class TinyMCESettingsXMLAdapter(XMLAdapterBase):
+             'containsanchors': {'type': 'List', 'default': u'ATEvent\nATNewsItem\nATDocument\nATRelativePathCriterion'},
+             'linkable': {'type': 'List', 'default': u'ATTopic\nATEvent\nATFile\nATFolder\nATImage\nATBTreeFolder\nATNewsItem\nATDocument'},
+             'imageobjects': {'type': 'List', 'default': u'ATImage'},
++            'plugins': {'type': 'Selection', 'default': []},
+             'customplugins': {'type': 'List', 'default': u''},
+             'entity_encoding': {'type': 'Text', 'default': u'raw'},
+             'rooted': {'type': 'Bool', 'default': False},
+         },
+         'contentbrowser': {
+             'anchor_selector': {'type': 'Text', 'default': u'h2,h3'},
++            'link_shortcuts': {'type': 'Selection', 'default': []},
++            'image_shortcuts': {'type': 'Selection', 'default': []},
+         }
+     }
  
- - Remove unnecessary test setup.
--  [timo] 
-+  [timo]
+@@ -126,6 +129,15 @@ def _exportNode(self):
+                                 child = self._doc.createElement('element')
+                                 child.setAttribute('value', value)
+                                 fieldnode.appendChild(child)
++                elif category[field]['type'] == 'Selection':
++                    if not fieldvalue:
++                        fieldnode.setAttribute('value', '')
++                    else:
++                        for value in fieldvalue:
++                            if value:
++                                child = self._doc.createElement('element')
++                                child.setAttribute('value', value)
++                                fieldnode.appendChild(child)
+                 categorynode.appendChild(fieldnode)
+             object.appendChild(categorynode)
+         return object
+@@ -169,6 +181,30 @@ def _importNode(self, node):
+                                 string = string.decode("utf-8", "ignore")
  
- - Fix HTML entities in browse button title
-   [gaudenz]
-diff --git a/plone/formwidget/contenttree/source.py b/plone/formwidget/contenttree/source.py
-index 6ae80b0..8c5e998 100644
---- a/plone/formwidget/contenttree/source.py
-+++ b/plone/formwidget/contenttree/source.py
-@@ -66,7 +66,7 @@ class PathSource(object):
- 
-     def __init__(self, context, selectable_filter, navigation_tree_query=None, default=None, defaultFactory=None):
-         self.context = context
--        
+                             setattr(self.context, fieldnode.nodeName, string)
++                        elif self.attributes[categorynode.nodeName][fieldnode.nodeName]['type'] == 'Selection':
++                            field = getattr(self.context, fieldnode.nodeName)
++                            if field is None or fieldnode.getAttribute("purge").lower() == 'true':
++                                items = []
++                            else:
++                                items = field
++                            for element in fieldnode.childNodes:
++                                if element.nodeName != '#text' and element.nodeName != '#comment':
++                                    remove = element.getAttribute('remove').lower() == 'true'
++                                    value = element.getAttribute('value')
++                                    if remove and value in items:
++                                        items.remove(value)
++                                    if not remove and value not in items:
++                                        items.append(value)
 +
-         nav_root = getNavigationRootObject(context, None)
-         query_builder = getMultiAdapter((nav_root, self),
-                                         INavigationQueryBuilder)
-@@ -153,12 +153,10 @@ def search(self, query, limit=20):
-             catalog_query['sort_limit'] = limit
++                            for index, key in enumerate(items):
++                                # Don't break on international characters or otherwise
++                                # funky data -
++                                if isinstance(key, str):
++                                    # On Plone 4.1 this should not be reached
++                                    # as string is unicode in any case
++                                    items[index] = key.decode("utf-8", "ignore")
++
++                            setattr(self.context, fieldnode.nodeName, items)
  
-         try:
--            results = (self.getTermByBrain(brain, real_value=False)
--                       for brain in self.catalog(**catalog_query))
-+            for brain in self.catalog(**catalog_query)[:limit]:
-+                yield self.getTermByBrain(brain, real_value=False)
-         except ParseError:
--            return []
--
--        return results
-+            pass
+         self._logger.info('TinyMCE Settings imported.')
  
-     def isBrainSelectable(self, brain):
-         if brain is None:
+diff --git a/Products/TinyMCE/tests/test_exportimport.py b/Products/TinyMCE/tests/test_exportimport.py
+index 1893ea1..abbedb2 100644
+--- a/Products/TinyMCE/tests/test_exportimport.py
++++ b/Products/TinyMCE/tests/test_exportimport.py
+@@ -27,7 +27,15 @@ def test_import_export(self):
+             <customplugins purge="True">
+               <element value="testplugin"/>
+             </customplugins>
++            <plugins>
++              <element value="ploneinlinestyles"/>
++              <element value="plonebrowser"/>
++            </plugins>
+           </resourcetypes>
++          <contentbrowser>
++            <anchor_selector value="h2,h3"/>
++            <link_shortcuts />
++          </contentbrowser>
+         </object>
+         """
+ 
+@@ -41,6 +49,11 @@ def test_import_export(self):
+ 
+         tinymce_utility = getUtility(ITinyMCE)
+         self.assertIn('testplugin', tinymce_utility.customplugins)
++        self.assertIn('ploneinlinestyles', tinymce_utility.plugins)
++        self.assertIn('plonebrowser', tinymce_utility.plugins)
++        self.assertTrue(isinstance(tinymce_utility.plugins, (list, tuple)))
++        self.assertFalse(tinymce_utility.link_shortcuts)
++        self.assertTrue(isinstance(tinymce_utility.link_shortcuts, (list, tuple)))
+ 
+         # Let's create a dummy export context.
+         context = DummyExportContext(self.portal)
 
 
