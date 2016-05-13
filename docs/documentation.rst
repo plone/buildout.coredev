@@ -108,6 +108,6 @@ Using Sphinx
 ------------
 
 reST References:
- * `Plone Oriented Shpinx Documentation <http://developer.plone.org/reference_manuals/active/writing/index.html>`_
+ * `Plone documenttion style guide <http://docs.plone.org/about/rst-styleguide.html>`_
  * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_
 
