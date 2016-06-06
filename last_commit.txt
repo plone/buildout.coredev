@@ -1,348 +1,86 @@
-Repository: plone.app.vocabularies
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2016-06-03T14:10:43+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/6b43e571b9b0cb0a8106539cf9e07f311491ebff
+Date: 2016-06-03T00:43:21+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.discussion/commit/e1dbaef82a801c58576057564ab3689dba983c15
 
-Refactor KeywordsVocabulary logic of term construction from  *dirty* values out into own functions.
+Fixed possible cross site scripting (XSS) attack on moderate comments page.
 
 Files changed:
 M CHANGES.rst
-M README.rst
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/terms.py
-M setup.py
+M plone/app/discussion/browser/moderation.pt
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 644f29c..7363c59 100644
+index a10ba9f..c54fd67 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--2.2.6 (unreleased)
-+2.3.0 (unreleased)
- ------------------
- 
- Breaking changes:
-@@ -10,7 +10,9 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Refactor ``KeywordsVocabulary`` logic of term construction from  *dirty* values out into own functions.
-+  Document functions in README.
-+  [jensens]
+@@ -14,7 +14,7 @@ New features:
  
  Bug fixes:
  
-diff --git a/README.rst b/README.rst
-index 914baf5..3843aab 100644
---- a/README.rst
-+++ b/README.rst
-@@ -149,6 +149,26 @@ Images
-    All image scales which are avaiable on Plone site.
+-- *add item here*
++- Fixed possible cross site scripting (XSS) attack on moderate comments page.  [maurits]
  
  
-+API/ Tools
-+==========
-+
-+``plone.app.vocabularies.terms.TermWithDescription`` (class)
-+    A SimpleTerm accepting additionally a description parameter.
-+    Like title it may be used for display.
-+
-+``plone.app.vocabularies.terms.BrowsableTerm`` (class)
-+    A term which may be browsed.
-+    In a vocabulary those are used to identify terms which are actually browsable (e.g. those representing folders).
-+
-+``plone.app.vocabularies.terms.safe_simpleterm_from_value`` (function)
-+    Create a ``SimpleTerm`` from a *dirty* or *untrusted* value.
-+    Token is encoed carefully and Title converted to unicode.
-+
-+``plone.app.vocabularies.terms.safe_simplevocabulary_from_values`` (function)
-+    Create a ``SimpleVocabulary`` from a iterable (list) of *dirty* or *untrusted* values.
-+    Utilizes above ``safe_simpleterm_from_value`` to achieve this.
-+
-+
- Source Code
- ===========
  
-diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
-index 3128306..97ab102 100644
---- a/plone/app/vocabularies/catalog.py
-+++ b/plone/app/vocabularies/catalog.py
-@@ -1,12 +1,11 @@
- # -*- coding: utf-8 -*-
--from binascii import b2a_qp
- from plone.app.layout.navigation.root import getNavigationRootObject
- from plone.app.vocabularies import SlicableVocabulary
- from plone.app.vocabularies.terms import BrowsableTerm
-+from plone.app.vocabularies.terms import safe_simplevocabulary_from_values
- from plone.app.vocabularies.utils import parseQueryString
- from plone.uuid.interfaces import IUUID
- from Products.CMFCore.utils import getToolByName
--from Products.CMFPlone.utils import safe_unicode
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from Products.ZCTextIndex.ParseTree import ParseError
- from zope.browser.interfaces import ITerms
-@@ -442,22 +441,7 @@ def __call__(self, context, query=None):
-         if self.catalog is None:
-             return SimpleVocabulary([])
-         index = self.catalog._catalog.getIndex(self.keyword_index)
--
--        def safe_encode(term):
--            if isinstance(term, unicode):
--                # no need to use portal encoding for transitional encoding from
--                # unicode to ascii. utf-8 should be fine.
--                term = term.encode('utf-8')
--            return term
--
--        # Vocabulary term tokens *must* be 7 bit values, titles *must* be
--        # unicode
--        items = [
--            SimpleTerm(i, b2a_qp(safe_encode(i)), safe_unicode(i))
--            for i in index._index
--            if query is None or safe_encode(query) in safe_encode(i)
--        ]
--        return SimpleVocabulary(items)
-+        return safe_simplevocabulary_from_values(index._index, query=query)
- 
- KeywordsVocabularyFactory = KeywordsVocabulary()
- 
-diff --git a/plone/app/vocabularies/terms.py b/plone/app/vocabularies/terms.py
-index 55c7d5d..0d653e7 100644
---- a/plone/app/vocabularies/terms.py
-+++ b/plone/app/vocabularies/terms.py
-@@ -1,9 +1,40 @@
- # -*- coding: utf-8 -*-
-+from binascii import b2a_qp
- from plone.app.vocabularies.interfaces import IBrowsableTerm
- from plone.app.vocabularies.interfaces import ITermWithDescription
-+from Products.CMFPlone.utils import safe_unicode
- from zope.interface import alsoProvides
- from zope.interface import implementer
- from zope.schema.vocabulary import SimpleTerm
-+from zope.schema.vocabulary import SimpleVocabulary
-+
-+
-+def safe_encode(value):
-+    if isinstance(value, unicode):
-+        # no need to use portal encoding for transitional encoding from
-+        # unicode to ascii. utf-8 should be fine.
-+        value = value.encode('utf-8')
-+    return value
-+
-+
-+def safe_simpleterm_from_value(value):
-+    """create SimpleTerm from an untrusted value.
-+
-+    - token need cleaned up: Vocabulary term tokens *must* be 7 bit values
-+    - anything for display has to be cleaned up, titles *must* be unicode
-+    """
-+    return SimpleTerm(value, b2a_qp(safe_encode(value)), safe_unicode(value))
-+
-+
-+def safe_simplevocabulary_from_values(values, query=None):
-+    """Creates (filtered) SimpleVocabulary from iterable of untrusted values.
-+    """
-+    items = [
-+        safe_simpleterm_from_value(i)
-+        for i in values
-+        if query is None or safe_encode(query) in safe_encode(i)
-+    ]
-+    return SimpleVocabulary(items)
- 
- 
- @implementer(ITermWithDescription)
-diff --git a/setup.py b/setup.py
-index ad4cbf3..215f65c 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,6 +1,6 @@
- from setuptools import setup, find_packages
- 
--version = '2.2.6.dev0'
-+version = '2.3.0.dev0'
- 
- setup(
-     name='plone.app.vocabularies',
+diff --git a/plone/app/discussion/browser/moderation.pt b/plone/app/discussion/browser/moderation.pt
+index 39ae1f0..d89fff0 100644
+--- a/plone/app/discussion/browser/moderation.pt
++++ b/plone/app/discussion/browser/moderation.pt
+@@ -110,7 +110,7 @@
+                                        tal:content="item/in_response_to" />
+                                 </td>
+                                 <td>
+-                                    <span tal:replace="structure item/Description" />
++                                    <span tal:replace="item/Description" />
+                                     <a href=""
+                                        tal:attributes="href string:${item/getURL}/getText"
+                                        tal:condition="python:item.Description.endswith('[...]')"
 
 
-Repository: plone.app.vocabularies
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2016-06-03T15:54:09+02:00
-Author: agitator (agitator) <hpeter@agitator.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/8e39461178d813db272bb25ff18a781b5631590b
+Date: 2016-06-06T10:10:57+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.discussion/commit/43ea78382493bc73e290060725361deb75bf72f6
 
-Merge pull request #33 from plone/jensens-refactor-keywords
+Merge pull request #98 from plone/maurits-xss-master
 
-Refactor KeywordsVocabulary logic of term construction ...
+Fixed possible cross site scripting attack on moderate comments page [master]
 
 Files changed:
 M CHANGES.rst
-M README.rst
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/terms.py
-M setup.py
+M plone/app/discussion/browser/moderation.pt
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 644f29c..7363c59 100644
+index a10ba9f..c54fd67 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
- 
--2.2.6 (unreleased)
-+2.3.0 (unreleased)
- ------------------
- 
- Breaking changes:
-@@ -10,7 +10,9 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Refactor ``KeywordsVocabulary`` logic of term construction from  *dirty* values out into own functions.
-+  Document functions in README.
-+  [jensens]
+@@ -14,7 +14,7 @@ New features:
  
  Bug fixes:
  
-diff --git a/README.rst b/README.rst
-index 914baf5..3843aab 100644
---- a/README.rst
-+++ b/README.rst
-@@ -149,6 +149,26 @@ Images
-    All image scales which are avaiable on Plone site.
+-- *add item here*
++- Fixed possible cross site scripting (XSS) attack on moderate comments page.  [maurits]
  
  
-+API/ Tools
-+==========
-+
-+``plone.app.vocabularies.terms.TermWithDescription`` (class)
-+    A SimpleTerm accepting additionally a description parameter.
-+    Like title it may be used for display.
-+
-+``plone.app.vocabularies.terms.BrowsableTerm`` (class)
-+    A term which may be browsed.
-+    In a vocabulary those are used to identify terms which are actually browsable (e.g. those representing folders).
-+
-+``plone.app.vocabularies.terms.safe_simpleterm_from_value`` (function)
-+    Create a ``SimpleTerm`` from a *dirty* or *untrusted* value.
-+    Token is encoed carefully and Title converted to unicode.
-+
-+``plone.app.vocabularies.terms.safe_simplevocabulary_from_values`` (function)
-+    Create a ``SimpleVocabulary`` from a iterable (list) of *dirty* or *untrusted* values.
-+    Utilizes above ``safe_simpleterm_from_value`` to achieve this.
-+
-+
- Source Code
- ===========
  
-diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
-index 3128306..97ab102 100644
---- a/plone/app/vocabularies/catalog.py
-+++ b/plone/app/vocabularies/catalog.py
-@@ -1,12 +1,11 @@
- # -*- coding: utf-8 -*-
--from binascii import b2a_qp
- from plone.app.layout.navigation.root import getNavigationRootObject
- from plone.app.vocabularies import SlicableVocabulary
- from plone.app.vocabularies.terms import BrowsableTerm
-+from plone.app.vocabularies.terms import safe_simplevocabulary_from_values
- from plone.app.vocabularies.utils import parseQueryString
- from plone.uuid.interfaces import IUUID
- from Products.CMFCore.utils import getToolByName
--from Products.CMFPlone.utils import safe_unicode
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from Products.ZCTextIndex.ParseTree import ParseError
- from zope.browser.interfaces import ITerms
-@@ -442,22 +441,7 @@ def __call__(self, context, query=None):
-         if self.catalog is None:
-             return SimpleVocabulary([])
-         index = self.catalog._catalog.getIndex(self.keyword_index)
--
--        def safe_encode(term):
--            if isinstance(term, unicode):
--                # no need to use portal encoding for transitional encoding from
--                # unicode to ascii. utf-8 should be fine.
--                term = term.encode('utf-8')
--            return term
--
--        # Vocabulary term tokens *must* be 7 bit values, titles *must* be
--        # unicode
--        items = [
--            SimpleTerm(i, b2a_qp(safe_encode(i)), safe_unicode(i))
--            for i in index._index
--            if query is None or safe_encode(query) in safe_encode(i)
--        ]
--        return SimpleVocabulary(items)
-+        return safe_simplevocabulary_from_values(index._index, query=query)
- 
- KeywordsVocabularyFactory = KeywordsVocabulary()
- 
-diff --git a/plone/app/vocabularies/terms.py b/plone/app/vocabularies/terms.py
-index 55c7d5d..0d653e7 100644
---- a/plone/app/vocabularies/terms.py
-+++ b/plone/app/vocabularies/terms.py
-@@ -1,9 +1,40 @@
- # -*- coding: utf-8 -*-
-+from binascii import b2a_qp
- from plone.app.vocabularies.interfaces import IBrowsableTerm
- from plone.app.vocabularies.interfaces import ITermWithDescription
-+from Products.CMFPlone.utils import safe_unicode
- from zope.interface import alsoProvides
- from zope.interface import implementer
- from zope.schema.vocabulary import SimpleTerm
-+from zope.schema.vocabulary import SimpleVocabulary
-+
-+
-+def safe_encode(value):
-+    if isinstance(value, unicode):
-+        # no need to use portal encoding for transitional encoding from
-+        # unicode to ascii. utf-8 should be fine.
-+        value = value.encode('utf-8')
-+    return value
-+
-+
-+def safe_simpleterm_from_value(value):
-+    """create SimpleTerm from an untrusted value.
-+
-+    - token need cleaned up: Vocabulary term tokens *must* be 7 bit values
-+    - anything for display has to be cleaned up, titles *must* be unicode
-+    """
-+    return SimpleTerm(value, b2a_qp(safe_encode(value)), safe_unicode(value))
-+
-+
-+def safe_simplevocabulary_from_values(values, query=None):
-+    """Creates (filtered) SimpleVocabulary from iterable of untrusted values.
-+    """
-+    items = [
-+        safe_simpleterm_from_value(i)
-+        for i in values
-+        if query is None or safe_encode(query) in safe_encode(i)
-+    ]
-+    return SimpleVocabulary(items)
- 
- 
- @implementer(ITermWithDescription)
-diff --git a/setup.py b/setup.py
-index ad4cbf3..215f65c 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,6 +1,6 @@
- from setuptools import setup, find_packages
- 
--version = '2.2.6.dev0'
-+version = '2.3.0.dev0'
- 
- setup(
-     name='plone.app.vocabularies',
+diff --git a/plone/app/discussion/browser/moderation.pt b/plone/app/discussion/browser/moderation.pt
+index 39ae1f0..d89fff0 100644
+--- a/plone/app/discussion/browser/moderation.pt
++++ b/plone/app/discussion/browser/moderation.pt
+@@ -110,7 +110,7 @@
+                                        tal:content="item/in_response_to" />
+                                 </td>
+                                 <td>
+-                                    <span tal:replace="structure item/Description" />
++                                    <span tal:replace="item/Description" />
+                                     <a href=""
+                                        tal:attributes="href string:${item/getURL}/getText"
+                                        tal:condition="python:item.Description.endswith('[...]')"
 
 
