@@ -1,188 +1,328 @@
-Repository: diazo
+Repository: plone.app.vocabularies
 
 
 Branch: refs/heads/master
-Date: 2016-06-06T14:24:35+02:00
-Author: Kristin Kuche (krissik) <kuche@hrz.uni-marburg.de>
-Commit: https://github.com/plone/diazo/commit/11ce1abef7879f28d6594f73deae2e9ecabd7bbc
+Date: 2016-06-06T20:08:14-05:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/d52b1c850be9eebba9d3744f4e5b4669c610a880
 
-Add absolute url prefix to xlink:href attributes
+CatalogVocabulary now takes a query for it's constructor instead of a LazyMap of brains
+  and lazy loads terms. Also, in __contains___, do a UID query instead of checking the
+  entire contents of the result. This prevents potential DOS with custom code where the
+  whole contents of the catalog would get loaded with terms created for it on every
+  validation attempt.
 
 Files changed:
 M CHANGES.rst
-M lib/diazo/rules.py
-M lib/diazo/tests/absolute-prefix/output.html
-M lib/diazo/tests/absolute-prefix/theme.html
+M plone/app/vocabularies/catalog.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7ec41be..adf576e 100644
+index 7363c59..80f2bfe 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -7,6 +7,8 @@ Changelog
- New:
+@@ -6,7 +6,12 @@ Changelog
  
- - *add item here*
-+- Add absolute url prefix to xlink:href attributes
-+  [krissik]
+ Breaking changes:
  
- Fixes:
+-- *add item here*
++- CatalogVocabulary now takes a query for it's constructor instead of a LazyMap of brains
++  and lazy loads terms. Also, in __contains__, do a UID query instead of checking the
++  entire contents of the result. This prevents potential DOS with custom code where the
++  whole contents of the catalog would get loaded with terms created for it on every
++  validation attempt.
++  [vangheem]
  
-diff --git a/lib/diazo/rules.py b/lib/diazo/rules.py
-index c6a70dc..59e6473 100644
---- a/lib/diazo/rules.py
-+++ b/lib/diazo/rules.py
-@@ -140,6 +140,10 @@ def apply_absolute_prefix(theme_doc, absolute_prefix):
-     for node in theme_doc.xpath('//*[@src]'):
-         url = urljoin(absolute_prefix, node.get('src'))
-         node.set('src', url)
-+    for xlink_attr in theme_doc.xpath('//@*[local-name()="xlink:href"]'):
-+        node = xlink_attr.getparent()
-+        url = urljoin(absolute_prefix, node.get('xlink:href'))
-+        node.set('xlink:href', url)
-     for node in theme_doc.xpath('//*[@srcset]'):
-         srcset = node.get('srcset')
-         srcset = SRCSET.sub(
-diff --git a/lib/diazo/tests/absolute-prefix/output.html b/lib/diazo/tests/absolute-prefix/output.html
-index 7b77fe3..a2c2c78 100644
---- a/lib/diazo/tests/absolute-prefix/output.html
-+++ b/lib/diazo/tests/absolute-prefix/output.html
-@@ -39,5 +39,9 @@
-     <input type="submit" src="http://site.com/foo.jpg" />
-     <a href="/abs/foo.html">Link</a>
-     <a href="#foo">Anchor</a>
-+    <div xmlns:xlink="http://www.w3.org/1999/xlink">
-+      <svg><use xlink:href="/abs/img/foo.svg"></use></svg>
-+      <span xlink:href="/abs/foo.html"></span>
-+    </div>
-   </body>
- </html>
-diff --git a/lib/diazo/tests/absolute-prefix/theme.html b/lib/diazo/tests/absolute-prefix/theme.html
-index a348111..94cd30b 100644
---- a/lib/diazo/tests/absolute-prefix/theme.html
-+++ b/lib/diazo/tests/absolute-prefix/theme.html
-@@ -39,5 +39,9 @@
-     <input type="submit" src="http://site.com/foo.jpg" />
-     <a href="foo.html">Link</a>
-     <a href="#foo">Anchor</a>
-+    <div xmlns:xlink="http://www.w3.org/1999/xlink">
-+      <svg><use xlink:href="img/foo.svg"></use></svg>
-+      <span xlink:href="foo.html"></span>
-+    </div>
-   </body>
- </html>
+ New features:
+ 
+diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
+index 97ab102..725b609 100644
+--- a/plone/app/vocabularies/catalog.py
++++ b/plone/app/vocabularies/catalog.py
+@@ -4,6 +4,7 @@
+ from plone.app.vocabularies.terms import BrowsableTerm
+ from plone.app.vocabularies.terms import safe_simplevocabulary_from_values
+ from plone.app.vocabularies.utils import parseQueryString
++from plone.memoize.instance import memoize
+ from plone.uuid.interfaces import IUUID
+ from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+@@ -452,19 +453,30 @@ class CatalogVocabulary(SlicableVocabulary):
+     # plone.app.widgets < 1.6.0
+ 
+     @classmethod
+-    def fromItems(cls, brains, context, *interfaces):
+-        return cls(brains)
++    def fromItems(cls, query, context, *interfaces):
++        return cls(query)
+     fromValues = fromItems
+ 
+     @classmethod
+     def createTerm(cls, brain, context):
+         return SimpleTerm(brain, brain.UID, brain.UID)
+ 
+-    def __init__(self, brains, *interfaces):
+-        self._brains = brains
++    def __init__(self, query, *interfaces):
++        self.query = query
++
++    @property
++    @memoize
++    def catalog(self):
++        return getToolByName(getSite(), 'portal_catalog')
++
++    @property
++    @memoize
++    def brains(self):
++        return self.catalog(**self.query)
+ 
+     def __iter__(self):
+-        return iter(self._terms)
++        for brain in self.brains:
++            yield self.createTerm(brain, None)
+ 
+     def __contains__(self, value):
+         if isinstance(value, basestring):
+@@ -472,42 +484,22 @@ def __contains__(self, value):
+             uid = value
+         else:
+             uid = IUUID(value)
+-        for term in self._terms:
+-            try:
+-                term_uid = term.value.UID
+-            except AttributeError:
+-                term_uid = term.value
+-            if uid == term_uid:
+-                return True
+-        return False
++        query = self.query.copy()
++        query['UID'] = uid
++        return len(self.catalog(**query)) > 0
+ 
+     def __len__(self):
+-        return len(self._brains)
++        return len(self.brains)
+ 
+     def __getitem__(self, index):
+         if isinstance(index, slice):
+             slice_inst = index
+             start = slice_inst.start
+             stop = slice_inst.stop
+-            if not hasattr(self, "__terms"):
+-                return [self.createTerm(brain, None)
+-                        for brain in self._brains[start:stop]]
+-            else:
+-                return self.__terms[start:stop]
++            return [self.createTerm(brain, None)
++                    for brain in self.brains[start:stop]]
+         else:
+-            if not hasattr(self, "__terms"):
+-                return self.createTerm(self._brains[index], None)
+-            else:
+-                return self.__terms[index]
+-
+-    @property
+-    def _terms(self):
+-        if not hasattr(self, "__terms"):
+-            self.__terms = [
+-                self.createTerm(brain, None)
+-                for brain in self._brains
+-            ]
+-        return self.__terms
++            return self.createTerm(self.brains[index], None)
+ 
+ 
+ @implementer(IVocabularyFactory)
+@@ -552,24 +544,18 @@ def __call__(self, context, query=None):
+                 parsed['sort_on'] = query['sort_on']
+             if 'sort_order' in query:
+                 parsed['sort_order'] = str(query['sort_order'])
+-        try:
+-            catalog = getToolByName(context, 'portal_catalog')
+-        except AttributeError:
+-            context = getSite()
+-            catalog = getToolByName(context, 'portal_catalog')
+ 
+         # If no path is specified check if we are in a sub-site and use that
+         # as the path root for catalog searches
+         if 'path' not in parsed:
+-            portal = getToolByName(context, 'portal_url').getPortalObject()
+-            nav_root = getNavigationRootObject(context, portal)
+-            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
++            site = getSite()
++            nav_root = getNavigationRootObject(context, site)
++            if nav_root and nav_root.getPhysicalPath() != site.getPhysicalPath():
+                 parsed['path'] = {
+                     'query': '/'.join(nav_root.getPhysicalPath()),
+                     'depth': -1
+                 }
+-        brains = catalog(**parsed)
+-        return CatalogVocabulary.fromItems(brains, context)
++        return CatalogVocabulary.fromItems(parsed, context)
+ 
+ 
+ @implementer(ISource)
 
 
-Repository: diazo
+Repository: plone.app.vocabularies
 
 
 Branch: refs/heads/master
-Date: 2016-06-06T14:45:49+02:00
-Author: Kristin Kuche (krissik) <kuche@hrz.uni-marburg.de>
-Commit: https://github.com/plone/diazo/commit/3d99953f296c43d58a658b82358c562049a176a9
+Date: 2016-06-08T13:56:24+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/dfd8bc3784d6e6f2782568f316df3e11af8ddf32
 
-Pin repoze.xmliter to 0.6
+Merge pull request #34 from plone/fix-catalog-query
 
-Files changed:
-M versions.cfg
-
-diff --git a/versions.cfg b/versions.cfg
-index 4b66da6..a709949 100644
---- a/versions.cfg
-+++ b/versions.cfg
-@@ -5,5 +5,5 @@ versions = versions
- WebOb = 1.4
- cssselect = 0.9.1
- lxml = 3.3.5
--repoze.xmliter = 0.5
-+repoze.xmliter = 0.6
- FormEncode = 1.3.0a1
-
-
-Repository: diazo
-
-
-Branch: refs/heads/master
-Date: 2016-06-07T09:08:25+02:00
-Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
-Commit: https://github.com/plone/diazo/commit/a354f53f3fe2c414fefe5642b4997cabe052c6b1
-
-Merge pull request #58 from hrz-unimr/master
-
-Add absolute url prefix to xlink:href attributes
+Fix CatalogVocabulary loading entire catalog
 
 Files changed:
 M CHANGES.rst
-M lib/diazo/rules.py
-M lib/diazo/tests/absolute-prefix/output.html
-M lib/diazo/tests/absolute-prefix/theme.html
-M versions.cfg
+M plone/app/vocabularies/catalog.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7ec41be..adf576e 100644
+index 1277d34..dfea620 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -7,6 +7,8 @@ Changelog
- New:
+@@ -6,7 +6,12 @@ Changelog
  
- - *add item here*
-+- Add absolute url prefix to xlink:href attributes
-+  [krissik]
+ Breaking changes:
  
- Fixes:
+-- *add item here*
++- CatalogVocabulary now takes a query for it's constructor instead of a LazyMap of brains
++  and lazy loads terms. Also, in __contains__, do a UID query instead of checking the
++  entire contents of the result. This prevents potential DOS with custom code where the
++  whole contents of the catalog would get loaded with terms created for it on every
++  validation attempt.
++  [vangheem]
  
-diff --git a/lib/diazo/rules.py b/lib/diazo/rules.py
-index c6a70dc..59e6473 100644
---- a/lib/diazo/rules.py
-+++ b/lib/diazo/rules.py
-@@ -140,6 +140,10 @@ def apply_absolute_prefix(theme_doc, absolute_prefix):
-     for node in theme_doc.xpath('//*[@src]'):
-         url = urljoin(absolute_prefix, node.get('src'))
-         node.set('src', url)
-+    for xlink_attr in theme_doc.xpath('//@*[local-name()="xlink:href"]'):
-+        node = xlink_attr.getparent()
-+        url = urljoin(absolute_prefix, node.get('xlink:href'))
-+        node.set('xlink:href', url)
-     for node in theme_doc.xpath('//*[@srcset]'):
-         srcset = node.get('srcset')
-         srcset = SRCSET.sub(
-diff --git a/lib/diazo/tests/absolute-prefix/output.html b/lib/diazo/tests/absolute-prefix/output.html
-index 7b77fe3..a2c2c78 100644
---- a/lib/diazo/tests/absolute-prefix/output.html
-+++ b/lib/diazo/tests/absolute-prefix/output.html
-@@ -39,5 +39,9 @@
-     <input type="submit" src="http://site.com/foo.jpg" />
-     <a href="/abs/foo.html">Link</a>
-     <a href="#foo">Anchor</a>
-+    <div xmlns:xlink="http://www.w3.org/1999/xlink">
-+      <svg><use xlink:href="/abs/img/foo.svg"></use></svg>
-+      <span xlink:href="/abs/foo.html"></span>
-+    </div>
-   </body>
- </html>
-diff --git a/lib/diazo/tests/absolute-prefix/theme.html b/lib/diazo/tests/absolute-prefix/theme.html
-index a348111..94cd30b 100644
---- a/lib/diazo/tests/absolute-prefix/theme.html
-+++ b/lib/diazo/tests/absolute-prefix/theme.html
-@@ -39,5 +39,9 @@
-     <input type="submit" src="http://site.com/foo.jpg" />
-     <a href="foo.html">Link</a>
-     <a href="#foo">Anchor</a>
-+    <div xmlns:xlink="http://www.w3.org/1999/xlink">
-+      <svg><use xlink:href="img/foo.svg"></use></svg>
-+      <span xlink:href="foo.html"></span>
-+    </div>
-   </body>
- </html>
-diff --git a/versions.cfg b/versions.cfg
-index 4b66da6..a709949 100644
---- a/versions.cfg
-+++ b/versions.cfg
-@@ -5,5 +5,5 @@ versions = versions
- WebOb = 1.4
- cssselect = 0.9.1
- lxml = 3.3.5
--repoze.xmliter = 0.5
-+repoze.xmliter = 0.6
- FormEncode = 1.3.0a1
+ New features:
+ 
+diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py
+index 97ab102..725b609 100644
+--- a/plone/app/vocabularies/catalog.py
++++ b/plone/app/vocabularies/catalog.py
+@@ -4,6 +4,7 @@
+ from plone.app.vocabularies.terms import BrowsableTerm
+ from plone.app.vocabularies.terms import safe_simplevocabulary_from_values
+ from plone.app.vocabularies.utils import parseQueryString
++from plone.memoize.instance import memoize
+ from plone.uuid.interfaces import IUUID
+ from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+@@ -452,19 +453,30 @@ class CatalogVocabulary(SlicableVocabulary):
+     # plone.app.widgets < 1.6.0
+ 
+     @classmethod
+-    def fromItems(cls, brains, context, *interfaces):
+-        return cls(brains)
++    def fromItems(cls, query, context, *interfaces):
++        return cls(query)
+     fromValues = fromItems
+ 
+     @classmethod
+     def createTerm(cls, brain, context):
+         return SimpleTerm(brain, brain.UID, brain.UID)
+ 
+-    def __init__(self, brains, *interfaces):
+-        self._brains = brains
++    def __init__(self, query, *interfaces):
++        self.query = query
++
++    @property
++    @memoize
++    def catalog(self):
++        return getToolByName(getSite(), 'portal_catalog')
++
++    @property
++    @memoize
++    def brains(self):
++        return self.catalog(**self.query)
+ 
+     def __iter__(self):
+-        return iter(self._terms)
++        for brain in self.brains:
++            yield self.createTerm(brain, None)
+ 
+     def __contains__(self, value):
+         if isinstance(value, basestring):
+@@ -472,42 +484,22 @@ def __contains__(self, value):
+             uid = value
+         else:
+             uid = IUUID(value)
+-        for term in self._terms:
+-            try:
+-                term_uid = term.value.UID
+-            except AttributeError:
+-                term_uid = term.value
+-            if uid == term_uid:
+-                return True
+-        return False
++        query = self.query.copy()
++        query['UID'] = uid
++        return len(self.catalog(**query)) > 0
+ 
+     def __len__(self):
+-        return len(self._brains)
++        return len(self.brains)
+ 
+     def __getitem__(self, index):
+         if isinstance(index, slice):
+             slice_inst = index
+             start = slice_inst.start
+             stop = slice_inst.stop
+-            if not hasattr(self, "__terms"):
+-                return [self.createTerm(brain, None)
+-                        for brain in self._brains[start:stop]]
+-            else:
+-                return self.__terms[start:stop]
++            return [self.createTerm(brain, None)
++                    for brain in self.brains[start:stop]]
+         else:
+-            if not hasattr(self, "__terms"):
+-                return self.createTerm(self._brains[index], None)
+-            else:
+-                return self.__terms[index]
+-
+-    @property
+-    def _terms(self):
+-        if not hasattr(self, "__terms"):
+-            self.__terms = [
+-                self.createTerm(brain, None)
+-                for brain in self._brains
+-            ]
+-        return self.__terms
++            return self.createTerm(self.brains[index], None)
+ 
+ 
+ @implementer(IVocabularyFactory)
+@@ -552,24 +544,18 @@ def __call__(self, context, query=None):
+                 parsed['sort_on'] = query['sort_on']
+             if 'sort_order' in query:
+                 parsed['sort_order'] = str(query['sort_order'])
+-        try:
+-            catalog = getToolByName(context, 'portal_catalog')
+-        except AttributeError:
+-            context = getSite()
+-            catalog = getToolByName(context, 'portal_catalog')
+ 
+         # If no path is specified check if we are in a sub-site and use that
+         # as the path root for catalog searches
+         if 'path' not in parsed:
+-            portal = getToolByName(context, 'portal_url').getPortalObject()
+-            nav_root = getNavigationRootObject(context, portal)
+-            if nav_root.getPhysicalPath() != portal.getPhysicalPath():
++            site = getSite()
++            nav_root = getNavigationRootObject(context, site)
++            if nav_root and nav_root.getPhysicalPath() != site.getPhysicalPath():
+                 parsed['path'] = {
+                     'query': '/'.join(nav_root.getPhysicalPath()),
+                     'depth': -1
+                 }
+-        brains = catalog(**parsed)
+-        return CatalogVocabulary.fromItems(brains, context)
++        return CatalogVocabulary.fromItems(parsed, context)
+ 
+ 
+ @implementer(ISource)
 
 
