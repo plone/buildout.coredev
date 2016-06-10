@@ -1,261 +1,348 @@
-Repository: plone.app.discussion
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2016-06-10T01:57:04+02:00
+Date: 2016-06-08T02:35:56+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.discussion/commit/6952923b1e61831e4586a397aaa8cd5a8d8c5f38
+Commit: https://github.com/plone/plone.protect/commit/d6c220701e34a0dced721d7a7cf77cf7530ed8ed
 
-Reset the required setting of the author_email widget each time.
+Added protect.js from plone4.csrffixes.
 
-Otherwise, the email field might get set to required when an anonymous
-user visits, and then remain required when an authenticated user
-visits, making it impossible for an authenticated user to fill in the
-form without validation error.  Or when in the control panel the field
-is set as not required anymore, that change would have no effect until
-the instance was restarted.
+This adds an `X-CSRF-TOKEN` header to ajax requests.
+
+Fixes https://github.com/plone/plone.protect/issues/42
 
 Files changed:
+A plone/protect/protect.js
 M CHANGES.rst
-M plone/app/discussion/browser/comments.py
-M plone/app/discussion/tests/functional_test_comments.txt
+M plone/protect/auto.py
+M plone/protect/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e7f6da9..789ef5f 100644
+index d6c1845..db7b2c5 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,13 @@ New features:
+@@ -6,7 +6,10 @@ Changelog
  
- Bug fixes:
+ New:
  
 -- *add item here*
-+- Reset the required setting of the author_email widget each time.
-+  Otherwise, the email field might get set to required when an
-+  anonymous user visits, and then remain required when an
-+  authenticated user visits, making it impossible for an authenticated
-+  user to fill in the form without validation error.  Or when in the
-+  control panel the field is set as not required anymore, that change
-+  would have no effect until the instance was restarted.  [maurits]
++- Added protect.js from plone4.csrffixes.  This adds an ``X-CSRF-TOKEN``
++  header to ajax requests.
++  Fixes https://github.com/plone/plone.protect/issues/42
++  [maurits]
  
+ Fixes:
  
- 2.4.14 (2016-06-06)
-diff --git a/plone/app/discussion/browser/comments.py b/plone/app/discussion/browser/comments.py
-index a1c80af..7d9695c 100644
---- a/plone/app/discussion/browser/comments.py
-+++ b/plone/app/discussion/browser/comments.py
-@@ -87,6 +87,20 @@ def updateWidgets(self):
-         self.widgets['in_reply_to'].mode = interfaces.HIDDEN_MODE
-         self.widgets['text'].addClass('autoresize')
-         self.widgets['user_notification'].label = _(u'')
-+        # Reset widget field settings to their defaults, which may be changed
-+        # further on.  Otherwise, the email field might get set to required
-+        # when an anonymous user visits, and then remain required when an
-+        # authenticated user visits, making it impossible for an authenticated
-+        # user to fill in the form without validation error.  Or when in the
-+        # control panel the field is set as not required anymore, that change
-+        # would have no effect until the instance was restarted.  Note that the
-+        # widget is new each time, but the field is the same item in memory as
-+        # the previous time.
-+        self.widgets['author_email'].field.required = False
-+        # The widget is new, but its 'required' setting is based on the
-+        # previous value on the field, so we need to reset it here.  Changing
-+        # the field in updateFields does not help.
-+        self.widgets['author_email'].required = False
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 1879b02..80d1650 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -298,4 +298,18 @@ def transform(self, result, encoding):
+                 hidden.attrib['value'] = token
+                 form.append(hidden)
  
-         # Rename the id of the text widgets because there can be css-id
-         # clashes with the text field of documents when using and overlay
-diff --git a/plone/app/discussion/tests/functional_test_comments.txt b/plone/app/discussion/tests/functional_test_comments.txt
-index ccdb4ff..6aa6b81 100644
---- a/plone/app/discussion/tests/functional_test_comments.txt
-+++ b/plone/app/discussion/tests/functional_test_comments.txt
-@@ -479,3 +479,60 @@ Make sure the edit was successful.
++        if self.site is not None and not root.cssselect('#protect-script'):
++            # Alternative: add this in the resource registry.
++            site_url = self.site.absolute_url()
++            body = root.cssselect('body')[0]
++            protect_script = etree.Element("script")
++            protect_script.attrib.update({
++                'type': "application/javascript",
++                'src': "%s/++resource++protect.js" % site_url,
++                'data-site-url': site_url,
++                'data-token': token,
++                'id': 'protect-script'
++            })
++            body.append(protect_script)
++
+         return result
+diff --git a/plone/protect/configure.zcml b/plone/protect/configure.zcml
+index 22934eb..54212cc 100644
+--- a/plone/protect/configure.zcml
++++ b/plone/protect/configure.zcml
+@@ -35,6 +35,11 @@
+         factory=".auto.ProtectTransform"
+         />
  
-     >>> 'Lorem ipsum' in browser.contents
-     True
++    <browser:resource
++        name="protect.js"
++        file="protect.js"
++        />
 +
+     <browser:page
+         name="confirm-action"
+         for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+@@ -60,4 +65,4 @@
+         replacement=".monkey.wl_lockmapping"
+         preserveOriginal="True"
+         />
+-</configure>
+\ No newline at end of file
++</configure>
+diff --git a/plone/protect/protect.js b/plone/protect/protect.js
+new file mode 100644
+index 0000000..acd3aed
+--- /dev/null
++++ b/plone/protect/protect.js
+@@ -0,0 +1,85 @@
++/* jshint undef: true, unused: true */
++/* globals tinymce, jQuery, kukit */
 +
-+Require anonymous email
-+-----------------------
++"use strict";
 +
-+Edit the control panel.
++var script = document.getElementById('protect-script');
 +
-+    >>> browser.open(portal_url + '/logout')
-+    >>> browser.open(portal_url + '/login_form')
-+    >>> browser.getControl(name='__ac_name').value = 'admin'
-+    >>> browser.getControl(name='__ac_password').value = 'secret'
-+    >>> browser.getControl(name='submit').click()
-+    >>> browser.open(portal_url+'/@@discussion-controlpanel')
-+    >>> browser.getControl(name='form.widgets.anonymous_email_enabled:list').value = [True]
-+    >>> browser.getControl(name='form.buttons.save').click()
-+    >>> browser.open(portal_url + '/logout')
++if(script){
++  var base_url = script.getAttribute('data-site-url');
++  var token = script.getAttribute('data-token');
 +
-+Post an anonymous comment without setting the email.
-+
-+    >>> unprivileged_browser.open(urldoc1)
-+    >>> unprivileged_browser.getControl(name='form.widgets.text').value = "This is an anonymous comment without email"
-+    >>> unprivileged_browser.getControl(name='form.buttons.comment').click()
-+    >>> 'Required input is missing' in unprivileged_browser.contents
-+    True
-+
-+Try again.
-+
-+    >>> unprivileged_browser.getControl(name='form.widgets.text').value = "This is an anonymous comment with email"
-+    >>> unprivileged_browser.getControl(name='form.widgets.author_email').value = "email@example.org"
-+    >>> unprivileged_browser.getControl(name='form.buttons.comment').click()
-+    >>> 'Required input missing' in unprivileged_browser.contents
-+    False
-+    >>> 'Your comment awaits moderator approval' in unprivileged_browser.contents
-+    True
-+
-+Posting as member should still work.  Especially it should not
-+complain about missing input for an invisible author_email field.
-+Login as user 'jim'.
-+
-+    >>> browser_member.open(portal_url + '/login_form')
-+    >>> browser_member.getControl(name='__ac_name').value = 'jim'
-+    >>> browser_member.getControl(name='__ac_password').value = 'secret'
-+    >>> browser_member.getControl(name='submit').click()
-+
-+Post a comment as user jim.
-+
-+    >>> browser_member.open(urldoc1)
-+    >>> browser_member.getControl(name='form.widgets.text').value = "Use the ZODB, Luke!"
-+    >>> submit = browser_member.getControl(name='form.buttons.comment')
-+    >>> submit.click()
-+
-+Check if there are no validation errors.
-+
-+    >>> 'Required input missing' in browser_member.contents
-+    False
-+    >>> 'Your comment awaits moderator approval' in browser_member.contents
-+    True
++  if(window.jQuery !== undefined){
++    jQuery.ajaxSetup({
++      beforeSend: function (xhr, options){
++        if(options === undefined){
++          return;
++        }
++        if(!options.url){
++          return;
++        }
++        if(options.url.indexOf('_authenticator') !== -1){
++          return;
++        }
++        if(options.url.indexOf(base_url) === 0 || options.url.indexOf('//') === -1){
++          // only urls that start with the site url
++          // Extra compared to plone4.csrffixes: also for relative urls, like @@my-view.
++          xhr.setRequestHeader("X-CSRF-TOKEN", token);
++        }
++      }
++    });
++  }
++  if(window.tinymce && window.tinymce.util.XHR._send === undefined){
++    window.tinymce.util.XHR._send = window.tinymce.util.XHR.send;
++    var xhr = window.tinymce.util.XHR;
++    var _send = xhr.send;
++    window.tinymce.util.XHR.send = function(){
++      var args = Array.prototype.slice.call(arguments);
++      if(args[0]){
++        var config = args[0];
++        if(config.data && typeof(config.data) === 'string' &&
++            config.url && config.url.indexOf(base_url) === 0){
++          config.data = config.data + '&_authenticator=' + token;
++        }
++      }
++     _send.apply(xhr, args);
++    };
++  }
++  if(window.kukit && window.kukit.sa){
++    kukit.sa.ServerAction.prototype.reallyNotifyServer = function() {
++      // make a deferred callback
++      var domDoc = new XMLHttpRequest();
++      var self = this;
++      var notifyServer_done  = function() {
++          self.notifyServer_done(domDoc);
++      };
++      // convert params
++      var query = new kukit.fo.FormQuery();
++      for (var key in this.oper.parms) {
++          query.appendElem(key, this.oper.parms[key]);
++      }
++      // also add the parms that result from submitting an entire form.
++      // This is, unlike the normal parms, is a list. Keys and values are
++      // added at the end of the query, without mangling names.
++      var submitForm = this.oper.kssParms.kssSubmitForm;
++      if (submitForm) {
++          for (var i=0; i<submitForm.length; i++) {
++              var item = submitForm[i];
++              query.appendElem(item[0], item[1]);
++          }
++      }
++      query.appendElem('_authenticator', token);
++      // encode the query
++      var encoded = query.encode();
++      // sending form
++      var ts = new Date().getTime();
++      //kukit.logDebug('TS: '+ts);
++      var tsurl = this.url + "?kukitTimeStamp=" + ts;
++      domDoc.open("POST", tsurl, true);
++      domDoc.onreadystatechange = notifyServer_done;
++      domDoc.setRequestHeader("Content-Type",
++          "application/x-www-form-urlencoded");
++      domDoc.send(encoded);
++    };
++  }
++}
 
 
-Repository: plone.app.discussion
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2016-06-10T09:07:54+02:00
+Date: 2016-06-10T09:13:01+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.discussion/commit/483b8b071fed6a3a4d92ceef4448996290104012
+Commit: https://github.com/plone/plone.protect/commit/b8c955752abfff248a4108f79297af59fec86fdb
 
-Merge pull request #102 from plone/maurits-fix-required-email
+Merge pull request #49 from plone/maurits-add-protect-js
 
-Reset the required setting of the author_email widget each time.
+Added protect.js from plone4.csrffixes.
 
 Files changed:
+A plone/protect/protect.js
 M CHANGES.rst
-M plone/app/discussion/browser/comments.py
-M plone/app/discussion/tests/functional_test_comments.txt
+M plone/protect/auto.py
+M plone/protect/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e7f6da9..789ef5f 100644
+index d6c1845..db7b2c5 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,13 @@ New features:
+@@ -6,7 +6,10 @@ Changelog
  
- Bug fixes:
+ New:
  
 -- *add item here*
-+- Reset the required setting of the author_email widget each time.
-+  Otherwise, the email field might get set to required when an
-+  anonymous user visits, and then remain required when an
-+  authenticated user visits, making it impossible for an authenticated
-+  user to fill in the form without validation error.  Or when in the
-+  control panel the field is set as not required anymore, that change
-+  would have no effect until the instance was restarted.  [maurits]
++- Added protect.js from plone4.csrffixes.  This adds an ``X-CSRF-TOKEN``
++  header to ajax requests.
++  Fixes https://github.com/plone/plone.protect/issues/42
++  [maurits]
  
+ Fixes:
  
- 2.4.14 (2016-06-06)
-diff --git a/plone/app/discussion/browser/comments.py b/plone/app/discussion/browser/comments.py
-index a1c80af..7d9695c 100644
---- a/plone/app/discussion/browser/comments.py
-+++ b/plone/app/discussion/browser/comments.py
-@@ -87,6 +87,20 @@ def updateWidgets(self):
-         self.widgets['in_reply_to'].mode = interfaces.HIDDEN_MODE
-         self.widgets['text'].addClass('autoresize')
-         self.widgets['user_notification'].label = _(u'')
-+        # Reset widget field settings to their defaults, which may be changed
-+        # further on.  Otherwise, the email field might get set to required
-+        # when an anonymous user visits, and then remain required when an
-+        # authenticated user visits, making it impossible for an authenticated
-+        # user to fill in the form without validation error.  Or when in the
-+        # control panel the field is set as not required anymore, that change
-+        # would have no effect until the instance was restarted.  Note that the
-+        # widget is new each time, but the field is the same item in memory as
-+        # the previous time.
-+        self.widgets['author_email'].field.required = False
-+        # The widget is new, but its 'required' setting is based on the
-+        # previous value on the field, so we need to reset it here.  Changing
-+        # the field in updateFields does not help.
-+        self.widgets['author_email'].required = False
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 1879b02..80d1650 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -298,4 +298,18 @@ def transform(self, result, encoding):
+                 hidden.attrib['value'] = token
+                 form.append(hidden)
  
-         # Rename the id of the text widgets because there can be css-id
-         # clashes with the text field of documents when using and overlay
-diff --git a/plone/app/discussion/tests/functional_test_comments.txt b/plone/app/discussion/tests/functional_test_comments.txt
-index ccdb4ff..6aa6b81 100644
---- a/plone/app/discussion/tests/functional_test_comments.txt
-+++ b/plone/app/discussion/tests/functional_test_comments.txt
-@@ -479,3 +479,60 @@ Make sure the edit was successful.
++        if self.site is not None and not root.cssselect('#protect-script'):
++            # Alternative: add this in the resource registry.
++            site_url = self.site.absolute_url()
++            body = root.cssselect('body')[0]
++            protect_script = etree.Element("script")
++            protect_script.attrib.update({
++                'type': "application/javascript",
++                'src': "%s/++resource++protect.js" % site_url,
++                'data-site-url': site_url,
++                'data-token': token,
++                'id': 'protect-script'
++            })
++            body.append(protect_script)
++
+         return result
+diff --git a/plone/protect/configure.zcml b/plone/protect/configure.zcml
+index 22934eb..54212cc 100644
+--- a/plone/protect/configure.zcml
++++ b/plone/protect/configure.zcml
+@@ -35,6 +35,11 @@
+         factory=".auto.ProtectTransform"
+         />
  
-     >>> 'Lorem ipsum' in browser.contents
-     True
++    <browser:resource
++        name="protect.js"
++        file="protect.js"
++        />
 +
+     <browser:page
+         name="confirm-action"
+         for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+@@ -60,4 +65,4 @@
+         replacement=".monkey.wl_lockmapping"
+         preserveOriginal="True"
+         />
+-</configure>
+\ No newline at end of file
++</configure>
+diff --git a/plone/protect/protect.js b/plone/protect/protect.js
+new file mode 100644
+index 0000000..acd3aed
+--- /dev/null
++++ b/plone/protect/protect.js
+@@ -0,0 +1,85 @@
++/* jshint undef: true, unused: true */
++/* globals tinymce, jQuery, kukit */
 +
-+Require anonymous email
-+-----------------------
++"use strict";
 +
-+Edit the control panel.
++var script = document.getElementById('protect-script');
 +
-+    >>> browser.open(portal_url + '/logout')
-+    >>> browser.open(portal_url + '/login_form')
-+    >>> browser.getControl(name='__ac_name').value = 'admin'
-+    >>> browser.getControl(name='__ac_password').value = 'secret'
-+    >>> browser.getControl(name='submit').click()
-+    >>> browser.open(portal_url+'/@@discussion-controlpanel')
-+    >>> browser.getControl(name='form.widgets.anonymous_email_enabled:list').value = [True]
-+    >>> browser.getControl(name='form.buttons.save').click()
-+    >>> browser.open(portal_url + '/logout')
++if(script){
++  var base_url = script.getAttribute('data-site-url');
++  var token = script.getAttribute('data-token');
 +
-+Post an anonymous comment without setting the email.
-+
-+    >>> unprivileged_browser.open(urldoc1)
-+    >>> unprivileged_browser.getControl(name='form.widgets.text').value = "This is an anonymous comment without email"
-+    >>> unprivileged_browser.getControl(name='form.buttons.comment').click()
-+    >>> 'Required input is missing' in unprivileged_browser.contents
-+    True
-+
-+Try again.
-+
-+    >>> unprivileged_browser.getControl(name='form.widgets.text').value = "This is an anonymous comment with email"
-+    >>> unprivileged_browser.getControl(name='form.widgets.author_email').value = "email@example.org"
-+    >>> unprivileged_browser.getControl(name='form.buttons.comment').click()
-+    >>> 'Required input missing' in unprivileged_browser.contents
-+    False
-+    >>> 'Your comment awaits moderator approval' in unprivileged_browser.contents
-+    True
-+
-+Posting as member should still work.  Especially it should not
-+complain about missing input for an invisible author_email field.
-+Login as user 'jim'.
-+
-+    >>> browser_member.open(portal_url + '/login_form')
-+    >>> browser_member.getControl(name='__ac_name').value = 'jim'
-+    >>> browser_member.getControl(name='__ac_password').value = 'secret'
-+    >>> browser_member.getControl(name='submit').click()
-+
-+Post a comment as user jim.
-+
-+    >>> browser_member.open(urldoc1)
-+    >>> browser_member.getControl(name='form.widgets.text').value = "Use the ZODB, Luke!"
-+    >>> submit = browser_member.getControl(name='form.buttons.comment')
-+    >>> submit.click()
-+
-+Check if there are no validation errors.
-+
-+    >>> 'Required input missing' in browser_member.contents
-+    False
-+    >>> 'Your comment awaits moderator approval' in browser_member.contents
-+    True
++  if(window.jQuery !== undefined){
++    jQuery.ajaxSetup({
++      beforeSend: function (xhr, options){
++        if(options === undefined){
++          return;
++        }
++        if(!options.url){
++          return;
++        }
++        if(options.url.indexOf('_authenticator') !== -1){
++          return;
++        }
++        if(options.url.indexOf(base_url) === 0 || options.url.indexOf('//') === -1){
++          // only urls that start with the site url
++          // Extra compared to plone4.csrffixes: also for relative urls, like @@my-view.
++          xhr.setRequestHeader("X-CSRF-TOKEN", token);
++        }
++      }
++    });
++  }
++  if(window.tinymce && window.tinymce.util.XHR._send === undefined){
++    window.tinymce.util.XHR._send = window.tinymce.util.XHR.send;
++    var xhr = window.tinymce.util.XHR;
++    var _send = xhr.send;
++    window.tinymce.util.XHR.send = function(){
++      var args = Array.prototype.slice.call(arguments);
++      if(args[0]){
++        var config = args[0];
++        if(config.data && typeof(config.data) === 'string' &&
++            config.url && config.url.indexOf(base_url) === 0){
++          config.data = config.data + '&_authenticator=' + token;
++        }
++      }
++     _send.apply(xhr, args);
++    };
++  }
++  if(window.kukit && window.kukit.sa){
++    kukit.sa.ServerAction.prototype.reallyNotifyServer = function() {
++      // make a deferred callback
++      var domDoc = new XMLHttpRequest();
++      var self = this;
++      var notifyServer_done  = function() {
++          self.notifyServer_done(domDoc);
++      };
++      // convert params
++      var query = new kukit.fo.FormQuery();
++      for (var key in this.oper.parms) {
++          query.appendElem(key, this.oper.parms[key]);
++      }
++      // also add the parms that result from submitting an entire form.
++      // This is, unlike the normal parms, is a list. Keys and values are
++      // added at the end of the query, without mangling names.
++      var submitForm = this.oper.kssParms.kssSubmitForm;
++      if (submitForm) {
++          for (var i=0; i<submitForm.length; i++) {
++              var item = submitForm[i];
++              query.appendElem(item[0], item[1]);
++          }
++      }
++      query.appendElem('_authenticator', token);
++      // encode the query
++      var encoded = query.encode();
++      // sending form
++      var ts = new Date().getTime();
++      //kukit.logDebug('TS: '+ts);
++      var tsurl = this.url + "?kukitTimeStamp=" + ts;
++      domDoc.open("POST", tsurl, true);
++      domDoc.onreadystatechange = notifyServer_done;
++      domDoc.setRequestHeader("Content-Type",
++          "application/x-www-form-urlencoded");
++      domDoc.send(encoded);
++    };
++  }
++}
 
 
