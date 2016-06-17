@@ -1,43 +1,236 @@
-Repository: Products.CMFPlone
+Repository: plone.namedfile
 
 
-Branch: refs/heads/4.3.x
-Date: 2016-06-16T15:36:13+02:00
-Author: Luca Fabbri (keul) <luca@keul.it>
-Commit: https://github.com/plone/Products.CMFPlone/commit/e8d3da7a1afa57b181f54b5910e61d5aa957db28
+Branch: refs/heads/3.0.x
+Date: 2016-06-15T14:46:10-07:00
+Author: Steve McMahon (smcmahon) <steve@dcn.org>
+Commit: https://github.com/plone/plone.namedfile/commit/1c52b3429ff3772ee9de787165e5609b46ff06c8
 
-jquery.highlightsearchterms.js was skipping words that simply *contains* reserved filterTerms terms
+Backport scale-streaming fix from v4
 
 Files changed:
-M Products/CMFPlone/skins/plone_ecmascript/jquery.highlightsearchterms.js
-M docs/CHANGES.rst
+M CHANGES.rst
+M plone/namedfile/tests/base.py
+M plone/namedfile/usage.rst
+M plone/namedfile/utils.py
 
-diff --git a/Products/CMFPlone/skins/plone_ecmascript/jquery.highlightsearchterms.js b/Products/CMFPlone/skins/plone_ecmascript/jquery.highlightsearchterms.js
-index e0ba2c3..2b671e1 100644
---- a/Products/CMFPlone/skins/plone_ecmascript/jquery.highlightsearchterms.js
-+++ b/Products/CMFPlone/skins/plone_ecmascript/jquery.highlightsearchterms.js
-@@ -198,7 +198,7 @@
-         // Are terms matched case insensitive?
-         caseInsensitive: true,
-         // what terms are never to be highlighted (regexp)?
--        filterTerms: /(not|and|or)/i,
-+        filterTerms: /\b(not|and|or)\b/i,
-         // What class is used to mark highlighted search terms?
-         highlightClass: 'highlightedSearchTerm'
-     };
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 2368b34..a496f45 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -14,6 +14,9 @@ Changelog
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b975dd7..a9a2ab8 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,10 @@ New:
  
  Fixes:
  
-+- jquery.highlightsearchterms.js was skipping words that simply *contains* reserved ``filterTerms`` terms.
-+  [keul]
-+
- - Render an empty ``<dd>`` tag on ``folder_listing`` template when no description is available to avoid validation issues.
-   [hvelarde]
+-- *add item here*
++- Backport from v4 a fix for a problem streaming an uncommitted image scale.
++  Fixes an error on Windows 10 "WindowsError 32" by attempting to delete or
++  access a file in use by another process.
++  [smcmahon]
  
+ 
+ 3.0.8 (2016-02-26)
+diff --git a/plone/namedfile/tests/base.py b/plone/namedfile/tests/base.py
+index 53e6a1c..cb0feb7 100644
+--- a/plone/namedfile/tests/base.py
++++ b/plone/namedfile/tests/base.py
+@@ -12,7 +12,7 @@
+ def getFile(filename):
+     """ return contents of the file with the given name """
+     filename = os.path.join(os.path.dirname(__file__), filename)
+-    return open(filename, 'r')
++    return open(filename, 'rb')
+ 
+ 
+ def setUp(self=None):
+diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst
+index 6c10984..163063e 100644
+--- a/plone/namedfile/usage.rst
++++ b/plone/namedfile/usage.rst
+@@ -202,9 +202,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> download = Download(container, request).publishTraverse(request, 'blob')
+     >>> data = download()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read()
++    >>> hasattr(data, 'read') and data.read() or data
+     'dummy test data'
+     >>> request.response.getHeader('Content-Length')
+     '15'
+@@ -228,9 +226,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> download = Download(container, request).publishTraverse(request, 'blobimage')
+     >>> data = download()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read() == zptlogo
++    >>> hasattr(data, 'read') and data.read() or data == zptlogo
+     True
+     >>> request.response.getHeader('Content-Length')
+     '341'
+@@ -266,9 +262,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> display_file = DisplayFile(container, request).publishTraverse(request, 'blob')
+     >>> data = display_file()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read()
++    >>> hasattr(data, 'read') and data.read() or data
+     'dummy test data'
+     >>> request.response.getHeader('Content-Length')
+     '15'
+@@ -290,9 +284,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> display_file = DisplayFile(container, request).publishTraverse(request, 'blobimage')
+     >>> data = display_file()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read() == zptlogo
++    >>> hasattr(data, 'read') and data.read() or data == zptlogo
+     True
+     >>> request.response.getHeader('Content-Length')
+     '341'
+diff --git a/plone/namedfile/utils.py b/plone/namedfile/utils.py
+index 08317b2..982df4c 100644
+--- a/plone/namedfile/utils.py
++++ b/plone/namedfile/utils.py
+@@ -68,12 +68,10 @@ def stream_data(file):
+     """Return the given file as a stream if possible.
+     """
+ 
+-    if IBlobby.providedBy(file) and filestream_iterator is not None:
+-        # XXX: we may want to use this instead, which would raise an error
+-        # in case of uncomitted changes
+-        # filename = file._blob.committed()
+-
+-        filename = file._blob._p_blob_uncommitted or file._blob.committed()
+-        return filestream_iterator(filename, 'rb')
++    if IBlobby.providedBy(file):
++        if file._blob._p_blob_uncommitted:
++            return file.data
++        if filestream_iterator is not None:
++            return filestream_iterator(file._blob.committed(), 'rb')
+ 
+     return file.data
+
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/3.0.x
+Date: 2016-06-17T18:57:25+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/c16a56aacb573946ff36f2235ee098d628723625
+
+Merge pull request #30 from plone/scale-stream-fix
+
+Backport scale-streaming fix from v4
+
+Files changed:
+M CHANGES.rst
+M plone/namedfile/tests/base.py
+M plone/namedfile/usage.rst
+M plone/namedfile/utils.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b975dd7..a9a2ab8 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,10 @@ New:
+ 
+ Fixes:
+ 
+-- *add item here*
++- Backport from v4 a fix for a problem streaming an uncommitted image scale.
++  Fixes an error on Windows 10 "WindowsError 32" by attempting to delete or
++  access a file in use by another process.
++  [smcmahon]
+ 
+ 
+ 3.0.8 (2016-02-26)
+diff --git a/plone/namedfile/tests/base.py b/plone/namedfile/tests/base.py
+index 53e6a1c..cb0feb7 100644
+--- a/plone/namedfile/tests/base.py
++++ b/plone/namedfile/tests/base.py
+@@ -12,7 +12,7 @@
+ def getFile(filename):
+     """ return contents of the file with the given name """
+     filename = os.path.join(os.path.dirname(__file__), filename)
+-    return open(filename, 'r')
++    return open(filename, 'rb')
+ 
+ 
+ def setUp(self=None):
+diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst
+index 6c10984..163063e 100644
+--- a/plone/namedfile/usage.rst
++++ b/plone/namedfile/usage.rst
+@@ -202,9 +202,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> download = Download(container, request).publishTraverse(request, 'blob')
+     >>> data = download()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read()
++    >>> hasattr(data, 'read') and data.read() or data
+     'dummy test data'
+     >>> request.response.getHeader('Content-Length')
+     '15'
+@@ -228,9 +226,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> download = Download(container, request).publishTraverse(request, 'blobimage')
+     >>> data = download()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read() == zptlogo
++    >>> hasattr(data, 'read') and data.read() or data == zptlogo
+     True
+     >>> request.response.getHeader('Content-Length')
+     '341'
+@@ -266,9 +262,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> display_file = DisplayFile(container, request).publishTraverse(request, 'blob')
+     >>> data = display_file()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read()
++    >>> hasattr(data, 'read') and data.read() or data
+     'dummy test data'
+     >>> request.response.getHeader('Content-Length')
+     '15'
+@@ -290,9 +284,7 @@ We will test this with a dummy request, faking traversal::
+     >>> request = TestRequest()
+     >>> display_file = DisplayFile(container, request).publishTraverse(request, 'blobimage')
+     >>> data = display_file()
+-    >>> isinstance(data, file)
+-    True
+-    >>> data.read() == zptlogo
++    >>> hasattr(data, 'read') and data.read() or data == zptlogo
+     True
+     >>> request.response.getHeader('Content-Length')
+     '341'
+diff --git a/plone/namedfile/utils.py b/plone/namedfile/utils.py
+index 08317b2..982df4c 100644
+--- a/plone/namedfile/utils.py
++++ b/plone/namedfile/utils.py
+@@ -68,12 +68,10 @@ def stream_data(file):
+     """Return the given file as a stream if possible.
+     """
+ 
+-    if IBlobby.providedBy(file) and filestream_iterator is not None:
+-        # XXX: we may want to use this instead, which would raise an error
+-        # in case of uncomitted changes
+-        # filename = file._blob.committed()
+-
+-        filename = file._blob._p_blob_uncommitted or file._blob.committed()
+-        return filestream_iterator(filename, 'rb')
++    if IBlobby.providedBy(file):
++        if file._blob._p_blob_uncommitted:
++            return file.data
++        if filestream_iterator is not None:
++            return filestream_iterator(file._blob.committed(), 'rb')
+ 
+     return file.data
 
 
