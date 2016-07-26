@@ -12,7 +12,7 @@ Just sending in a contributors agreement does not guarantee you access to the re
 but once you send it in we will always have it on file for when you are ready to contribute.
 We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
-* Ask and (especially) answer questions on `stack overflow <http://stackoverflow.com/>`_ and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit. 
+* Ask and (especially) answer questions on `stack overflow <http://stackoverflow.com/>`_ and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit.
 
 * Attend a `conference <http://plone.org/events/conferences>`_ / `symposium <http://plone.org/events/regional>`_ or participate in a `sprint <http://plone.org/events/sprints>`_ / `tune-up <http://plone.org/events/plone-tuneups>`_.
   There are plenty of opportunities to meet the community and start contributing through various coding sessions,
@@ -35,7 +35,7 @@ We do ask that before requesting core access you familiarize yourself a little w
 
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
-* Sign the contributor agreement at http://plone.org/foundation/contributors-agreement/agreement.pdf/at_download/file,
+* Sign the contributor agreement at http://plone.org/foundation/contributors-agreement/agreement.pdf,
   then either snail mail it to the address provided or scan and email it to assignments@plone.org.
   This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase,
   ensuring it is not appropriated for someone's unethical purposes.
