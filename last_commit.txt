@@ -1,94 +1,300 @@
-Repository: plone.app.controlpanel
+Repository: plone.app.iterate
 
 
-Branch: refs/heads/2.3.x
-Date: 2016-08-24T10:43:03+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/plone.app.controlpanel/commit/180da62870693c00136bd79712e8d3465348bdbe
+Branch: refs/heads/2.1.x
+Date: 2016-08-23T18:54:31+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.iterate/commit/afe4a8439039048a39db598ce0c48312a1b58d25
 
-Fix tests for syndication control panel to pass also with new plone.app.registry versions
+Remove broken references when making checkout.
+
+Fixes issue https://github.com/plone/plone.app.iterate/issues/30.
 
 Files changed:
-M CHANGES.txt
-M plone/app/controlpanel/tests/syndication.txt
+M CHANGES.rst
+M plone/app/iterate/relation.py
+M plone/app/iterate/tests/test_iterate.py
 
-diff --git a/CHANGES.txt b/CHANGES.txt
-index e069a3b..7eaf4df 100644
---- a/CHANGES.txt
-+++ b/CHANGES.txt
-@@ -4,8 +4,9 @@ Changelog
- 2.3.10 (unreleased)
- -------------------
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 6ec1c44..2ba7db4 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
  
--- Nothing changed yet.
--
-+- Fix tests for syndication control panel to pass also with
-+  new plone.app.registry versions
-+  [Asko Soukka]
+ Bug fixes:
  
- 2.3.9 (2015-09-27)
- ------------------
-diff --git a/plone/app/controlpanel/tests/syndication.txt b/plone/app/controlpanel/tests/syndication.txt
-index 09d7e76..9f12a58 100644
---- a/plone/app/controlpanel/tests/syndication.txt
-+++ b/plone/app/controlpanel/tests/syndication.txt
-@@ -19,7 +19,8 @@ Edit some settings and make sure they stick.
+-- *add item here*
++- Remove broken references when making checkout.
++  Fixes issue `30 <https://github.com/plone/plone.app.iterate/issues/30>`_.
++  [maurits]
  
- We should be back on the Site Setup screen:
  
--    >>> 'plone_control_panel' in self.browser.url
-+    >>> ('plone_control_panel' in self.browser.url or
-+    ...  '@@overview-controlpanel' in self.browser.url)
-     True
+ 2.1.17 (2016-05-10)
+diff --git a/plone/app/iterate/relation.py b/plone/app/iterate/relation.py
+index a513b65..585667d 100644
+--- a/plone/app/iterate/relation.py
++++ b/plone/app/iterate/relation.py
+@@ -28,12 +28,18 @@
+ from zope.annotation.interfaces import IAttributeAnnotatable
  
- Navigate back to the syndication settings:
+ from Products.Archetypes import config as atconf
++from Products.Archetypes.exceptions import ReferenceException
+ from Products.Archetypes.ReferenceEngine import Reference
+ 
+ from interfaces import IWorkingCopyRelation
+ from interfaces import ICheckinCheckoutReference
+ from interfaces import IIterateAware
+ 
++import logging
++
++
++logger = logging.getLogger('plone.app.iterate')
++
+ 
+ class WorkingCopyRelation( Reference ):
+     """
+@@ -51,7 +57,7 @@ class CheckinCheckoutReferenceAdapter ( object ):
+     default adapter for references.
+ 
+     on checkout
+-    
++
+     forward refs on baseline are copied to wc
+     backward refs on baseline are ignored on wc
+ 
+@@ -62,21 +68,29 @@ class CheckinCheckoutReferenceAdapter ( object ):
+ 
+     forward refs on baseline get removed
+     backward refs on baseline are kept by virtue of UID transferance
+-    
++
+     """
+ 
+     implements( ICheckinCheckoutReference )
+     adapts( IIterateAware )
+-    
++
+     storage_key = "coci.references"
+ 
+     def __init__(self, context ):
+         self.context = context
+-    
+-    def checkout( self, baseline, wc, refs, storage ):
++
++    def checkout(self, baseline, wc, refs, storage):
+         for ref in refs:
+-            wc.addReference( ref.targetUID, ref.relationship, referenceClass=ref.__class__ )
+-            
++            try:
++                wc.addReference(ref.targetUID, ref.relationship,
++                                referenceClass=ref.__class__)
++            except ReferenceException:
++                logger.warn(
++                    'Reference exception when adding relation %r '
++                    'from new working copy %s to uid %s. Ignoring relation.',
++                    ref.relationship, '/'.join(wc.getPhysicalPath()),
++                    ref.targetUID)
++
+     def checkin( self, *args ):
+         pass
+ 
+@@ -95,7 +109,7 @@ class NoCopyReferenceAdapter( object ):
+ 
+     def __init__(self, context):
+         self.context = context
+-    
++
+     def checkin( self, baseline, wc, refs, storage ):
+         # move the references from the baseline to the wc
+ 
+@@ -118,6 +132,5 @@ def _verifyObjectPaste( *args, **kw ): pass
+ 
+     def checkout( self, *args ):
+         pass
+-        
++
+     checkoutBackReferences = checkinBackReferences = checkout
+-    
+diff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py
+index 5126cad..268a209 100644
+--- a/plone/app/iterate/tests/test_iterate.py
++++ b/plone/app/iterate/tests/test_iterate.py
+@@ -157,6 +157,26 @@ def test_baselineReferencesMaintained( self ):
+         self.assertEqual( len(doc.getReferences()), 1 )
+         self.assertEqual( len(doc.getBackReferences()), 1 )
+ 
++    def test_baselineBrokenReferencesRemoved(self):
++        # When the baseline has a reference to a deleted object, a
++        # checkout should not fail with a ReferenceException.
++
++        doc = self.portal.docs.doc1
++        doc.addReference(self.portal.docs.doc2, "pony")
++        self.portal.docs._delOb('doc2')
++        # _delOb is low level enough that the reference does not get cleaned
++        # up.
++        self.assertEqual(len(doc.getReferences()), 1)
++
++        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)
++        # The working copy has one reference: its original.
++        self.assertEqual(len(wc.getReferences()), 1)
++        self.assertEqual(wc.getReferences()[0].id, 'doc1')
++
++        doc = ICheckinCheckoutPolicy(wc).checkin("updated")
++        # The checkin removes the broken reference.
++        self.assertEqual(len(doc.getReferences()), 0)
++
+     def test_baselineNoCopyReferences( self ):
+         # ensure that custom state is maintained with the no copy adapter
+ 
 
 
-Repository: plone.app.controlpanel
+Repository: plone.app.iterate
 
 
-Branch: refs/heads/2.3.x
-Date: 2016-08-24T13:40:34+02:00
+Branch: refs/heads/2.1.x
+Date: 2016-08-25T08:48:35+02:00
 Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.app.controlpanel/commit/0f49f455afadeaf5a293b4512886220c37224e48
+Commit: https://github.com/plone/plone.app.iterate/commit/17e05f26719ab8da7436f73e3ee97a2f37edda36
 
-Merge pull request #65 from plone/datakurre-fix-tests
+Merge pull request #31 from plone/catch-reference-exception-43
 
-Fix tests for syndication control panel to pass also with new plone.app.registry version
+Remove broken references when making checkout.
 
 Files changed:
-M CHANGES.txt
-M plone/app/controlpanel/tests/syndication.txt
+M CHANGES.rst
+M plone/app/iterate/relation.py
+M plone/app/iterate/tests/test_iterate.py
 
-diff --git a/CHANGES.txt b/CHANGES.txt
-index e069a3b..7eaf4df 100644
---- a/CHANGES.txt
-+++ b/CHANGES.txt
-@@ -4,8 +4,9 @@ Changelog
- 2.3.10 (unreleased)
- -------------------
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 6ec1c44..2ba7db4 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
  
--- Nothing changed yet.
--
-+- Fix tests for syndication control panel to pass also with
-+  new plone.app.registry versions
-+  [Asko Soukka]
+ Bug fixes:
  
- 2.3.9 (2015-09-27)
- ------------------
-diff --git a/plone/app/controlpanel/tests/syndication.txt b/plone/app/controlpanel/tests/syndication.txt
-index 09d7e76..9f12a58 100644
---- a/plone/app/controlpanel/tests/syndication.txt
-+++ b/plone/app/controlpanel/tests/syndication.txt
-@@ -19,7 +19,8 @@ Edit some settings and make sure they stick.
+-- *add item here*
++- Remove broken references when making checkout.
++  Fixes issue `30 <https://github.com/plone/plone.app.iterate/issues/30>`_.
++  [maurits]
  
- We should be back on the Site Setup screen:
  
--    >>> 'plone_control_panel' in self.browser.url
-+    >>> ('plone_control_panel' in self.browser.url or
-+    ...  '@@overview-controlpanel' in self.browser.url)
-     True
+ 2.1.17 (2016-05-10)
+diff --git a/plone/app/iterate/relation.py b/plone/app/iterate/relation.py
+index a513b65..585667d 100644
+--- a/plone/app/iterate/relation.py
++++ b/plone/app/iterate/relation.py
+@@ -28,12 +28,18 @@
+ from zope.annotation.interfaces import IAttributeAnnotatable
  
- Navigate back to the syndication settings:
+ from Products.Archetypes import config as atconf
++from Products.Archetypes.exceptions import ReferenceException
+ from Products.Archetypes.ReferenceEngine import Reference
+ 
+ from interfaces import IWorkingCopyRelation
+ from interfaces import ICheckinCheckoutReference
+ from interfaces import IIterateAware
+ 
++import logging
++
++
++logger = logging.getLogger('plone.app.iterate')
++
+ 
+ class WorkingCopyRelation( Reference ):
+     """
+@@ -51,7 +57,7 @@ class CheckinCheckoutReferenceAdapter ( object ):
+     default adapter for references.
+ 
+     on checkout
+-    
++
+     forward refs on baseline are copied to wc
+     backward refs on baseline are ignored on wc
+ 
+@@ -62,21 +68,29 @@ class CheckinCheckoutReferenceAdapter ( object ):
+ 
+     forward refs on baseline get removed
+     backward refs on baseline are kept by virtue of UID transferance
+-    
++
+     """
+ 
+     implements( ICheckinCheckoutReference )
+     adapts( IIterateAware )
+-    
++
+     storage_key = "coci.references"
+ 
+     def __init__(self, context ):
+         self.context = context
+-    
+-    def checkout( self, baseline, wc, refs, storage ):
++
++    def checkout(self, baseline, wc, refs, storage):
+         for ref in refs:
+-            wc.addReference( ref.targetUID, ref.relationship, referenceClass=ref.__class__ )
+-            
++            try:
++                wc.addReference(ref.targetUID, ref.relationship,
++                                referenceClass=ref.__class__)
++            except ReferenceException:
++                logger.warn(
++                    'Reference exception when adding relation %r '
++                    'from new working copy %s to uid %s. Ignoring relation.',
++                    ref.relationship, '/'.join(wc.getPhysicalPath()),
++                    ref.targetUID)
++
+     def checkin( self, *args ):
+         pass
+ 
+@@ -95,7 +109,7 @@ class NoCopyReferenceAdapter( object ):
+ 
+     def __init__(self, context):
+         self.context = context
+-    
++
+     def checkin( self, baseline, wc, refs, storage ):
+         # move the references from the baseline to the wc
+ 
+@@ -118,6 +132,5 @@ def _verifyObjectPaste( *args, **kw ): pass
+ 
+     def checkout( self, *args ):
+         pass
+-        
++
+     checkoutBackReferences = checkinBackReferences = checkout
+-    
+diff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py
+index 5126cad..268a209 100644
+--- a/plone/app/iterate/tests/test_iterate.py
++++ b/plone/app/iterate/tests/test_iterate.py
+@@ -157,6 +157,26 @@ def test_baselineReferencesMaintained( self ):
+         self.assertEqual( len(doc.getReferences()), 1 )
+         self.assertEqual( len(doc.getBackReferences()), 1 )
+ 
++    def test_baselineBrokenReferencesRemoved(self):
++        # When the baseline has a reference to a deleted object, a
++        # checkout should not fail with a ReferenceException.
++
++        doc = self.portal.docs.doc1
++        doc.addReference(self.portal.docs.doc2, "pony")
++        self.portal.docs._delOb('doc2')
++        # _delOb is low level enough that the reference does not get cleaned
++        # up.
++        self.assertEqual(len(doc.getReferences()), 1)
++
++        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)
++        # The working copy has one reference: its original.
++        self.assertEqual(len(wc.getReferences()), 1)
++        self.assertEqual(wc.getReferences()[0].id, 'doc1')
++
++        doc = ICheckinCheckoutPolicy(wc).checkin("updated")
++        # The checkin removes the broken reference.
++        self.assertEqual(len(doc.getReferences()), 0)
++
+     def test_baselineNoCopyReferences( self ):
+         # ensure that custom state is maintained with the no copy adapter
+ 
 
 
