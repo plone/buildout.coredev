@@ -1,212 +1,542 @@
-Repository: plone.app.iterate
+Repository: plone.app.registry
 
 
 Branch: refs/heads/master
-Date: 2016-08-25T11:51:23+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.iterate/commit/4bda56277d58fc373c518100f383c34485a0fba2
+Date: 2016-08-18T13:29:57+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/09284b62bfde68cf494aba2b3ebce070704a3216
 
-Remove broken references when making checkout.
-
-Fixes issue https://github.com/plone/plone.app.iterate/issues/30.
+Add support for import conditions in registry.xml records
 
 Files changed:
 M CHANGES.rst
-M plone/app/iterate/relation.py
-M plone/app/iterate/tests/test_iterate.py
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 16a726f..eda7e15 100644
+index 6c1d69a..e25cd9e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,9 @@ New features:
+@@ -1,8 +1,8 @@
+ Changelog
+ =========
+ 
+-1.3.13 (unreleased)
+--------------------
++1.4.0 (unreleased)
++------------------
+ 
+ Breaking changes:
+ 
+@@ -10,7 +10,10 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Add support for optional condition attribute in registry.xml entries
++  to allow conditional importing of records. Conditions themselves are
++  not import (nor exported).
++  [datakurre]
  
  Bug fixes:
  
--- *add item here*
-+- Remove broken references when making checkout.
-+  Fixes issue `30 <https://github.com/plone/plone.app.iterate/issues/30>`_.
-+  [maurits]
+diff --git a/README.rst b/README.rst
+index dbf5ed0..fe3f073 100644
+--- a/README.rst
++++ b/README.rst
+@@ -157,6 +157,32 @@ pairs. They can be configured like so::
+         </value>
+     </record>
  
- 
- 3.2.1 (2016-08-17)
-diff --git a/plone/app/iterate/relation.py b/plone/app/iterate/relation.py
-index 4cb6f62..b0877c2 100644
---- a/plone/app/iterate/relation.py
-+++ b/plone/app/iterate/relation.py
-@@ -28,12 +28,18 @@
- from zope.annotation.interfaces import IAttributeAnnotatable
- 
- from Products.Archetypes import config as atconf
-+from Products.Archetypes.exceptions import ReferenceException
- from Products.Archetypes.ReferenceEngine import Reference
- 
- from interfaces import IWorkingCopyRelation
- from interfaces import ICheckinCheckoutReference
- from interfaces import IIterateAware
- 
-+import logging
++
++Conditional records
++~~~~~~~~~~~~~~~~~~~
++
++Importable records in ``registry.xml`` can be marked conditional with
++``condition`` attribute, which supports the following condition values:
++
++* ``installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is available to be imported.
++
++* ``not-installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is *not* available to be imported:
++
++For example, the following ``registry.xml`` step at the GenericSetup profile of
++your policy product, would only import records when module ``my.package`` is
++available::
++
++    <registry>
++      <records interface="my.package.interfaces.IZooSettings"
++               condition="installed my.package">
++        <value key="entryPrice">40</value>
++        <value key="messageOfTheDay">We've got lions and tigers!</value>
++      </records>
++    </registry>
 +
 +
-+logger = logging.getLogger('plone.app.iterate')
-+
+ Field references
+ ~~~~~~~~~~~~~~~~
  
- @implementer(IWorkingCopyRelation, IAttributeAnnotatable)
- class WorkingCopyRelation(Reference):
-@@ -73,8 +79,15 @@ def __init__(self, context):
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index bb3ec06..fb8cda8 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -21,6 +21,36 @@
+ _marker = object()
  
-     def checkout(self, baseline, wc, refs, storage):
-         for ref in refs:
--            wc.addReference(ref.targetUID, ref.relationship,
--                            referenceClass=ref.__class__)
-+            try:
-+                wc.addReference(ref.targetUID, ref.relationship,
-+                                referenceClass=ref.__class__)
-+            except ReferenceException:
-+                logger.warn(
-+                    'Reference exception when adding relation %r '
-+                    'from new working copy %s to uid %s. Ignoring relation.',
-+                    ref.relationship, '/'.join(wc.getPhysicalPath()),
-+                    ref.targetUID)
  
-     def checkin(self, *args):
-         pass
-diff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py
-index 45f51f5..6c2a5a8 100644
---- a/plone/app/iterate/tests/test_iterate.py
-+++ b/plone/app/iterate/tests/test_iterate.py
-@@ -160,6 +160,26 @@ def test_baselineReferencesMaintained(self):
-         self.assertEqual(len(doc.getReferences()), 1)
-         self.assertEqual(len(doc.getBackReferences()), 1)
++def evaluateCondition(expression):
++    """Evaluate import condition.
++
++    ``expression`` is a string of the form "verb arguments".
++
++    Currently the supported verbs are ``installed`` and ``not-installed``.
++    """
++    arguments = expression.split(None)
++    verb = arguments.pop(0)
++
++    if verb in ('installed', 'not-installed'):
++        if not arguments:
++            raise ValueError("Package name missing: %r" % expression)
++        if len(arguments) > 1:
++            raise ValueError("Only one package allowed: %r" % expression)
++
++        try:
++            __import__(arguments[0])
++            installed = True
++        except ImportError:
++            installed = False
++
++        if verb == 'installed':
++            return installed
++        elif verb == 'not-installed':
++            return not installed
++    else:
++        raise ValueError("Invalid import condition: %r" % expression)
++
++
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
+         attrib = child.attrib
+@@ -86,6 +116,9 @@ def importDocument(self, document):
+         for node in tree:
+             if not isinstance(node.tag, str):
+                 continue
++            condition = node.attrib.get('condition', None)
++            if condition and not evaluateCondition(condition):
++                continue
+             if node.tag.lower() == 'record':
+                 self.importRecord(node)
+             elif node.tag.lower() == 'records':
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 0799ffe..c651847 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -316,6 +316,40 @@ def test_import_records_with_values(self):
+             42
+         )
  
-+    def test_baselineBrokenReferencesRemoved(self):
-+        # When the baseline has a reference to a deleted object, a
-+        # checkout should not fail with a ReferenceException.
++    def test_import_records_nonexistant_interface(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
 +
-+        doc = self.portal.docs.doc1
-+        doc.addReference(self.portal.docs.doc2, "pony")
-+        self.portal.docs._delOb('doc2')
-+        # _delOb is low level enough that the reference does not get cleaned
-+        # up.
-+        self.assertEqual(len(doc.getReferences()), 1)
++        self.assertRaises(ImportError, importRegistry, context)
 +
-+        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)
-+        # The working copy has one reference: its original.
-+        self.assertEqual(len(wc.getReferences()), 1)
-+        self.assertEqual(wc.getReferences()[0].id, 'doc1')
++    def test_import_records_nonexistant_interface_condition(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="not-installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
 +
-+        doc = ICheckinCheckoutPolicy(wc).checkin("updated")
-+        # The checkin removes the broken reference.
-+        self.assertEqual(len(doc.getReferences()), 0)
++        self.assertRaises(ImportError, importRegistry, context)
 +
-     def test_baselineNoCopyReferences(self):
-         # ensure that custom state is maintained with the no copy adapter
++    def test_import_records_nonexistant_interface_condition_skip(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++        importRegistry(context)
++
+     def test_import_value_only(self):
+         xml = """\
+ <registry>
+diff --git a/setup.py b/setup.py
+index 3b2917b..91a6132 100644
+--- a/setup.py
++++ b/setup.py
+@@ -2,7 +2,7 @@
+ from setuptools import find_packages
+ from setuptools import setup
  
+-version = '1.3.13.dev0'
++version = '1.4.0.dev0'
+ 
+ setup(
+     name='plone.app.registry',
 
 
-Repository: plone.app.iterate
+Repository: plone.app.registry
 
 
 Branch: refs/heads/master
-Date: 2016-08-25T13:25:08+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.iterate/commit/58f5b21f03d69acb59355ef79035d24ff139db6a
+Date: 2016-08-23T15:03:11+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/3cdab7aac8edef749df98460f332c31774c7ad96
 
-Merge pull request #32 from plone/catch-reference-exception-master
+Flatten evaluateConditions for better readability
 
-Remove broken references when making checkout.
+Files changed:
+M plone/app/registry/exportimport/handler.py
+
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index fb8cda8..7fd9ab3 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -31,25 +31,25 @@ def evaluateCondition(expression):
+     arguments = expression.split(None)
+     verb = arguments.pop(0)
+ 
+-    if verb in ('installed', 'not-installed'):
+-        if not arguments:
+-            raise ValueError("Package name missing: %r" % expression)
+-        if len(arguments) > 1:
+-            raise ValueError("Only one package allowed: %r" % expression)
+-
+-        try:
+-            __import__(arguments[0])
+-            installed = True
+-        except ImportError:
+-            installed = False
+-
+-        if verb == 'installed':
+-            return installed
+-        elif verb == 'not-installed':
+-            return not installed
+-    else:
++    if verb not in ('installed', 'not-installed'):
+         raise ValueError("Invalid import condition: %r" % expression)
+ 
++    if not arguments:
++        raise ValueError("Package name missing: %r" % expression)
++    if len(arguments) > 1:
++        raise ValueError("Only one package allowed: %r" % expression)
++
++    try:
++        __import__(arguments[0])
++        installed = True
++    except ImportError:
++        installed = False
++
++    if verb == 'installed':
++        return installed
++    elif verb == 'not-installed':
++        return not installed
++
+ 
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2016-08-23T15:13:11+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/a82176b93f1ed813652b99d72d38b9447a73c535
+
+Add test for skipping import with condition
+
+Files changed:
+M plone/app/registry/tests/test_exportimport.py
+
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index c651847..90691e9 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -339,21 +339,37 @@ def test_import_records_nonexistant_interface_condition(self):
+ 
+         self.assertRaises(ImportError, importRegistry, context)
+ 
+-    def test_import_records_nonexistant_interface_condition_skip(self):
++    def test_import_value_only(self):
+         xml = """\
+ <registry>
+-    <records interface="non.existant.ISchema"
+-             condition="installed non" />
++    <record name="test.export.simple">
++        <value>Imported value</value>
++    </record>
+ </registry>
+ """
+         context = DummyImportContext(self.site, purge=False)
+         context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
+         importRegistry(context)
+ 
+-    def test_import_value_only(self):
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_skip(self):
+         xml = """\
+ <registry>
+-    <record name="test.export.simple">
++    <record name="test.export.simple"
++            condition="installed non">
+         <value>Imported value</value>
+     </record>
+ </registry>
+@@ -372,7 +388,7 @@ def test_import_value_only(self):
+             self.registry.records['test.export.simple'].field.title
+         )
+         self.assertEquals(
+-            u"Imported value",
++            u"Sample value",
+             self.registry['test.export.simple']
+         )
+ 
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2016-08-26T01:28:28+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.registry/commit/7334e5b713c4209c8a6479ddc3c27955790dc546
+
+Merge pull request #23 from plone/datakurre-import-conditions
+
+Add support for import conditions in registry.xml records
 
 Files changed:
 M CHANGES.rst
-M plone/app/iterate/relation.py
-M plone/app/iterate/tests/test_iterate.py
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 16a726f..eda7e15 100644
+index 6c1d69a..e25cd9e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,9 @@ New features:
+@@ -1,8 +1,8 @@
+ Changelog
+ =========
+ 
+-1.3.13 (unreleased)
+--------------------
++1.4.0 (unreleased)
++------------------
+ 
+ Breaking changes:
+ 
+@@ -10,7 +10,10 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Add support for optional condition attribute in registry.xml entries
++  to allow conditional importing of records. Conditions themselves are
++  not import (nor exported).
++  [datakurre]
  
  Bug fixes:
  
--- *add item here*
-+- Remove broken references when making checkout.
-+  Fixes issue `30 <https://github.com/plone/plone.app.iterate/issues/30>`_.
-+  [maurits]
+diff --git a/README.rst b/README.rst
+index dbf5ed0..fe3f073 100644
+--- a/README.rst
++++ b/README.rst
+@@ -157,6 +157,32 @@ pairs. They can be configured like so::
+         </value>
+     </record>
  
- 
- 3.2.1 (2016-08-17)
-diff --git a/plone/app/iterate/relation.py b/plone/app/iterate/relation.py
-index 4cb6f62..b0877c2 100644
---- a/plone/app/iterate/relation.py
-+++ b/plone/app/iterate/relation.py
-@@ -28,12 +28,18 @@
- from zope.annotation.interfaces import IAttributeAnnotatable
- 
- from Products.Archetypes import config as atconf
-+from Products.Archetypes.exceptions import ReferenceException
- from Products.Archetypes.ReferenceEngine import Reference
- 
- from interfaces import IWorkingCopyRelation
- from interfaces import ICheckinCheckoutReference
- from interfaces import IIterateAware
- 
-+import logging
++
++Conditional records
++~~~~~~~~~~~~~~~~~~~
++
++Importable records in ``registry.xml`` can be marked conditional with
++``condition`` attribute, which supports the following condition values:
++
++* ``installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is available to be imported.
++
++* ``not-installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is *not* available to be imported:
++
++For example, the following ``registry.xml`` step at the GenericSetup profile of
++your policy product, would only import records when module ``my.package`` is
++available::
++
++    <registry>
++      <records interface="my.package.interfaces.IZooSettings"
++               condition="installed my.package">
++        <value key="entryPrice">40</value>
++        <value key="messageOfTheDay">We've got lions and tigers!</value>
++      </records>
++    </registry>
 +
 +
-+logger = logging.getLogger('plone.app.iterate')
-+
+ Field references
+ ~~~~~~~~~~~~~~~~
  
- @implementer(IWorkingCopyRelation, IAttributeAnnotatable)
- class WorkingCopyRelation(Reference):
-@@ -73,8 +79,15 @@ def __init__(self, context):
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index bb3ec06..7fd9ab3 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -21,6 +21,36 @@
+ _marker = object()
  
-     def checkout(self, baseline, wc, refs, storage):
-         for ref in refs:
--            wc.addReference(ref.targetUID, ref.relationship,
--                            referenceClass=ref.__class__)
-+            try:
-+                wc.addReference(ref.targetUID, ref.relationship,
-+                                referenceClass=ref.__class__)
-+            except ReferenceException:
-+                logger.warn(
-+                    'Reference exception when adding relation %r '
-+                    'from new working copy %s to uid %s. Ignoring relation.',
-+                    ref.relationship, '/'.join(wc.getPhysicalPath()),
-+                    ref.targetUID)
  
-     def checkin(self, *args):
-         pass
-diff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py
-index 45f51f5..6c2a5a8 100644
---- a/plone/app/iterate/tests/test_iterate.py
-+++ b/plone/app/iterate/tests/test_iterate.py
-@@ -160,6 +160,26 @@ def test_baselineReferencesMaintained(self):
-         self.assertEqual(len(doc.getReferences()), 1)
-         self.assertEqual(len(doc.getBackReferences()), 1)
++def evaluateCondition(expression):
++    """Evaluate import condition.
++
++    ``expression`` is a string of the form "verb arguments".
++
++    Currently the supported verbs are ``installed`` and ``not-installed``.
++    """
++    arguments = expression.split(None)
++    verb = arguments.pop(0)
++
++    if verb not in ('installed', 'not-installed'):
++        raise ValueError("Invalid import condition: %r" % expression)
++
++    if not arguments:
++        raise ValueError("Package name missing: %r" % expression)
++    if len(arguments) > 1:
++        raise ValueError("Only one package allowed: %r" % expression)
++
++    try:
++        __import__(arguments[0])
++        installed = True
++    except ImportError:
++        installed = False
++
++    if verb == 'installed':
++        return installed
++    elif verb == 'not-installed':
++        return not installed
++
++
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
+         attrib = child.attrib
+@@ -86,6 +116,9 @@ def importDocument(self, document):
+         for node in tree:
+             if not isinstance(node.tag, str):
+                 continue
++            condition = node.attrib.get('condition', None)
++            if condition and not evaluateCondition(condition):
++                continue
+             if node.tag.lower() == 'record':
+                 self.importRecord(node)
+             elif node.tag.lower() == 'records':
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 0799ffe..90691e9 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -316,6 +316,29 @@ def test_import_records_with_values(self):
+             42
+         )
  
-+    def test_baselineBrokenReferencesRemoved(self):
-+        # When the baseline has a reference to a deleted object, a
-+        # checkout should not fail with a ReferenceException.
++    def test_import_records_nonexistant_interface(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
 +
-+        doc = self.portal.docs.doc1
-+        doc.addReference(self.portal.docs.doc2, "pony")
-+        self.portal.docs._delOb('doc2')
-+        # _delOb is low level enough that the reference does not get cleaned
-+        # up.
-+        self.assertEqual(len(doc.getReferences()), 1)
++        self.assertRaises(ImportError, importRegistry, context)
 +
-+        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)
-+        # The working copy has one reference: its original.
-+        self.assertEqual(len(wc.getReferences()), 1)
-+        self.assertEqual(wc.getReferences()[0].id, 'doc1')
++    def test_import_records_nonexistant_interface_condition(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="not-installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
 +
-+        doc = ICheckinCheckoutPolicy(wc).checkin("updated")
-+        # The checkin removes the broken reference.
-+        self.assertEqual(len(doc.getReferences()), 0)
++        self.assertRaises(ImportError, importRegistry, context)
 +
-     def test_baselineNoCopyReferences(self):
-         # ensure that custom state is maintained with the no copy adapter
+     def test_import_value_only(self):
+         xml = """\
+ <registry>
+@@ -342,6 +365,33 @@ def test_import_value_only(self):
+             self.registry['test.export.simple']
+         )
  
++    def test_import_value_only_condition_skip(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="installed non">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
++
+     def test_import_interface_and_value(self):
+         xml = """\
+ <registry>
+diff --git a/setup.py b/setup.py
+index 3b2917b..91a6132 100644
+--- a/setup.py
++++ b/setup.py
+@@ -2,7 +2,7 @@
+ from setuptools import find_packages
+ from setuptools import setup
+ 
+-version = '1.3.13.dev0'
++version = '1.4.0.dev0'
+ 
+ setup(
+     name='plone.app.registry',
 
 
