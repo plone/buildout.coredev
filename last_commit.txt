@@ -1,417 +1,178 @@
-Repository: Products.CMFFormController
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-09-01T13:01:19+02:00
+Date: 2016-09-01T10:24:53+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFFormController/commit/d874f868cf0309c6e4e5ffbda7b598b067436324
+Commit: https://github.com/plone/Products.CMFPlone/commit/b44a92dcba7db73615382a9bd8ef70a7069b34ab
 
-Applied security hotfix 20160830 for redirect_to.
+Fixed tests in combination with CMFFormController that includes hotfix.
 
-This action refuses to redirect to unknown external sites.  Added
-`redirect_to_external` action in case someone *does* need to redirect
-to an external site.
-This option is also there in the hotfix.
+This is from PloneHotfix20160830.
+
+Test in combination with https://github.com/plone/Products.CMFFormController/pull/8
 
 Files changed:
-A Products/CMFFormController/tests/testRedirectTo.py
 M CHANGES.rst
-M Products/CMFFormController/Actions/RedirectTo.py
+M Products/CMFPlone/tests/testSSOLogin.py
+M Products/CMFPlone/tests/testSecurity.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6037df9..65691a1 100644
+index e85d0bf..0d30fb4 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,11 @@ New features:
+@@ -26,6 +26,8 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Applied security hotfix 20160830 for ``redirect_to``.  This action
-+  refuses to redirect to unknown external sites.  Added
-+  ``external_redirect_to`` action in case someone *does* need to
-+  redirect to an external site.  This option is also there in the
-+  hotfix.  [maurits]
++- Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
++
+ - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
  
+ - Apply security hotfix 20160830 for ``isURLInPortal``.  [maurits]
+diff --git a/Products/CMFPlone/tests/testSSOLogin.py b/Products/CMFPlone/tests/testSSOLogin.py
+index 7ab3692..0e908f9 100644
+--- a/Products/CMFPlone/tests/testSSOLogin.py
++++ b/Products/CMFPlone/tests/testSSOLogin.py
+@@ -35,11 +35,19 @@ def afterSetUp(self):
+             portal.acl_users.portal_role_manager.doAssignRoleToPrincipal(
+                 TEST_USER_ID, role)
  
- 3.1.2 (2016-08-31)
-diff --git a/Products/CMFFormController/Actions/RedirectTo.py b/Products/CMFFormController/Actions/RedirectTo.py
-index ee9f11b..e48bd1a 100644
---- a/Products/CMFFormController/Actions/RedirectTo.py
-+++ b/Products/CMFFormController/Actions/RedirectTo.py
-@@ -1,20 +1,34 @@
- from BaseFormAction import BaseFormAction
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFFormController.FormController import registerFormAction
--from urlparse import urlparse, urljoin
-+from urlparse import urljoin
-+from urlparse import urlparse
+-        registry = self.login_portal.portal_registry
+-
+         # Configure the login portal to allow logins from our sites.
+-        registry['plone.allow_external_login_sites'] = (self.portal.absolute_url(),
+-                                                        self.another_portal.absolute_url())
++        login_registry = self.login_portal.portal_registry
++        login_registry['plone.allow_external_login_sites'] = (
++            self.portal.absolute_url(),
++            self.another_portal.absolute_url())
 +
++        # The normal portal needs to allow logins from the login portal,
++        # otherwise the redirect_to action on login or logout will refuse to
++        # redirect externally.  This may need to be done on another_portal too,
++        # but for the current tests this is not needed.
++        portal_registry = self.portal.portal_registry
++        portal_registry['plone.allow_external_login_sites'] = (
++            self.login_portal.absolute_url(), )
  
- def factory(arg):
-     """Create a new redirect-to action"""
-     return RedirectTo(arg)
+         # Configure our sites to use the login portal for logins and logouts
+         login_portal_url = self.login_portal.absolute_url()
+diff --git a/Products/CMFPlone/tests/testSecurity.py b/Products/CMFPlone/tests/testSecurity.py
+index e31e15c..853a548 100644
+--- a/Products/CMFPlone/tests/testSecurity.py
++++ b/Products/CMFPlone/tests/testSecurity.py
+@@ -154,10 +154,20 @@ def test_atat_does_not_return_anything(self):
+         self.assertEqual(404, res.status)
  
- 
-+def factory_external(arg):
-+    """Create a new external-redirect-to action"""
-+    return ExternalRedirectTo(arg)
-+
-+
- class RedirectTo(BaseFormAction):
-+
-+    allow_external_url = False
-+
-     def __call__(self, controller_state):
-         url = self.getArg(controller_state)
-         context = controller_state.getContext()
-         # see if this is a relative url or an absolute
-         if len(urlparse(url)[1]) == 0:
-             # No host specified, so url is relative.  Get an absolute url.
--            url = urljoin(context.absolute_url()+'/', url)
-+            url = urljoin(context.absolute_url() + '/', url)
-+        elif (not self.allow_external_url
-+              and not getToolByName(context, 'portal_url').isURLInPortal(url)):
-+            url = context.absolute_url()
-         url = self.updateQuery(url, controller_state.kwargs)
-         request = context.REQUEST
-         # this is mostly just for archetypes edit forms...
-@@ -31,6 +45,19 @@ def __call__(self, controller_state):
-         return request.RESPONSE.redirect(url)
- 
- 
--registerFormAction('redirect_to',
--                   factory,
--                   'Redirect to the URL specified in the argument (a TALES expression).  The URL can either be absolute or relative.')
-+class ExternalRedirectTo(RedirectTo):
-+
-+    allow_external_url = True
-+
-+
-+registerFormAction(
-+    'redirect_to',
-+    factory,
-+    'Redirect to the URL specified in the argument (a TALES expression). '
-+    'The URL can either be absolute or relative, and must be internal.')
-+
-+registerFormAction(
-+    'external_redirect_to',
-+    factory_external,
-+    'Redirect to the URL specified in the argument (a TALES expression). '
-+    'The URL can either be absolute or relative, and may be external.')
-diff --git a/Products/CMFFormController/tests/testRedirectTo.py b/Products/CMFFormController/tests/testRedirectTo.py
-new file mode 100644
-index 0000000..63fc090
---- /dev/null
-+++ b/Products/CMFFormController/tests/testRedirectTo.py
-@@ -0,0 +1,101 @@
-+#
-+# Test the RedirectTo action.
-+#
-+
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
-+from plone.app.testing import TEST_USER_NAME
-+from plone.app.testing import TEST_USER_PASSWORD
-+from plone.app.testing.bbb import PloneTestCase
-+from plone.protect import createToken
-+
-+import transaction
-+
-+
-+class TestRedirectToFunctional(PloneTestCase):
-+    # Functional tests, using the folder_publish.cpy script from
-+    # Products.CMFPlone, which could be persuaded to redirect to an external
-+    # website, which is not what it is meant for.
-+
-+    def afterSetUp(self):
-+        # Update settings.
-+        # self.app = self.layer['app']
-+        # self.portal = self.layer['portal']
-+        # self.request = self.layer['request']
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        self.portal.portal_workflow.setChainForPortalTypes(
-+            ('Document',),
-+            ('simple_publication_workflow',))
-+        # Create page.
-+        self.portal.invokeFactory(
-+            id='page',
-+            title='Page 1',
-+            type_name='Document'
-+        )
-+        self.page = self.portal.page
-+
-+    def beforeTearDown(self):
-+        # Weird that we have to remove this page manually.  Otherwise with the
-+        # second test we get an error:
-+        # BadRequest: The id "page" is invalid - it is already in use.
-+        # Strangely this does not happen when you run
-+        # bin/test -s Products.CMFFormController -m testRedirectTo
-+        # which is the only test case that uses portal.page,
-+        # and it does happen when you run all the tests:
-+        # bin/test -s Products.CMFFormController
-+        # We may want to switch to the real plone.app.testing
-+        # instead of bbb.PloneTestCase.
-+        self.portal._delObject('page')
-+        transaction.commit()
-+
-+    def test_regression(self):
-+        csrf_token = createToken()
-+        env = {'HTTP_X_CSRF_TOKEN': csrf_token}
-+        target = 'front-page'
-+        url = (
-+            '%s/folder_publish'
-+            '?workflow_action=publish'
-+            '&paths=%s'
-+            '&orig_template=%s') % (
-+                '/'.join(self.portal.getPhysicalPath()),
-+                '/'.join(self.page.getPhysicalPath()),
-+                target
-+        )
-+        response = self.publish(
-+            url,
-+            basic='%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD),
-+            env=env,
-+            extra={'orig_template': target,
-+                   '_authenticator': csrf_token},
-+            request_method='POST',
-+            handle_errors=False,
-+        )
-+        self.assertNotEqual(response.headers.get('location'), None)
-+        self.assertEqual(response.headers.get('location'),
+     def test_go_back(self):
+-        res = self.publish('/plone/front-page/go_back?last_referer=http://${request}',
+-                           basic=SITE_OWNER_NAME + ':' + SITE_OWNER_PASSWORD)
++        res = self.publish(
++            '/plone/front-page/go_back?last_referer=http://${request}',
++            basic=SITE_OWNER_NAME + ':' + SITE_OWNER_PASSWORD)
++        # This used to show the request as location, so something like:
++        # http://<h3>form</h3><table>... and then all kinds of data from the
++        # request.  This was fixed in PloneHotfix20121106.  For this request
++        # you then got redirected to url http://${request} which your browser
++        # obviously does not know how to handle.
++        #
++        # In PloneHotfix20160830 this fix was kept, but additionally Plone
++        # refuses to redirect to external sites by default.
+         self.assertEqual(302, res.status)
+-        self.assertEqual('http://${request}', res.headers['location'][:17])
++        self.assertEqual(res.headers['location'],
 +                         self.portal.absolute_url() + '/front-page')
-+
-+    def test_attacker_redirect(self):
-+        csrf_token = createToken()
-+        env = {'HTTP_X_CSRF_TOKEN': csrf_token}
-+        target = 'http://attacker.com'
-+        url = (
-+            '%s/folder_publish'
-+            '?workflow_action=publish'
-+            '&paths=%s'
-+            '&orig_template=%s') % (
-+                '/'.join(self.portal.getPhysicalPath()),
-+                '/'.join(self.page.getPhysicalPath()),
-+                target
-+        )
-+        response = self.publish(
-+            url,
-+            basic='%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD),
-+            env=env,
-+            extra={'orig_template': target,
-+                   '_authenticator': csrf_token},
-+            request_method='POST',
-+            handle_errors=False,
-+        )
-+        self.assertNotEqual(response.headers.get('location'), None)
-+        self.assertNotEqual(response.headers.get('location'),
-+                            'http://attacker.com')
+ 
+     def test_getFolderContents(self):
+         res = self.publish('/plone/getFolderContents')
 
 
-Repository: Products.CMFFormController
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-09-01T13:02:30+02:00
+Date: 2016-09-01T13:02:36+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFFormController/commit/18615976aa2fd90d8ba80b350b80a615d930cf00
+Commit: https://github.com/plone/Products.CMFPlone/commit/8db22589da91a0b2c01cd0307ce83847848a1aa9
 
-Merge pull request #8 from plone/apply-hotfix-20168030-master
+Merge pull request #1741 from plone/fix-tests-with-latest-cmfformcontroller
 
-Applied security hotfix 20160830 for redirect_to. [master]
+Fixed tests in combination with CMFFormController that includes hotfix. [master]
 
 Files changed:
-A Products/CMFFormController/tests/testRedirectTo.py
 M CHANGES.rst
-M Products/CMFFormController/Actions/RedirectTo.py
+M Products/CMFPlone/tests/testSSOLogin.py
+M Products/CMFPlone/tests/testSecurity.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6037df9..65691a1 100644
+index e85d0bf..0d30fb4 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,11 @@ New features:
+@@ -26,6 +26,8 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Applied security hotfix 20160830 for ``redirect_to``.  This action
-+  refuses to redirect to unknown external sites.  Added
-+  ``external_redirect_to`` action in case someone *does* need to
-+  redirect to an external site.  This option is also there in the
-+  hotfix.  [maurits]
++- Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
++
+ - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
  
+ - Apply security hotfix 20160830 for ``isURLInPortal``.  [maurits]
+diff --git a/Products/CMFPlone/tests/testSSOLogin.py b/Products/CMFPlone/tests/testSSOLogin.py
+index 7ab3692..0e908f9 100644
+--- a/Products/CMFPlone/tests/testSSOLogin.py
++++ b/Products/CMFPlone/tests/testSSOLogin.py
+@@ -35,11 +35,19 @@ def afterSetUp(self):
+             portal.acl_users.portal_role_manager.doAssignRoleToPrincipal(
+                 TEST_USER_ID, role)
  
- 3.1.2 (2016-08-31)
-diff --git a/Products/CMFFormController/Actions/RedirectTo.py b/Products/CMFFormController/Actions/RedirectTo.py
-index ee9f11b..e48bd1a 100644
---- a/Products/CMFFormController/Actions/RedirectTo.py
-+++ b/Products/CMFFormController/Actions/RedirectTo.py
-@@ -1,20 +1,34 @@
- from BaseFormAction import BaseFormAction
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFFormController.FormController import registerFormAction
--from urlparse import urlparse, urljoin
-+from urlparse import urljoin
-+from urlparse import urlparse
+-        registry = self.login_portal.portal_registry
+-
+         # Configure the login portal to allow logins from our sites.
+-        registry['plone.allow_external_login_sites'] = (self.portal.absolute_url(),
+-                                                        self.another_portal.absolute_url())
++        login_registry = self.login_portal.portal_registry
++        login_registry['plone.allow_external_login_sites'] = (
++            self.portal.absolute_url(),
++            self.another_portal.absolute_url())
 +
++        # The normal portal needs to allow logins from the login portal,
++        # otherwise the redirect_to action on login or logout will refuse to
++        # redirect externally.  This may need to be done on another_portal too,
++        # but for the current tests this is not needed.
++        portal_registry = self.portal.portal_registry
++        portal_registry['plone.allow_external_login_sites'] = (
++            self.login_portal.absolute_url(), )
  
- def factory(arg):
-     """Create a new redirect-to action"""
-     return RedirectTo(arg)
+         # Configure our sites to use the login portal for logins and logouts
+         login_portal_url = self.login_portal.absolute_url()
+diff --git a/Products/CMFPlone/tests/testSecurity.py b/Products/CMFPlone/tests/testSecurity.py
+index e31e15c..853a548 100644
+--- a/Products/CMFPlone/tests/testSecurity.py
++++ b/Products/CMFPlone/tests/testSecurity.py
+@@ -154,10 +154,20 @@ def test_atat_does_not_return_anything(self):
+         self.assertEqual(404, res.status)
  
- 
-+def factory_external(arg):
-+    """Create a new external-redirect-to action"""
-+    return ExternalRedirectTo(arg)
-+
-+
- class RedirectTo(BaseFormAction):
-+
-+    allow_external_url = False
-+
-     def __call__(self, controller_state):
-         url = self.getArg(controller_state)
-         context = controller_state.getContext()
-         # see if this is a relative url or an absolute
-         if len(urlparse(url)[1]) == 0:
-             # No host specified, so url is relative.  Get an absolute url.
--            url = urljoin(context.absolute_url()+'/', url)
-+            url = urljoin(context.absolute_url() + '/', url)
-+        elif (not self.allow_external_url
-+              and not getToolByName(context, 'portal_url').isURLInPortal(url)):
-+            url = context.absolute_url()
-         url = self.updateQuery(url, controller_state.kwargs)
-         request = context.REQUEST
-         # this is mostly just for archetypes edit forms...
-@@ -31,6 +45,19 @@ def __call__(self, controller_state):
-         return request.RESPONSE.redirect(url)
- 
- 
--registerFormAction('redirect_to',
--                   factory,
--                   'Redirect to the URL specified in the argument (a TALES expression).  The URL can either be absolute or relative.')
-+class ExternalRedirectTo(RedirectTo):
-+
-+    allow_external_url = True
-+
-+
-+registerFormAction(
-+    'redirect_to',
-+    factory,
-+    'Redirect to the URL specified in the argument (a TALES expression). '
-+    'The URL can either be absolute or relative, and must be internal.')
-+
-+registerFormAction(
-+    'external_redirect_to',
-+    factory_external,
-+    'Redirect to the URL specified in the argument (a TALES expression). '
-+    'The URL can either be absolute or relative, and may be external.')
-diff --git a/Products/CMFFormController/tests/testRedirectTo.py b/Products/CMFFormController/tests/testRedirectTo.py
-new file mode 100644
-index 0000000..63fc090
---- /dev/null
-+++ b/Products/CMFFormController/tests/testRedirectTo.py
-@@ -0,0 +1,101 @@
-+#
-+# Test the RedirectTo action.
-+#
-+
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
-+from plone.app.testing import TEST_USER_NAME
-+from plone.app.testing import TEST_USER_PASSWORD
-+from plone.app.testing.bbb import PloneTestCase
-+from plone.protect import createToken
-+
-+import transaction
-+
-+
-+class TestRedirectToFunctional(PloneTestCase):
-+    # Functional tests, using the folder_publish.cpy script from
-+    # Products.CMFPlone, which could be persuaded to redirect to an external
-+    # website, which is not what it is meant for.
-+
-+    def afterSetUp(self):
-+        # Update settings.
-+        # self.app = self.layer['app']
-+        # self.portal = self.layer['portal']
-+        # self.request = self.layer['request']
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        self.portal.portal_workflow.setChainForPortalTypes(
-+            ('Document',),
-+            ('simple_publication_workflow',))
-+        # Create page.
-+        self.portal.invokeFactory(
-+            id='page',
-+            title='Page 1',
-+            type_name='Document'
-+        )
-+        self.page = self.portal.page
-+
-+    def beforeTearDown(self):
-+        # Weird that we have to remove this page manually.  Otherwise with the
-+        # second test we get an error:
-+        # BadRequest: The id "page" is invalid - it is already in use.
-+        # Strangely this does not happen when you run
-+        # bin/test -s Products.CMFFormController -m testRedirectTo
-+        # which is the only test case that uses portal.page,
-+        # and it does happen when you run all the tests:
-+        # bin/test -s Products.CMFFormController
-+        # We may want to switch to the real plone.app.testing
-+        # instead of bbb.PloneTestCase.
-+        self.portal._delObject('page')
-+        transaction.commit()
-+
-+    def test_regression(self):
-+        csrf_token = createToken()
-+        env = {'HTTP_X_CSRF_TOKEN': csrf_token}
-+        target = 'front-page'
-+        url = (
-+            '%s/folder_publish'
-+            '?workflow_action=publish'
-+            '&paths=%s'
-+            '&orig_template=%s') % (
-+                '/'.join(self.portal.getPhysicalPath()),
-+                '/'.join(self.page.getPhysicalPath()),
-+                target
-+        )
-+        response = self.publish(
-+            url,
-+            basic='%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD),
-+            env=env,
-+            extra={'orig_template': target,
-+                   '_authenticator': csrf_token},
-+            request_method='POST',
-+            handle_errors=False,
-+        )
-+        self.assertNotEqual(response.headers.get('location'), None)
-+        self.assertEqual(response.headers.get('location'),
+     def test_go_back(self):
+-        res = self.publish('/plone/front-page/go_back?last_referer=http://${request}',
+-                           basic=SITE_OWNER_NAME + ':' + SITE_OWNER_PASSWORD)
++        res = self.publish(
++            '/plone/front-page/go_back?last_referer=http://${request}',
++            basic=SITE_OWNER_NAME + ':' + SITE_OWNER_PASSWORD)
++        # This used to show the request as location, so something like:
++        # http://<h3>form</h3><table>... and then all kinds of data from the
++        # request.  This was fixed in PloneHotfix20121106.  For this request
++        # you then got redirected to url http://${request} which your browser
++        # obviously does not know how to handle.
++        #
++        # In PloneHotfix20160830 this fix was kept, but additionally Plone
++        # refuses to redirect to external sites by default.
+         self.assertEqual(302, res.status)
+-        self.assertEqual('http://${request}', res.headers['location'][:17])
++        self.assertEqual(res.headers['location'],
 +                         self.portal.absolute_url() + '/front-page')
-+
-+    def test_attacker_redirect(self):
-+        csrf_token = createToken()
-+        env = {'HTTP_X_CSRF_TOKEN': csrf_token}
-+        target = 'http://attacker.com'
-+        url = (
-+            '%s/folder_publish'
-+            '?workflow_action=publish'
-+            '&paths=%s'
-+            '&orig_template=%s') % (
-+                '/'.join(self.portal.getPhysicalPath()),
-+                '/'.join(self.page.getPhysicalPath()),
-+                target
-+        )
-+        response = self.publish(
-+            url,
-+            basic='%s:%s' % (TEST_USER_NAME, TEST_USER_PASSWORD),
-+            env=env,
-+            extra={'orig_template': target,
-+                   '_authenticator': csrf_token},
-+            request_method='POST',
-+            handle_errors=False,
-+        )
-+        self.assertNotEqual(response.headers.get('location'), None)
-+        self.assertNotEqual(response.headers.get('location'),
-+                            'http://attacker.com')
+ 
+     def test_getFolderContents(self):
+         res = self.publish('/plone/getFolderContents')
 
 
