@@ -1,5 +1,5 @@
-PLIP 13350: Edit Member Schema TTW
-==================================
+PLIP 1340: Get rid of portal_quickinstaller
+===========================================
 
 PLIP ticket: https://github.com/plone/Products.CMFPlone/issues/1340
 
