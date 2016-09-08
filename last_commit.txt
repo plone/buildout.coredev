@@ -1,180 +1,448 @@
-Repository: plone.protect
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2016-09-07T17:06:17+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.protect/commit/062e1d17adbbc1dd31152db0a75cf07e21cc33c1
+Date: 2016-09-08T02:56:38+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/dcd8adbf343727cd5a8c5576962b37709c3ccfb9
 
-Only try the confirm view for urls that are in the portal.
-
-This applies PloneHotfix20160830.
+Add overridable tiledata storage layer to allow custom tile data storages
 
 Files changed:
-A plone/protect/tests/test_confirm_view.py
 M CHANGES.rst
-M plone/protect/views.py
+M plone/tiles/configure.zcml
+M plone/tiles/data.py
+M plone/tiles/interfaces.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index bd6d9ba..2a37b39 100644
+index 9d048b8..d582fbf 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
+ 
+-1.6.2 (unreleased)
++1.7.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+@@ -10,7 +10,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Add support for custom storage layer with ITileDataStorage adapter
++  [datakurre]
  
  Bug fixes:
  
-+- Only try the confirm view for urls that are in the portal.
-+  This applies PloneHotfix20160830.  [maurits]
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index da7faf0..7a672e8 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -7,6 +7,8 @@
+     <adapter factory=".data.transientTileDataManagerFactory" />
+     <adapter factory=".data.PersistentTileDataManager" />
+     <adapter factory=".data.defaultTileDataContext" />
++    <adapter factory=".data.defaultTileDataStorage" />
++    <adapter factory=".data.defaultPersistentTileDataStorage" />
+ 
+     <!-- Absolute URL -->
+     <view
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index 89bea1a..cb6cce3 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -5,6 +5,7 @@
+ from plone.tiles.interfaces import ITile
+ from plone.tiles.interfaces import ITileDataContext
+ from plone.tiles.interfaces import ITileDataManager
++from plone.tiles.interfaces import ITileDataStorage
+ from plone.tiles.interfaces import ITileType
+ from zope.annotation.interfaces import IAnnotations
+ from zope.component import adapter
+@@ -45,16 +46,21 @@ class TransientTileDataManager(object):
+     def __init__(self, tile):
+         self.tile = tile
+         self.tileType = queryUtility(ITileType, name=tile.__name__)
+-        self.annotations = IAnnotations(
+-            self.tile.request,
+-            self.tile.request.form
+-        )
+-        self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
 +
- - Removed ``RedirectTo`` patch.  The patch has been merged to
-   ``Products.CMFFormController`` 3.0.7 (Plone 4.3 and 5.0) and 3.1.2
-   (Plone 5.1).  Note that we are not requiring those versions in our
-diff --git a/plone/protect/tests/test_confirm_view.py b/plone/protect/tests/test_confirm_view.py
-new file mode 100644
-index 0000000..73f43fe
---- /dev/null
-+++ b/plone/protect/tests/test_confirm_view.py
-@@ -0,0 +1,29 @@
-+from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
-+from zExceptions import Forbidden
-+from zope.component import getMultiAdapter
++        self.context = getMultiAdapter(
++            (tile.context, tile.request, tile), ITileDataContext)
++        self.storage = getMultiAdapter(
++            (self.context, tile.request, tile), ITileDataStorage)
 +
-+import unittest
-+
-+
-+class TestAttackVector(unittest.TestCase):
-+    layer = PROTECT_FUNCTIONAL_TESTING
-+
-+    def test_regression(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        view = getMultiAdapter(
-+            (portal, request), name=u'confirm-action')
-+        request.form.update({
-+            'original_url': 'foobar'
-+        })
-+        self.assertTrue('value="foobar"' in view())
-+
-+    def test_valid_url(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        view = getMultiAdapter(
-+            (portal, request), name=u'confirm-action')
-+        request.form.update({
-+            'original_url': 'javascript:alert(1)'
-+        })
-+        self.assertRaises(Forbidden, view)
-diff --git a/plone/protect/views.py b/plone/protect/views.py
-index 253cc83..933caa0 100644
---- a/plone/protect/views.py
-+++ b/plone/protect/views.py
-@@ -1,8 +1,16 @@
- from plone.protect.interfaces import IConfirmView
-+from Products.CMFCore.utils import getToolByName
- from Products.Five import BrowserView
-+from zExceptions import Forbidden
- from zope.interface import implementer
++        if IAnnotations.providedBy(self.storage):
++            self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        else:
++            self.key = str(tile.id)
+ 
+     def get(self):
+         # use explicitly set data (saved as annotation on the request)
+-        if self.key in self.annotations:
+-            data = dict(self.annotations[self.key])
++        if self.key in self.storage:
++            data = dict(self.storage[self.key])
+ 
+             if self.tileType is not None and self.tileType.schema is not None:
+                 for name, field in getFields(self.tileType.schema).items():
+@@ -82,11 +88,11 @@ def get(self):
+         return data
+ 
+     def set(self, data):
+-        self.annotations[self.key] = data
++        self.storage[self.key] = data
+ 
+     def delete(self):
+-        if self.key in self.annotations:
+-            self.annotations[self.key] = {}
++        if self.key in self.storage:
++            self.storage[self.key] = {}
  
  
- @implementer(IConfirmView)
- class ConfirmView(BrowserView):
--    pass
+ @adapter(IPersistentTile)
+@@ -102,9 +108,13 @@ def __init__(self, tile):
+ 
+         self.context = getMultiAdapter(
+             (tile.context, tile.request, tile), ITileDataContext)
+-        self.annotations = IAnnotations(self.context)
++        self.storage = getMultiAdapter(
++            (self.context, tile.request, tile), ITileDataStorage)
+ 
+-        self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        if IAnnotations.providedBy(self.storage):
++            self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        else:
++            self.key = str(tile.id)
+ 
+     def _get_default_request_data(self):
+         # If we don't have a schema, just take the request
+@@ -122,7 +132,7 @@ def _get_default_request_data(self):
+ 
+     def get(self):
+         data = self._get_default_request_data()
+-        data.update(dict(self.annotations.get(self.key, {})))
++        data.update(dict(self.storage.get(self.key, {})))
+         if self.tileType is not None and self.tileType.schema is not None:
+             for name, field in getFields(self.tileType.schema).items():
+                 if name not in data:
+@@ -130,11 +140,11 @@ def get(self):
+         return data
+ 
+     def set(self, data):
+-        self.annotations[self.key] = PersistentDict(data)
++        self.storage[self.key] = PersistentDict(data)
+ 
+     def delete(self):
+-        if self.key in self.annotations:
+-            del self.annotations[self.key]
++        if self.key in self.storage:
++            del self.storage[self.key]
+ 
+ 
+ @implementer(ITileDataContext)
+@@ -142,6 +152,22 @@ def delete(self):
+ def defaultTileDataContext(context, request, tile):
+     return tile.context
+ 
 +
-+    def __call__(self):
-+        urltool = getToolByName(self.context, 'portal_url')
-+        original_url = getattr(self.request, 'original_url', '')
-+        if not original_url or not urltool.isURLInPortal(original_url):
-+            raise Forbidden('url not in portal')
-+        return self.index()
++@implementer(ITileDataStorage)
++@adapter(Interface, Interface, ITile)
++def defaultTileDataStorage(context, request, tile):
++    if tile.request.get('X-Tile-Persistent'):
++        return defaultPersistentTileDataStorage(context, request, tile)
++    else:
++        return IAnnotations(tile.request, tile.request.form)
++
++
++@implementer(ITileDataStorage)
++@adapter(Interface, Interface, IPersistentTile)
++def defaultPersistentTileDataStorage(context, request, tile):
++    return IAnnotations(context)
++
++
+ # Encoding
+ 
+ 
+diff --git a/plone/tiles/interfaces.py b/plone/tiles/interfaces.py
+index 5a43ea1..3c07287 100644
+--- a/plone/tiles/interfaces.py
++++ b/plone/tiles/interfaces.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+-
+ from zope.interface import Interface
++from zope.interface.common.mapping import IMapping
+ from zope.interface.interfaces import IInterface
+ from zope.publisher.interfaces.browser import IBrowserView
+ 
+@@ -146,8 +146,21 @@ class ITileDataContext(Interface):
+     the context or request.
+ 
+     The default implementation simply returns ``tile.context``. That must
+-    be annotatable for the default persistent tile ``ITileDataManager``
+-    to work.
++    be annotatable for the default tile data storage adapter and
++    persistent tile ``ITileDataManager`` to work.
++    """
++
++
++class ITileDataStorage(IMapping):
++    """Indirection to help determine how persistent tiles store their data.
++
++    This is a multi-adapter on ``(context, request, tile)``. The context and
++    request are the same as ``tile.context`` and ``tile.request``, but these
++    discriminators allow the data context to be customised depending on
++    the context or request.
++
++    The default implementation simply returns the configured zope.annotation
++    storage for the given context.
+     """
+ 
+ 
+diff --git a/setup.py b/setup.py
+index 492ca9c..53ce3a1 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,7 @@
+ import os
+ 
+ 
+-version = '1.6.2.dev0'
++version = '1.7.0.dev0'
+ 
+ setup(
+     name='plone.tiles',
 
 
-Repository: plone.protect
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2016-09-07T18:53:51+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.protect/commit/ec87ec3314eb0a94be1f75b8c357513bb7bef83e
+Date: 2016-09-08T18:10:58+02:00
+Author: Nathan Van Gheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.tiles/commit/310962ea05dfbf5f29bcf5ad6d2f04de68c34e2d
 
-Merge pull request #54 from plone/apply-hotfix-20160830
+Merge pull request #12 from plone/datakurre-tile-data-storage
 
-Only try the confirm view for urls that are in the portal.
+Add overridable tiledata storage layer to allow custom tile data storages
 
 Files changed:
-A plone/protect/tests/test_confirm_view.py
 M CHANGES.rst
-M plone/protect/views.py
+M plone/tiles/configure.zcml
+M plone/tiles/data.py
+M plone/tiles/interfaces.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index bd6d9ba..2a37b39 100644
+index 9d048b8..d582fbf 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
+ 
+-1.6.2 (unreleased)
++1.7.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+@@ -10,7 +10,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Add support for custom storage layer with ITileDataStorage adapter
++  [datakurre]
  
  Bug fixes:
  
-+- Only try the confirm view for urls that are in the portal.
-+  This applies PloneHotfix20160830.  [maurits]
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index da7faf0..7a672e8 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -7,6 +7,8 @@
+     <adapter factory=".data.transientTileDataManagerFactory" />
+     <adapter factory=".data.PersistentTileDataManager" />
+     <adapter factory=".data.defaultTileDataContext" />
++    <adapter factory=".data.defaultTileDataStorage" />
++    <adapter factory=".data.defaultPersistentTileDataStorage" />
+ 
+     <!-- Absolute URL -->
+     <view
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index 89bea1a..cb6cce3 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -5,6 +5,7 @@
+ from plone.tiles.interfaces import ITile
+ from plone.tiles.interfaces import ITileDataContext
+ from plone.tiles.interfaces import ITileDataManager
++from plone.tiles.interfaces import ITileDataStorage
+ from plone.tiles.interfaces import ITileType
+ from zope.annotation.interfaces import IAnnotations
+ from zope.component import adapter
+@@ -45,16 +46,21 @@ class TransientTileDataManager(object):
+     def __init__(self, tile):
+         self.tile = tile
+         self.tileType = queryUtility(ITileType, name=tile.__name__)
+-        self.annotations = IAnnotations(
+-            self.tile.request,
+-            self.tile.request.form
+-        )
+-        self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
 +
- - Removed ``RedirectTo`` patch.  The patch has been merged to
-   ``Products.CMFFormController`` 3.0.7 (Plone 4.3 and 5.0) and 3.1.2
-   (Plone 5.1).  Note that we are not requiring those versions in our
-diff --git a/plone/protect/tests/test_confirm_view.py b/plone/protect/tests/test_confirm_view.py
-new file mode 100644
-index 0000000..73f43fe
---- /dev/null
-+++ b/plone/protect/tests/test_confirm_view.py
-@@ -0,0 +1,29 @@
-+from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING
-+from zExceptions import Forbidden
-+from zope.component import getMultiAdapter
++        self.context = getMultiAdapter(
++            (tile.context, tile.request, tile), ITileDataContext)
++        self.storage = getMultiAdapter(
++            (self.context, tile.request, tile), ITileDataStorage)
 +
-+import unittest
-+
-+
-+class TestAttackVector(unittest.TestCase):
-+    layer = PROTECT_FUNCTIONAL_TESTING
-+
-+    def test_regression(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        view = getMultiAdapter(
-+            (portal, request), name=u'confirm-action')
-+        request.form.update({
-+            'original_url': 'foobar'
-+        })
-+        self.assertTrue('value="foobar"' in view())
-+
-+    def test_valid_url(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        view = getMultiAdapter(
-+            (portal, request), name=u'confirm-action')
-+        request.form.update({
-+            'original_url': 'javascript:alert(1)'
-+        })
-+        self.assertRaises(Forbidden, view)
-diff --git a/plone/protect/views.py b/plone/protect/views.py
-index 253cc83..933caa0 100644
---- a/plone/protect/views.py
-+++ b/plone/protect/views.py
-@@ -1,8 +1,16 @@
- from plone.protect.interfaces import IConfirmView
-+from Products.CMFCore.utils import getToolByName
- from Products.Five import BrowserView
-+from zExceptions import Forbidden
- from zope.interface import implementer
++        if IAnnotations.providedBy(self.storage):
++            self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        else:
++            self.key = str(tile.id)
+ 
+     def get(self):
+         # use explicitly set data (saved as annotation on the request)
+-        if self.key in self.annotations:
+-            data = dict(self.annotations[self.key])
++        if self.key in self.storage:
++            data = dict(self.storage[self.key])
+ 
+             if self.tileType is not None and self.tileType.schema is not None:
+                 for name, field in getFields(self.tileType.schema).items():
+@@ -82,11 +88,11 @@ def get(self):
+         return data
+ 
+     def set(self, data):
+-        self.annotations[self.key] = data
++        self.storage[self.key] = data
+ 
+     def delete(self):
+-        if self.key in self.annotations:
+-            self.annotations[self.key] = {}
++        if self.key in self.storage:
++            self.storage[self.key] = {}
  
  
- @implementer(IConfirmView)
- class ConfirmView(BrowserView):
--    pass
+ @adapter(IPersistentTile)
+@@ -102,9 +108,13 @@ def __init__(self, tile):
+ 
+         self.context = getMultiAdapter(
+             (tile.context, tile.request, tile), ITileDataContext)
+-        self.annotations = IAnnotations(self.context)
++        self.storage = getMultiAdapter(
++            (self.context, tile.request, tile), ITileDataStorage)
+ 
+-        self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        if IAnnotations.providedBy(self.storage):
++            self.key = '.'.join([ANNOTATIONS_KEY_PREFIX, str(tile.id)])
++        else:
++            self.key = str(tile.id)
+ 
+     def _get_default_request_data(self):
+         # If we don't have a schema, just take the request
+@@ -122,7 +132,7 @@ def _get_default_request_data(self):
+ 
+     def get(self):
+         data = self._get_default_request_data()
+-        data.update(dict(self.annotations.get(self.key, {})))
++        data.update(dict(self.storage.get(self.key, {})))
+         if self.tileType is not None and self.tileType.schema is not None:
+             for name, field in getFields(self.tileType.schema).items():
+                 if name not in data:
+@@ -130,11 +140,11 @@ def get(self):
+         return data
+ 
+     def set(self, data):
+-        self.annotations[self.key] = PersistentDict(data)
++        self.storage[self.key] = PersistentDict(data)
+ 
+     def delete(self):
+-        if self.key in self.annotations:
+-            del self.annotations[self.key]
++        if self.key in self.storage:
++            del self.storage[self.key]
+ 
+ 
+ @implementer(ITileDataContext)
+@@ -142,6 +152,22 @@ def delete(self):
+ def defaultTileDataContext(context, request, tile):
+     return tile.context
+ 
 +
-+    def __call__(self):
-+        urltool = getToolByName(self.context, 'portal_url')
-+        original_url = getattr(self.request, 'original_url', '')
-+        if not original_url or not urltool.isURLInPortal(original_url):
-+            raise Forbidden('url not in portal')
-+        return self.index()
++@implementer(ITileDataStorage)
++@adapter(Interface, Interface, ITile)
++def defaultTileDataStorage(context, request, tile):
++    if tile.request.get('X-Tile-Persistent'):
++        return defaultPersistentTileDataStorage(context, request, tile)
++    else:
++        return IAnnotations(tile.request, tile.request.form)
++
++
++@implementer(ITileDataStorage)
++@adapter(Interface, Interface, IPersistentTile)
++def defaultPersistentTileDataStorage(context, request, tile):
++    return IAnnotations(context)
++
++
+ # Encoding
+ 
+ 
+diff --git a/plone/tiles/interfaces.py b/plone/tiles/interfaces.py
+index 5a43ea1..3c07287 100644
+--- a/plone/tiles/interfaces.py
++++ b/plone/tiles/interfaces.py
+@@ -1,6 +1,6 @@
+ # -*- coding: utf-8 -*-
+-
+ from zope.interface import Interface
++from zope.interface.common.mapping import IMapping
+ from zope.interface.interfaces import IInterface
+ from zope.publisher.interfaces.browser import IBrowserView
+ 
+@@ -146,8 +146,21 @@ class ITileDataContext(Interface):
+     the context or request.
+ 
+     The default implementation simply returns ``tile.context``. That must
+-    be annotatable for the default persistent tile ``ITileDataManager``
+-    to work.
++    be annotatable for the default tile data storage adapter and
++    persistent tile ``ITileDataManager`` to work.
++    """
++
++
++class ITileDataStorage(IMapping):
++    """Indirection to help determine how persistent tiles store their data.
++
++    This is a multi-adapter on ``(context, request, tile)``. The context and
++    request are the same as ``tile.context`` and ``tile.request``, but these
++    discriminators allow the data context to be customised depending on
++    the context or request.
++
++    The default implementation simply returns the configured zope.annotation
++    storage for the given context.
+     """
+ 
+ 
+diff --git a/setup.py b/setup.py
+index 492ca9c..53ce3a1 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,7 @@
+ import os
+ 
+ 
+-version = '1.6.2.dev0'
++version = '1.7.0.dev0'
+ 
+ setup(
+     name='plone.tiles',
 
 
