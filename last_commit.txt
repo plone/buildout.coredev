@@ -1,286 +1,563 @@
-Repository: plone.app.users
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2016-09-07T17:29:37+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.users/commit/38284c22eb13a7416efa14eabe8aa0fe7ce84d43
+Date: 2016-09-13T10:29:09+03:00
+Author: vangheem (vangheem) <vangheem@gmail.com>
+Commit: https://github.com/plone/plone.tiles/commit/2b000d672ba3143d344fedc30f57bdfe1fa322fa
 
-Don't show unescaped user id in user-information form.
-
-This applies PloneHotfix20160830.
+Provide ignore_querystring form directive to mark particular tiles fields
+    that are not allowed to default data from query string data
 
 Files changed:
-A plone/app/users/tests/test_user_data_panel.py
+A plone/tiles/directives.py
 M CHANGES.rst
-M plone/app/users/browser/userdatapanel.py
+M plone/tiles/data.py
+M plone/tiles/tiles.rst
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a793b31..045c6fd 100644
+index d131718..46edae7 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -1,10 +1,14 @@
+ Changelog
+ =========
  
- Bug fixes:
+-1.7.2 (unreleased)
++1.8.0 (unreleased)
+ ------------------
  
--- *add item here*
-+- Don't show unescaped user id in user-information form.
-+  This applies PloneHotfix20160830.  [maurits]
+-- Nothing changed yet.
++New features:
++
++  - Provide ignore_querystring form directive to mark particular tiles fields
++    that are not allowed to default data from query string data
++    [vangheem]
  
  
- 2.3.7 (2016-08-18)
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index debc12d..f28a809 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -15,6 +15,9 @@
- from ..schema import IUserDataSchema
- from .schemaeditor import getFromBaseSchema
+ 1.7.1 (2016-09-12)
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index 88f8a9b..3c98f23 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -1,5 +1,7 @@
+ # -*- coding: utf-8 -*-
+ from persistent.dict import PersistentDict
++from plone.subrequest import ISubRequest
++from plone.tiles.directives import IGNORE_QUERYSTRING_KEY
+ from plone.tiles.interfaces import IFieldTypeConverter
+ from plone.tiles.interfaces import IPersistentTile
+ from plone.tiles.interfaces import ITile
+@@ -36,9 +38,50 @@ def transientTileDataManagerFactory(tile):
+         return TransientTileDataManager(tile)
  
-+import cgi
+ 
++class BaseTileDataManager(object):
++
++    def get_default_request_data(self):
++        """
++        from request form
++        """
++        # try to use a '_tiledata' parameter in the request
++        if '_tiledata' in self.tile.request.form:
++            data = json.loads(self.tile.request.form['_tiledata'])
++        elif self.tileType is None or self.tileType.schema is None:
++            data = self.tile.request.form.copy()
++        else:
++            # Try to decode the form data properly if we can
++            try:
++                data = decode(self.tile.request.form,
++                              self.tileType.schema, missing=True)
++            except (ValueError, UnicodeDecodeError,):
++                LOGGER.exception(u'Could not convert form data to schema')
++                return self.data.copy()
++        # we're assuming this data is potentially unsafe so we need to check
++        # the ignore querystring field setting
++
++        # before we start, we allow it for sub-requests since in this case,
++        # the input is safe and we can trust it
++        if ISubRequest.providedBy(self.tile.request):
++            return data
++
++        # first off, we only care to filter if it is a GET request
++        if getattr(self.tile.request, 'REQUEST_METHOD', 'GET') != 'GET':
++            return data
++
++        # now, pay attention to schema hints for form data
++        if self.tileType is not None and self.tileType.schema is not None:
++            for name in self.tileType.schema.queryTaggedValue(
++                    IGNORE_QUERYSTRING_KEY) or []:
++                if name in data:
++                    del data[name]
++
++        return data
 +
 +
- 
- class UserDataPanelAdapter(AccountPanelSchemaAdapter):
-     """One does not simply set portrait, email might be used to login with.
-@@ -72,7 +75,7 @@ def description(self):
-             return _(
-                 u'description_personal_information_form_otheruser',
-                 default='Change personal information for $name',
--                mapping={'name': userid}
-+                mapping={'name': cgi.escape(userid)}
-             )
+ @adapter(ITile)
+ @implementer(ITileDataManager)
+-class TransientTileDataManager(object):
++class TransientTileDataManager(BaseTileDataManager):
+     """A data manager for transient tile data, which reads data from the
+     request query string.
+     """
+@@ -70,24 +113,9 @@ def get(self):
+                 for name, field in getFields(self.tileType.schema).items():
+                     if name not in data:
+                         data[name] = field.missing_value
+-
+-        # try to use a '_tiledata' parameter in the request
+-        elif '_tiledata' in self.tile.request.form:
+-            data = json.loads(self.tile.request.form['_tiledata'])
+-
+         # fall back to the copy of request.form object itself
          else:
-             # editing my own profile
-diff --git a/plone/app/users/tests/test_user_data_panel.py b/plone/app/users/tests/test_user_data_panel.py
+-            # If we don't have a schema, just take the request
+-            if self.tileType is None or self.tileType.schema is None:
+-                data = self.tile.request.form.copy()
+-            else:
+-                # Try to decode the form data properly if we can
+-                try:
+-                    data = decode(self.tile.request.form,
+-                                  self.tileType.schema, missing=True)
+-                except (ValueError, UnicodeDecodeError,):
+-                    LOGGER.exception(u'Could not convert form data to schema')
+-                    return self.data.copy()
++            data = self.get_default_request_data()
+ 
+         return data
+ 
+@@ -101,7 +129,7 @@ def delete(self):
+ 
+ @adapter(IPersistentTile)
+ @implementer(ITileDataManager)
+-class PersistentTileDataManager(object):
++class PersistentTileDataManager(BaseTileDataManager):
+     """A data reader for persistent tiles operating on annotatable contexts.
+     The data is retrieved from an annotation.
+     """
+@@ -124,22 +152,8 @@ def __init__(self, tile):
+     def annotations(self):  # BBB for < 0.7.0 support
+         return self.storage
+ 
+-    def _get_default_request_data(self):
+-        # If we don't have a schema, just take the request
+-        if self.tileType is None or self.tileType.schema is None:
+-            data = self.tile.request.form.copy()
+-        else:
+-            # Try to decode the form data properly if we can
+-            try:
+-                data = decode(self.tile.request.form,
+-                              self.tileType.schema, missing=True)
+-            except (ValueError, UnicodeDecodeError,):
+-                LOGGER.exception(u'Could not convert form data to schema')
+-                return self.data.copy()
+-        return data
+-
+     def get(self):
+-        data = self._get_default_request_data()
++        data = self.get_default_request_data()
+         data.update(dict(self.storage.get(self.key, {})))
+         if self.tileType is not None and self.tileType.schema is not None:
+             for name, field in getFields(self.tileType.schema).items():
+diff --git a/plone/tiles/directives.py b/plone/tiles/directives.py
 new file mode 100644
-index 0000000..7cbc9ba
+index 0000000..9e5c675
 --- /dev/null
-+++ b/plone/app/users/tests/test_user_data_panel.py
-@@ -0,0 +1,30 @@
-+from plone.app.users.browser.userdatapanel import UserDataPanel
-+from plone.app.users.testing import PLONE_APP_USERS_FUNCTIONAL_TESTING
-+from zope.i18n import translate
++++ b/plone/tiles/directives.py
+@@ -0,0 +1,13 @@
++# -*- coding: utf-8 -*-
++from plone.supermodel.directives import MetadataListDirective
 +
-+import unittest
++IGNORE_QUERYSTRING_KEY = 'plone.tiles.ignore_querystring'
 +
 +
-+class TestUserDataPanel(unittest.TestCase):
++class ignore_querystring(MetadataListDirective):
++    """Directive used to create fieldsets
++    """
++    key = IGNORE_QUERYSTRING_KEY
 +
-+    layer = PLONE_APP_USERS_FUNCTIONAL_TESTING
++    def factory(self, name):
++        return [name]
+diff --git a/plone/tiles/tiles.rst b/plone/tiles/tiles.rst
+index e633953..7366498 100644
+--- a/plone/tiles/tiles.rst
++++ b/plone/tiles/tiles.rst
+@@ -709,3 +709,72 @@ If the tile doesn't have an id, we don't get any sub-path:
+     >>> persistentTile = getMultiAdapter((context, request), name=u'sample.persistenttile')
+     >>> absoluteURL(persistentTile, request)
+     'http://example.com/context/@@sample.persistenttile'
 +
-+    def test_regression(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        request.form.update({
-+            'userid': 'admin'
-+        })
-+        form = UserDataPanel(portal, request)
-+        description = translate(form.description, context=request)
-+        self.assertTrue('admin' in description)
 +
-+    def test_escape_html(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        request.form.update({
-+            'userid': 'admin<script>alert("userid")</script>'
-+        })
-+        form = UserDataPanel(portal, request)
-+        description = translate(form.description, context=request)
-+        self.assertTrue('<script>' not in description)
++We can also disallow query parameters providing data into our tiles
++
++.. code-block:: python
++
++    >>> import zope.schema
++    >>> from plone.tiles.directives import ignore_querystring
++
++    >>> class ISampleTileData(Interface):
++    ...     unfiltered = zope.schema.Text(title=u'Unfiltered data')
++    ...     ignore_querystring('unfiltered')
++    ...     filtered = zope.schema.Text(title=u'filtered data')
++
++    >>> sampleTileType.schema = ISampleTileData
++
++And create a tile with our new schema
++
++.. code-block:: python
++
++  >>> from plone.tiles import Tile
++  >>> class SampleTile(Tile):
++  ...
++  ...     __name__ = 'sample.unfilteredtile' # would normally be set by a ZCML handler
++  ...
++  ...     def __call__(self):
++  ...         return '<html><body><div>{}{}</div></body></html>'.format(
++  ...             self.data.get('unfiltered') or '',
++  ...             self.data.get('filtered') or '')
++
++We'll register the sample unfiltered tile directly here, for testing.
++
++.. code-block:: python
++
++    >>> from zope.component import provideAdapter, provideUtility
++    >>> from zope.interface import Interface
++    >>> from plone.tiles.interfaces import IBasicTile
++
++    >>> provideUtility(sampleTileType, name=u'sample.unfilteredtile')
++    >>> provideAdapter(SampleTile, (Interface, Interface), IBasicTile, name=u'sample.unfilteredtile')
++
++
++Let's simulate traversal to test if form data is used:
++
++.. code-block:: python
++
++    >>> context = Context()
++    >>> request = TestRequest(form={'unfiltered': 'foobar', 'filtered': 'safe'})
++
++    >>> tile = getMultiAdapter((context, request), name=u'sample.unfilteredtile')
++    >>> tile = tile['tile1']
++
++Data should not contain unfiltered field:
++
++.. code-block:: python
++
++    >>> sorted(tile.data.items())
++    [('filtered', u'safe')]
++
++
++Rendering the tile should not include ignored query string:
++
++.. code-block:: python
++
++    >>> 'foobar' in tile()
++    False
++
++    >>> tile()
++    '<html><body><div>safe</div></body></html>'
+diff --git a/setup.py b/setup.py
+index 9cb036b..42f5103 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,7 @@
+ import os
+ 
+ 
+-version = '1.7.2.dev0'
++version = '1.8.0.dev0'
+ 
+ setup(
+     name='plone.tiles',
+@@ -52,6 +52,7 @@
+         'zope.security',
+         'zope.traversing',
+         'Zope2',
++        'plone.subrequest'
+     ],
+     extras_require={
+         'test': [
 
 
-Repository: plone.app.users
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2016-09-07T17:48:58+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.users/commit/46c34bc8612c0558fc055385bd3d246d0b0a2b9e
+Date: 2016-09-13T10:53:50+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/6703af7b70a152cbb9f821dcf29bd98eeab98624
 
-Give 404 when user-information form is called with not existing userid.
+Merge pull request #14 from plone/ignore-querystring-directive
 
-Files changed:
-M CHANGES.rst
-M plone/app/users/browser/userdatapanel.py
-M plone/app/users/tests/test_user_data_panel.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 045c6fd..069c410 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
- 
- Bug fixes:
- 
-+- Give a 404 when the user-information form is called with a not
-+  existing userid.  [maurits]
-+
- - Don't show unescaped user id in user-information form.
-   This applies PloneHotfix20160830.  [maurits]
- 
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index f28a809..2b6f827 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -11,6 +11,7 @@
- from plone.app.users.browser.account import AccountPanelForm
- from plone.app.users.browser.account import AccountPanelSchemaAdapter
- from plone.registry.interfaces import IRegistry
-+from zExceptions import NotFound
- 
- from ..schema import IUserDataSchema
- from .schemaeditor import getFromBaseSchema
-@@ -85,6 +86,11 @@ def description(self):
-             )
- 
-     def __call__(self):
-+        userid = self.request.form.get('userid')
-+        if userid:
-+            mt = getToolByName(self.context, 'portal_membership')
-+            if mt.getMemberById(userid) is None:
-+                raise NotFound('User does not exist.')
-         self.request.set('disable_border', 1)
-         return super(UserDataPanel, self).__call__()
- 
-diff --git a/plone/app/users/tests/test_user_data_panel.py b/plone/app/users/tests/test_user_data_panel.py
-index 7cbc9ba..a9aa7e0 100644
---- a/plone/app/users/tests/test_user_data_panel.py
-+++ b/plone/app/users/tests/test_user_data_panel.py
-@@ -1,3 +1,4 @@
-+from zExceptions import NotFound
- from plone.app.users.browser.userdatapanel import UserDataPanel
- from plone.app.users.testing import PLONE_APP_USERS_FUNCTIONAL_TESTING
- from zope.i18n import translate
-@@ -18,6 +19,8 @@ def test_regression(self):
-         form = UserDataPanel(portal, request)
-         description = translate(form.description, context=request)
-         self.assertTrue('admin' in description)
-+        # form can be called without raising exception.
-+        self.assertTrue(form())
- 
-     def test_escape_html(self):
-         portal = self.layer['portal']
-@@ -28,3 +31,4 @@ def test_escape_html(self):
-         form = UserDataPanel(portal, request)
-         description = translate(form.description, context=request)
-         self.assertTrue('<script>' not in description)
-+        self.assertRaises(NotFound, form)
-
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2016-09-12T19:07:50+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.users/commit/9e20918433ba8ce1eb65ac33141cbaf56c460b24
-
-Merge pull request #60 from plone/apply-hotfix-20160830-master
-
-Apply hotfix 20160830 master
+Provide ignore_querystring form directive
 
 Files changed:
-A plone/app/users/tests/test_user_data_panel.py
+A plone/tiles/directives.py
 M CHANGES.rst
-M plone/app/users/browser/userdatapanel.py
+M plone/tiles/data.py
+M plone/tiles/tiles.rst
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a793b31..069c410 100644
+index d131718..46edae7 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,11 @@ New features:
+@@ -1,10 +1,14 @@
+ Changelog
+ =========
  
- Bug fixes:
+-1.7.2 (unreleased)
++1.8.0 (unreleased)
+ ------------------
  
--- *add item here*
-+- Give a 404 when the user-information form is called with a not
-+  existing userid.  [maurits]
+-- Nothing changed yet.
++New features:
 +
-+- Don't show unescaped user id in user-information form.
-+  This applies PloneHotfix20160830.  [maurits]
++  - Provide ignore_querystring form directive to mark particular tiles fields
++    that are not allowed to default data from query string data
++    [vangheem]
  
  
- 2.3.7 (2016-08-18)
-diff --git a/plone/app/users/browser/userdatapanel.py b/plone/app/users/browser/userdatapanel.py
-index debc12d..2b6f827 100644
---- a/plone/app/users/browser/userdatapanel.py
-+++ b/plone/app/users/browser/userdatapanel.py
-@@ -11,10 +11,14 @@
- from plone.app.users.browser.account import AccountPanelForm
- from plone.app.users.browser.account import AccountPanelSchemaAdapter
- from plone.registry.interfaces import IRegistry
-+from zExceptions import NotFound
+ 1.7.1 (2016-09-12)
+diff --git a/plone/tiles/data.py b/plone/tiles/data.py
+index 88f8a9b..3c98f23 100644
+--- a/plone/tiles/data.py
++++ b/plone/tiles/data.py
+@@ -1,5 +1,7 @@
+ # -*- coding: utf-8 -*-
+ from persistent.dict import PersistentDict
++from plone.subrequest import ISubRequest
++from plone.tiles.directives import IGNORE_QUERYSTRING_KEY
+ from plone.tiles.interfaces import IFieldTypeConverter
+ from plone.tiles.interfaces import IPersistentTile
+ from plone.tiles.interfaces import ITile
+@@ -36,9 +38,50 @@ def transientTileDataManagerFactory(tile):
+         return TransientTileDataManager(tile)
  
- from ..schema import IUserDataSchema
- from .schemaeditor import getFromBaseSchema
  
-+import cgi
++class BaseTileDataManager(object):
++
++    def get_default_request_data(self):
++        """
++        from request form
++        """
++        # try to use a '_tiledata' parameter in the request
++        if '_tiledata' in self.tile.request.form:
++            data = json.loads(self.tile.request.form['_tiledata'])
++        elif self.tileType is None or self.tileType.schema is None:
++            data = self.tile.request.form.copy()
++        else:
++            # Try to decode the form data properly if we can
++            try:
++                data = decode(self.tile.request.form,
++                              self.tileType.schema, missing=True)
++            except (ValueError, UnicodeDecodeError,):
++                LOGGER.exception(u'Could not convert form data to schema')
++                return self.data.copy()
++        # we're assuming this data is potentially unsafe so we need to check
++        # the ignore querystring field setting
++
++        # before we start, we allow it for sub-requests since in this case,
++        # the input is safe and we can trust it
++        if ISubRequest.providedBy(self.tile.request):
++            return data
++
++        # first off, we only care to filter if it is a GET request
++        if getattr(self.tile.request, 'REQUEST_METHOD', 'GET') != 'GET':
++            return data
++
++        # now, pay attention to schema hints for form data
++        if self.tileType is not None and self.tileType.schema is not None:
++            for name in self.tileType.schema.queryTaggedValue(
++                    IGNORE_QUERYSTRING_KEY) or []:
++                if name in data:
++                    del data[name]
++
++        return data
 +
 +
- 
- class UserDataPanelAdapter(AccountPanelSchemaAdapter):
-     """One does not simply set portrait, email might be used to login with.
-@@ -72,7 +76,7 @@ def description(self):
-             return _(
-                 u'description_personal_information_form_otheruser',
-                 default='Change personal information for $name',
--                mapping={'name': userid}
-+                mapping={'name': cgi.escape(userid)}
-             )
+ @adapter(ITile)
+ @implementer(ITileDataManager)
+-class TransientTileDataManager(object):
++class TransientTileDataManager(BaseTileDataManager):
+     """A data manager for transient tile data, which reads data from the
+     request query string.
+     """
+@@ -70,24 +113,9 @@ def get(self):
+                 for name, field in getFields(self.tileType.schema).items():
+                     if name not in data:
+                         data[name] = field.missing_value
+-
+-        # try to use a '_tiledata' parameter in the request
+-        elif '_tiledata' in self.tile.request.form:
+-            data = json.loads(self.tile.request.form['_tiledata'])
+-
+         # fall back to the copy of request.form object itself
          else:
-             # editing my own profile
-@@ -82,6 +86,11 @@ def description(self):
-             )
+-            # If we don't have a schema, just take the request
+-            if self.tileType is None or self.tileType.schema is None:
+-                data = self.tile.request.form.copy()
+-            else:
+-                # Try to decode the form data properly if we can
+-                try:
+-                    data = decode(self.tile.request.form,
+-                                  self.tileType.schema, missing=True)
+-                except (ValueError, UnicodeDecodeError,):
+-                    LOGGER.exception(u'Could not convert form data to schema')
+-                    return self.data.copy()
++            data = self.get_default_request_data()
  
-     def __call__(self):
-+        userid = self.request.form.get('userid')
-+        if userid:
-+            mt = getToolByName(self.context, 'portal_membership')
-+            if mt.getMemberById(userid) is None:
-+                raise NotFound('User does not exist.')
-         self.request.set('disable_border', 1)
-         return super(UserDataPanel, self).__call__()
+         return data
  
-diff --git a/plone/app/users/tests/test_user_data_panel.py b/plone/app/users/tests/test_user_data_panel.py
+@@ -101,7 +129,7 @@ def delete(self):
+ 
+ @adapter(IPersistentTile)
+ @implementer(ITileDataManager)
+-class PersistentTileDataManager(object):
++class PersistentTileDataManager(BaseTileDataManager):
+     """A data reader for persistent tiles operating on annotatable contexts.
+     The data is retrieved from an annotation.
+     """
+@@ -124,22 +152,8 @@ def __init__(self, tile):
+     def annotations(self):  # BBB for < 0.7.0 support
+         return self.storage
+ 
+-    def _get_default_request_data(self):
+-        # If we don't have a schema, just take the request
+-        if self.tileType is None or self.tileType.schema is None:
+-            data = self.tile.request.form.copy()
+-        else:
+-            # Try to decode the form data properly if we can
+-            try:
+-                data = decode(self.tile.request.form,
+-                              self.tileType.schema, missing=True)
+-            except (ValueError, UnicodeDecodeError,):
+-                LOGGER.exception(u'Could not convert form data to schema')
+-                return self.data.copy()
+-        return data
+-
+     def get(self):
+-        data = self._get_default_request_data()
++        data = self.get_default_request_data()
+         data.update(dict(self.storage.get(self.key, {})))
+         if self.tileType is not None and self.tileType.schema is not None:
+             for name, field in getFields(self.tileType.schema).items():
+diff --git a/plone/tiles/directives.py b/plone/tiles/directives.py
 new file mode 100644
-index 0000000..a9aa7e0
+index 0000000..9e5c675
 --- /dev/null
-+++ b/plone/app/users/tests/test_user_data_panel.py
-@@ -0,0 +1,34 @@
-+from zExceptions import NotFound
-+from plone.app.users.browser.userdatapanel import UserDataPanel
-+from plone.app.users.testing import PLONE_APP_USERS_FUNCTIONAL_TESTING
-+from zope.i18n import translate
++++ b/plone/tiles/directives.py
+@@ -0,0 +1,13 @@
++# -*- coding: utf-8 -*-
++from plone.supermodel.directives import MetadataListDirective
 +
-+import unittest
++IGNORE_QUERYSTRING_KEY = 'plone.tiles.ignore_querystring'
 +
 +
-+class TestUserDataPanel(unittest.TestCase):
++class ignore_querystring(MetadataListDirective):
++    """Directive used to create fieldsets
++    """
++    key = IGNORE_QUERYSTRING_KEY
 +
-+    layer = PLONE_APP_USERS_FUNCTIONAL_TESTING
++    def factory(self, name):
++        return [name]
+diff --git a/plone/tiles/tiles.rst b/plone/tiles/tiles.rst
+index e633953..7366498 100644
+--- a/plone/tiles/tiles.rst
++++ b/plone/tiles/tiles.rst
+@@ -709,3 +709,72 @@ If the tile doesn't have an id, we don't get any sub-path:
+     >>> persistentTile = getMultiAdapter((context, request), name=u'sample.persistenttile')
+     >>> absoluteURL(persistentTile, request)
+     'http://example.com/context/@@sample.persistenttile'
 +
-+    def test_regression(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        request.form.update({
-+            'userid': 'admin'
-+        })
-+        form = UserDataPanel(portal, request)
-+        description = translate(form.description, context=request)
-+        self.assertTrue('admin' in description)
-+        # form can be called without raising exception.
-+        self.assertTrue(form())
 +
-+    def test_escape_html(self):
-+        portal = self.layer['portal']
-+        request = self.layer['request']
-+        request.form.update({
-+            'userid': 'admin<script>alert("userid")</script>'
-+        })
-+        form = UserDataPanel(portal, request)
-+        description = translate(form.description, context=request)
-+        self.assertTrue('<script>' not in description)
-+        self.assertRaises(NotFound, form)
++We can also disallow query parameters providing data into our tiles
++
++.. code-block:: python
++
++    >>> import zope.schema
++    >>> from plone.tiles.directives import ignore_querystring
++
++    >>> class ISampleTileData(Interface):
++    ...     unfiltered = zope.schema.Text(title=u'Unfiltered data')
++    ...     ignore_querystring('unfiltered')
++    ...     filtered = zope.schema.Text(title=u'filtered data')
++
++    >>> sampleTileType.schema = ISampleTileData
++
++And create a tile with our new schema
++
++.. code-block:: python
++
++  >>> from plone.tiles import Tile
++  >>> class SampleTile(Tile):
++  ...
++  ...     __name__ = 'sample.unfilteredtile' # would normally be set by a ZCML handler
++  ...
++  ...     def __call__(self):
++  ...         return '<html><body><div>{}{}</div></body></html>'.format(
++  ...             self.data.get('unfiltered') or '',
++  ...             self.data.get('filtered') or '')
++
++We'll register the sample unfiltered tile directly here, for testing.
++
++.. code-block:: python
++
++    >>> from zope.component import provideAdapter, provideUtility
++    >>> from zope.interface import Interface
++    >>> from plone.tiles.interfaces import IBasicTile
++
++    >>> provideUtility(sampleTileType, name=u'sample.unfilteredtile')
++    >>> provideAdapter(SampleTile, (Interface, Interface), IBasicTile, name=u'sample.unfilteredtile')
++
++
++Let's simulate traversal to test if form data is used:
++
++.. code-block:: python
++
++    >>> context = Context()
++    >>> request = TestRequest(form={'unfiltered': 'foobar', 'filtered': 'safe'})
++
++    >>> tile = getMultiAdapter((context, request), name=u'sample.unfilteredtile')
++    >>> tile = tile['tile1']
++
++Data should not contain unfiltered field:
++
++.. code-block:: python
++
++    >>> sorted(tile.data.items())
++    [('filtered', u'safe')]
++
++
++Rendering the tile should not include ignored query string:
++
++.. code-block:: python
++
++    >>> 'foobar' in tile()
++    False
++
++    >>> tile()
++    '<html><body><div>safe</div></body></html>'
+diff --git a/setup.py b/setup.py
+index 9cb036b..42f5103 100644
+--- a/setup.py
++++ b/setup.py
+@@ -5,7 +5,7 @@
+ import os
+ 
+ 
+-version = '1.7.2.dev0'
++version = '1.8.0.dev0'
+ 
+ setup(
+     name='plone.tiles',
+@@ -52,6 +52,7 @@
+         'zope.security',
+         'zope.traversing',
+         'Zope2',
++        'plone.subrequest'
+     ],
+     extras_require={
+         'test': [
 
 
