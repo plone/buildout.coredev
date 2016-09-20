@@ -1,440 +1,690 @@
-Repository: Products.CMFPlone
+Repository: plone.app.portlets
 
 
-Branch: refs/heads/4.3.x
-Date: 2016-09-19T14:48:49+02:00
+Branch: refs/heads/2.5.x
+Date: 2016-09-20T14:11:40+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/2e1643d4cf784ab7dfe398f7d08e85a455e2a69b
+Commit: https://github.com/plone/plone.app.portlets/commit/7e04d37ad5065da761b21576faa8aa1c54ea02ef
 
-Apply security hotfix 20160830 for z3c.form widgets.
+Apply security hotfix 20160830 for redirects.
+
+Also, made sure that all form views have a `referer` property:
+until now some did not have it, some had it as property, some had it
+as method.
 
 Files changed:
-A Products/CMFPlone/patches/z3c_form.py
-A Products/CMFPlone/tests/test_z3c_form_widgets.py
-M Products/CMFPlone/patches/__init__.py
-M docs/CHANGES.rst
+A plone/app/portlets/tests/test_redirects.py
+M CHANGES.rst
+M plone/app/portlets/browser/adding.py
+M plone/app/portlets/browser/editmanager.py
+M plone/app/portlets/browser/formhelper.py
+M plone/app/portlets/browser/z3cformhelper.py
 
-diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
-index fd661fe..534d5d6 100644
---- a/Products/CMFPlone/patches/__init__.py
-+++ b/Products/CMFPlone/patches/__init__.py
-@@ -33,3 +33,5 @@
- 
- import addMember
- import publishing
-+
-+import z3c_form
-diff --git a/Products/CMFPlone/patches/z3c_form.py b/Products/CMFPlone/patches/z3c_form.py
-new file mode 100644
-index 0000000..1b61598
---- /dev/null
-+++ b/Products/CMFPlone/patches/z3c_form.py
-@@ -0,0 +1,50 @@
-+# This is from Products.PloneHotfix20160830.
-+from urlparse import urlparse
-+from z3c.form import widget
-+
-+
-+# Attribute name to allow prefilling a widget with a value from a GET request.
-+# Usually all forms are only for POST, and we disallow filling it with GET
-+# data.  This works the way around too: allow prefilling from a POST request
-+# when the form only handles GET.  But that is unlikely.
-+ALLOW_PREFILL = 'allow_prefill_from_GET_request'
-+
-+
-+def _wrap_update(update):
-+    def _wrapped(self):
-+        # If we are ignoring the request on the form, we should also ignore it
-+        # on the widget.  This means that when on the first widget we conclude
-+        # that the form should be ignored, we quickly ignore it on all widgets,
-+        # without needing to check the referer and method again and again.
-+        # When we do not ignore the request, we do still run these checks for
-+        # all widgets.  But it seems an international sport to override the
-+        # update or updateWidgets method of the base z3c form, which makes it
-+        # hard to fix all occurrences by one check on the form.
-+        if not self.ignoreRequest and getattr(self.form, 'ignoreRequest', False):
-+            self.ignoreRequest = True
-+        # If we are not already ignoring the request, check the request method.
-+        if (not self.ignoreRequest
-+                and hasattr(self.form, 'method')
-+                and hasattr(self.request, 'REQUEST_METHOD')):
-+            if self.request.REQUEST_METHOD.lower() != self.form.method.lower():
-+                # This is an unexpected request method.
-+                # For special cases we allow a form to bail out.
-+                if not getattr(self.form, ALLOW_PREFILL, False):
-+                    self.ignoreRequest = True
-+                    self.form.ignoreRequest = True
-+        # If we are not already ignoring the request, check the referer.
-+        if not self.ignoreRequest and hasattr(self.request, 'environ'):
-+            env = self.request.environ
-+            referrer = env.get('HTTP_REFERER', env.get('HTTP_REFERRER'))
-+            if referrer:
-+                req_url_parsed = urlparse(self.request.URL)
-+                referrer_parsed = urlparse(referrer)
-+                if req_url_parsed.netloc != referrer_parsed.netloc:
-+                    # We do not trust data from outside referrers.
-+                    self.ignoreRequest = True
-+                    self.form.ignoreRequest = True
-+        return update(self)
-+    return _wrapped
-+
-+
-+widget.Widget.update = _wrap_update(widget.Widget.update)
-diff --git a/Products/CMFPlone/tests/test_z3c_form_widgets.py b/Products/CMFPlone/tests/test_z3c_form_widgets.py
-new file mode 100644
-index 0000000..38de318
---- /dev/null
-+++ b/Products/CMFPlone/tests/test_z3c_form_widgets.py
-@@ -0,0 +1,116 @@
-+from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
-+from z3c.form import widget
-+from z3c.form.browser.text import TextWidget
-+
-+import unittest
-+
-+
-+WIDGETS_TO_TEST = [
-+    TextWidget,
-+    widget.Widget,
-+    widget.MultiWidget,
-+    widget.SequenceWidget,
-+]
-+
-+_marker = object()
-+
-+
-+class FakeForm(object):
-+    method = 'post'
-+    ignoreRequest = False
-+
-+
-+class TestAttackVector(unittest.TestCase):
-+    layer = PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
-+    _widgets_to_test = WIDGETS_TO_TEST
-+    _attack = '</textarea><script>alert("form.widgets.class_blacklist")</script>'  # noqa
-+
-+    def _terms(self):
-+        # For the SequenceWidget we need basic terms.
-+        # We make dummy (dumb) terms.
-+        from z3c.form.term import Terms
-+
-+        class DummyTerms(Terms):
-+            def getTermByToken(self, token):
-+                return token
-+
-+        return DummyTerms()
-+
-+    def test_regression(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foo'
-+            request.REQUEST_METHOD = 'POST'
-+            request.form.update({
-+                'foo': 'bar'
-+            })
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, False)
-+
-+    def test_only_get_data_from_valid_request_method(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'GET'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, True)
-+
-+    def test_explicitly_allow_data_from_invalid_request_method(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'GET'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            wi.form = FakeForm()
-+            # Set attribute on form to explicitly allow prefill.
-+            from Products.CMFPlone.patches.z3c_form import ALLOW_PREFILL
-+            setattr(wi.form, ALLOW_PREFILL, True)
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, False)
-+
-+    def test_only_get_data_from_valid_referrer(self):
-+        # this handles the use case where hijacker gets user to click on
-+        # button that submits to plone site
-+        request = self.layer['request']
-+
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'POST'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            request.environ['HTTP_REFERER'] = 'http://attacker.com'
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, True)
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 751c267..f33b8a3 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -19,6 +19,8 @@ New features:
+diff --git a/CHANGES.rst b/CHANGES.rst
+index fbc828b..5841f93 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
  
  Bug fixes:
  
-+- Apply security hotfix 20160830 for ``z3c.form`` widgets.  [maurits]
-+
- - Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
+-- *add item here*
++- Apply security hotfix 20160830 for redirects.  Also, made sure that
++  all form views have a ``referer`` property: until now some did not
++  have it, some had it as property, some had it as method.  [maurits]
  
- - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2016-09-20T10:54:30+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/9b63707c5a830004b79abfbe4789026c4f73ab5c
-
-Merge pull request #1769 from plone/apply-hotfix-20160830-z3cform-43
-
-Apply security hotfix 20160830 for z3c.form widgets. [4.3]
-
-Files changed:
-A Products/CMFPlone/patches/z3c_form.py
-A Products/CMFPlone/tests/test_z3c_form_widgets.py
-M Products/CMFPlone/patches/__init__.py
-M docs/CHANGES.rst
-
-diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
-index fd661fe..534d5d6 100644
---- a/Products/CMFPlone/patches/__init__.py
-+++ b/Products/CMFPlone/patches/__init__.py
-@@ -33,3 +33,5 @@
  
- import addMember
- import publishing
+ 2.5.5 (2016-06-12)
+diff --git a/plone/app/portlets/browser/adding.py b/plone/app/portlets/browser/adding.py
+index e88879f..ef26c06 100644
+--- a/plone/app/portlets/browser/adding.py
++++ b/plone/app/portlets/browser/adding.py
+@@ -7,6 +7,7 @@
+ 
+ from Acquisition import aq_inner, aq_base, aq_parent
+ from OFS.SimpleItem import SimpleItem
++from Products.CMFCore.utils import getToolByName
+ from Products.Five import BrowserView
+ 
+ from plone.app.portlets.browser.interfaces import IPortletAdding
+@@ -34,9 +35,14 @@ def add(self, content):
+         chooser = INameChooser(manager)
+         manager[chooser.chooseName(None, content)] = content
+ 
++    @property
++    def referer(self):
++        return self.request.get('referer', '')
 +
-+import z3c_form
-diff --git a/Products/CMFPlone/patches/z3c_form.py b/Products/CMFPlone/patches/z3c_form.py
+     def nextURL(self):
+-        referer = self.request.get('referer')
+-        if not referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        referer = self.referer
++        if not referer or not urltool.isURLInPortal(referer):
+             context = aq_parent(aq_inner(self.context))
+             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+             referer = url + '/@@manage-portlets'
+diff --git a/plone/app/portlets/browser/editmanager.py b/plone/app/portlets/browser/editmanager.py
+index 51dd34a..49a268c 100644
+--- a/plone/app/portlets/browser/editmanager.py
++++ b/plone/app/portlets/browser/editmanager.py
+@@ -26,6 +26,7 @@
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from Products.PythonScripts.standard import url_quote, url_unquote
++from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.interfaces import IPloneSiteRoot
+ 
+ from plone.app.portlets.browser.interfaces import IManageColumnPortletsView
+@@ -429,9 +430,11 @@ def delete_portlet(self, name):
+ 
+     def _nextUrl(self):
+         referer = self.request.get('referer')
++        urltool = getToolByName(self.context, 'portal_url')
+         if referer:
+             referer = url_unquote(referer)
+-        else:
++
++        if not referer or not urltool.isURLInPortal(referer):
+             context = aq_parent(aq_inner(self.context))
+             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+             referer = '%s/@@manage-portlets' % (url,)
+diff --git a/plone/app/portlets/browser/formhelper.py b/plone/app/portlets/browser/formhelper.py
+index f92a35d..c913eab 100644
+--- a/plone/app/portlets/browser/formhelper.py
++++ b/plone/app/portlets/browser/formhelper.py
+@@ -7,6 +7,7 @@
+ import zope.lifecycleevent
+ 
+ from Acquisition import aq_parent, aq_inner
++from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ 
+@@ -53,18 +54,25 @@ def __call__(self):
+         IPortletPermissionChecker(aq_parent(aq_inner(self.context)))()
+         return super(AddForm, self).__call__()
+ 
++    @property
+     def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        referer = self.request.form.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            addview = aq_parent(aq_inner(self.context))
+-            context = aq_parent(aq_inner(addview))
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        addview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(addview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            # At least in tests we can get a TypeError: "There isn't enough
++            # context to get URL information. This is probably due to a bug in
++            # setting up location information."
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     @form.action(_(u"label_save", default=u"Save"), name=u'save')
+     def handle_save_action(self, action, data):
+@@ -99,15 +107,22 @@ def __call__(self):
+             self.request.response.redirect(self.nextURL())
+         return ''
+ 
++    @property
++    def referer(self):
++        return self.request.get('referer', '')
++
+     def nextURL(self):
+-        referer = self.request.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            addview = aq_parent(aq_inner(self.context))
+-            context = aq_parent(aq_inner(addview))
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        addview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(addview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     def create(self):
+         raise NotImplementedError("concrete classes must implement create()")
+@@ -125,18 +140,22 @@ def __call__(self):
+         IPortletPermissionChecker(aq_parent(aq_inner(self.context)))()
+         return super(EditForm, self).__call__()
+ 
++    @property
+     def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        referer = self.request.form.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            portlet = aq_inner(self.context)
+-            context = aq_parent(portlet)
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        editview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(editview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     @form.action(_(u"label_save", default=u"Save"),
+                  condition=form.haveInputWidgets,
+diff --git a/plone/app/portlets/browser/z3cformhelper.py b/plone/app/portlets/browser/z3cformhelper.py
+index e2a1944..81890b8 100644
+--- a/plone/app/portlets/browser/z3cformhelper.py
++++ b/plone/app/portlets/browser/z3cformhelper.py
+@@ -5,6 +5,7 @@
+ import zope.event
+ import zope.lifecycleevent
+ 
++from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ 
+ from Acquisition import aq_parent, aq_inner, aq_base
+@@ -21,7 +22,7 @@ class AddForm(form.AddForm):
+     implements(IPortletAddForm)
+ 
+     template = ViewPageTemplateFile('templates/z3cform-portlets-pageform.pt')
+-    
++
+     label = _(u"Configure portlet")
+ 
+     def add(self, object):
+@@ -55,14 +56,21 @@ def createAndAdd(self, data):
+     @property
+     def referer(self):
+         return self.request.get('referer', '')
+-    
++
+     def nextURL(self):
+-        if self.referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
+             return self.referer
+         addview = aq_parent(aq_inner(self.context))
+         context = aq_parent(aq_inner(addview))
+-        url = str(getMultiAdapter((context, self.request),
+-                                  name=u"absolute_url"))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            # At least in tests we can get a TypeError: "There isn't enough
++            # context to get URL information. This is probably due to a bug in
++            # setting up location information."
++            url = self.context.absolute_url()
+         return url + '/@@manage-portlets'
+ 
+     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='add')
+@@ -92,7 +100,7 @@ class EditForm(form.EditForm):
+     implements(IPortletEditForm)
+ 
+     template = ViewPageTemplateFile('templates/z3cform-portlets-pageform.pt')
+-    
++
+     label = _(u"Modify portlet")
+ 
+     def __call__(self):
+@@ -107,12 +115,16 @@ def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        if self.referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
+             return self.referer
+         editview = aq_parent(aq_inner(self.context))
+         context = aq_parent(aq_inner(editview))
+-        url = str(getMultiAdapter((context, self.request),
+-                                  name=u"absolute_url"))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
+         return url + '/@@manage-portlets'
+ 
+     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='apply')
+diff --git a/plone/app/portlets/tests/test_redirects.py b/plone/app/portlets/tests/test_redirects.py
 new file mode 100644
-index 0000000..1b61598
+index 0000000..94a99cf
 --- /dev/null
-+++ b/Products/CMFPlone/patches/z3c_form.py
-@@ -0,0 +1,50 @@
-+# This is from Products.PloneHotfix20160830.
-+from urlparse import urlparse
-+from z3c.form import widget
++++ b/plone/app/portlets/tests/test_redirects.py
+@@ -0,0 +1,63 @@
++# -*- coding: utf-8 -*-
++from plone.app.portlets.browser.adding import PortletAdding
++from plone.app.portlets.browser.editmanager import ManagePortletAssignments
++from plone.app.portlets.browser.formhelper import AddForm
++from plone.app.portlets.browser.formhelper import EditForm
++from plone.app.portlets.browser import z3cformhelper
++from plone.app.portlets.tests.base import PortletsTestCase
 +
 +
-+# Attribute name to allow prefilling a widget with a value from a GET request.
-+# Usually all forms are only for POST, and we disallow filling it with GET
-+# data.  This works the way around too: allow prefilling from a POST request
-+# when the form only handles GET.  But that is unlikely.
-+ALLOW_PREFILL = 'allow_prefill_from_GET_request'
-+
-+
-+def _wrap_update(update):
-+    def _wrapped(self):
-+        # If we are ignoring the request on the form, we should also ignore it
-+        # on the widget.  This means that when on the first widget we conclude
-+        # that the form should be ignored, we quickly ignore it on all widgets,
-+        # without needing to check the referer and method again and again.
-+        # When we do not ignore the request, we do still run these checks for
-+        # all widgets.  But it seems an international sport to override the
-+        # update or updateWidgets method of the base z3c form, which makes it
-+        # hard to fix all occurrences by one check on the form.
-+        if not self.ignoreRequest and getattr(self.form, 'ignoreRequest', False):
-+            self.ignoreRequest = True
-+        # If we are not already ignoring the request, check the request method.
-+        if (not self.ignoreRequest
-+                and hasattr(self.form, 'method')
-+                and hasattr(self.request, 'REQUEST_METHOD')):
-+            if self.request.REQUEST_METHOD.lower() != self.form.method.lower():
-+                # This is an unexpected request method.
-+                # For special cases we allow a form to bail out.
-+                if not getattr(self.form, ALLOW_PREFILL, False):
-+                    self.ignoreRequest = True
-+                    self.form.ignoreRequest = True
-+        # If we are not already ignoring the request, check the referer.
-+        if not self.ignoreRequest and hasattr(self.request, 'environ'):
-+            env = self.request.environ
-+            referrer = env.get('HTTP_REFERER', env.get('HTTP_REFERRER'))
-+            if referrer:
-+                req_url_parsed = urlparse(self.request.URL)
-+                referrer_parsed = urlparse(referrer)
-+                if req_url_parsed.netloc != referrer_parsed.netloc:
-+                    # We do not trust data from outside referrers.
-+                    self.ignoreRequest = True
-+                    self.form.ignoreRequest = True
-+        return update(self)
-+    return _wrapped
-+
-+
-+widget.Widget.update = _wrap_update(widget.Widget.update)
-diff --git a/Products/CMFPlone/tests/test_z3c_form_widgets.py b/Products/CMFPlone/tests/test_z3c_form_widgets.py
-new file mode 100644
-index 0000000..38de318
---- /dev/null
-+++ b/Products/CMFPlone/tests/test_z3c_form_widgets.py
-@@ -0,0 +1,116 @@
-+from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
-+from z3c.form import widget
-+from z3c.form.browser.text import TextWidget
-+
-+import unittest
-+
-+
-+WIDGETS_TO_TEST = [
-+    TextWidget,
-+    widget.Widget,
-+    widget.MultiWidget,
-+    widget.SequenceWidget,
-+]
-+
-+_marker = object()
-+
-+
-+class FakeForm(object):
-+    method = 'post'
-+    ignoreRequest = False
-+
-+
-+class TestAttackVector(unittest.TestCase):
-+    layer = PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
-+    _widgets_to_test = WIDGETS_TO_TEST
-+    _attack = '</textarea><script>alert("form.widgets.class_blacklist")</script>'  # noqa
-+
-+    def _terms(self):
-+        # For the SequenceWidget we need basic terms.
-+        # We make dummy (dumb) terms.
-+        from z3c.form.term import Terms
-+
-+        class DummyTerms(Terms):
-+            def getTermByToken(self, token):
-+                return token
-+
-+        return DummyTerms()
++class TestRedirects(PortletsTestCase):
++    _test_methods = [
++        (PortletAdding, 'nextURL'),
++        (ManagePortletAssignments, '_nextUrl'),
++        (AddForm, 'nextURL'),
++        (EditForm, 'nextURL'),
++        (z3cformhelper.AddForm, 'nextURL'),
++        (z3cformhelper.EditForm, 'nextURL'),
++    ]
 +
 +    def test_regression(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foo'
-+            request.REQUEST_METHOD = 'POST'
-+            request.form.update({
-+                'foo': 'bar'
-+            })
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, False)
++        portal_url = self.portal.absolute_url()
++        request = self.portal.REQUEST
++        request.form.update({
++            'referer': portal_url
++        })
++        for Klass, method in self._test_methods:
++            view = Klass(self.portal, request)
++            view.__parent__ = self.portal
++            self.assertEqual(getattr(view, method)(), portal_url)
 +
-+    def test_only_get_data_from_valid_request_method(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'GET'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, True)
++    def test_valid_next_url(self):
++        request = self.portal.REQUEST
++        request.form.update({
++            'referer': 'http://attacker.com'
++        })
++        for Klass, method in self._test_methods:
++            view = Klass(self.portal, request)
++            view.__parent__ = self.portal
++            self.assertNotEqual('http://attacker.com', getattr(view, method)())
 +
-+    def test_explicitly_allow_data_from_invalid_request_method(self):
-+        request = self.layer['request']
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'GET'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            wi.form = FakeForm()
-+            # Set attribute on form to explicitly allow prefill.
-+            from Products.CMFPlone.patches.z3c_form import ALLOW_PREFILL
-+            setattr(wi.form, ALLOW_PREFILL, True)
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, False)
 +
-+    def test_only_get_data_from_valid_referrer(self):
-+        # this handles the use case where hijacker gets user to click on
-+        # button that submits to plone site
-+        request = self.layer['request']
-+
-+        for Widget in self._widgets_to_test:
-+            wi = Widget(request)
-+            wi.name = 'foobar'
-+            request.REQUEST_METHOD = 'POST'
-+            request.form.update({
-+                'foobar': self._attack
-+            })
-+            request.environ['HTTP_REFERER'] = 'http://attacker.com'
-+            wi.form = FakeForm()
-+            self.assertEquals(wi.ignoreRequest, False)
-+            # The SequenceWidget needs terms.  It will have terms=None,
-+            # where the others have no terms attribute.
-+            if getattr(wi, 'terms', _marker) is None:
-+                wi.terms = self._terms()
-+            wi.update()
-+            self.assertEquals(wi.ignoreRequest, True)
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 751c267..f33b8a3 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -19,6 +19,8 @@ New features:
++def test_suite():
++    # Without this test_suite, there is a strange error when running the tests:
++    #
++    # Error in test runTest
++    # (plone.app.portlets.tests.base.PortletsTestCase)
++    # Traceback (most recent call last):
++    #   File "unittest2-0.5.1-py2.7.egg/unittest2/case.py", line 340, in run
++    #     testMethod()
++    #   TypeError: 'NoneType' object is not callable
++    #
++    # You get the error when running
++    # bin/test -s plone.app.portlets
++    # or
++    # bin/test -s plone.app.portlets -t run
++    # but not with
++    # bin/test -s plone.app.portlets -m test_redirects
++    # But the error *is* in this test_redirects.py file,
++    # because it goes away when I delete this file.
++    from unittest import TestSuite, makeSuite
++    suite = TestSuite()
++    suite.addTest(makeSuite(TestRedirects))
++    return suite
+
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/2.5.x
+Date: 2016-09-20T21:09:38+02:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/ec9dcd13492f5abcb24b38ec4145f0d60959173c
+
+Merge pull request #89 from plone/apply-hotfix-20160830-25x
+
+Apply security hotfix 20160830 for redirects. [2.5.x, Plone 4.3]
+
+Files changed:
+A plone/app/portlets/tests/test_redirects.py
+M CHANGES.rst
+M plone/app/portlets/browser/adding.py
+M plone/app/portlets/browser/editmanager.py
+M plone/app/portlets/browser/formhelper.py
+M plone/app/portlets/browser/z3cformhelper.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index fbc828b..5841f93 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
  
  Bug fixes:
  
-+- Apply security hotfix 20160830 for ``z3c.form`` widgets.  [maurits]
-+
- - Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
+-- *add item here*
++- Apply security hotfix 20160830 for redirects.  Also, made sure that
++  all form views have a ``referer`` property: until now some did not
++  have it, some had it as property, some had it as method.  [maurits]
  
- - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
+ 
+ 2.5.5 (2016-06-12)
+diff --git a/plone/app/portlets/browser/adding.py b/plone/app/portlets/browser/adding.py
+index e88879f..ef26c06 100644
+--- a/plone/app/portlets/browser/adding.py
++++ b/plone/app/portlets/browser/adding.py
+@@ -7,6 +7,7 @@
+ 
+ from Acquisition import aq_inner, aq_base, aq_parent
+ from OFS.SimpleItem import SimpleItem
++from Products.CMFCore.utils import getToolByName
+ from Products.Five import BrowserView
+ 
+ from plone.app.portlets.browser.interfaces import IPortletAdding
+@@ -34,9 +35,14 @@ def add(self, content):
+         chooser = INameChooser(manager)
+         manager[chooser.chooseName(None, content)] = content
+ 
++    @property
++    def referer(self):
++        return self.request.get('referer', '')
++
+     def nextURL(self):
+-        referer = self.request.get('referer')
+-        if not referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        referer = self.referer
++        if not referer or not urltool.isURLInPortal(referer):
+             context = aq_parent(aq_inner(self.context))
+             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+             referer = url + '/@@manage-portlets'
+diff --git a/plone/app/portlets/browser/editmanager.py b/plone/app/portlets/browser/editmanager.py
+index 51dd34a..49a268c 100644
+--- a/plone/app/portlets/browser/editmanager.py
++++ b/plone/app/portlets/browser/editmanager.py
+@@ -26,6 +26,7 @@
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from Products.PythonScripts.standard import url_quote, url_unquote
++from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.interfaces import IPloneSiteRoot
+ 
+ from plone.app.portlets.browser.interfaces import IManageColumnPortletsView
+@@ -429,9 +430,11 @@ def delete_portlet(self, name):
+ 
+     def _nextUrl(self):
+         referer = self.request.get('referer')
++        urltool = getToolByName(self.context, 'portal_url')
+         if referer:
+             referer = url_unquote(referer)
+-        else:
++
++        if not referer or not urltool.isURLInPortal(referer):
+             context = aq_parent(aq_inner(self.context))
+             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+             referer = '%s/@@manage-portlets' % (url,)
+diff --git a/plone/app/portlets/browser/formhelper.py b/plone/app/portlets/browser/formhelper.py
+index f92a35d..c913eab 100644
+--- a/plone/app/portlets/browser/formhelper.py
++++ b/plone/app/portlets/browser/formhelper.py
+@@ -7,6 +7,7 @@
+ import zope.lifecycleevent
+ 
+ from Acquisition import aq_parent, aq_inner
++from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ 
+@@ -53,18 +54,25 @@ def __call__(self):
+         IPortletPermissionChecker(aq_parent(aq_inner(self.context)))()
+         return super(AddForm, self).__call__()
+ 
++    @property
+     def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        referer = self.request.form.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            addview = aq_parent(aq_inner(self.context))
+-            context = aq_parent(aq_inner(addview))
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        addview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(addview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            # At least in tests we can get a TypeError: "There isn't enough
++            # context to get URL information. This is probably due to a bug in
++            # setting up location information."
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     @form.action(_(u"label_save", default=u"Save"), name=u'save')
+     def handle_save_action(self, action, data):
+@@ -99,15 +107,22 @@ def __call__(self):
+             self.request.response.redirect(self.nextURL())
+         return ''
+ 
++    @property
++    def referer(self):
++        return self.request.get('referer', '')
++
+     def nextURL(self):
+-        referer = self.request.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            addview = aq_parent(aq_inner(self.context))
+-            context = aq_parent(aq_inner(addview))
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        addview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(addview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     def create(self):
+         raise NotImplementedError("concrete classes must implement create()")
+@@ -125,18 +140,22 @@ def __call__(self):
+         IPortletPermissionChecker(aq_parent(aq_inner(self.context)))()
+         return super(EditForm, self).__call__()
+ 
++    @property
+     def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        referer = self.request.form.get('referer')
+-        if referer:
+-            return referer
+-        else:
+-            portlet = aq_inner(self.context)
+-            context = aq_parent(portlet)
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
+-            return url + '/@@manage-portlets'
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
++            return self.referer
++        editview = aq_parent(aq_inner(self.context))
++        context = aq_parent(aq_inner(editview))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
++        return url + '/@@manage-portlets'
+ 
+     @form.action(_(u"label_save", default=u"Save"),
+                  condition=form.haveInputWidgets,
+diff --git a/plone/app/portlets/browser/z3cformhelper.py b/plone/app/portlets/browser/z3cformhelper.py
+index e2a1944..81890b8 100644
+--- a/plone/app/portlets/browser/z3cformhelper.py
++++ b/plone/app/portlets/browser/z3cformhelper.py
+@@ -5,6 +5,7 @@
+ import zope.event
+ import zope.lifecycleevent
+ 
++from Products.CMFCore.utils import getToolByName
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ 
+ from Acquisition import aq_parent, aq_inner, aq_base
+@@ -21,7 +22,7 @@ class AddForm(form.AddForm):
+     implements(IPortletAddForm)
+ 
+     template = ViewPageTemplateFile('templates/z3cform-portlets-pageform.pt')
+-    
++
+     label = _(u"Configure portlet")
+ 
+     def add(self, object):
+@@ -55,14 +56,21 @@ def createAndAdd(self, data):
+     @property
+     def referer(self):
+         return self.request.get('referer', '')
+-    
++
+     def nextURL(self):
+-        if self.referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
+             return self.referer
+         addview = aq_parent(aq_inner(self.context))
+         context = aq_parent(aq_inner(addview))
+-        url = str(getMultiAdapter((context, self.request),
+-                                  name=u"absolute_url"))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            # At least in tests we can get a TypeError: "There isn't enough
++            # context to get URL information. This is probably due to a bug in
++            # setting up location information."
++            url = self.context.absolute_url()
+         return url + '/@@manage-portlets'
+ 
+     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='add')
+@@ -92,7 +100,7 @@ class EditForm(form.EditForm):
+     implements(IPortletEditForm)
+ 
+     template = ViewPageTemplateFile('templates/z3cform-portlets-pageform.pt')
+-    
++
+     label = _(u"Modify portlet")
+ 
+     def __call__(self):
+@@ -107,12 +115,16 @@ def referer(self):
+         return self.request.get('referer', '')
+ 
+     def nextURL(self):
+-        if self.referer:
++        urltool = getToolByName(self.context, 'portal_url')
++        if self.referer and urltool.isURLInPortal(self.referer):
+             return self.referer
+         editview = aq_parent(aq_inner(self.context))
+         context = aq_parent(aq_inner(editview))
+-        url = str(getMultiAdapter((context, self.request),
+-                                  name=u"absolute_url"))
++        try:
++            url = str(getMultiAdapter((context, self.request),
++                                      name=u"absolute_url"))
++        except (TypeError, AttributeError):
++            url = self.context.absolute_url()
+         return url + '/@@manage-portlets'
+ 
+     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='apply')
+diff --git a/plone/app/portlets/tests/test_redirects.py b/plone/app/portlets/tests/test_redirects.py
+new file mode 100644
+index 0000000..94a99cf
+--- /dev/null
++++ b/plone/app/portlets/tests/test_redirects.py
+@@ -0,0 +1,63 @@
++# -*- coding: utf-8 -*-
++from plone.app.portlets.browser.adding import PortletAdding
++from plone.app.portlets.browser.editmanager import ManagePortletAssignments
++from plone.app.portlets.browser.formhelper import AddForm
++from plone.app.portlets.browser.formhelper import EditForm
++from plone.app.portlets.browser import z3cformhelper
++from plone.app.portlets.tests.base import PortletsTestCase
++
++
++class TestRedirects(PortletsTestCase):
++    _test_methods = [
++        (PortletAdding, 'nextURL'),
++        (ManagePortletAssignments, '_nextUrl'),
++        (AddForm, 'nextURL'),
++        (EditForm, 'nextURL'),
++        (z3cformhelper.AddForm, 'nextURL'),
++        (z3cformhelper.EditForm, 'nextURL'),
++    ]
++
++    def test_regression(self):
++        portal_url = self.portal.absolute_url()
++        request = self.portal.REQUEST
++        request.form.update({
++            'referer': portal_url
++        })
++        for Klass, method in self._test_methods:
++            view = Klass(self.portal, request)
++            view.__parent__ = self.portal
++            self.assertEqual(getattr(view, method)(), portal_url)
++
++    def test_valid_next_url(self):
++        request = self.portal.REQUEST
++        request.form.update({
++            'referer': 'http://attacker.com'
++        })
++        for Klass, method in self._test_methods:
++            view = Klass(self.portal, request)
++            view.__parent__ = self.portal
++            self.assertNotEqual('http://attacker.com', getattr(view, method)())
++
++
++def test_suite():
++    # Without this test_suite, there is a strange error when running the tests:
++    #
++    # Error in test runTest
++    # (plone.app.portlets.tests.base.PortletsTestCase)
++    # Traceback (most recent call last):
++    #   File "unittest2-0.5.1-py2.7.egg/unittest2/case.py", line 340, in run
++    #     testMethod()
++    #   TypeError: 'NoneType' object is not callable
++    #
++    # You get the error when running
++    # bin/test -s plone.app.portlets
++    # or
++    # bin/test -s plone.app.portlets -t run
++    # but not with
++    # bin/test -s plone.app.portlets -m test_redirects
++    # But the error *is* in this test_redirects.py file,
++    # because it goes away when I delete this file.
++    from unittest import TestSuite, makeSuite
++    suite = TestSuite()
++    suite.addTest(makeSuite(TestRedirects))
++    return suite
 
 
