@@ -1,292 +1,440 @@
-Repository: plone.app.discussion
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.2.x
-Date: 2016-09-19T17:14:26+02:00
+Branch: refs/heads/4.3.x
+Date: 2016-09-19T14:48:49+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.discussion/commit/781d67a52007df4e2687a5388ecceb8aa5587dda
+Commit: https://github.com/plone/Products.CMFPlone/commit/2e1643d4cf784ab7dfe398f7d08e85a455e2a69b
 
-Apply security hotfix 20160830 for redirects.
+Apply security hotfix 20160830 for z3c.form widgets.
 
 Files changed:
-M CHANGES.rst
-M plone/app/discussion/browser/moderation.py
-M plone/app/discussion/tests/test_moderation_view.py
+A Products/CMFPlone/patches/z3c_form.py
+A Products/CMFPlone/tests/test_z3c_form_widgets.py
+M Products/CMFPlone/patches/__init__.py
+M docs/CHANGES.rst
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 669a7f2..abe4ec9 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,7 +14,7 @@ New features:
+diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
+index fd661fe..534d5d6 100644
+--- a/Products/CMFPlone/patches/__init__.py
++++ b/Products/CMFPlone/patches/__init__.py
+@@ -33,3 +33,5 @@
+ 
+ import addMember
+ import publishing
++
++import z3c_form
+diff --git a/Products/CMFPlone/patches/z3c_form.py b/Products/CMFPlone/patches/z3c_form.py
+new file mode 100644
+index 0000000..1b61598
+--- /dev/null
++++ b/Products/CMFPlone/patches/z3c_form.py
+@@ -0,0 +1,50 @@
++# This is from Products.PloneHotfix20160830.
++from urlparse import urlparse
++from z3c.form import widget
++
++
++# Attribute name to allow prefilling a widget with a value from a GET request.
++# Usually all forms are only for POST, and we disallow filling it with GET
++# data.  This works the way around too: allow prefilling from a POST request
++# when the form only handles GET.  But that is unlikely.
++ALLOW_PREFILL = 'allow_prefill_from_GET_request'
++
++
++def _wrap_update(update):
++    def _wrapped(self):
++        # If we are ignoring the request on the form, we should also ignore it
++        # on the widget.  This means that when on the first widget we conclude
++        # that the form should be ignored, we quickly ignore it on all widgets,
++        # without needing to check the referer and method again and again.
++        # When we do not ignore the request, we do still run these checks for
++        # all widgets.  But it seems an international sport to override the
++        # update or updateWidgets method of the base z3c form, which makes it
++        # hard to fix all occurrences by one check on the form.
++        if not self.ignoreRequest and getattr(self.form, 'ignoreRequest', False):
++            self.ignoreRequest = True
++        # If we are not already ignoring the request, check the request method.
++        if (not self.ignoreRequest
++                and hasattr(self.form, 'method')
++                and hasattr(self.request, 'REQUEST_METHOD')):
++            if self.request.REQUEST_METHOD.lower() != self.form.method.lower():
++                # This is an unexpected request method.
++                # For special cases we allow a form to bail out.
++                if not getattr(self.form, ALLOW_PREFILL, False):
++                    self.ignoreRequest = True
++                    self.form.ignoreRequest = True
++        # If we are not already ignoring the request, check the referer.
++        if not self.ignoreRequest and hasattr(self.request, 'environ'):
++            env = self.request.environ
++            referrer = env.get('HTTP_REFERER', env.get('HTTP_REFERRER'))
++            if referrer:
++                req_url_parsed = urlparse(self.request.URL)
++                referrer_parsed = urlparse(referrer)
++                if req_url_parsed.netloc != referrer_parsed.netloc:
++                    # We do not trust data from outside referrers.
++                    self.ignoreRequest = True
++                    self.form.ignoreRequest = True
++        return update(self)
++    return _wrapped
++
++
++widget.Widget.update = _wrap_update(widget.Widget.update)
+diff --git a/Products/CMFPlone/tests/test_z3c_form_widgets.py b/Products/CMFPlone/tests/test_z3c_form_widgets.py
+new file mode 100644
+index 0000000..38de318
+--- /dev/null
++++ b/Products/CMFPlone/tests/test_z3c_form_widgets.py
+@@ -0,0 +1,116 @@
++from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
++from z3c.form import widget
++from z3c.form.browser.text import TextWidget
++
++import unittest
++
++
++WIDGETS_TO_TEST = [
++    TextWidget,
++    widget.Widget,
++    widget.MultiWidget,
++    widget.SequenceWidget,
++]
++
++_marker = object()
++
++
++class FakeForm(object):
++    method = 'post'
++    ignoreRequest = False
++
++
++class TestAttackVector(unittest.TestCase):
++    layer = PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
++    _widgets_to_test = WIDGETS_TO_TEST
++    _attack = '</textarea><script>alert("form.widgets.class_blacklist")</script>'  # noqa
++
++    def _terms(self):
++        # For the SequenceWidget we need basic terms.
++        # We make dummy (dumb) terms.
++        from z3c.form.term import Terms
++
++        class DummyTerms(Terms):
++            def getTermByToken(self, token):
++                return token
++
++        return DummyTerms()
++
++    def test_regression(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foo'
++            request.REQUEST_METHOD = 'POST'
++            request.form.update({
++                'foo': 'bar'
++            })
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, False)
++
++    def test_only_get_data_from_valid_request_method(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'GET'
++            request.form.update({
++                'foobar': self._attack
++            })
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, True)
++
++    def test_explicitly_allow_data_from_invalid_request_method(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'GET'
++            request.form.update({
++                'foobar': self._attack
++            })
++            wi.form = FakeForm()
++            # Set attribute on form to explicitly allow prefill.
++            from Products.CMFPlone.patches.z3c_form import ALLOW_PREFILL
++            setattr(wi.form, ALLOW_PREFILL, True)
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, False)
++
++    def test_only_get_data_from_valid_referrer(self):
++        # this handles the use case where hijacker gets user to click on
++        # button that submits to plone site
++        request = self.layer['request']
++
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'POST'
++            request.form.update({
++                'foobar': self._attack
++            })
++            request.environ['HTTP_REFERER'] = 'http://attacker.com'
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, True)
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 751c267..f33b8a3 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -19,6 +19,8 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Apply security hotfix 20160830 for redirects.  [maurits]
- 
- 
- 2.2.18 (2016-06-06)
-diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py
-index da710b1..d234ff5 100644
---- a/plone/app/discussion/browser/moderation.py
-+++ b/plone/app/discussion/browser/moderation.py
-@@ -101,7 +101,9 @@ def __call__(self):
-             type="info")
-         came_from = self.context.REQUEST.HTTP_REFERER
-         # if the referrer already has a came_from in it, don't redirect back
--        if len(came_from) == 0 or 'came_from=' in came_from:
-+        if (len(came_from) == 0 or 'came_from=' in came_from or
-+                not getToolByName(
-+                content_object, 'portal_url').isURLInPortal(came_from)):
-             came_from = content_object.absolute_url()
-         return self.context.REQUEST.RESPONSE.redirect(came_from)
- 
-@@ -140,7 +142,9 @@ def __call__(self):
-             type="info")
-         came_from = self.context.REQUEST.HTTP_REFERER
-         # if the referrer already has a came_from in it, don't redirect back
--        if len(came_from) == 0 or 'came_from=' in came_from:
-+        if (len(came_from) == 0 or 'came_from=' in came_from or
-+                not getToolByName(
-+                content_object, 'portal_url').isURLInPortal(came_from)):
-             came_from = content_object.absolute_url()
-         return self.context.REQUEST.RESPONSE.redirect(came_from)
- 
-diff --git a/plone/app/discussion/tests/test_moderation_view.py b/plone/app/discussion/tests/test_moderation_view.py
-index ac0a7bd..7ac4087 100644
---- a/plone/app/discussion/tests/test_moderation_view.py
-+++ b/plone/app/discussion/tests/test_moderation_view.py
-@@ -1,20 +1,20 @@
- # -*- coding: utf-8 -*-
--import unittest
--
- from DateTime import DateTime
--
--from zope.component import createObject
--
--from Products.CMFCore.utils import getToolByName
--
--from plone.app.testing import TEST_USER_ID, setRoles
--
--from plone.app.discussion.testing import\
--    PLONE_APP_DISCUSSION_INTEGRATION_TESTING
--
--from plone.app.discussion.browser.moderation import View
- from plone.app.discussion.browser.moderation import BulkActionsView
-+from plone.app.discussion.browser.moderation import DeleteComment
-+from plone.app.discussion.browser.moderation import PublishComment
-+from plone.app.discussion.browser.moderation import View
- from plone.app.discussion.interfaces import IConversation
-+from plone.app.discussion.interfaces import IDiscussionSettings
-+from plone.app.discussion.testing import PLONE_APP_DISCUSSION_INTEGRATION_TESTING  # noqa
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
-+from plone.registry.interfaces import IRegistry
-+from Products.CMFCore.utils import getToolByName
-+from zope.component import createObject
-+from zope.component import queryUtility
++- Apply security hotfix 20160830 for ``z3c.form`` widgets.  [maurits]
 +
-+import unittest
+ - Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
  
- 
- class ModerationViewTest(unittest.TestCase):
-@@ -190,5 +190,50 @@ def test_delete(self):
-         self.assertEqual(comment, self.comment2)
- 
- 
-+class RedirectionTest(unittest.TestCase):
-+
-+    layer = PLONE_APP_DISCUSSION_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        # Update settings.
-+        self.portal = self.layer['portal']
-+        self.request = self.layer['request']
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        # applyProfile(self.portal, 'plone.app.discussion:default')
-+        registry = queryUtility(IRegistry)
-+        settings = registry.forInterface(IDiscussionSettings)
-+        settings.globally_enabled = True
-+        self.portal.portal_workflow.setChainForPortalTypes(
-+            ('Discussion Item',),
-+            ('comment_review_workflow',))
-+        # Create page plus comment.
-+        self.portal.invokeFactory(
-+            id='page',
-+            title='Page 1',
-+            type_name='Document'
-+        )
-+        self.page = self.portal.page
-+        self.conversation = IConversation(self.page)
-+        comment = createObject('plone.Comment')
-+        comment.text = 'Comment text'
-+        self.comment_id = self.conversation.addComment(comment)
-+        self.comment = list(self.conversation.getComments())[0]
-+
-+    def test_regression(self):
-+        page_url = self.page.absolute_url()
-+        self.request['HTTP_REFERER'] = page_url
-+        for Klass in (DeleteComment, PublishComment):
-+            view = Klass(self.comment, self.request)
-+            view.__parent__ = self.comment
-+            self.assertEqual(page_url, view())
-+
-+    def test_valid_next_url(self):
-+        self.request['HTTP_REFERER'] = 'http://attacker.com'
-+        for Klass in (DeleteComment, PublishComment):
-+            view = Klass(self.comment, self.request)
-+            view.__parent__ = self.comment
-+            self.assertNotEqual('http://attacker.com', view())
-+
-+
- def test_suite():
-     return unittest.defaultTestLoader.loadTestsFromName(__name__)
+ - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
 
 
-Repository: plone.app.discussion
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.2.x
-Date: 2016-09-20T10:51:57+02:00
+Branch: refs/heads/4.3.x
+Date: 2016-09-20T10:54:30+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.discussion/commit/b5bb31b5c91ecbae5ea4eeef563f9dcc5d974948
+Commit: https://github.com/plone/Products.CMFPlone/commit/9b63707c5a830004b79abfbe4789026c4f73ab5c
 
-Merge pull request #113 from plone/apply-hotfix-20160830-22
+Merge pull request #1769 from plone/apply-hotfix-20160830-z3cform-43
 
-Apply security hotfix 20160830 for redirects. [2.2]
+Apply security hotfix 20160830 for z3c.form widgets. [4.3]
 
 Files changed:
-M CHANGES.rst
-M plone/app/discussion/browser/moderation.py
-M plone/app/discussion/tests/test_moderation_view.py
+A Products/CMFPlone/patches/z3c_form.py
+A Products/CMFPlone/tests/test_z3c_form_widgets.py
+M Products/CMFPlone/patches/__init__.py
+M docs/CHANGES.rst
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 669a7f2..abe4ec9 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,7 +14,7 @@ New features:
+diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
+index fd661fe..534d5d6 100644
+--- a/Products/CMFPlone/patches/__init__.py
++++ b/Products/CMFPlone/patches/__init__.py
+@@ -33,3 +33,5 @@
+ 
+ import addMember
+ import publishing
++
++import z3c_form
+diff --git a/Products/CMFPlone/patches/z3c_form.py b/Products/CMFPlone/patches/z3c_form.py
+new file mode 100644
+index 0000000..1b61598
+--- /dev/null
++++ b/Products/CMFPlone/patches/z3c_form.py
+@@ -0,0 +1,50 @@
++# This is from Products.PloneHotfix20160830.
++from urlparse import urlparse
++from z3c.form import widget
++
++
++# Attribute name to allow prefilling a widget with a value from a GET request.
++# Usually all forms are only for POST, and we disallow filling it with GET
++# data.  This works the way around too: allow prefilling from a POST request
++# when the form only handles GET.  But that is unlikely.
++ALLOW_PREFILL = 'allow_prefill_from_GET_request'
++
++
++def _wrap_update(update):
++    def _wrapped(self):
++        # If we are ignoring the request on the form, we should also ignore it
++        # on the widget.  This means that when on the first widget we conclude
++        # that the form should be ignored, we quickly ignore it on all widgets,
++        # without needing to check the referer and method again and again.
++        # When we do not ignore the request, we do still run these checks for
++        # all widgets.  But it seems an international sport to override the
++        # update or updateWidgets method of the base z3c form, which makes it
++        # hard to fix all occurrences by one check on the form.
++        if not self.ignoreRequest and getattr(self.form, 'ignoreRequest', False):
++            self.ignoreRequest = True
++        # If we are not already ignoring the request, check the request method.
++        if (not self.ignoreRequest
++                and hasattr(self.form, 'method')
++                and hasattr(self.request, 'REQUEST_METHOD')):
++            if self.request.REQUEST_METHOD.lower() != self.form.method.lower():
++                # This is an unexpected request method.
++                # For special cases we allow a form to bail out.
++                if not getattr(self.form, ALLOW_PREFILL, False):
++                    self.ignoreRequest = True
++                    self.form.ignoreRequest = True
++        # If we are not already ignoring the request, check the referer.
++        if not self.ignoreRequest and hasattr(self.request, 'environ'):
++            env = self.request.environ
++            referrer = env.get('HTTP_REFERER', env.get('HTTP_REFERRER'))
++            if referrer:
++                req_url_parsed = urlparse(self.request.URL)
++                referrer_parsed = urlparse(referrer)
++                if req_url_parsed.netloc != referrer_parsed.netloc:
++                    # We do not trust data from outside referrers.
++                    self.ignoreRequest = True
++                    self.form.ignoreRequest = True
++        return update(self)
++    return _wrapped
++
++
++widget.Widget.update = _wrap_update(widget.Widget.update)
+diff --git a/Products/CMFPlone/tests/test_z3c_form_widgets.py b/Products/CMFPlone/tests/test_z3c_form_widgets.py
+new file mode 100644
+index 0000000..38de318
+--- /dev/null
++++ b/Products/CMFPlone/tests/test_z3c_form_widgets.py
+@@ -0,0 +1,116 @@
++from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
++from z3c.form import widget
++from z3c.form.browser.text import TextWidget
++
++import unittest
++
++
++WIDGETS_TO_TEST = [
++    TextWidget,
++    widget.Widget,
++    widget.MultiWidget,
++    widget.SequenceWidget,
++]
++
++_marker = object()
++
++
++class FakeForm(object):
++    method = 'post'
++    ignoreRequest = False
++
++
++class TestAttackVector(unittest.TestCase):
++    layer = PRODUCTS_CMFPLONE_FUNCTIONAL_TESTING
++    _widgets_to_test = WIDGETS_TO_TEST
++    _attack = '</textarea><script>alert("form.widgets.class_blacklist")</script>'  # noqa
++
++    def _terms(self):
++        # For the SequenceWidget we need basic terms.
++        # We make dummy (dumb) terms.
++        from z3c.form.term import Terms
++
++        class DummyTerms(Terms):
++            def getTermByToken(self, token):
++                return token
++
++        return DummyTerms()
++
++    def test_regression(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foo'
++            request.REQUEST_METHOD = 'POST'
++            request.form.update({
++                'foo': 'bar'
++            })
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, False)
++
++    def test_only_get_data_from_valid_request_method(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'GET'
++            request.form.update({
++                'foobar': self._attack
++            })
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, True)
++
++    def test_explicitly_allow_data_from_invalid_request_method(self):
++        request = self.layer['request']
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'GET'
++            request.form.update({
++                'foobar': self._attack
++            })
++            wi.form = FakeForm()
++            # Set attribute on form to explicitly allow prefill.
++            from Products.CMFPlone.patches.z3c_form import ALLOW_PREFILL
++            setattr(wi.form, ALLOW_PREFILL, True)
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, False)
++
++    def test_only_get_data_from_valid_referrer(self):
++        # this handles the use case where hijacker gets user to click on
++        # button that submits to plone site
++        request = self.layer['request']
++
++        for Widget in self._widgets_to_test:
++            wi = Widget(request)
++            wi.name = 'foobar'
++            request.REQUEST_METHOD = 'POST'
++            request.form.update({
++                'foobar': self._attack
++            })
++            request.environ['HTTP_REFERER'] = 'http://attacker.com'
++            wi.form = FakeForm()
++            self.assertEquals(wi.ignoreRequest, False)
++            # The SequenceWidget needs terms.  It will have terms=None,
++            # where the others have no terms attribute.
++            if getattr(wi, 'terms', _marker) is None:
++                wi.terms = self._terms()
++            wi.update()
++            self.assertEquals(wi.ignoreRequest, True)
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 751c267..f33b8a3 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -19,6 +19,8 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Apply security hotfix 20160830 for redirects.  [maurits]
- 
- 
- 2.2.18 (2016-06-06)
-diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py
-index da710b1..d234ff5 100644
---- a/plone/app/discussion/browser/moderation.py
-+++ b/plone/app/discussion/browser/moderation.py
-@@ -101,7 +101,9 @@ def __call__(self):
-             type="info")
-         came_from = self.context.REQUEST.HTTP_REFERER
-         # if the referrer already has a came_from in it, don't redirect back
--        if len(came_from) == 0 or 'came_from=' in came_from:
-+        if (len(came_from) == 0 or 'came_from=' in came_from or
-+                not getToolByName(
-+                content_object, 'portal_url').isURLInPortal(came_from)):
-             came_from = content_object.absolute_url()
-         return self.context.REQUEST.RESPONSE.redirect(came_from)
- 
-@@ -140,7 +142,9 @@ def __call__(self):
-             type="info")
-         came_from = self.context.REQUEST.HTTP_REFERER
-         # if the referrer already has a came_from in it, don't redirect back
--        if len(came_from) == 0 or 'came_from=' in came_from:
-+        if (len(came_from) == 0 or 'came_from=' in came_from or
-+                not getToolByName(
-+                content_object, 'portal_url').isURLInPortal(came_from)):
-             came_from = content_object.absolute_url()
-         return self.context.REQUEST.RESPONSE.redirect(came_from)
- 
-diff --git a/plone/app/discussion/tests/test_moderation_view.py b/plone/app/discussion/tests/test_moderation_view.py
-index ac0a7bd..7ac4087 100644
---- a/plone/app/discussion/tests/test_moderation_view.py
-+++ b/plone/app/discussion/tests/test_moderation_view.py
-@@ -1,20 +1,20 @@
- # -*- coding: utf-8 -*-
--import unittest
--
- from DateTime import DateTime
--
--from zope.component import createObject
--
--from Products.CMFCore.utils import getToolByName
--
--from plone.app.testing import TEST_USER_ID, setRoles
--
--from plone.app.discussion.testing import\
--    PLONE_APP_DISCUSSION_INTEGRATION_TESTING
--
--from plone.app.discussion.browser.moderation import View
- from plone.app.discussion.browser.moderation import BulkActionsView
-+from plone.app.discussion.browser.moderation import DeleteComment
-+from plone.app.discussion.browser.moderation import PublishComment
-+from plone.app.discussion.browser.moderation import View
- from plone.app.discussion.interfaces import IConversation
-+from plone.app.discussion.interfaces import IDiscussionSettings
-+from plone.app.discussion.testing import PLONE_APP_DISCUSSION_INTEGRATION_TESTING  # noqa
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
-+from plone.registry.interfaces import IRegistry
-+from Products.CMFCore.utils import getToolByName
-+from zope.component import createObject
-+from zope.component import queryUtility
++- Apply security hotfix 20160830 for ``z3c.form`` widgets.  [maurits]
 +
-+import unittest
+ - Fixed tests in combination with newer CMFFormController which has the hotfix.  [maurits]
  
- 
- class ModerationViewTest(unittest.TestCase):
-@@ -190,5 +190,50 @@ def test_delete(self):
-         self.assertEqual(comment, self.comment2)
- 
- 
-+class RedirectionTest(unittest.TestCase):
-+
-+    layer = PLONE_APP_DISCUSSION_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        # Update settings.
-+        self.portal = self.layer['portal']
-+        self.request = self.layer['request']
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        # applyProfile(self.portal, 'plone.app.discussion:default')
-+        registry = queryUtility(IRegistry)
-+        settings = registry.forInterface(IDiscussionSettings)
-+        settings.globally_enabled = True
-+        self.portal.portal_workflow.setChainForPortalTypes(
-+            ('Discussion Item',),
-+            ('comment_review_workflow',))
-+        # Create page plus comment.
-+        self.portal.invokeFactory(
-+            id='page',
-+            title='Page 1',
-+            type_name='Document'
-+        )
-+        self.page = self.portal.page
-+        self.conversation = IConversation(self.page)
-+        comment = createObject('plone.Comment')
-+        comment.text = 'Comment text'
-+        self.comment_id = self.conversation.addComment(comment)
-+        self.comment = list(self.conversation.getComments())[0]
-+
-+    def test_regression(self):
-+        page_url = self.page.absolute_url()
-+        self.request['HTTP_REFERER'] = page_url
-+        for Klass in (DeleteComment, PublishComment):
-+            view = Klass(self.comment, self.request)
-+            view.__parent__ = self.comment
-+            self.assertEqual(page_url, view())
-+
-+    def test_valid_next_url(self):
-+        self.request['HTTP_REFERER'] = 'http://attacker.com'
-+        for Klass in (DeleteComment, PublishComment):
-+            view = Klass(self.comment, self.request)
-+            view.__parent__ = self.comment
-+            self.assertNotEqual('http://attacker.com', view())
-+
-+
- def test_suite():
-     return unittest.defaultTestLoader.loadTestsFromName(__name__)
+ - Apply security hotfix 20160830 for ``@@plone-root-login``.  [maurits]
 
 
