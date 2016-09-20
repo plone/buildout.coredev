@@ -2,117 +2,39 @@ Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2016-09-19T18:23:42+02:00
+Date: 2016-09-20T14:18:13+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.portlets/commit/0e10f8159fa82106655a809deb3f99cd03cc75a6
+Commit: https://github.com/plone/plone.app.portlets/commit/3b77a093e9443aae4992731951c6216254174477
 
-Apply security hotfix 20160830 for redirects.
+Added `referer` property to `PortletAdding` view.
+
+Now all views like this have it.
 
 Files changed:
-A plone/app/portlets/tests/test_redirects.py
 M CHANGES.rst
 M plone/app/portlets/browser/adding.py
-M plone/app/portlets/browser/editmanager.py
-M plone/app/portlets/browser/formhelper.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3b9f6f9..404d36e 100644
+index 404d36e..7017af3 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -15,7 +15,7 @@ New features:
+@@ -15,6 +15,9 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Apply security hotfix 20160830 for redirects.  [maurits]
++- Added ``referer`` property to ``PortletAdding`` view.  Now all views
++  like this have it.  [maurits]
++
+ - Apply security hotfix 20160830 for redirects.  [maurits]
  
  
- 4.2 (2016-08-12)
 diff --git a/plone/app/portlets/browser/adding.py b/plone/app/portlets/browser/adding.py
-index d4672b1..db8933f 100644
+index db8933f..67f93ad 100644
 --- a/plone/app/portlets/browser/adding.py
 +++ b/plone/app/portlets/browser/adding.py
-@@ -7,6 +7,7 @@
- 
- from Acquisition import aq_inner, aq_base, aq_parent
- from OFS.SimpleItem import SimpleItem
-+from Products.CMFCore.utils import getToolByName
- from Products.Five import BrowserView
- 
- from plone.app.portlets.browser.interfaces import IPortletAdding
-@@ -36,7 +37,8 @@ def add(self, content):
- 
-     def nextURL(self):
-         referer = self.request.get('referer')
--        if not referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if not referer or not urltool.isURLInPortal(referer):
-             context = aq_parent(aq_inner(self.context))
-             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
-             referer = url + '/@@manage-portlets'
-diff --git a/plone/app/portlets/browser/editmanager.py b/plone/app/portlets/browser/editmanager.py
-index 392c899..6c84944 100644
---- a/plone/app/portlets/browser/editmanager.py
-+++ b/plone/app/portlets/browser/editmanager.py
-@@ -27,6 +27,7 @@
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from Products.PythonScripts.standard import url_quote, url_unquote
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- 
- from plone.app.portlets.browser.interfaces import IManageColumnPortletsView
-@@ -441,9 +442,11 @@ def delete_portlet(self, name):
- 
-     def _nextUrl(self):
-         referer = self.request.get('referer')
-+        urltool = getToolByName(self.context, 'portal_url')
-         if referer:
-             referer = url_unquote(referer)
--        else:
-+
-+        if not referer or not urltool.isURLInPortal(referer):
-             context = aq_parent(aq_inner(self.context))
-             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
-             referer = '%s/@@manage-portlets' % (url,)
-diff --git a/plone/app/portlets/browser/formhelper.py b/plone/app/portlets/browser/formhelper.py
-index 2a98d14..ec987be 100644
---- a/plone/app/portlets/browser/formhelper.py
-+++ b/plone/app/portlets/browser/formhelper.py
-@@ -5,6 +5,7 @@
- import zope.event
- import zope.lifecycleevent
- 
-+from Products.CMFCore.utils import getToolByName
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-@@ -78,12 +79,19 @@ def referer(self):
-         return self.request.get('referer', '')
- 
-     def nextURL(self):
--        if self.referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-             return self.referer
-         addview = aq_parent(aq_inner(self.context))
-         context = aq_parent(aq_inner(addview))
--        url = str(getMultiAdapter((context, self.request),
--                                  name=u"absolute_url"))
-+        try:
-+            url = str(getMultiAdapter((context, self.request),
-+                                      name=u"absolute_url"))
-+        except (TypeError, AttributeError):
-+            # At least in tests we can get a TypeError: "There isn't enough
-+            # context to get URL information. This is probably due to a bug in
-+            # setting up location information."
-+            url = self.context.absolute_url()
-         return url + '/@@manage-portlets'
- 
-     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='add')
-@@ -125,15 +133,22 @@ def __call__(self):
-             self.request.response.redirect(self.nextURL())
-         return ''
+@@ -35,12 +35,17 @@ def add(self, content):
+         chooser = INameChooser(manager)
+         manager[chooser.chooseName(None, content)] = content
  
 +    @property
 +    def referer(self):
@@ -120,335 +42,15 @@ index 2a98d14..ec987be 100644
 +
      def nextURL(self):
 -        referer = self.request.get('referer')
--        if referer:
--            return referer
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-+            return self.referer
-         else:
-             addview = aq_parent(aq_inner(self.context))
-             context = aq_parent(aq_inner(addview))
--            url = str(getMultiAdapter((context, self.request),
--                                      name=u"absolute_url"))
-+            try:
-+                url = str(getMultiAdapter((context, self.request),
-+                                          name=u"absolute_url"))
-+            except (TypeError, AttributeError):
-+                url = self.context.absolute_url()
-             return url + '/@@manage-portlets'
- 
-     def create(self):
-@@ -161,12 +176,16 @@ def referer(self):
-         return self.request.get('referer', '')
- 
-     def nextURL(self):
--        if self.referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-             return self.referer
-         editview = aq_parent(aq_inner(self.context))
-         context = aq_parent(aq_inner(editview))
--        url = str(getMultiAdapter((context, self.request),
--                                  name=u"absolute_url"))
-+        try:
+         urltool = getToolByName(self.context, 'portal_url')
++        referer = self.referer
+         if not referer or not urltool.isURLInPortal(referer):
+             context = aq_parent(aq_inner(self.context))
+-            url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
 +            url = str(getMultiAdapter((context, self.request),
 +                                      name=u"absolute_url"))
-+        except (TypeError, AttributeError):
-+            url = self.context.absolute_url()
-         return url + '/@@manage-portlets'
- 
-     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='apply')
-diff --git a/plone/app/portlets/tests/test_redirects.py b/plone/app/portlets/tests/test_redirects.py
-new file mode 100644
-index 0000000..2d656ed
---- /dev/null
-+++ b/plone/app/portlets/tests/test_redirects.py
-@@ -0,0 +1,58 @@
-+# -*- coding: utf-8 -*-
-+from plone.app.portlets.browser.adding import PortletAdding
-+from plone.app.portlets.browser.editmanager import ManagePortletAssignments
-+from plone.app.portlets.browser.formhelper import AddForm
-+from plone.app.portlets.browser.formhelper import EditForm
-+from plone.app.portlets.tests.base import PortletsTestCase
-+
-+
-+class TestRedirects(PortletsTestCase):
-+    _test_methods = [
-+        (PortletAdding, 'nextURL'),
-+        (ManagePortletAssignments, '_nextUrl'),
-+        (AddForm, 'nextURL'),
-+        (EditForm, 'nextURL'),
-+    ]
-+
-+    def test_regression(self):
-+        portal_url = self.portal.absolute_url()
-+        self.request.form.update({
-+            'referer': portal_url
-+        })
-+        for Klass, method in self._test_methods:
-+            view = Klass(self.portal, self.request)
-+            view.__parent__ = self.portal
-+            self.assertEqual(getattr(view, method)(), portal_url)
-+
-+    def test_valid_next_url(self):
-+        self.request.form.update({
-+            'referer': 'http://attacker.com'
-+        })
-+        for Klass, method in self._test_methods:
-+            view = Klass(self.portal, self.request)
-+            view.__parent__ = self.portal
-+            self.assertNotEqual('http://attacker.com', getattr(view, method)())
-+
-+
-+def test_suite():
-+    # Without this test_suite, there is a strange error when running the tests:
-+    #
-+    # Error in test runTest
-+    # (plone.app.portlets.tests.base.PortletsFunctionalTestCase)
-+    # Traceback (most recent call last):
-+    #   File "unittest2-0.5.1-py2.7.egg/unittest2/case.py", line 340, in run
-+    #     testMethod()
-+    #   TypeError: 'NoneType' object is not callable
-+    #
-+    # You get the error when running
-+    # bin/test -s plone.app.portlets
-+    # or
-+    # bin/test -s plone.app.portlets -t run
-+    # but not with
-+    # bin/test -s plone.app.portlets -m test_redirects
-+    # But the error *is* in this test_redirects.py file,
-+    # because it goes away when I delete this file.
-+    from unittest import TestSuite, makeSuite
-+    suite = TestSuite()
-+    suite.addTest(makeSuite(TestRedirects))
-+    return suite
-
-
-Repository: plone.app.portlets
-
-
-Branch: refs/heads/master
-Date: 2016-09-20T10:53:17+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.portlets/commit/af73d8090a31c9fab0b11a106767c934ed39f853
-
-Merge pull request #87 from plone/apply-hotfix-20160830-master
-
-Apply security hotfix 20160830 for redirects. [master]
-
-Files changed:
-A plone/app/portlets/tests/test_redirects.py
-M CHANGES.rst
-M plone/app/portlets/browser/adding.py
-M plone/app/portlets/browser/editmanager.py
-M plone/app/portlets/browser/formhelper.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 3b9f6f9..404d36e 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -15,7 +15,7 @@ New features:
- 
- Bug fixes:
- 
--- *add item here*
-+- Apply security hotfix 20160830 for redirects.  [maurits]
- 
- 
- 4.2 (2016-08-12)
-diff --git a/plone/app/portlets/browser/adding.py b/plone/app/portlets/browser/adding.py
-index d4672b1..db8933f 100644
---- a/plone/app/portlets/browser/adding.py
-+++ b/plone/app/portlets/browser/adding.py
-@@ -7,6 +7,7 @@
- 
- from Acquisition import aq_inner, aq_base, aq_parent
- from OFS.SimpleItem import SimpleItem
-+from Products.CMFCore.utils import getToolByName
- from Products.Five import BrowserView
- 
- from plone.app.portlets.browser.interfaces import IPortletAdding
-@@ -36,7 +37,8 @@ def add(self, content):
- 
-     def nextURL(self):
-         referer = self.request.get('referer')
--        if not referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if not referer or not urltool.isURLInPortal(referer):
-             context = aq_parent(aq_inner(self.context))
-             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
              referer = url + '/@@manage-portlets'
-diff --git a/plone/app/portlets/browser/editmanager.py b/plone/app/portlets/browser/editmanager.py
-index 392c899..6c84944 100644
---- a/plone/app/portlets/browser/editmanager.py
-+++ b/plone/app/portlets/browser/editmanager.py
-@@ -27,6 +27,7 @@
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- from Products.PythonScripts.standard import url_quote, url_unquote
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
+         return referer
  
- from plone.app.portlets.browser.interfaces import IManageColumnPortletsView
-@@ -441,9 +442,11 @@ def delete_portlet(self, name):
- 
-     def _nextUrl(self):
-         referer = self.request.get('referer')
-+        urltool = getToolByName(self.context, 'portal_url')
-         if referer:
-             referer = url_unquote(referer)
--        else:
-+
-+        if not referer or not urltool.isURLInPortal(referer):
-             context = aq_parent(aq_inner(self.context))
-             url = str(getMultiAdapter((context, self.request), name=u"absolute_url"))
-             referer = '%s/@@manage-portlets' % (url,)
-diff --git a/plone/app/portlets/browser/formhelper.py b/plone/app/portlets/browser/formhelper.py
-index 2a98d14..ec987be 100644
---- a/plone/app/portlets/browser/formhelper.py
-+++ b/plone/app/portlets/browser/formhelper.py
-@@ -5,6 +5,7 @@
- import zope.event
- import zope.lifecycleevent
- 
-+from Products.CMFCore.utils import getToolByName
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
- 
-@@ -78,12 +79,19 @@ def referer(self):
-         return self.request.get('referer', '')
- 
-     def nextURL(self):
--        if self.referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-             return self.referer
-         addview = aq_parent(aq_inner(self.context))
-         context = aq_parent(aq_inner(addview))
--        url = str(getMultiAdapter((context, self.request),
--                                  name=u"absolute_url"))
-+        try:
-+            url = str(getMultiAdapter((context, self.request),
-+                                      name=u"absolute_url"))
-+        except (TypeError, AttributeError):
-+            # At least in tests we can get a TypeError: "There isn't enough
-+            # context to get URL information. This is probably due to a bug in
-+            # setting up location information."
-+            url = self.context.absolute_url()
-         return url + '/@@manage-portlets'
- 
-     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='add')
-@@ -125,15 +133,22 @@ def __call__(self):
-             self.request.response.redirect(self.nextURL())
-         return ''
- 
-+    @property
-+    def referer(self):
-+        return self.request.get('referer', '')
-+
-     def nextURL(self):
--        referer = self.request.get('referer')
--        if referer:
--            return referer
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-+            return self.referer
-         else:
-             addview = aq_parent(aq_inner(self.context))
-             context = aq_parent(aq_inner(addview))
--            url = str(getMultiAdapter((context, self.request),
--                                      name=u"absolute_url"))
-+            try:
-+                url = str(getMultiAdapter((context, self.request),
-+                                          name=u"absolute_url"))
-+            except (TypeError, AttributeError):
-+                url = self.context.absolute_url()
-             return url + '/@@manage-portlets'
- 
-     def create(self):
-@@ -161,12 +176,16 @@ def referer(self):
-         return self.request.get('referer', '')
- 
-     def nextURL(self):
--        if self.referer:
-+        urltool = getToolByName(self.context, 'portal_url')
-+        if self.referer and urltool.isURLInPortal(self.referer):
-             return self.referer
-         editview = aq_parent(aq_inner(self.context))
-         context = aq_parent(aq_inner(editview))
--        url = str(getMultiAdapter((context, self.request),
--                                  name=u"absolute_url"))
-+        try:
-+            url = str(getMultiAdapter((context, self.request),
-+                                      name=u"absolute_url"))
-+        except (TypeError, AttributeError):
-+            url = self.context.absolute_url()
-         return url + '/@@manage-portlets'
- 
-     @button.buttonAndHandler(_(u"label_save", default=u"Save"), name='apply')
-diff --git a/plone/app/portlets/tests/test_redirects.py b/plone/app/portlets/tests/test_redirects.py
-new file mode 100644
-index 0000000..2d656ed
---- /dev/null
-+++ b/plone/app/portlets/tests/test_redirects.py
-@@ -0,0 +1,58 @@
-+# -*- coding: utf-8 -*-
-+from plone.app.portlets.browser.adding import PortletAdding
-+from plone.app.portlets.browser.editmanager import ManagePortletAssignments
-+from plone.app.portlets.browser.formhelper import AddForm
-+from plone.app.portlets.browser.formhelper import EditForm
-+from plone.app.portlets.tests.base import PortletsTestCase
-+
-+
-+class TestRedirects(PortletsTestCase):
-+    _test_methods = [
-+        (PortletAdding, 'nextURL'),
-+        (ManagePortletAssignments, '_nextUrl'),
-+        (AddForm, 'nextURL'),
-+        (EditForm, 'nextURL'),
-+    ]
-+
-+    def test_regression(self):
-+        portal_url = self.portal.absolute_url()
-+        self.request.form.update({
-+            'referer': portal_url
-+        })
-+        for Klass, method in self._test_methods:
-+            view = Klass(self.portal, self.request)
-+            view.__parent__ = self.portal
-+            self.assertEqual(getattr(view, method)(), portal_url)
-+
-+    def test_valid_next_url(self):
-+        self.request.form.update({
-+            'referer': 'http://attacker.com'
-+        })
-+        for Klass, method in self._test_methods:
-+            view = Klass(self.portal, self.request)
-+            view.__parent__ = self.portal
-+            self.assertNotEqual('http://attacker.com', getattr(view, method)())
-+
-+
-+def test_suite():
-+    # Without this test_suite, there is a strange error when running the tests:
-+    #
-+    # Error in test runTest
-+    # (plone.app.portlets.tests.base.PortletsFunctionalTestCase)
-+    # Traceback (most recent call last):
-+    #   File "unittest2-0.5.1-py2.7.egg/unittest2/case.py", line 340, in run
-+    #     testMethod()
-+    #   TypeError: 'NoneType' object is not callable
-+    #
-+    # You get the error when running
-+    # bin/test -s plone.app.portlets
-+    # or
-+    # bin/test -s plone.app.portlets -t run
-+    # but not with
-+    # bin/test -s plone.app.portlets -m test_redirects
-+    # But the error *is* in this test_redirects.py file,
-+    # because it goes away when I delete this file.
-+    from unittest import TestSuite, makeSuite
-+    suite = TestSuite()
-+    suite.addTest(makeSuite(TestRedirects))
-+    return suite
 
 
