@@ -1,813 +1,630 @@
-Repository: plone.app.upgrade
+Repository: plone.app.testing
 
 
 Branch: refs/heads/master
-Date: 2016-09-21T00:57:38+02:00
+Date: 2016-09-07T01:21:27+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/45823b9d2572aa40aa1fd521a54d7a4f8ce69ed5
+Commit: https://github.com/plone/plone.app.testing/commit/8dbbe7833b386ca100e57c8b50c857e377a95874
 
-Support sites without portal_quickinstaller.
+Added test that the upgrade step registry gets rolled back.
 
-We can use get_installer in Plone 5.1 migrations.
-In earlier version we will keep using the portal_quickinstaller,
-because get_installer is not available.
+Files changed:
+M plone/app/testing/helpers.rst
 
-In a getToolByName call for portal_quickinstaller, we will pass a
-default of None, so an upgrade can still work if the portal tool has
-already been removed.
+diff --git a/plone/app/testing/helpers.rst b/plone/app/testing/helpers.rst
+index 9ce0ca4..a2de491 100644
+--- a/plone/app/testing/helpers.rst
++++ b/plone/app/testing/helpers.rst
+@@ -254,10 +254,13 @@ layer base class which helps implement this pattern.
+     ...         from Products.GenericSetup.registry import _profile_registry
+     ...         from Products.GenericSetup.registry import _import_step_registry
+     ...         from Products.GenericSetup.registry import _export_step_registry
++    ...         from Products.GenericSetup import upgrade
+     ...
+     ...         _profile_registry.registerProfile('dummy1', u"My package", u"", ".", 'plone.app.testing')
+     ...         _import_step_registry.registerStep('import1', version=1, handler='plone.app.testing.tests.dummy', title=u"Dummy import step", description=u"")
+     ...         _export_step_registry.registerStep('export1', handler='plone.app.testing.tests.dummy', title=u"Dummy import step", description=u"")
++    ...         upgrade_step = upgrade.UpgradeStep(u'Dummy upgrade step', 'plone.app.testing:default', '1000', '1001', '', 'plone.app.testing.tests.dummy')
++    ...         upgrade._registerUpgradeStep(upgrade_step)
+     ...
+     ...         # And then pretend to register a PAS multi-plugin
+     ...         from Products.PluggableAuthService import PluggableAuthService
+@@ -336,6 +339,7 @@ Again, our state should now be available.
+     >>> from Products.GenericSetup.registry import _profile_registry
+     >>> from Products.GenericSetup.registry import _import_step_registry
+     >>> from Products.GenericSetup.registry import _export_step_registry
++    >>> from Products.GenericSetup.upgrade import _upgrade_registry
+ 
+     >>> numProfiles = len(_profile_registry.listProfiles())
+     >>> 'plone.app.testing:dummy1' in _profile_registry.listProfiles()
+@@ -353,6 +357,10 @@ Again, our state should now be available.
+     >>> 'dummy_plugin1' in PluggableAuthService.MultiPlugins
+     True
+ 
++    >>> numUpgrades = len(_upgrade_registry.keys())
++    >>> len(_upgrade_registry.getUpgradeStepsForProfile('plone.app.testing:default'))
++    1
++
+ We'll now tear down just the ``MY_INTEGRATION_TESTING`` layer. At this
+ point, we should still have a Plone site, but none of the changes from our
+ layer.
+@@ -385,6 +393,11 @@ layer.
+     >>> 'export1' in _export_step_registry.listSteps()
+     False
+ 
++    >>> len(_upgrade_registry.keys()) == numUpgrades - 1
++    True
++    >>> len(_upgrade_registry.getUpgradeStepsForProfile('plone.app.testing:default'))
++    0
++
+     >>> from Products.PluggableAuthService import PluggableAuthService
+     >>> 'dummy_plugin1' in PluggableAuthService.MultiPlugins
+     False
 
-In shared utility and base code, we will try to import get_installer,
-and fall back on the previous implementation.
 
+Repository: plone.app.testing
+
+
+Branch: refs/heads/master
+Date: 2016-09-07T01:21:27+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.testing/commit/63c517716eed885776f6d59bcd3020c12e87ccaf
+
+In PloneSandboxLayer make profile upgrade versions persistent.
+
+This way installed profile versions get reset in teardown.
+
+Initially I added push and pop support for the various GS registries,
+but somehow that is handled fine already.
+
+Files changed:
+M CHANGES.rst
+M plone/app/testing/helpers.py
+M plone/app/testing/helpers.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 0f69f1f..1b02a52 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -10,7 +10,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- In PloneSandboxLayer make profile upgrade versions persistent.  This
++  way installed profile versions get reset in teardown.  [maurits]
+ 
+ Bug fixes:
+ 
+diff --git a/plone/app/testing/helpers.py b/plone/app/testing/helpers.py
+index 905ed21..7bb57c5 100644
+--- a/plone/app/testing/helpers.py
++++ b/plone/app/testing/helpers.py
+@@ -204,6 +204,21 @@ def popGlobalRegistry(portal):
+     return previous
+ 
+ 
++def persist_profile_upgrade_versions(portal):
++    """Persist the profile_upgrade_versions of portal_setup.
++
++    Until at least Products.GenericSetup 1.8.3 this is a standard
++    non-persistent dictionary, which means a transaction rollback does
++    not rollback changes to this dictionary.  So we make it a persistent
++    mapping.  Call this once in layer setup and you have easy rollback.
++    """
++    from persistent.mapping import PersistentMapping
++    puv = portal.portal_setup._profile_upgrade_versions
++    if isinstance(puv, PersistentMapping):
++        return
++    portal.portal_setup._profile_upgrade_versions = PersistentMapping(puv)
++
++
+ @contextlib.contextmanager
+ def ploneSite(db=None, connection=None, environ=None):
+     """Context manager for working with the Plone portal during layer setup::
+@@ -325,6 +340,10 @@ def setUp(self):
+                 # and other global component registry changes are sandboxed
+                 pushGlobalRegistry(portal)
+ 
++                # Persist GenericSetup profile upgrade versions for easy
++                # rollback.
++                persist_profile_upgrade_versions(portal)
++
+                 # Make sure zope.security checkers can be set up and torn down
+                 # reliably
+ 
+diff --git a/plone/app/testing/helpers.rst b/plone/app/testing/helpers.rst
+index a2de491..58e4ed9 100644
+--- a/plone/app/testing/helpers.rst
++++ b/plone/app/testing/helpers.rst
+@@ -70,6 +70,9 @@ need to tear that down as well.
+     ...
+     ...         with helpers.ploneSite() as portal:
+     ...
++    ...             # Persist GenericSetup profile upgrade versions for easy rollback.
++    ...             helpers.persist_profile_upgrade_versions(portal)
++    ...
+     ...             # Push a new component registry so that ZCML registations
+     ...             # and other global component registry changes are sandboxed
+     ...             helpers.pushGlobalRegistry(portal)
+@@ -133,9 +136,12 @@ having taken effect.
+ We should also see our product installation in the quickinstaller tool
+ and the results of the profile having been applied.
+ 
++    >>> from Products.GenericSetup.tool import UNKNOWN
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
+     True
++    False
+ 
+ Let's now simulate a test.
+ 
+@@ -199,9 +205,11 @@ should not.
+     ...     print portal.title
+     ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
+     ...     'folder1' in portal.objectIds()
++    ...     portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
+     New title
+     True
+     False
++    False
+ 
+ We'll now tear down just the ``HELPER_DEMOS_INTEGRATION_TESTING`` layer. At this
+ point, we should still have a Plone site, but none of the persistent or
+@@ -217,6 +225,8 @@ component architecture changes from our layer.
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal.title
+     ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     # This should be True, but is False:
++    ...     # portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
+     Plone site
+     False
+ 
+
+
+Repository: plone.app.testing
+
+
+Branch: refs/heads/master
+Date: 2016-09-07T01:21:28+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.testing/commit/773220f54f45dad6bce6efcc9b734cc6263f65f3
+
+Use get_installer instead of portal_quickinstaller when available.
+
+This is needed for Plone 5.1 and higher, plip 1340:
 https://github.com/plone/Products.CMFPlone/issues/1340
 
 Files changed:
+A plone/app/testing/profile/metadata.xml
 M CHANGES.rst
-M plone/app/upgrade/tests/base.py
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v30/tests.py
-M plone/app/upgrade/v31/betas.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v42/final.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v43/tests.py
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
+M plone/app/testing/helpers.py
+M plone/app/testing/helpers.rst
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 69b5c8a..749fd77 100644
+index 1b02a52..d9cc520 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,15 @@ Breaking changes:
+@@ -10,6 +10,9 @@ Breaking changes:
  
  New features:
  
-+- Support sites without ``portal_quickinstaller``.
-+  We use ``get_installer`` in Plone 5.1 migrations.
-+  In earlier version we will keep using the ``portal_quickinstaller``,
-+  because ``get_installer`` is not available.
-+  In shared utility and base code, we try to import get_installer,
-+  and fall back on the previous implementation.
-+  See `PLIP 1340 <https://github.com/plone/Products.CMFPlone/issues/1340>`_.
-+  [maurits]
++- Use get_installer instead of portal_quickinstaller when available, for
++  Plone 5.1 and higher.  [maurits]
 +
- - Add new Mockup 2.4.0 relateditems resource url.
-   [thet]
+ - In PloneSandboxLayer make profile upgrade versions persistent.  This
+   way installed profile versions get reset in teardown.  [maurits]
  
-diff --git a/plone/app/upgrade/tests/base.py b/plone/app/upgrade/tests/base.py
-index b403e32..1f60274 100644
---- a/plone/app/upgrade/tests/base.py
-+++ b/plone/app/upgrade/tests/base.py
-@@ -87,9 +87,17 @@ def removeMemberdataProperty(self, property_id):
+diff --git a/plone/app/testing/helpers.py b/plone/app/testing/helpers.py
+index 7bb57c5..1a60080 100644
+--- a/plone/app/testing/helpers.py
++++ b/plone/app/testing/helpers.py
+@@ -84,13 +84,27 @@ def quickInstallProduct(portal, productName, reinstall=False):
+     z2.login(app['acl_users'], SITE_OWNER_NAME)
  
-     def uninstallProduct(self, product_name):
-         # Removes a product
--        tool = getToolByName(self.portal, 'portal_quickinstaller')
--        if tool.isProductInstalled(product_name):
--            tool.uninstallProducts([product_name])
-+        try:
-+            from Products.CMFPlone.utils import get_installer
-+        except ImportError:
-+            # BBB For Plone 5.0 and lower.
-+            qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+            if qi is None:
-+                return
-+        else:
-+            qi = get_installer(self.portal)
-+        if qi.isProductInstalled(product_name):
-+            qi.uninstallProducts([product_name])
- 
-     def addSkinLayer(self, layer, skin='Plone Default', pos=None):
-         # Adds a skin layer at pos. If pos is None, the layer is appended
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 5b2491b..10ed8bc 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -106,25 +106,45 @@ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
-     If product is already installed test if it needs to be reinstalled. Also
-     fix skins after reinstalling
-     """
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled(product_name):
--        qi.installProduct(product_name, hidden=hidden)
--        # Refresh skins
--        portal.clearCurrentSkin()
--        if getattr(portal, 'REQUEST', None):
--            portal.setupCurrentSkin(portal.REQUEST)
--        logger.info("Installed %s" % product_name)
-+    try:
+     try:
+-        quickinstaller = portal['portal_quickinstaller']
 +        from Products.CMFPlone.utils import get_installer
 +    except ImportError:
 +        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            return
++        qi = portal['portal_quickinstaller']
 +        old_qi = True
 +    else:
 +        qi = get_installer(portal)
 +        old_qi = False
-+    if old_qi:
-+        if not qi.isProductInstalled(product_name):
-+            qi.installProduct(product_name, hidden=hidden)
-+            logger.info("Installed %s" % product_name)
-+        elif old_qi:
-+            info = qi._getOb(product_name)
-+            installed_version = info.getInstalledVersion()
-+            product_version = qi.getProductVersion(product_name)
-+            if installed_version != product_version:
-+                qi.reinstallProducts([product_name])
-+                logger.info("%s is out of date (installed: %s/ "
-+                            "filesystem: %s), reinstalled." % (
-+                                product_name, installed_version,
-+                                product_version))
-+            else:
-+                logger.info('%s already installed.' % product_name)
-     else:
--        info = qi._getOb(product_name)
--        installed_version = info.getInstalledVersion()
--        product_version = qi.getProductVersion(product_name)
--        if installed_version != product_version:
--            qi.reinstallProducts([product_name])
--            logger.info("%s is out of date (installed: %s/ filesystem: %s), "
--                        "reinstalled." % (product_name, installed_version,
--                                          product_version))
-+        # New QI browser view.
-+        if not qi.is_product_installed(product_name):
-+            qi.install_product(product_name, allow_hidden=True)
-+            logger.info("Installed %s" % product_name)
+ 
+-        if quickinstaller.isProductInstalled(productName):
+-            if reinstall:
+-                quickinstaller.reinstallProducts([productName])
++    try:
++        if old_qi:
++            if not qi.isProductInstalled(productName):
++                qi.installProduct(productName)
++            elif reinstall:
++                qi.reinstallProducts([productName])
          else:
--            logger.info('%s already installed.' % product_name)
-+            qi.upgrade_product(product_name)
-+            logger.info("Upgraded %s", product_name)
-+    # Refresh skins
-+    portal.clearCurrentSkin()
-+    if getattr(portal, 'REQUEST', None):
-+        portal.setupCurrentSkin(portal.REQUEST)
+-            quickinstaller.installProduct(productName)
++            if not qi.is_product_installed(productName):
++                qi.install_product(productName, allow_hidden=True)
++            elif reinstall:
++                qi.uninstall_product(productName)
++                qi.install_product(productName, allow_hidden=True)
  
+         portal.clearCurrentSkin()
+         portal.setupCurrentSkin(portal.REQUEST)
+diff --git a/plone/app/testing/helpers.rst b/plone/app/testing/helpers.rst
+index 58e4ed9..a67bd2f 100644
+--- a/plone/app/testing/helpers.rst
++++ b/plone/app/testing/helpers.rst
+@@ -38,7 +38,7 @@ layer, we will perform the following setup:
+ 4. Make some persistent changes, to illustrate how these are torn down when
+    we pop the ZODB ``DemoStorage``.
  
- def loadMigrationProfile(context, profile, steps=_marker):
-diff --git a/plone/app/upgrade/v30/tests.py b/plone/app/upgrade/v30/tests.py
-index bab3076..e4954e7 100644
---- a/plone/app/upgrade/v30/tests.py
-+++ b/plone/app/upgrade/v30/tests.py
-@@ -837,7 +837,10 @@ def testInstallPloneLanguageTool(self):
-         super(self.portal.__class__, self.portal).manage_delObjects(
-             ['portal_languages'])
-         self.uninstallProduct('PloneLanguageTool')
--        qi = getToolByName(self.portal, "portal_quickinstaller")
-+        qi = getToolByName(self.portal, "portal_quickinstaller", None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         # Test it twice
-         for i in range(2):
-             installProduct('PloneLanguageTool', self.portal)
-diff --git a/plone/app/upgrade/v31/betas.py b/plone/app/upgrade/v31/betas.py
-index b621f9c..1748c17 100644
---- a/plone/app/upgrade/v31/betas.py
-+++ b/plone/app/upgrade/v31/betas.py
-@@ -29,14 +29,20 @@ def three0_beta1(portal):
+-5. Install a product using the ``portal_quickinstaller`` tool.
++5. Install a product using the ``get_installer`` view (or the old ``portal_quickinstaller`` tool).
  
+ 6. Apply a named extension profile.
  
- def addBrowserLayer(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.browserlayer"):
-         qi.installProduct("plone.browserlayer", locked=True)
-         out.append("Installed plone.browserlayer")
+@@ -49,6 +49,17 @@ component registry (to roll back all global component registrations). Of
+ course, if our setup had changed any other global or external state, we would
+ need to tear that down as well.
  
- 
- def addCollectionAndStaticPortlets(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.portlet.static"):
-         qi.installProduct("plone.portlet.static", locked=True)
-         out.append("Installed plone.portlet.static")
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index e98f8b0..4c4450f 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -67,7 +67,7 @@ def threeX_alpha1(context):
-     """3.x -> 4.0alpha1
-     """
-     try:
--        import plone.app.jquerytools
-+        import plone.app.jquerytools  # noqa
-         loadMigrationProfile(context, 'profile-plone.app.jquerytools:default')
-     except ImportError:
-         pass
-@@ -77,12 +77,23 @@ def threeX_alpha1(context):
-         steps=('controlpanel', 'jsregistry'))
-     # Install plonetheme.classic profile
-     # (if, installed, it will be removed in Plone 5)
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-     stool = getToolByName(context, 'portal_setup')
--    if 'plonetheme.classic' in qi:
--        stool.runAllImportStepsFromProfile(
--            'profile-plonetheme.classic:default'
--        )
-+    if qi is not None:
-+        if 'plonetheme.classic' in qi:
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+            )
-+    else:
-+        # Plone 5.1 and higher.
-+        from Products.CMFPlone.utils import get_installer
-+        qi = get_installer(context)
-+        # It needs to be reinstalled.  Probably this actually does nothing on
-+        # Plone 5, which is fine, but we will try it anyway.
-+        if qi.is_product_installed('plonetheme.classic'):
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+                )
-     # Install packages that are needed for Plone 4,
-     # but don't break on Plone 5 where they are gone
-     for profile in ('archetypes.referencebrowserwidget:default',
-@@ -555,8 +566,8 @@ def cleanUpClassicThemeResources(context):
-     product is uninstalled. These registrations now live in
-     Products.CMFPlone.
-     """
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if 'plonetheme.classic' in qi:
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and 'plonetheme.classic' in qi:
-         classictheme = qi['plonetheme.classic']
-         classictheme.resources_css = []  # empty the list of installed resources
- 
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index b641cbe..ced720d 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -146,8 +146,8 @@ def update_controlpanel_permissions(context):
- 
- 
- def install_outputfilters(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstallable('plone.outputfilters'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstallable('plone.outputfilters'):
-         if not qi.isProductInstalled('plone.outputfilters'):
-             qi.installProduct('plone.outputfilters')
- 
-diff --git a/plone/app/upgrade/v42/final.py b/plone/app/upgrade/v42/final.py
-index b8a6af3..f1eea51 100644
---- a/plone/app/upgrade/v42/final.py
-+++ b/plone/app/upgrade/v42/final.py
-@@ -13,8 +13,9 @@ def to42final_cmfeditions_registry_bases(context):
-     # profile isn't installed and so has no installed version number.
-     # this applies a necessary upgrade step but also establishes a
-     # version for the profile
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('Products.CMFEditions')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('Products.CMFEditions')
- 
- 
- def to42final(context):
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index eddbc97..8588c08 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -232,8 +232,8 @@ def removeKSS(context):
-     cleanUpToolRegistry(context)
- 
-     # make sure plone.app.kss is not activated in the quick installer
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstalled('plone.app.kss'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstalled('plone.app.kss'):
-         qi.uninstallProduct('plone.app.kss')
- 
- 
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index ff4d6c4..b3eb1b1 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -49,8 +49,9 @@ def addDefaultPlonePasswordPolicy(context):
- 
- 
- def addShowInactiveCriteria(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('plone.app.querystring')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('plone.app.querystring')
- 
- 
- def improveSyndication(context):
-@@ -164,7 +165,9 @@ def markProductsInstalledForUninstallableProfiles(context):
-     """
-     from Products.CMFPlone.interfaces import INonInstallable
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     # Get list of profiles that are marked as not installable.
-     profile_ids = []
-     utils = getAllUtilitiesRegisteredFor(INonInstallable)
-@@ -221,7 +224,9 @@ def cleanupUninstalledProducts(context):
-     GS too.
-     """
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     for prod in qi.objectValues():
-         if prod.isInstalled():
-             continue
-diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
-index 098e950..89436b3 100644
---- a/plone/app/upgrade/v43/tests.py
-+++ b/plone/app/upgrade/v43/tests.py
-@@ -278,6 +278,11 @@ def testMarkProductsInstalledForUninstallableProfiles(self):
-         from plone.app.upgrade.v43.final import \
-             markProductsInstalledForUninstallableProfiles
- 
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
++    >>> def is_installed(portal, product_name):
++    ...     try:
++    ...         from Products.CMFPlone.utils import get_installer
++    ...     except ImportError:
++    ...         # BBB For Plone 5.0 and lower.
++    ...         qi = portal['portal_quickinstaller']
++    ...         return qi.isProductInstalled(product_name)
++    ...     else:
++    ...         qi = get_installer(portal)
++    ...         return qi.is_product_installed(product_name)
 +
-         # Register a profile.
-         product_id = 'my.test.package'
-         profile_id = '{0}:default'.format(product_id)
-@@ -299,7 +304,6 @@ def getNonInstallableProfiles(self):
-         setup = getToolByName(self.portal, 'portal_setup')
-         self.assertEqual(
-             setup.getLastVersionForProfile(profile_id), 'unknown')
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-         self.assertFalse(qi.isProductInstalled(product_id))
+     >>> from plone.testing import Layer
+     >>> from plone.testing import zca, z2, zodb
  
-         # Call our upgrade function.  This should have no effect,
-@@ -321,7 +325,10 @@ def getNonInstallableProfiles(self):
+@@ -73,6 +84,16 @@ need to tear that down as well.
+     ...             # Persist GenericSetup profile upgrade versions for easy rollback.
+     ...             helpers.persist_profile_upgrade_versions(portal)
+     ...
++    ...             # First register dummy default and uninstall profiles for plone.app.testing.
++    ...             # We will use this to test that after teardown the installed profile versions get reset.
++    ...             # We used to test this with plone.resource, but that is already installed by default,
++    ...             # which makes it a pain to test with.
++    ...             from Products.GenericSetup.registry import _profile_registry
++    ...             from Products.GenericSetup.interfaces import EXTENSION
++    ...             # 'profile' points to a path with a metadata.xml so we can have a version.
++    ...             _profile_registry.registerProfile('default', u"Testing", u"", "profile", 'plone.app.testing', EXTENSION)
++    ...             _profile_registry.registerProfile('uninstall', u"Testing uninstall", u"", "profile", 'plone.app.testing', EXTENSION)
++    ...
+     ...             # Push a new component registry so that ZCML registations
+     ...             # and other global component registry changes are sandboxed
+     ...             helpers.pushGlobalRegistry(portal)
+@@ -86,7 +107,8 @@ need to tear that down as well.
+     ...             portal.title = u"New title"
+     ...
+     ...             # Install a product using portal_quickinstaller
+-    ...             helpers.quickInstallProduct(portal, 'plone.resource')
++    ...             helpers.quickInstallProduct(portal, 'plone.app.testing')
++    ...             assert is_installed(portal, 'plone.app.testing')
+     ...
+     ...     def tearDown(self):
+     ...
+@@ -138,8 +160,8 @@ and the results of the profile having been applied.
  
-     def testCleanupUninstalledProducts(self):
-         from plone.app.upgrade.v43.final import cleanupUninstalledProducts
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         setup = getToolByName(self.portal, 'portal_setup')
-         # Register three profiles.  I wanted to take 'new' as product
-         # id, but there is already a python module 'new', so that goes
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index 06ac9a4..53a6567 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -49,7 +49,13 @@ def to50alpha1(context):
-     migrate_registry_settings(portal)
+     >>> from Products.GenericSetup.tool import UNKNOWN
+     >>> with helpers.ploneSite() as portal:
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
+-    ...     portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
++    ...     print is_installed(portal, 'plone.app.testing')
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     True
+     False
  
-     # install plone.app.event
--    qi = getToolByName(portal, 'portal_quickinstaller')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+    else:
-+        qi = get_installer(portal)
-     if not qi.isProductInstalled('plone.app.event'):
-         qi.installProduct('plone.app.event')
+@@ -203,9 +225,9 @@ should not.
  
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 54cf111..bfb5bc8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -349,9 +349,17 @@ def to50rc1(context):
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc1')
-     portal = getSite()
-     # install plone.app.linkintegrity and its dependencies
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled('plone.app.linkintegrity'):
--        qi.installProduct('plone.app.linkintegrity')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+        if not qi.isProductInstalled('plone.app.linkintegrity'):
-+            qi.installProduct('plone.app.linkintegrity')
-+    else:
-+        qi = get_installer(portal)
-+        if not qi.is_product_installed('plone.app.linkintegrity'):
-+            qi.install_product('plone.app.linkintegrity')
-     migrate_linkintegrity_relations(portal)
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal.title
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     print is_installed(portal, 'plone.app.testing')
+     ...     'folder1' in portal.objectIds()
+-    ...     portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     New title
+     True
+     False
+@@ -224,11 +246,11 @@ component architecture changes from our layer.
  
-     upgrade_usergroups_controlpanel_settings(context)
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal.title
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
+-    ...     # This should be True, but is False:
+-    ...     # portal.portal_setup.getLastVersionForProfile('plone.resource:default') == UNKNOWN
++    ...     print is_installed(portal, 'plone.app.testing')
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     Plone site
+     False
++    True
+ 
+ Let's tear down the rest of the layers too.
+ 
+diff --git a/plone/app/testing/profile/metadata.xml b/plone/app/testing/profile/metadata.xml
+new file mode 100644
+index 0000000..6ce5b66
+--- /dev/null
++++ b/plone/app/testing/profile/metadata.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0"?>
++<metadata>
++  <!-- This is used in the helpers.rst tests. -->
++  <version>1000</version>
++</metadata>
 
 
-Repository: plone.app.upgrade
+Repository: plone.app.testing
 
 
 Branch: refs/heads/master
-Date: 2016-09-21T11:53:41+02:00
+Date: 2016-09-21T11:53:53+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/949b0f9c2ef862d57a7e479c490a43f5437bf458
+Commit: https://github.com/plone/plone.app.testing/commit/f424bbe7b54d498e1a7f6cc458ba6a34ead3b5b2
 
-Merge pull request #86 from plone/get-rid-of-qi
+Merge pull request #29 from plone/get-rid-of-qi
 
-Support sites without portal_quickinstaller.
+Use get_installer and make profile upgrade versions persistent
 
 Files changed:
+A plone/app/testing/profile/metadata.xml
 M CHANGES.rst
-M plone/app/upgrade/tests/base.py
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v30/tests.py
-M plone/app/upgrade/v31/betas.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v42/final.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v43/tests.py
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
+M plone/app/testing/helpers.py
+M plone/app/testing/helpers.rst
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 69b5c8a..749fd77 100644
+index 5736f5c..399723c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,15 @@ Breaking changes:
+@@ -10,7 +10,11 @@ Breaking changes:
  
  New features:
  
-+- Support sites without ``portal_quickinstaller``.
-+  We use ``get_installer`` in Plone 5.1 migrations.
-+  In earlier version we will keep using the ``portal_quickinstaller``,
-+  because ``get_installer`` is not available.
-+  In shared utility and base code, we try to import get_installer,
-+  and fall back on the previous implementation.
-+  See `PLIP 1340 <https://github.com/plone/Products.CMFPlone/issues/1340>`_.
-+  [maurits]
+-- *add item here*
++- Use get_installer instead of portal_quickinstaller when available, for
++  Plone 5.1 and higher.  [maurits]
 +
- - Add new Mockup 2.4.0 relateditems resource url.
-   [thet]
++- In PloneSandboxLayer make profile upgrade versions persistent.  This
++  way installed profile versions get reset in teardown.  [maurits]
  
-diff --git a/plone/app/upgrade/tests/base.py b/plone/app/upgrade/tests/base.py
-index b403e32..1f60274 100644
---- a/plone/app/upgrade/tests/base.py
-+++ b/plone/app/upgrade/tests/base.py
-@@ -87,9 +87,17 @@ def removeMemberdataProperty(self, property_id):
+ Bug fixes:
  
-     def uninstallProduct(self, product_name):
-         # Removes a product
--        tool = getToolByName(self.portal, 'portal_quickinstaller')
--        if tool.isProductInstalled(product_name):
--            tool.uninstallProducts([product_name])
-+        try:
-+            from Products.CMFPlone.utils import get_installer
-+        except ImportError:
-+            # BBB For Plone 5.0 and lower.
-+            qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+            if qi is None:
-+                return
-+        else:
-+            qi = get_installer(self.portal)
-+        if qi.isProductInstalled(product_name):
-+            qi.uninstallProducts([product_name])
+diff --git a/plone/app/testing/helpers.py b/plone/app/testing/helpers.py
+index 905ed21..1a60080 100644
+--- a/plone/app/testing/helpers.py
++++ b/plone/app/testing/helpers.py
+@@ -84,13 +84,27 @@ def quickInstallProduct(portal, productName, reinstall=False):
+     z2.login(app['acl_users'], SITE_OWNER_NAME)
  
-     def addSkinLayer(self, layer, skin='Plone Default', pos=None):
-         # Adds a skin layer at pos. If pos is None, the layer is appended
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 5b2491b..10ed8bc 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -106,25 +106,45 @@ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
-     If product is already installed test if it needs to be reinstalled. Also
-     fix skins after reinstalling
-     """
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled(product_name):
--        qi.installProduct(product_name, hidden=hidden)
--        # Refresh skins
--        portal.clearCurrentSkin()
--        if getattr(portal, 'REQUEST', None):
--            portal.setupCurrentSkin(portal.REQUEST)
--        logger.info("Installed %s" % product_name)
-+    try:
+     try:
+-        quickinstaller = portal['portal_quickinstaller']
 +        from Products.CMFPlone.utils import get_installer
 +    except ImportError:
 +        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            return
++        qi = portal['portal_quickinstaller']
 +        old_qi = True
 +    else:
 +        qi = get_installer(portal)
 +        old_qi = False
-+    if old_qi:
-+        if not qi.isProductInstalled(product_name):
-+            qi.installProduct(product_name, hidden=hidden)
-+            logger.info("Installed %s" % product_name)
-+        elif old_qi:
-+            info = qi._getOb(product_name)
-+            installed_version = info.getInstalledVersion()
-+            product_version = qi.getProductVersion(product_name)
-+            if installed_version != product_version:
-+                qi.reinstallProducts([product_name])
-+                logger.info("%s is out of date (installed: %s/ "
-+                            "filesystem: %s), reinstalled." % (
-+                                product_name, installed_version,
-+                                product_version))
-+            else:
-+                logger.info('%s already installed.' % product_name)
-     else:
--        info = qi._getOb(product_name)
--        installed_version = info.getInstalledVersion()
--        product_version = qi.getProductVersion(product_name)
--        if installed_version != product_version:
--            qi.reinstallProducts([product_name])
--            logger.info("%s is out of date (installed: %s/ filesystem: %s), "
--                        "reinstalled." % (product_name, installed_version,
--                                          product_version))
-+        # New QI browser view.
-+        if not qi.is_product_installed(product_name):
-+            qi.install_product(product_name, allow_hidden=True)
-+            logger.info("Installed %s" % product_name)
+ 
+-        if quickinstaller.isProductInstalled(productName):
+-            if reinstall:
+-                quickinstaller.reinstallProducts([productName])
++    try:
++        if old_qi:
++            if not qi.isProductInstalled(productName):
++                qi.installProduct(productName)
++            elif reinstall:
++                qi.reinstallProducts([productName])
          else:
--            logger.info('%s already installed.' % product_name)
-+            qi.upgrade_product(product_name)
-+            logger.info("Upgraded %s", product_name)
-+    # Refresh skins
-+    portal.clearCurrentSkin()
-+    if getattr(portal, 'REQUEST', None):
-+        portal.setupCurrentSkin(portal.REQUEST)
+-            quickinstaller.installProduct(productName)
++            if not qi.is_product_installed(productName):
++                qi.install_product(productName, allow_hidden=True)
++            elif reinstall:
++                qi.uninstall_product(productName)
++                qi.install_product(productName, allow_hidden=True)
+ 
+         portal.clearCurrentSkin()
+         portal.setupCurrentSkin(portal.REQUEST)
+@@ -204,6 +218,21 @@ def popGlobalRegistry(portal):
+     return previous
  
  
- def loadMigrationProfile(context, profile, steps=_marker):
-diff --git a/plone/app/upgrade/v30/tests.py b/plone/app/upgrade/v30/tests.py
-index bab3076..e4954e7 100644
---- a/plone/app/upgrade/v30/tests.py
-+++ b/plone/app/upgrade/v30/tests.py
-@@ -837,7 +837,10 @@ def testInstallPloneLanguageTool(self):
-         super(self.portal.__class__, self.portal).manage_delObjects(
-             ['portal_languages'])
-         self.uninstallProduct('PloneLanguageTool')
--        qi = getToolByName(self.portal, "portal_quickinstaller")
-+        qi = getToolByName(self.portal, "portal_quickinstaller", None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         # Test it twice
-         for i in range(2):
-             installProduct('PloneLanguageTool', self.portal)
-diff --git a/plone/app/upgrade/v31/betas.py b/plone/app/upgrade/v31/betas.py
-index b621f9c..1748c17 100644
---- a/plone/app/upgrade/v31/betas.py
-+++ b/plone/app/upgrade/v31/betas.py
-@@ -29,14 +29,20 @@ def three0_beta1(portal):
- 
- 
- def addBrowserLayer(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.browserlayer"):
-         qi.installProduct("plone.browserlayer", locked=True)
-         out.append("Installed plone.browserlayer")
- 
- 
- def addCollectionAndStaticPortlets(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.portlet.static"):
-         qi.installProduct("plone.portlet.static", locked=True)
-         out.append("Installed plone.portlet.static")
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index e98f8b0..4c4450f 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -67,7 +67,7 @@ def threeX_alpha1(context):
-     """3.x -> 4.0alpha1
-     """
-     try:
--        import plone.app.jquerytools
-+        import plone.app.jquerytools  # noqa
-         loadMigrationProfile(context, 'profile-plone.app.jquerytools:default')
-     except ImportError:
-         pass
-@@ -77,12 +77,23 @@ def threeX_alpha1(context):
-         steps=('controlpanel', 'jsregistry'))
-     # Install plonetheme.classic profile
-     # (if, installed, it will be removed in Plone 5)
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-     stool = getToolByName(context, 'portal_setup')
--    if 'plonetheme.classic' in qi:
--        stool.runAllImportStepsFromProfile(
--            'profile-plonetheme.classic:default'
--        )
-+    if qi is not None:
-+        if 'plonetheme.classic' in qi:
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+            )
-+    else:
-+        # Plone 5.1 and higher.
-+        from Products.CMFPlone.utils import get_installer
-+        qi = get_installer(context)
-+        # It needs to be reinstalled.  Probably this actually does nothing on
-+        # Plone 5, which is fine, but we will try it anyway.
-+        if qi.is_product_installed('plonetheme.classic'):
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+                )
-     # Install packages that are needed for Plone 4,
-     # but don't break on Plone 5 where they are gone
-     for profile in ('archetypes.referencebrowserwidget:default',
-@@ -555,8 +566,8 @@ def cleanUpClassicThemeResources(context):
-     product is uninstalled. These registrations now live in
-     Products.CMFPlone.
-     """
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if 'plonetheme.classic' in qi:
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and 'plonetheme.classic' in qi:
-         classictheme = qi['plonetheme.classic']
-         classictheme.resources_css = []  # empty the list of installed resources
- 
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index b641cbe..ced720d 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -146,8 +146,8 @@ def update_controlpanel_permissions(context):
- 
- 
- def install_outputfilters(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstallable('plone.outputfilters'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstallable('plone.outputfilters'):
-         if not qi.isProductInstalled('plone.outputfilters'):
-             qi.installProduct('plone.outputfilters')
- 
-diff --git a/plone/app/upgrade/v42/final.py b/plone/app/upgrade/v42/final.py
-index b8a6af3..f1eea51 100644
---- a/plone/app/upgrade/v42/final.py
-+++ b/plone/app/upgrade/v42/final.py
-@@ -13,8 +13,9 @@ def to42final_cmfeditions_registry_bases(context):
-     # profile isn't installed and so has no installed version number.
-     # this applies a necessary upgrade step but also establishes a
-     # version for the profile
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('Products.CMFEditions')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('Products.CMFEditions')
- 
- 
- def to42final(context):
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index eddbc97..8588c08 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -232,8 +232,8 @@ def removeKSS(context):
-     cleanUpToolRegistry(context)
- 
-     # make sure plone.app.kss is not activated in the quick installer
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstalled('plone.app.kss'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstalled('plone.app.kss'):
-         qi.uninstallProduct('plone.app.kss')
- 
- 
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index ff4d6c4..b3eb1b1 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -49,8 +49,9 @@ def addDefaultPlonePasswordPolicy(context):
- 
- 
- def addShowInactiveCriteria(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('plone.app.querystring')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('plone.app.querystring')
- 
- 
- def improveSyndication(context):
-@@ -164,7 +165,9 @@ def markProductsInstalledForUninstallableProfiles(context):
-     """
-     from Products.CMFPlone.interfaces import INonInstallable
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     # Get list of profiles that are marked as not installable.
-     profile_ids = []
-     utils = getAllUtilitiesRegisteredFor(INonInstallable)
-@@ -221,7 +224,9 @@ def cleanupUninstalledProducts(context):
-     GS too.
-     """
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     for prod in qi.objectValues():
-         if prod.isInstalled():
-             continue
-diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
-index 098e950..89436b3 100644
---- a/plone/app/upgrade/v43/tests.py
-+++ b/plone/app/upgrade/v43/tests.py
-@@ -278,6 +278,11 @@ def testMarkProductsInstalledForUninstallableProfiles(self):
-         from plone.app.upgrade.v43.final import \
-             markProductsInstalledForUninstallableProfiles
- 
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
++def persist_profile_upgrade_versions(portal):
++    """Persist the profile_upgrade_versions of portal_setup.
 +
-         # Register a profile.
-         product_id = 'my.test.package'
-         profile_id = '{0}:default'.format(product_id)
-@@ -299,7 +304,6 @@ def getNonInstallableProfiles(self):
-         setup = getToolByName(self.portal, 'portal_setup')
-         self.assertEqual(
-             setup.getLastVersionForProfile(profile_id), 'unknown')
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-         self.assertFalse(qi.isProductInstalled(product_id))
++    Until at least Products.GenericSetup 1.8.3 this is a standard
++    non-persistent dictionary, which means a transaction rollback does
++    not rollback changes to this dictionary.  So we make it a persistent
++    mapping.  Call this once in layer setup and you have easy rollback.
++    """
++    from persistent.mapping import PersistentMapping
++    puv = portal.portal_setup._profile_upgrade_versions
++    if isinstance(puv, PersistentMapping):
++        return
++    portal.portal_setup._profile_upgrade_versions = PersistentMapping(puv)
++
++
+ @contextlib.contextmanager
+ def ploneSite(db=None, connection=None, environ=None):
+     """Context manager for working with the Plone portal during layer setup::
+@@ -325,6 +354,10 @@ def setUp(self):
+                 # and other global component registry changes are sandboxed
+                 pushGlobalRegistry(portal)
  
-         # Call our upgrade function.  This should have no effect,
-@@ -321,7 +325,10 @@ def getNonInstallableProfiles(self):
++                # Persist GenericSetup profile upgrade versions for easy
++                # rollback.
++                persist_profile_upgrade_versions(portal)
++
+                 # Make sure zope.security checkers can be set up and torn down
+                 # reliably
  
-     def testCleanupUninstalledProducts(self):
-         from plone.app.upgrade.v43.final import cleanupUninstalledProducts
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         setup = getToolByName(self.portal, 'portal_setup')
-         # Register three profiles.  I wanted to take 'new' as product
-         # id, but there is already a python module 'new', so that goes
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index 06ac9a4..53a6567 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -49,7 +49,13 @@ def to50alpha1(context):
-     migrate_registry_settings(portal)
+diff --git a/plone/app/testing/helpers.rst b/plone/app/testing/helpers.rst
+index 9ce0ca4..a67bd2f 100644
+--- a/plone/app/testing/helpers.rst
++++ b/plone/app/testing/helpers.rst
+@@ -38,7 +38,7 @@ layer, we will perform the following setup:
+ 4. Make some persistent changes, to illustrate how these are torn down when
+    we pop the ZODB ``DemoStorage``.
  
-     # install plone.app.event
--    qi = getToolByName(portal, 'portal_quickinstaller')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+    else:
-+        qi = get_installer(portal)
-     if not qi.isProductInstalled('plone.app.event'):
-         qi.installProduct('plone.app.event')
+-5. Install a product using the ``portal_quickinstaller`` tool.
++5. Install a product using the ``get_installer`` view (or the old ``portal_quickinstaller`` tool).
  
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 54cf111..bfb5bc8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -349,9 +349,17 @@ def to50rc1(context):
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc1')
-     portal = getSite()
-     # install plone.app.linkintegrity and its dependencies
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled('plone.app.linkintegrity'):
--        qi.installProduct('plone.app.linkintegrity')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+        if not qi.isProductInstalled('plone.app.linkintegrity'):
-+            qi.installProduct('plone.app.linkintegrity')
-+    else:
-+        qi = get_installer(portal)
-+        if not qi.is_product_installed('plone.app.linkintegrity'):
-+            qi.install_product('plone.app.linkintegrity')
-     migrate_linkintegrity_relations(portal)
+ 6. Apply a named extension profile.
  
-     upgrade_usergroups_controlpanel_settings(context)
+@@ -49,6 +49,17 @@ component registry (to roll back all global component registrations). Of
+ course, if our setup had changed any other global or external state, we would
+ need to tear that down as well.
+ 
++    >>> def is_installed(portal, product_name):
++    ...     try:
++    ...         from Products.CMFPlone.utils import get_installer
++    ...     except ImportError:
++    ...         # BBB For Plone 5.0 and lower.
++    ...         qi = portal['portal_quickinstaller']
++    ...         return qi.isProductInstalled(product_name)
++    ...     else:
++    ...         qi = get_installer(portal)
++    ...         return qi.is_product_installed(product_name)
++
+     >>> from plone.testing import Layer
+     >>> from plone.testing import zca, z2, zodb
+ 
+@@ -70,6 +81,19 @@ need to tear that down as well.
+     ...
+     ...         with helpers.ploneSite() as portal:
+     ...
++    ...             # Persist GenericSetup profile upgrade versions for easy rollback.
++    ...             helpers.persist_profile_upgrade_versions(portal)
++    ...
++    ...             # First register dummy default and uninstall profiles for plone.app.testing.
++    ...             # We will use this to test that after teardown the installed profile versions get reset.
++    ...             # We used to test this with plone.resource, but that is already installed by default,
++    ...             # which makes it a pain to test with.
++    ...             from Products.GenericSetup.registry import _profile_registry
++    ...             from Products.GenericSetup.interfaces import EXTENSION
++    ...             # 'profile' points to a path with a metadata.xml so we can have a version.
++    ...             _profile_registry.registerProfile('default', u"Testing", u"", "profile", 'plone.app.testing', EXTENSION)
++    ...             _profile_registry.registerProfile('uninstall', u"Testing uninstall", u"", "profile", 'plone.app.testing', EXTENSION)
++    ...
+     ...             # Push a new component registry so that ZCML registations
+     ...             # and other global component registry changes are sandboxed
+     ...             helpers.pushGlobalRegistry(portal)
+@@ -83,7 +107,8 @@ need to tear that down as well.
+     ...             portal.title = u"New title"
+     ...
+     ...             # Install a product using portal_quickinstaller
+-    ...             helpers.quickInstallProduct(portal, 'plone.resource')
++    ...             helpers.quickInstallProduct(portal, 'plone.app.testing')
++    ...             assert is_installed(portal, 'plone.app.testing')
+     ...
+     ...     def tearDown(self):
+     ...
+@@ -133,9 +158,12 @@ having taken effect.
+ We should also see our product installation in the quickinstaller tool
+ and the results of the profile having been applied.
+ 
++    >>> from Products.GenericSetup.tool import UNKNOWN
+     >>> with helpers.ploneSite() as portal:
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     print is_installed(portal, 'plone.app.testing')
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     True
++    False
+ 
+ Let's now simulate a test.
+ 
+@@ -197,11 +225,13 @@ should not.
+ 
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal.title
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     print is_installed(portal, 'plone.app.testing')
+     ...     'folder1' in portal.objectIds()
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     New title
+     True
+     False
++    False
+ 
+ We'll now tear down just the ``HELPER_DEMOS_INTEGRATION_TESTING`` layer. At this
+ point, we should still have a Plone site, but none of the persistent or
+@@ -216,9 +246,11 @@ component architecture changes from our layer.
+ 
+     >>> with helpers.ploneSite() as portal:
+     ...     print portal.title
+-    ...     print portal['portal_quickinstaller'].isProductInstalled('plone.resource')
++    ...     print is_installed(portal, 'plone.app.testing')
++    ...     portal.portal_setup.getLastVersionForProfile('plone.app.testing:default') == UNKNOWN
+     Plone site
+     False
++    True
+ 
+ Let's tear down the rest of the layers too.
+ 
+@@ -254,10 +286,13 @@ layer base class which helps implement this pattern.
+     ...         from Products.GenericSetup.registry import _profile_registry
+     ...         from Products.GenericSetup.registry import _import_step_registry
+     ...         from Products.GenericSetup.registry import _export_step_registry
++    ...         from Products.GenericSetup import upgrade
+     ...
+     ...         _profile_registry.registerProfile('dummy1', u"My package", u"", ".", 'plone.app.testing')
+     ...         _import_step_registry.registerStep('import1', version=1, handler='plone.app.testing.tests.dummy', title=u"Dummy import step", description=u"")
+     ...         _export_step_registry.registerStep('export1', handler='plone.app.testing.tests.dummy', title=u"Dummy import step", description=u"")
++    ...         upgrade_step = upgrade.UpgradeStep(u'Dummy upgrade step', 'plone.app.testing:default', '1000', '1001', '', 'plone.app.testing.tests.dummy')
++    ...         upgrade._registerUpgradeStep(upgrade_step)
+     ...
+     ...         # And then pretend to register a PAS multi-plugin
+     ...         from Products.PluggableAuthService import PluggableAuthService
+@@ -336,6 +371,7 @@ Again, our state should now be available.
+     >>> from Products.GenericSetup.registry import _profile_registry
+     >>> from Products.GenericSetup.registry import _import_step_registry
+     >>> from Products.GenericSetup.registry import _export_step_registry
++    >>> from Products.GenericSetup.upgrade import _upgrade_registry
+ 
+     >>> numProfiles = len(_profile_registry.listProfiles())
+     >>> 'plone.app.testing:dummy1' in _profile_registry.listProfiles()
+@@ -353,6 +389,10 @@ Again, our state should now be available.
+     >>> 'dummy_plugin1' in PluggableAuthService.MultiPlugins
+     True
+ 
++    >>> numUpgrades = len(_upgrade_registry.keys())
++    >>> len(_upgrade_registry.getUpgradeStepsForProfile('plone.app.testing:default'))
++    1
++
+ We'll now tear down just the ``MY_INTEGRATION_TESTING`` layer. At this
+ point, we should still have a Plone site, but none of the changes from our
+ layer.
+@@ -385,6 +425,11 @@ layer.
+     >>> 'export1' in _export_step_registry.listSteps()
+     False
+ 
++    >>> len(_upgrade_registry.keys()) == numUpgrades - 1
++    True
++    >>> len(_upgrade_registry.getUpgradeStepsForProfile('plone.app.testing:default'))
++    0
++
+     >>> from Products.PluggableAuthService import PluggableAuthService
+     >>> 'dummy_plugin1' in PluggableAuthService.MultiPlugins
+     False
+diff --git a/plone/app/testing/profile/metadata.xml b/plone/app/testing/profile/metadata.xml
+new file mode 100644
+index 0000000..6ce5b66
+--- /dev/null
++++ b/plone/app/testing/profile/metadata.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0"?>
++<metadata>
++  <!-- This is used in the helpers.rst tests. -->
++  <version>1000</version>
++</metadata>
 
 
