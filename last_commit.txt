@@ -2,812 +2,99 @@ Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-09-21T00:57:38+02:00
+Date: 2016-09-27T14:19:44+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/45823b9d2572aa40aa1fd521a54d7a4f8ce69ed5
+Commit: https://github.com/plone/plone.app.upgrade/commit/3d4f84111c071269c5dbda04860e87a29039949a
 
-Support sites without portal_quickinstaller.
+Install plone.resource in Plone 5.0 alpha 3.
 
-We can use get_installer in Plone 5.1 migrations.
-In earlier version we will keep using the portal_quickinstaller,
-because get_installer is not available.
+Fixes possible ``TypeError: argument of type 'NoneType' is not iterable``
+when migrating from Plone 4.3 for a site that did not have
+plone.resource or diazo installed yet.
 
-In a getToolByName call for portal_quickinstaller, we will pass a
-default of None, so an upgrade can still work if the portal tool has
-already been removed.
-
-In shared utility and base code, we will try to import get_installer,
-and fall back on the previous implementation.
-
-https://github.com/plone/Products.CMFPlone/issues/1340
+Fixes https://github.com/plone/Products.CMFPlone/issues/1756
 
 Files changed:
+A plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
 M CHANGES.rst
-M plone/app/upgrade/tests/base.py
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v30/tests.py
-M plone/app/upgrade/v31/betas.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v42/final.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v43/tests.py
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 69b5c8a..749fd77 100644
+index 749fd77..960a71d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,15 @@ Breaking changes:
+@@ -28,6 +28,12 @@ New features:
  
- New features:
+ Bug fixes:
  
-+- Support sites without ``portal_quickinstaller``.
-+  We use ``get_installer`` in Plone 5.1 migrations.
-+  In earlier version we will keep using the ``portal_quickinstaller``,
-+  because ``get_installer`` is not available.
-+  In shared utility and base code, we try to import get_installer,
-+  and fall back on the previous implementation.
-+  See `PLIP 1340 <https://github.com/plone/Products.CMFPlone/issues/1340>`_.
-+  [maurits]
++- Install plone.resource in Plone 5.0 alpha 3.  Fixes possible
++  ``TypeError: argument of type 'NoneType' is not iterable`` when
++  migrating from Plone 4.3 for a site that did not have plone.resource
++  or diazo installed yet.
++  Fixes `issue 1756 <https://github.com/plone/Products.CMFPlone/issues/1756>`_. [maurits]
 +
- - Add new Mockup 2.4.0 relateditems resource url.
-   [thet]
+ - Be sure smtp_port is an integer.
+   [ale-rt]
  
-diff --git a/plone/app/upgrade/tests/base.py b/plone/app/upgrade/tests/base.py
-index b403e32..1f60274 100644
---- a/plone/app/upgrade/tests/base.py
-+++ b/plone/app/upgrade/tests/base.py
-@@ -87,9 +87,17 @@ def removeMemberdataProperty(self, property_id):
- 
-     def uninstallProduct(self, product_name):
-         # Removes a product
--        tool = getToolByName(self.portal, 'portal_quickinstaller')
--        if tool.isProductInstalled(product_name):
--            tool.uninstallProducts([product_name])
-+        try:
-+            from Products.CMFPlone.utils import get_installer
-+        except ImportError:
-+            # BBB For Plone 5.0 and lower.
-+            qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+            if qi is None:
-+                return
-+        else:
-+            qi = get_installer(self.portal)
-+        if qi.isProductInstalled(product_name):
-+            qi.uninstallProducts([product_name])
- 
-     def addSkinLayer(self, layer, skin='Plone Default', pos=None):
-         # Adds a skin layer at pos. If pos is None, the layer is appended
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 5b2491b..10ed8bc 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -106,25 +106,45 @@ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
-     If product is already installed test if it needs to be reinstalled. Also
-     fix skins after reinstalling
-     """
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled(product_name):
--        qi.installProduct(product_name, hidden=hidden)
--        # Refresh skins
--        portal.clearCurrentSkin()
--        if getattr(portal, 'REQUEST', None):
--            portal.setupCurrentSkin(portal.REQUEST)
--        logger.info("Installed %s" % product_name)
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            return
-+        old_qi = True
-+    else:
-+        qi = get_installer(portal)
-+        old_qi = False
-+    if old_qi:
-+        if not qi.isProductInstalled(product_name):
-+            qi.installProduct(product_name, hidden=hidden)
-+            logger.info("Installed %s" % product_name)
-+        elif old_qi:
-+            info = qi._getOb(product_name)
-+            installed_version = info.getInstalledVersion()
-+            product_version = qi.getProductVersion(product_name)
-+            if installed_version != product_version:
-+                qi.reinstallProducts([product_name])
-+                logger.info("%s is out of date (installed: %s/ "
-+                            "filesystem: %s), reinstalled." % (
-+                                product_name, installed_version,
-+                                product_version))
-+            else:
-+                logger.info('%s already installed.' % product_name)
-     else:
--        info = qi._getOb(product_name)
--        installed_version = info.getInstalledVersion()
--        product_version = qi.getProductVersion(product_name)
--        if installed_version != product_version:
--            qi.reinstallProducts([product_name])
--            logger.info("%s is out of date (installed: %s/ filesystem: %s), "
--                        "reinstalled." % (product_name, installed_version,
--                                          product_version))
-+        # New QI browser view.
-+        if not qi.is_product_installed(product_name):
-+            qi.install_product(product_name, allow_hidden=True)
-+            logger.info("Installed %s" % product_name)
-         else:
--            logger.info('%s already installed.' % product_name)
-+            qi.upgrade_product(product_name)
-+            logger.info("Upgraded %s", product_name)
-+    # Refresh skins
-+    portal.clearCurrentSkin()
-+    if getattr(portal, 'REQUEST', None):
-+        portal.setupCurrentSkin(portal.REQUEST)
- 
- 
- def loadMigrationProfile(context, profile, steps=_marker):
-diff --git a/plone/app/upgrade/v30/tests.py b/plone/app/upgrade/v30/tests.py
-index bab3076..e4954e7 100644
---- a/plone/app/upgrade/v30/tests.py
-+++ b/plone/app/upgrade/v30/tests.py
-@@ -837,7 +837,10 @@ def testInstallPloneLanguageTool(self):
-         super(self.portal.__class__, self.portal).manage_delObjects(
-             ['portal_languages'])
-         self.uninstallProduct('PloneLanguageTool')
--        qi = getToolByName(self.portal, "portal_quickinstaller")
-+        qi = getToolByName(self.portal, "portal_quickinstaller", None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         # Test it twice
-         for i in range(2):
-             installProduct('PloneLanguageTool', self.portal)
-diff --git a/plone/app/upgrade/v31/betas.py b/plone/app/upgrade/v31/betas.py
-index b621f9c..1748c17 100644
---- a/plone/app/upgrade/v31/betas.py
-+++ b/plone/app/upgrade/v31/betas.py
-@@ -29,14 +29,20 @@ def three0_beta1(portal):
- 
- 
- def addBrowserLayer(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.browserlayer"):
-         qi.installProduct("plone.browserlayer", locked=True)
-         out.append("Installed plone.browserlayer")
- 
- 
- def addCollectionAndStaticPortlets(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.portlet.static"):
-         qi.installProduct("plone.portlet.static", locked=True)
-         out.append("Installed plone.portlet.static")
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index e98f8b0..4c4450f 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -67,7 +67,7 @@ def threeX_alpha1(context):
-     """3.x -> 4.0alpha1
-     """
-     try:
--        import plone.app.jquerytools
-+        import plone.app.jquerytools  # noqa
-         loadMigrationProfile(context, 'profile-plone.app.jquerytools:default')
-     except ImportError:
-         pass
-@@ -77,12 +77,23 @@ def threeX_alpha1(context):
-         steps=('controlpanel', 'jsregistry'))
-     # Install plonetheme.classic profile
-     # (if, installed, it will be removed in Plone 5)
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-     stool = getToolByName(context, 'portal_setup')
--    if 'plonetheme.classic' in qi:
--        stool.runAllImportStepsFromProfile(
--            'profile-plonetheme.classic:default'
--        )
-+    if qi is not None:
-+        if 'plonetheme.classic' in qi:
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+            )
-+    else:
-+        # Plone 5.1 and higher.
-+        from Products.CMFPlone.utils import get_installer
-+        qi = get_installer(context)
-+        # It needs to be reinstalled.  Probably this actually does nothing on
-+        # Plone 5, which is fine, but we will try it anyway.
-+        if qi.is_product_installed('plonetheme.classic'):
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+                )
-     # Install packages that are needed for Plone 4,
-     # but don't break on Plone 5 where they are gone
-     for profile in ('archetypes.referencebrowserwidget:default',
-@@ -555,8 +566,8 @@ def cleanUpClassicThemeResources(context):
-     product is uninstalled. These registrations now live in
-     Products.CMFPlone.
-     """
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if 'plonetheme.classic' in qi:
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and 'plonetheme.classic' in qi:
-         classictheme = qi['plonetheme.classic']
-         classictheme.resources_css = []  # empty the list of installed resources
- 
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index b641cbe..ced720d 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -146,8 +146,8 @@ def update_controlpanel_permissions(context):
- 
- 
- def install_outputfilters(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstallable('plone.outputfilters'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstallable('plone.outputfilters'):
-         if not qi.isProductInstalled('plone.outputfilters'):
-             qi.installProduct('plone.outputfilters')
- 
-diff --git a/plone/app/upgrade/v42/final.py b/plone/app/upgrade/v42/final.py
-index b8a6af3..f1eea51 100644
---- a/plone/app/upgrade/v42/final.py
-+++ b/plone/app/upgrade/v42/final.py
-@@ -13,8 +13,9 @@ def to42final_cmfeditions_registry_bases(context):
-     # profile isn't installed and so has no installed version number.
-     # this applies a necessary upgrade step but also establishes a
-     # version for the profile
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('Products.CMFEditions')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('Products.CMFEditions')
- 
- 
- def to42final(context):
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index eddbc97..8588c08 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -232,8 +232,8 @@ def removeKSS(context):
-     cleanUpToolRegistry(context)
- 
-     # make sure plone.app.kss is not activated in the quick installer
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstalled('plone.app.kss'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstalled('plone.app.kss'):
-         qi.uninstallProduct('plone.app.kss')
- 
- 
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index ff4d6c4..b3eb1b1 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -49,8 +49,9 @@ def addDefaultPlonePasswordPolicy(context):
- 
- 
- def addShowInactiveCriteria(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('plone.app.querystring')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('plone.app.querystring')
- 
- 
- def improveSyndication(context):
-@@ -164,7 +165,9 @@ def markProductsInstalledForUninstallableProfiles(context):
-     """
-     from Products.CMFPlone.interfaces import INonInstallable
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     # Get list of profiles that are marked as not installable.
-     profile_ids = []
-     utils = getAllUtilitiesRegisteredFor(INonInstallable)
-@@ -221,7 +224,9 @@ def cleanupUninstalledProducts(context):
-     GS too.
-     """
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     for prod in qi.objectValues():
-         if prod.isInstalled():
-             continue
-diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
-index 098e950..89436b3 100644
---- a/plone/app/upgrade/v43/tests.py
-+++ b/plone/app/upgrade/v43/tests.py
-@@ -278,6 +278,11 @@ def testMarkProductsInstalledForUninstallableProfiles(self):
-         from plone.app.upgrade.v43.final import \
-             markProductsInstalledForUninstallableProfiles
- 
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-+
-         # Register a profile.
-         product_id = 'my.test.package'
-         profile_id = '{0}:default'.format(product_id)
-@@ -299,7 +304,6 @@ def getNonInstallableProfiles(self):
-         setup = getToolByName(self.portal, 'portal_setup')
-         self.assertEqual(
-             setup.getLastVersionForProfile(profile_id), 'unknown')
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-         self.assertFalse(qi.isProductInstalled(product_id))
- 
-         # Call our upgrade function.  This should have no effect,
-@@ -321,7 +325,10 @@ def getNonInstallableProfiles(self):
- 
-     def testCleanupUninstalledProducts(self):
-         from plone.app.upgrade.v43.final import cleanupUninstalledProducts
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         setup = getToolByName(self.portal, 'portal_setup')
-         # Register three profiles.  I wanted to take 'new' as product
-         # id, but there is already a python module 'new', so that goes
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index 06ac9a4..53a6567 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -49,7 +49,13 @@ def to50alpha1(context):
-     migrate_registry_settings(portal)
- 
-     # install plone.app.event
--    qi = getToolByName(portal, 'portal_quickinstaller')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+    else:
-+        qi = get_installer(portal)
-     if not qi.isProductInstalled('plone.app.event'):
-         qi.installProduct('plone.app.event')
- 
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 54cf111..bfb5bc8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -349,9 +349,17 @@ def to50rc1(context):
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc1')
-     portal = getSite()
-     # install plone.app.linkintegrity and its dependencies
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled('plone.app.linkintegrity'):
--        qi.installProduct('plone.app.linkintegrity')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+        if not qi.isProductInstalled('plone.app.linkintegrity'):
-+            qi.installProduct('plone.app.linkintegrity')
-+    else:
-+        qi = get_installer(portal)
-+        if not qi.is_product_installed('plone.app.linkintegrity'):
-+            qi.install_product('plone.app.linkintegrity')
-     migrate_linkintegrity_relations(portal)
- 
-     upgrade_usergroups_controlpanel_settings(context)
+diff --git a/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml b/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
+new file mode 100644
+index 0000000..d6f609c
+--- /dev/null
++++ b/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0"?>
++<metadata>
++  <version>1000</version>
++  <dependencies>
++    <dependency>profile-plone.resource:default</dependency>
++  </dependencies>
++</metadata>
 
 
 Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-09-21T11:53:41+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/949b0f9c2ef862d57a7e479c490a43f5437bf458
+Date: 2016-09-27T16:58:59+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.upgrade/commit/0cc09f9a3d9cc79d5e7e1b2074a090893f3a2381
 
-Merge pull request #86 from plone/get-rid-of-qi
+Merge pull request #88 from plone/install-plone-resource-in-50a3
 
-Support sites without portal_quickinstaller.
+Install plone.resource in Plone 5.0 alpha 3.
 
 Files changed:
+A plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
 M CHANGES.rst
-M plone/app/upgrade/tests/base.py
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v30/tests.py
-M plone/app/upgrade/v31/betas.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v42/final.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v43/tests.py
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 69b5c8a..749fd77 100644
+index 749fd77..960a71d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,6 +10,15 @@ Breaking changes:
+@@ -28,6 +28,12 @@ New features:
  
- New features:
+ Bug fixes:
  
-+- Support sites without ``portal_quickinstaller``.
-+  We use ``get_installer`` in Plone 5.1 migrations.
-+  In earlier version we will keep using the ``portal_quickinstaller``,
-+  because ``get_installer`` is not available.
-+  In shared utility and base code, we try to import get_installer,
-+  and fall back on the previous implementation.
-+  See `PLIP 1340 <https://github.com/plone/Products.CMFPlone/issues/1340>`_.
-+  [maurits]
++- Install plone.resource in Plone 5.0 alpha 3.  Fixes possible
++  ``TypeError: argument of type 'NoneType' is not iterable`` when
++  migrating from Plone 4.3 for a site that did not have plone.resource
++  or diazo installed yet.
++  Fixes `issue 1756 <https://github.com/plone/Products.CMFPlone/issues/1756>`_. [maurits]
 +
- - Add new Mockup 2.4.0 relateditems resource url.
-   [thet]
+ - Be sure smtp_port is an integer.
+   [ale-rt]
  
-diff --git a/plone/app/upgrade/tests/base.py b/plone/app/upgrade/tests/base.py
-index b403e32..1f60274 100644
---- a/plone/app/upgrade/tests/base.py
-+++ b/plone/app/upgrade/tests/base.py
-@@ -87,9 +87,17 @@ def removeMemberdataProperty(self, property_id):
- 
-     def uninstallProduct(self, product_name):
-         # Removes a product
--        tool = getToolByName(self.portal, 'portal_quickinstaller')
--        if tool.isProductInstalled(product_name):
--            tool.uninstallProducts([product_name])
-+        try:
-+            from Products.CMFPlone.utils import get_installer
-+        except ImportError:
-+            # BBB For Plone 5.0 and lower.
-+            qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+            if qi is None:
-+                return
-+        else:
-+            qi = get_installer(self.portal)
-+        if qi.isProductInstalled(product_name):
-+            qi.uninstallProducts([product_name])
- 
-     def addSkinLayer(self, layer, skin='Plone Default', pos=None):
-         # Adds a skin layer at pos. If pos is None, the layer is appended
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 5b2491b..10ed8bc 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -106,25 +106,45 @@ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
-     If product is already installed test if it needs to be reinstalled. Also
-     fix skins after reinstalling
-     """
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled(product_name):
--        qi.installProduct(product_name, hidden=hidden)
--        # Refresh skins
--        portal.clearCurrentSkin()
--        if getattr(portal, 'REQUEST', None):
--            portal.setupCurrentSkin(portal.REQUEST)
--        logger.info("Installed %s" % product_name)
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            return
-+        old_qi = True
-+    else:
-+        qi = get_installer(portal)
-+        old_qi = False
-+    if old_qi:
-+        if not qi.isProductInstalled(product_name):
-+            qi.installProduct(product_name, hidden=hidden)
-+            logger.info("Installed %s" % product_name)
-+        elif old_qi:
-+            info = qi._getOb(product_name)
-+            installed_version = info.getInstalledVersion()
-+            product_version = qi.getProductVersion(product_name)
-+            if installed_version != product_version:
-+                qi.reinstallProducts([product_name])
-+                logger.info("%s is out of date (installed: %s/ "
-+                            "filesystem: %s), reinstalled." % (
-+                                product_name, installed_version,
-+                                product_version))
-+            else:
-+                logger.info('%s already installed.' % product_name)
-     else:
--        info = qi._getOb(product_name)
--        installed_version = info.getInstalledVersion()
--        product_version = qi.getProductVersion(product_name)
--        if installed_version != product_version:
--            qi.reinstallProducts([product_name])
--            logger.info("%s is out of date (installed: %s/ filesystem: %s), "
--                        "reinstalled." % (product_name, installed_version,
--                                          product_version))
-+        # New QI browser view.
-+        if not qi.is_product_installed(product_name):
-+            qi.install_product(product_name, allow_hidden=True)
-+            logger.info("Installed %s" % product_name)
-         else:
--            logger.info('%s already installed.' % product_name)
-+            qi.upgrade_product(product_name)
-+            logger.info("Upgraded %s", product_name)
-+    # Refresh skins
-+    portal.clearCurrentSkin()
-+    if getattr(portal, 'REQUEST', None):
-+        portal.setupCurrentSkin(portal.REQUEST)
- 
- 
- def loadMigrationProfile(context, profile, steps=_marker):
-diff --git a/plone/app/upgrade/v30/tests.py b/plone/app/upgrade/v30/tests.py
-index bab3076..e4954e7 100644
---- a/plone/app/upgrade/v30/tests.py
-+++ b/plone/app/upgrade/v30/tests.py
-@@ -837,7 +837,10 @@ def testInstallPloneLanguageTool(self):
-         super(self.portal.__class__, self.portal).manage_delObjects(
-             ['portal_languages'])
-         self.uninstallProduct('PloneLanguageTool')
--        qi = getToolByName(self.portal, "portal_quickinstaller")
-+        qi = getToolByName(self.portal, "portal_quickinstaller", None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         # Test it twice
-         for i in range(2):
-             installProduct('PloneLanguageTool', self.portal)
-diff --git a/plone/app/upgrade/v31/betas.py b/plone/app/upgrade/v31/betas.py
-index b621f9c..1748c17 100644
---- a/plone/app/upgrade/v31/betas.py
-+++ b/plone/app/upgrade/v31/betas.py
-@@ -29,14 +29,20 @@ def three0_beta1(portal):
- 
- 
- def addBrowserLayer(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.browserlayer"):
-         qi.installProduct("plone.browserlayer", locked=True)
-         out.append("Installed plone.browserlayer")
- 
- 
- def addCollectionAndStaticPortlets(portal, out):
--    qi = getToolByName(portal, "portal_quickinstaller")
-+    qi = getToolByName(portal, "portal_quickinstaller", None)
-+    if qi is None:
-+        # Newer Plone without qi.
-+        return
-     if not qi.isProductInstalled("plone.portlet.static"):
-         qi.installProduct("plone.portlet.static", locked=True)
-         out.append("Installed plone.portlet.static")
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index e98f8b0..4c4450f 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -67,7 +67,7 @@ def threeX_alpha1(context):
-     """3.x -> 4.0alpha1
-     """
-     try:
--        import plone.app.jquerytools
-+        import plone.app.jquerytools  # noqa
-         loadMigrationProfile(context, 'profile-plone.app.jquerytools:default')
-     except ImportError:
-         pass
-@@ -77,12 +77,23 @@ def threeX_alpha1(context):
-         steps=('controlpanel', 'jsregistry'))
-     # Install plonetheme.classic profile
-     # (if, installed, it will be removed in Plone 5)
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-     stool = getToolByName(context, 'portal_setup')
--    if 'plonetheme.classic' in qi:
--        stool.runAllImportStepsFromProfile(
--            'profile-plonetheme.classic:default'
--        )
-+    if qi is not None:
-+        if 'plonetheme.classic' in qi:
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+            )
-+    else:
-+        # Plone 5.1 and higher.
-+        from Products.CMFPlone.utils import get_installer
-+        qi = get_installer(context)
-+        # It needs to be reinstalled.  Probably this actually does nothing on
-+        # Plone 5, which is fine, but we will try it anyway.
-+        if qi.is_product_installed('plonetheme.classic'):
-+            stool.runAllImportStepsFromProfile(
-+                'profile-plonetheme.classic:default'
-+                )
-     # Install packages that are needed for Plone 4,
-     # but don't break on Plone 5 where they are gone
-     for profile in ('archetypes.referencebrowserwidget:default',
-@@ -555,8 +566,8 @@ def cleanUpClassicThemeResources(context):
-     product is uninstalled. These registrations now live in
-     Products.CMFPlone.
-     """
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if 'plonetheme.classic' in qi:
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and 'plonetheme.classic' in qi:
-         classictheme = qi['plonetheme.classic']
-         classictheme.resources_css = []  # empty the list of installed resources
- 
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index b641cbe..ced720d 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -146,8 +146,8 @@ def update_controlpanel_permissions(context):
- 
- 
- def install_outputfilters(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstallable('plone.outputfilters'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstallable('plone.outputfilters'):
-         if not qi.isProductInstalled('plone.outputfilters'):
-             qi.installProduct('plone.outputfilters')
- 
-diff --git a/plone/app/upgrade/v42/final.py b/plone/app/upgrade/v42/final.py
-index b8a6af3..f1eea51 100644
---- a/plone/app/upgrade/v42/final.py
-+++ b/plone/app/upgrade/v42/final.py
-@@ -13,8 +13,9 @@ def to42final_cmfeditions_registry_bases(context):
-     # profile isn't installed and so has no installed version number.
-     # this applies a necessary upgrade step but also establishes a
-     # version for the profile
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('Products.CMFEditions')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('Products.CMFEditions')
- 
- 
- def to42final(context):
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index eddbc97..8588c08 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -232,8 +232,8 @@ def removeKSS(context):
-     cleanUpToolRegistry(context)
- 
-     # make sure plone.app.kss is not activated in the quick installer
--    qi = getToolByName(context, 'portal_quickinstaller')
--    if qi.isProductInstalled('plone.app.kss'):
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None and qi.isProductInstalled('plone.app.kss'):
-         qi.uninstallProduct('plone.app.kss')
- 
- 
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index ff4d6c4..b3eb1b1 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -49,8 +49,9 @@ def addDefaultPlonePasswordPolicy(context):
- 
- 
- def addShowInactiveCriteria(context):
--    qi = getToolByName(context, 'portal_quickinstaller')
--    qi.upgradeProduct('plone.app.querystring')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is not None:
-+        qi.upgradeProduct('plone.app.querystring')
- 
- 
- def improveSyndication(context):
-@@ -164,7 +165,9 @@ def markProductsInstalledForUninstallableProfiles(context):
-     """
-     from Products.CMFPlone.interfaces import INonInstallable
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     # Get list of profiles that are marked as not installable.
-     profile_ids = []
-     utils = getAllUtilitiesRegisteredFor(INonInstallable)
-@@ -221,7 +224,9 @@ def cleanupUninstalledProducts(context):
-     GS too.
-     """
-     setup = context
--    qi = getToolByName(context, 'portal_quickinstaller')
-+    qi = getToolByName(context, 'portal_quickinstaller', None)
-+    if qi is None:
-+        return
-     for prod in qi.objectValues():
-         if prod.isInstalled():
-             continue
-diff --git a/plone/app/upgrade/v43/tests.py b/plone/app/upgrade/v43/tests.py
-index 098e950..89436b3 100644
---- a/plone/app/upgrade/v43/tests.py
-+++ b/plone/app/upgrade/v43/tests.py
-@@ -278,6 +278,11 @@ def testMarkProductsInstalledForUninstallableProfiles(self):
-         from plone.app.upgrade.v43.final import \
-             markProductsInstalledForUninstallableProfiles
- 
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-+
-         # Register a profile.
-         product_id = 'my.test.package'
-         profile_id = '{0}:default'.format(product_id)
-@@ -299,7 +304,6 @@ def getNonInstallableProfiles(self):
-         setup = getToolByName(self.portal, 'portal_setup')
-         self.assertEqual(
-             setup.getLastVersionForProfile(profile_id), 'unknown')
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-         self.assertFalse(qi.isProductInstalled(product_id))
- 
-         # Call our upgrade function.  This should have no effect,
-@@ -321,7 +325,10 @@ def getNonInstallableProfiles(self):
- 
-     def testCleanupUninstalledProducts(self):
-         from plone.app.upgrade.v43.final import cleanupUninstalledProducts
--        qi = getToolByName(self.portal, 'portal_quickinstaller')
-+        qi = getToolByName(self.portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            # Newer Plone without qi.
-+            return
-         setup = getToolByName(self.portal, 'portal_setup')
-         # Register three profiles.  I wanted to take 'new' as product
-         # id, but there is already a python module 'new', so that goes
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index 06ac9a4..53a6567 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -49,7 +49,13 @@ def to50alpha1(context):
-     migrate_registry_settings(portal)
- 
-     # install plone.app.event
--    qi = getToolByName(portal, 'portal_quickinstaller')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+    else:
-+        qi = get_installer(portal)
-     if not qi.isProductInstalled('plone.app.event'):
-         qi.installProduct('plone.app.event')
- 
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 54cf111..bfb5bc8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -349,9 +349,17 @@ def to50rc1(context):
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc1')
-     portal = getSite()
-     # install plone.app.linkintegrity and its dependencies
--    qi = getToolByName(portal, 'portal_quickinstaller')
--    if not qi.isProductInstalled('plone.app.linkintegrity'):
--        qi.installProduct('plone.app.linkintegrity')
-+    try:
-+        from Products.CMFPlone.utils import get_installer
-+    except ImportError:
-+        # BBB For Plone 5.0 and lower.
-+        qi = getToolByName(portal, 'portal_quickinstaller')
-+        if not qi.isProductInstalled('plone.app.linkintegrity'):
-+            qi.installProduct('plone.app.linkintegrity')
-+    else:
-+        qi = get_installer(portal)
-+        if not qi.is_product_installed('plone.app.linkintegrity'):
-+            qi.install_product('plone.app.linkintegrity')
-     migrate_linkintegrity_relations(portal)
- 
-     upgrade_usergroups_controlpanel_settings(context)
+diff --git a/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml b/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
+new file mode 100644
+index 0000000..d6f609c
+--- /dev/null
++++ b/plone/app/upgrade/v50/profiles/to_alpha3/metadata.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0"?>
++<metadata>
++  <version>1000</version>
++  <dependencies>
++    <dependency>profile-plone.resource:default</dependency>
++  </dependencies>
++</metadata>
 
 
