@@ -1,156 +1,468 @@
-Repository: plone.resource
+Repository: plone.app.registry
 
 
 Branch: refs/heads/master
-Date: 2016-09-29T10:10:18+02:00
+Date: 2016-09-21T10:31:18+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/99e835215dba53472221cda6d1de613e27a66279
+
+Add support for have and not-have import conditions on Zope2
+
+Files changed:
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
+
+diff --git a/README.rst b/README.rst
+index fe3f073..00d64da 100644
+--- a/README.rst
++++ b/README.rst
+@@ -170,6 +170,12 @@ Importable records in ``registry.xml`` can be marked conditional with
+ * ``not-installed my.package``, which causes record to be imported only when
+   python module ``my.package`` is *not* available to be imported:
+ 
++* ``have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has been registered (Zope2 only)
++
++* ``not-have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has *not* been registered (Zope2 only)
++
+ For example, the following ``registry.xml`` step at the GenericSetup profile of
+ your policy product, would only import records when module ``my.package`` is
+ available::
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 7fd9ab3..d7dc21e 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -15,6 +15,8 @@
+ from plone.supermodel.utils import prettyXML
+ from plone.supermodel.utils import valueToElement
+ from zope.component import queryUtility
++from zope.configuration import config
++from zope.configuration import xmlconfig
+ from zope.dottedname.resolve import resolve
+ from zope.schema import getFieldNames
+ 
+@@ -26,29 +28,20 @@ def evaluateCondition(expression):
+ 
+     ``expression`` is a string of the form "verb arguments".
+ 
+-    Currently the supported verbs are ``installed`` and ``not-installed``.
+-    """
+-    arguments = expression.split(None)
+-    verb = arguments.pop(0)
+-
+-    if verb not in ('installed', 'not-installed'):
+-        raise ValueError("Invalid import condition: %r" % expression)
+-
+-    if not arguments:
+-        raise ValueError("Package name missing: %r" % expression)
+-    if len(arguments) > 1:
+-        raise ValueError("Only one package allowed: %r" % expression)
++    Currently the supported verbs are 'have', 'not-have',
++    'installed' and 'not-installed'.
+ 
++    The 'have' verb takes one argument: the name of a feature.
++    """
+     try:
+-        __import__(arguments[0])
+-        installed = True
++        import Zope2.App.zcml
++        context = Zope2.App.zcml._context or config.ConfigurationMachine()
+     except ImportError:
+-        installed = False
++        context = config.ConfigurationMachine()
++
++    handler = xmlconfig.ConfigurationHandler(context)
++    return handler.evaluateCondition(expression)
+ 
+-    if verb == 'installed':
+-        return installed
+-    elif verb == 'not-installed':
+-        return not installed
+ 
+ 
+ def shouldPurgeList(value_node, key):
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 90691e9..446ae82 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -15,14 +15,15 @@
+ from plone.testing import zca
+ from Products.GenericSetup.tests.common import DummyExportContext
+ from Products.GenericSetup.tests.common import DummyImportContext
+-from StringIO import StringIO
+ from zope.component import provideUtility
+ from zope.configuration import xmlconfig
+ from zope.interface import alsoProvides
+ import unittest2 as unittest
+ 
+ configuration = """\
+-<configure xmlns="http://namespaces.zope.org/zope">
++<configure xmlns="http://namespaces.zope.org/zope"
++           xmlns:meta="http://namespaces.zope.org/meta">
++    <meta:provides feature="plone" />
+     <include package="zope.component" file="meta.zcml" />
+     <include package="plone.registry" />
+     <include package="plone.app.registry.exportimport" file="handlers.zcml" />
+@@ -38,7 +39,20 @@ def setUp(self):
+         self.site = ObjectManager('plone')
+         self.registry = Registry('portal_registry')
+         provideUtility(provides=IRegistry, component=self.registry)
+-        xmlconfig.xmlconfig(StringIO(configuration))
++        context = xmlconfig.string(configuration, execute=True)
++        try:
++            import Zope2.App.zcml
++            self._context = Zope2.App.zcml._context
++            Zope2.App.zcml._context = context
++        except ImportError:
++            pass
++
++    def tearDown(self):
++        try:
++            import Zope2.App.zcml
++            Zope2.App.zcml._context = self._context
++        except ImportError:
++            pass
+ 
+     def assertXmlEquals(self, expected, actual):
+ 
+@@ -327,7 +341,7 @@ def test_import_records_nonexistant_interface(self):
+ 
+         self.assertRaises(ImportError, importRegistry, context)
+ 
+-    def test_import_records_nonexistant_interface_condition(self):
++    def test_import_records_nonexistant_interface_condition_not_installed(self):  # noqa
+         xml = """\
+ <registry>
+     <records interface="non.existant.ISchema"
+@@ -365,7 +379,7 @@ def test_import_value_only(self):
+             self.registry['test.export.simple']
+         )
+ 
+-    def test_import_value_only_condition_skip(self):
++    def test_import_value_only_condition_installed(self):
+         xml = """\
+ <registry>
+     <record name="test.export.simple"
+@@ -392,6 +406,60 @@ def test_import_value_only_condition_skip(self):
+             self.registry['test.export.simple']
+         )
+ 
++    def test_import_value_only_condition_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_not_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="not-have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
++
+     def test_import_interface_and_value(self):
+         xml = """\
+ <registry>
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2016-09-21T10:31:55+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/02b15213f92449b54d76b3cc35253a18a1270466
+
+Add changelog entry
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 6aba565..ef6b908 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -10,7 +10,9 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Add support for *have* and *have-not* import conditions in
++  registry.xml
++  [datakurre]
+ 
+ Bug fixes:
+ 
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2016-09-29T13:03:54+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.resource/commit/13fefdcb8bf03b6d1be6ad4fbfa4a36fee25c680
+Commit: https://github.com/plone/plone.app.registry/commit/80f9bea852090b08af8de3a1b6130d2f3d83ebc0
 
-Use mimetypes_registry utility to dertermine mimetype if available.
+Merge pull request #24 from plone/datakurre-more-import-conditions
+
+Add support for have and not-have import conditions on Zope2
 
 Files changed:
 M CHANGES.rst
-M plone/resource/file.py
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 94dda3d..2b5aa7f 100644
+index 6aba565..ef6b908 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
+@@ -10,7 +10,9 @@ Breaking changes:
  
  New features:
  
 -- *add item here*
-+- Use ``mimetypes_registry`` utility to dertermine mimetype if available.
-+  [jensens]
++- Add support for *have* and *have-not* import conditions in
++  registry.xml
++  [datakurre]
  
  Bug fixes:
  
-diff --git a/plone/resource/file.py b/plone/resource/file.py
-index 3d3e670..09e6704 100644
---- a/plone/resource/file.py
-+++ b/plone/resource/file.py
-@@ -4,10 +4,11 @@
- from email.utils import formatdate
- from z3c.caching.interfaces import ILastModified
- from zope.component import adapter
--from zope.component import adapts
- from zope.filerepresentation.interfaces import IRawReadFile
- from zope.interface import implementer
- from ZPublisher.Iterators import filestream_iterator
-+from zope.component import queryUtility
+diff --git a/README.rst b/README.rst
+index fe3f073..00d64da 100644
+--- a/README.rst
++++ b/README.rst
+@@ -170,6 +170,12 @@ Importable records in ``registry.xml`` can be marked conditional with
+ * ``not-installed my.package``, which causes record to be imported only when
+   python module ``my.package`` is *not* available to be imported:
+ 
++* ``have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has been registered (Zope2 only)
 +
- import datetime
- import mimetypes
- import os
-@@ -43,10 +44,15 @@ def __init__(self, parent, request, path, name):
- 
-     def getContentType(self, default='application/octet-stream'):
-         extension = os.path.splitext(self.__name__)[1].lower()
--        return mimetypes.types_map.get(extension, default)
-+        mtr = queryUtility('mimetypes_registry')
-+        mt = None
-+        if mtr:
-+            mt = mtr.lookupExtension(extension)
-+        if mt is None:
-+            mt = mimetypes.types_map.get(extension, default)
-+        return mt
- 
-     def __call__(self, REQUEST=None, RESPONSE=None):
--
-         contentType = self.getContentType()
-         lastModifiedHeader = formatdate(
-             self.lastModifiedTimestamp,
-@@ -69,10 +75,10 @@ def __call__(self, REQUEST=None, RESPONSE=None):
- 
- 
- @implementer(ILastModified)
-+@adapter(FilesystemFile)
- class FileLastModified(object):
-     """Determine when a file was last modified, for caching purposes
-     """
--    adapts(FilesystemFile)
- 
-     def __init__(self, context):
-         self.context = context
-
-
-Repository: plone.resource
-
-
-Branch: refs/heads/master
-Date: 2016-09-29T12:44:30+02:00
-Author: agitator (agitator) <hpeter@agitator.com>
-Commit: https://github.com/plone/plone.resource/commit/387911afbb925f3c6d708b45afdc819f7fb6c656
-
-Merge pull request #15 from plone/jensens-use-mtr-if-available
-
-Use mimetypes_registry utility to determine mimetype if available.
-
-Files changed:
-M CHANGES.rst
-M plone/resource/file.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 94dda3d..2b5aa7f 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Use ``mimetypes_registry`` utility to dertermine mimetype if available.
-+  [jensens]
- 
- Bug fixes:
- 
-diff --git a/plone/resource/file.py b/plone/resource/file.py
-index 3d3e670..09e6704 100644
---- a/plone/resource/file.py
-+++ b/plone/resource/file.py
-@@ -4,10 +4,11 @@
- from email.utils import formatdate
- from z3c.caching.interfaces import ILastModified
- from zope.component import adapter
--from zope.component import adapts
- from zope.filerepresentation.interfaces import IRawReadFile
- from zope.interface import implementer
- from ZPublisher.Iterators import filestream_iterator
-+from zope.component import queryUtility
++* ``not-have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has *not* been registered (Zope2 only)
 +
- import datetime
- import mimetypes
- import os
-@@ -43,10 +44,15 @@ def __init__(self, parent, request, path, name):
+ For example, the following ``registry.xml`` step at the GenericSetup profile of
+ your policy product, would only import records when module ``my.package`` is
+ available::
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 7fd9ab3..d7dc21e 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -15,6 +15,8 @@
+ from plone.supermodel.utils import prettyXML
+ from plone.supermodel.utils import valueToElement
+ from zope.component import queryUtility
++from zope.configuration import config
++from zope.configuration import xmlconfig
+ from zope.dottedname.resolve import resolve
+ from zope.schema import getFieldNames
  
-     def getContentType(self, default='application/octet-stream'):
-         extension = os.path.splitext(self.__name__)[1].lower()
--        return mimetypes.types_map.get(extension, default)
-+        mtr = queryUtility('mimetypes_registry')
-+        mt = None
-+        if mtr:
-+            mt = mtr.lookupExtension(extension)
-+        if mt is None:
-+            mt = mimetypes.types_map.get(extension, default)
-+        return mt
+@@ -26,29 +28,20 @@ def evaluateCondition(expression):
  
-     def __call__(self, REQUEST=None, RESPONSE=None):
+     ``expression`` is a string of the form "verb arguments".
+ 
+-    Currently the supported verbs are ``installed`` and ``not-installed``.
+-    """
+-    arguments = expression.split(None)
+-    verb = arguments.pop(0)
 -
-         contentType = self.getContentType()
-         lastModifiedHeader = formatdate(
-             self.lastModifiedTimestamp,
-@@ -69,10 +75,10 @@ def __call__(self, REQUEST=None, RESPONSE=None):
+-    if verb not in ('installed', 'not-installed'):
+-        raise ValueError("Invalid import condition: %r" % expression)
+-
+-    if not arguments:
+-        raise ValueError("Package name missing: %r" % expression)
+-    if len(arguments) > 1:
+-        raise ValueError("Only one package allowed: %r" % expression)
++    Currently the supported verbs are 'have', 'not-have',
++    'installed' and 'not-installed'.
+ 
++    The 'have' verb takes one argument: the name of a feature.
++    """
+     try:
+-        __import__(arguments[0])
+-        installed = True
++        import Zope2.App.zcml
++        context = Zope2.App.zcml._context or config.ConfigurationMachine()
+     except ImportError:
+-        installed = False
++        context = config.ConfigurationMachine()
++
++    handler = xmlconfig.ConfigurationHandler(context)
++    return handler.evaluateCondition(expression)
+ 
+-    if verb == 'installed':
+-        return installed
+-    elif verb == 'not-installed':
+-        return not installed
  
  
- @implementer(ILastModified)
-+@adapter(FilesystemFile)
- class FileLastModified(object):
-     """Determine when a file was last modified, for caching purposes
-     """
--    adapts(FilesystemFile)
+ def shouldPurgeList(value_node, key):
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 90691e9..446ae82 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -15,14 +15,15 @@
+ from plone.testing import zca
+ from Products.GenericSetup.tests.common import DummyExportContext
+ from Products.GenericSetup.tests.common import DummyImportContext
+-from StringIO import StringIO
+ from zope.component import provideUtility
+ from zope.configuration import xmlconfig
+ from zope.interface import alsoProvides
+ import unittest2 as unittest
  
-     def __init__(self, context):
-         self.context = context
+ configuration = """\
+-<configure xmlns="http://namespaces.zope.org/zope">
++<configure xmlns="http://namespaces.zope.org/zope"
++           xmlns:meta="http://namespaces.zope.org/meta">
++    <meta:provides feature="plone" />
+     <include package="zope.component" file="meta.zcml" />
+     <include package="plone.registry" />
+     <include package="plone.app.registry.exportimport" file="handlers.zcml" />
+@@ -38,7 +39,20 @@ def setUp(self):
+         self.site = ObjectManager('plone')
+         self.registry = Registry('portal_registry')
+         provideUtility(provides=IRegistry, component=self.registry)
+-        xmlconfig.xmlconfig(StringIO(configuration))
++        context = xmlconfig.string(configuration, execute=True)
++        try:
++            import Zope2.App.zcml
++            self._context = Zope2.App.zcml._context
++            Zope2.App.zcml._context = context
++        except ImportError:
++            pass
++
++    def tearDown(self):
++        try:
++            import Zope2.App.zcml
++            Zope2.App.zcml._context = self._context
++        except ImportError:
++            pass
+ 
+     def assertXmlEquals(self, expected, actual):
+ 
+@@ -327,7 +341,7 @@ def test_import_records_nonexistant_interface(self):
+ 
+         self.assertRaises(ImportError, importRegistry, context)
+ 
+-    def test_import_records_nonexistant_interface_condition(self):
++    def test_import_records_nonexistant_interface_condition_not_installed(self):  # noqa
+         xml = """\
+ <registry>
+     <records interface="non.existant.ISchema"
+@@ -365,7 +379,7 @@ def test_import_value_only(self):
+             self.registry['test.export.simple']
+         )
+ 
+-    def test_import_value_only_condition_skip(self):
++    def test_import_value_only_condition_installed(self):
+         xml = """\
+ <registry>
+     <record name="test.export.simple"
+@@ -392,6 +406,60 @@ def test_import_value_only_condition_skip(self):
+             self.registry['test.export.simple']
+         )
+ 
++    def test_import_value_only_condition_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_not_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="not-have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
++
+     def test_import_interface_and_value(self):
+         xml = """\
+ <registry>
 
 
