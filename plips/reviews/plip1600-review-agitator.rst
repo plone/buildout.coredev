@@ -43,9 +43,9 @@ Review steps
 
 -  Manual testing of upgrade step on an existing site with coredev 5.1
 
-  - manually applying step "Add default search options - Add sort_on field to search controlpanel."
+  - manually applying upgrade steps "Run to51beta1 upgrade profile" & "Add default search options"
   
-  - upgrade step did NOT create the control panel entry
+  - upgrade step did create the control panel entry
 
 
 Notes and observations
@@ -55,11 +55,10 @@ Testing
 -------
 
 - Results as described in the PLIP
-- Upgrade step did NOT create control panel property on existing site
+- Upgrade step works and did create control panel property on existing site
 
 Conclusion
 ----------
 
-- I think the upgrade step should work on existing sites (running coredev) too
-- All other things work as expected
+- All things work as expected
 
