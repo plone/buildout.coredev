@@ -16,7 +16,7 @@ Review steps
 
 - Set up the buildout using the PLIP's config::
 
-  $ ./bin/buildout -c plips/plip1340-get-rid-of-qi.cfg
+  $ ./bin/buildout -c plips/plip-1600.cfg
 
 
 - Manual testing TTW with Plone 5.1
@@ -38,7 +38,9 @@ Review steps
   - added search portlet
   
   - repeated ttw tests, same result
-  
+
+
+
 -  Manual testing of upgrade step on an existing site with coredev 5.1
 
   - manually applying step "Add default search options - Add sort_on field to search controlpanel."
