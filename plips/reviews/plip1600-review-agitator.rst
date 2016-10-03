@@ -22,27 +22,35 @@ Review steps
 - Manual testing TTW with Plone 5.1
 
   - Created new site 
-  - Uploaded various PDFs over several minutes
-  - Tested header search viewlet default/relevance is working as we know it, hitting return and viewing the search result on @@search shows the same result order
-  - Switching to sort_on date via @@search-controlpanel
-  - Search viewlet shows order according to upload/last-modified date, hitting return and viewing the search result on @@search shows the same result order starting with the last modified as first item
-  - Switching to sort_on alphabetically via @@search-controlpanel
-  - Search viewlet shows order alphabetically, hitting return and viewing the search result on @@search shows the same result order starting with bill-2015-10-10 and continuing with bill-2015-11-10 and bill-2015-12-10
-  - added search portlet
-  - repeated ttw tests, same result
   
+  - Uploaded various PDFs over several minutes
+  
+  - Tested header search viewlet default/relevance is working as we know it, hitting return and viewing the search result on @@search shows the same result order
+  
+  - Switching to sort_on date via @@search-controlpanel
+  
+  - Search viewlet shows order according to upload/last-modified date, hitting return and viewing the search result on @@search shows the same result order starting with the last modified as first item
+  
+  - Switching to sort_on alphabetically via @@search-controlpanel
+  
+  - Search viewlet shows order alphabetically, hitting return and viewing the search result on @@search shows the same result order starting with bill-2015-10-10 and continuing with bill-2015-11-10 and bill-2015-12-10
+  
+  - added search portlet
+  
+  - repeated ttw tests, same result
   
 -  Manual testing of upgrade step on an existing site with coredev 5.1
 
   - manually applying step "Add default search options - Add sort_on field to search controlpanel."
+  
   - upgrade step did NOT create the control panel entry
 
 
 Notes and observations
 ----------------------
 
-Manual testing
-++++++++++++++
+Testing
+-------
 
 - Results as described in the PLIP
 - Upgrade step did NOT create control panel property on existing site
