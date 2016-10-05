@@ -1,34 +1,286 @@
-Repository: plone.app.caching
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2016-10-04T17:41:22+02:00
+Date: 2016-08-24T20:17:30+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.caching/commit/ecf2150113b72447488e65d296ae02afe97d2c8a
+Commit: https://github.com/plone/plone.protect/commit/26c74e2d5f6dec57e361f3b6e72d2718d8f503a5
 
-Set browser.handleErrors to False in one test.
+Avoid regenerating image scale over and over in Plone 4.
 
-This is when requesting an image scale.
-On the plone.namedfile branch for plip 1483 I am getting a KeyError 'x-cache-rule'
-when checking the browser headers,
-where it would be handier to get an Unauthorized because the user is not allowed to see this image.
-(The user probably *should* be allowed to see this image,
-but that is something to fix in that plip branch.)
+Avoid (unnoticed) error when refreshing lock in Plone 4,
+plus a few other cases that were handled by plone4.csrffixes.
+Fixes https://github.com/plone/plone.protect/issues/47
 
 Files changed:
-M plone/app/caching/tests/test_profile_with_caching_proxy.py
+M CHANGES.rst
+M plone/protect/auto.py
 
-diff --git a/plone/app/caching/tests/test_profile_with_caching_proxy.py b/plone/app/caching/tests/test_profile_with_caching_proxy.py
-index 04f5bbf..ec4ca9f 100644
---- a/plone/app/caching/tests/test_profile_with_caching_proxy.py
-+++ b/plone/app/caching/tests/test_profile_with_caching_proxy.py
-@@ -430,6 +430,7 @@ def test_content_files(self):
-         # Request an image scale with Manager role
-         now = stable_now()
-         browser = Browser(self.app)
-+        browser.handleErrors = False
-         browser.addHeader('Authorization', 'Basic %s:%s' %
-                           (SITE_OWNER_NAME, SITE_OWNER_PASSWORD,))
-         browser.open(self.portal['f1'][
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 3691db5..725f9b0 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,11 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Avoid regenerating image scale over and over in Plone 4.
++  Avoid (unnoticed) error when refreshing lock in Plone 4,
++  plus a few other cases that were handled by plone4.csrffixes.
++  Fixes https://github.com/plone/plone.protect/issues/47
++  [maurits]
+ 
+ 
+ 3.0.19 (2016-08-19)
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 14d7013..0b91855 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -1,12 +1,14 @@
+ import itertools
+ import logging
+ import os
++import pkg_resources
+ import traceback
+ from urllib import urlencode
+ from urlparse import urlparse
+ 
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_parent
++from BTrees.OOBTree import OOBTree
+ from Products.CMFCore.utils import getToolByName
+ from lxml import etree
+ from lxml import html
+@@ -38,12 +40,26 @@
+ except:
+     from zope.app.component.hooks import getSite
+ 
++try:
++    pkg_resources.get_distribution('plone.app.blob')
++except pkg_resources.DistributionNotFound:
++    ATBlob = None
++else:
++    from plone.app.blob.content import ATBlob
++
+ 
+ LOGGER = logging.getLogger('plone.protect')
+ 
+ X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false').lower() in \
+     ('true', 't', 'yes', 'y', '1')
++ANNOTATION_KEYS = (
++    'plone.contentrules.localassignments',
++    'syndication_settings',
++    'plone.portlets.contextassignments',
++    # plone.scale is new compared to plone4.csrffixes:
++    'plone.scale',
++)
+ 
+ 
+ @implementer(ITransform)
+@@ -60,6 +76,9 @@ class ProtectTransform(object):
+ 
+     key_manager = None
+     site = None
++    safe_views = (
++        'plone_lock_operations',
++    )
+ 
+     def __init__(self, published, request):
+         self.published = published
+@@ -167,6 +186,12 @@ def getContext(self):
+             return published.im_self
+         return aq_parent(published)
+ 
++    def getViewName(self):
++        try:
++            return self.getContext().__name__
++        except AttributeError:
++            return None
++
+     def check(self):
+         """
+         just being very careful here about our check so we don't
+@@ -195,6 +220,8 @@ def _check(self):
+         registered = self._registered_objects()
+         if len(registered) > 0 and \
+                 not IDisableCSRFProtection.providedBy(self.request):
++            if self.getViewName() in self.safe_views:
++                return True
+             # Okay, we're writing here, we need to protect!
+             try:
+                 check(self.request, manager=self.key_manager)
+@@ -216,10 +243,25 @@ def _check(self):
+                     safe_oids = self.request.environ[SAFE_WRITE_KEY]
+                 safe = True
+                 for obj in registered:
+-                    if (not IPortletAssignment.providedBy(obj) and
+-                            getattr(obj, '_p_oid', False) not in safe_oids):
++                    if IPortletAssignment.providedBy(obj):
++                        continue
++                    if getattr(obj, '_p_oid', False) in safe_oids:
++                        continue
++                    if ATBlob is not None and isinstance(obj, ATBlob):
++                        continue
++                    if isinstance(obj, OOBTree):
+                         safe = False
+-                        break
++                        for key in ANNOTATION_KEYS:
++                            try:
++                                if key in obj:
++                                    safe = True
++                                    break
++                            except TypeError:
++                                pass
++                        if safe:
++                            continue
++                    safe = False
++                    break
+                 if not safe:
+                     if self.request.REQUEST_METHOD != 'GET':
+                         # only try to be "smart" with GET requests
+
+
+Repository: plone.protect
+
+
+Branch: refs/heads/master
+Date: 2016-10-05T09:54:54+02:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.protect/commit/3e8cc100cbe848d60ae9850bd1d4201ca158e118
+
+Merge pull request #48 from plone/maurits-port-registered-blessings-plone4-csrffixes
+
+Avoid regenerating image scale over and over in Plone 4.
+
+Files changed:
+M CHANGES.rst
+M plone/protect/auto.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index a3f8196..e4c44e7 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,11 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Avoid regenerating image scale over and over in Plone 4.
++  Avoid (unnoticed) error when refreshing lock in Plone 4,
++  plus a few other cases that were handled by plone4.csrffixes.
++  Fixes https://github.com/plone/plone.protect/issues/47
++  [maurits]
+ 
+ 
+ 3.0.20 (2016-09-08)
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 14d7013..0b91855 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -1,12 +1,14 @@
+ import itertools
+ import logging
+ import os
++import pkg_resources
+ import traceback
+ from urllib import urlencode
+ from urlparse import urlparse
+ 
+ from AccessControl import getSecurityManager
+ from Acquisition import aq_parent
++from BTrees.OOBTree import OOBTree
+ from Products.CMFCore.utils import getToolByName
+ from lxml import etree
+ from lxml import html
+@@ -38,12 +40,26 @@
+ except:
+     from zope.app.component.hooks import getSite
+ 
++try:
++    pkg_resources.get_distribution('plone.app.blob')
++except pkg_resources.DistributionNotFound:
++    ATBlob = None
++else:
++    from plone.app.blob.content import ATBlob
++
+ 
+ LOGGER = logging.getLogger('plone.protect')
+ 
+ X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ CSRF_DISABLED = os.environ.get('PLONE_CSRF_DISABLED', 'false').lower() in \
+     ('true', 't', 'yes', 'y', '1')
++ANNOTATION_KEYS = (
++    'plone.contentrules.localassignments',
++    'syndication_settings',
++    'plone.portlets.contextassignments',
++    # plone.scale is new compared to plone4.csrffixes:
++    'plone.scale',
++)
+ 
+ 
+ @implementer(ITransform)
+@@ -60,6 +76,9 @@ class ProtectTransform(object):
+ 
+     key_manager = None
+     site = None
++    safe_views = (
++        'plone_lock_operations',
++    )
+ 
+     def __init__(self, published, request):
+         self.published = published
+@@ -167,6 +186,12 @@ def getContext(self):
+             return published.im_self
+         return aq_parent(published)
+ 
++    def getViewName(self):
++        try:
++            return self.getContext().__name__
++        except AttributeError:
++            return None
++
+     def check(self):
+         """
+         just being very careful here about our check so we don't
+@@ -195,6 +220,8 @@ def _check(self):
+         registered = self._registered_objects()
+         if len(registered) > 0 and \
+                 not IDisableCSRFProtection.providedBy(self.request):
++            if self.getViewName() in self.safe_views:
++                return True
+             # Okay, we're writing here, we need to protect!
+             try:
+                 check(self.request, manager=self.key_manager)
+@@ -216,10 +243,25 @@ def _check(self):
+                     safe_oids = self.request.environ[SAFE_WRITE_KEY]
+                 safe = True
+                 for obj in registered:
+-                    if (not IPortletAssignment.providedBy(obj) and
+-                            getattr(obj, '_p_oid', False) not in safe_oids):
++                    if IPortletAssignment.providedBy(obj):
++                        continue
++                    if getattr(obj, '_p_oid', False) in safe_oids:
++                        continue
++                    if ATBlob is not None and isinstance(obj, ATBlob):
++                        continue
++                    if isinstance(obj, OOBTree):
+                         safe = False
+-                        break
++                        for key in ANNOTATION_KEYS:
++                            try:
++                                if key in obj:
++                                    safe = True
++                                    break
++                            except TypeError:
++                                pass
++                        if safe:
++                            continue
++                    safe = False
++                    break
+                 if not safe:
+                     if self.request.REQUEST_METHOD != 'GET':
+                         # only try to be "smart" with GET requests
 
 
