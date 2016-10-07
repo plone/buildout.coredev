@@ -1,184 +1,672 @@
-Repository: plone.scale
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-10-05T15:11:49+02:00
+Date: 2016-10-03T16:22:50+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.scale/commit/c710301a318d04c468de42ab05c18c8eb13468d9
+Commit: https://github.com/plone/plone.app.upgrade/commit/4a7e9772086dd1f2894e779c8c0781ed426adee2
 
-Catch KeyError when deleting non existing scale.
+Don't remove sub skin layers when cleaning `portal_skins`.
 
-This can happen in corner cases.
+Created `utils.cleanUpSkinsTool` method which has generally useful code for cleaning up the skins.
 
-Fixes https://github.com/plone/plone.scale/issues/15
+Fixes https://github.com/plone/plone.app.upgrade/issues/87
 
 Files changed:
+A plone/app/upgrade/tests/skin_test/README.txt
+A plone/app/upgrade/tests/skin_test/sub1/README.txt
+A plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+A plone/app/upgrade/tests/skin_test/sub2/README.txt
+A plone/app/upgrade/tests/test_utils.py
 M CHANGES.rst
-M plone/scale/storage.py
-M plone/scale/tests/test_storage.py
+M plone/app/upgrade/utils.py
+M plone/app/upgrade/v40/alphas.py
+M plone/app/upgrade/v43/configure.zcml
+M plone/app/upgrade/v50/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 730d306..b9a0eb9 100644
+index 960a71d..9dac3cb 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -16,6 +16,10 @@ New features:
+@@ -28,6 +28,12 @@ New features:
  
  Bug fixes:
  
-+- Catch KeyError when deleting non existing scale.  This can happen in corner cases.
-+  Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
++- Don't remove sub skin layers when cleaning ``portal_skins``.
++  Created ``utils.cleanUpSkinsTool`` method which has generally useful
++  code for cleaning up the skins.
++  Fixes `issue 87 <https://github.com/plone/plone.app.upgrade/issues/87>`_.
 +  [maurits]
 +
- - Set ``zip_safe=False`` in ``setup.py``.  Otherwise you cannot run
-   the tests of the released package because the test runner does not
-   find any tests in the egg file.  Note that this is only a problem in
-diff --git a/plone/scale/storage.py b/plone/scale/storage.py
-index 5d3cbc4..4104001 100644
---- a/plone/scale/storage.py
-+++ b/plone/scale/storage.py
-@@ -160,7 +160,7 @@ def scale(self, factory=None, **parameters):
-         storage = self.storage
-         info = self.get_info_by_hash(key)
-         if info is not None and self._modified_since(info['modified']):
--            del storage[info['uid']]
-+            del self[info['uid']]
-             # invalidate when the image was updated
-             info = None
-         elif info is not None:
-@@ -227,11 +227,11 @@ def _cleanup(self):
-             # remove info stored by tuple keys
-             # before refactoring
-             if isinstance(key, tuple):
--                del storage[key]
-+                del self[key]
-             # clear cache from scales older than one day
-             elif (modified_time and
-                     value['modified'] < modified_time - KEEP_SCALE_MILLIS):
--                del storage[key]
-+                del self[key]
+ - Install plone.resource in Plone 5.0 alpha 3.  Fixes possible
+   ``TypeError: argument of type 'NoneType' is not iterable`` when
+   migrating from Plone 4.3 for a site that did not have plone.resource
+diff --git a/plone/app/upgrade/tests/skin_test/README.txt b/plone/app/upgrade/tests/skin_test/README.txt
+new file mode 100644
+index 0000000..3ac528e
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/README.txt
+@@ -0,0 +1 @@
++Recursive skin
+diff --git a/plone/app/upgrade/tests/skin_test/sub1/README.txt b/plone/app/upgrade/tests/skin_test/sub1/README.txt
+new file mode 100644
+index 0000000..b63d3e3
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub1/README.txt
+@@ -0,0 +1 @@
++Recursive sub skin 1
+diff --git a/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt b/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+new file mode 100644
+index 0000000..687025a
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+@@ -0,0 +1 @@
++Recursive sub sub skin 1
+diff --git a/plone/app/upgrade/tests/skin_test/sub2/README.txt b/plone/app/upgrade/tests/skin_test/sub2/README.txt
+new file mode 100644
+index 0000000..3ccbd81
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub2/README.txt
+@@ -0,0 +1 @@
++Recursive sub skin 2
+diff --git a/plone/app/upgrade/tests/test_utils.py b/plone/app/upgrade/tests/test_utils.py
+new file mode 100644
+index 0000000..3483181
+--- /dev/null
++++ b/plone/app/upgrade/tests/test_utils.py
+@@ -0,0 +1,73 @@
++from Products.CMFCore.utils import getToolByName
++from plone.app.upgrade.tests.base import MigrationTest
++from plone.app.upgrade import utils
++
++
++class TestUtils(MigrationTest):
++
++    def testCleanUpSkinsTool(self):
++        # This removes no longer existing layers from the skins tool and the
++        # skin selections.
++        from Products.CMFCore.DirectoryView import DirectoryView
++        from Products.CMFCore.DirectoryView import registerDirectory
++        self.setRoles(['Manager'])
++        skins = getToolByName(self.portal, 'portal_skins')
++        existing = skins.keys()
++        selection = 'Plone Default'
++
++        def layers_in_selection(selection_name):
++            return skins.getSkinPath(selection_name).split(',')
++
++        existing_layers_in_selection = layers_in_selection(selection)
++
++        # An initial cleanup should do nothing.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing))
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection))
++
++        # A second cleanup should also do nothing.  We used to rename
++        # plone_styles to classic_styles on the first run, which would get
++        # removed on a second run because in these tests the class_styles layer
++        # is not available.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing))
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection))
++
++        # Register some test skins layers.  Note: the current module name is
++        # taken from globals()['__name__'], which is how registerDirectory
++        # knows where to find the directory.  Also note that you should not try
++        # to register any layer that is outside of the current directory or in
++        # a 'skins' sub directory.  There is just too much crazyness in the
++        # api.  Better try to load some zcml in that case.
++        skin_name = 'skin_test'
++        # Make it available for Zope.  This is what you would do in zcml.
++        registerDirectory(skin_name, globals(), subdirs=1)
++        # Add the DirectoryView object to portal_skins.
++        directory_info = DirectoryView(
++            skin_name, reg_key='plone.app.upgrade.tests:%s' % skin_name)
++        skins._setObject(skin_name, directory_info)
++
++        # Add its sub skins to a skin selection.
++        self.addSkinLayer('skin_test/sub1', skin=selection)
++        self.addSkinLayer('skin_test/sub1/subsub1', skin=selection)
++        self.addSkinLayer('skin_test/sub2', skin=selection)
++
++        # Did that work?
++        self.assertEqual(len(skins.keys()), len(existing) + 1)
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection) + 3)
++
++        # Clean it up again.  Nothing should be removed.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing) + 1)
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection) + 3)
++
++
++def test_suite():
++    from unittest import TestSuite, makeSuite
++    suite = TestSuite()
++    suite.addTest(makeSuite(TestUtils))
++    return suite
+diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
+index 10ed8bc..e85deb1 100644
+--- a/plone/app/upgrade/utils.py
++++ b/plone/app/upgrade/utils.py
+@@ -1,17 +1,20 @@
+-import logging
+-import new
+-import sys
+-from types import ListType, TupleType
+-
+ from Acquisition import aq_base
++from Products.CMFCore.DirectoryView import _dirreg
+ from Products.CMFCore.utils import getToolByName
+ from Products.GenericSetup.interfaces import ISetupTool
+ from Products.GenericSetup.registry import _export_step_registry
+ from Products.GenericSetup.registry import _import_step_registry
+ from Products.ZCatalog.ProgressHandler import ZLogHandler
++from types import ListType
++from types import TupleType
+ from ZODB.POSException import ConflictError
  
-     def __getitem__(self, uid):
-         return self.storage[uid]
-@@ -240,7 +240,12 @@ def __setitem__(self, id, scale):
-         raise RuntimeError('New scales have to be created via scale()')
++import logging
++import new
+ import pkg_resources
++import sys
++import transaction
++
  
-     def __delitem__(self, uid):
--        del self.storage[uid]
+ _marker = []
+ 
+@@ -74,7 +77,11 @@ def saveCloneActions(actionprovider):
+ 
+ 
+ def testSkinLayer(skinsTool, layer):
+-    """Make sure a skin layer exists"""
++    """Make sure a skin layer exists.
++
++    layer can be a sub folder name, like captchas_core/dynamic
++    or a/b/c/d/e.
++    """
+     # code adapted from CMFCore.SkinsContainer.getSkinByPath
+     ob = aq_base(skinsTool)
+     for name in layer.strip().split('/'):
+@@ -100,6 +107,45 @@ def cleanupSkinPath(portal, skinName, test=1):
+     skinstool.addSkinSelection(skinName, ','.join(new_path), test=test)
+ 
+ 
++def cleanUpSkinsTool(context):
++    """Cleanup the portal_skins tool.
++
++    Initially this was created for Plone 4.0 alpha, but was factored out later.
++
++    - Remove directory views for directories missing on the filesystem.
++
++    - Remove invalid skin layers from all skin selections.
++    """
++    skins = getToolByName(context, 'portal_skins')
++    # Remove directory views for directories missing on the filesystem
++    for name in skins.keys():
++        directory_view = skins.get(name)
++        reg_key = getattr(directory_view, '_dirpath', None)
++        if not reg_key:
++            # not a directory view, but a persistent folder
++            continue
 +        try:
-+            del self.storage[uid]
-+        except KeyError:
-+            # This should not happen, but it apparently can happen in corner
-+            # cases.  See https://github.com/plone/plone.scale/issues/15
-+            logger.warn('Could not delete key %s from storage.', uid)
++            reg_key = _dirreg.getCurrentKeyFormat(reg_key)
++            _dirreg.getDirectoryInfo(reg_key)
++        except ValueError:
++            skins._delObject(name)
++
++    transaction.savepoint(optimistic=True)
++    existing = skins.keys()
++    # Remove no longer existing entries from skin selections
++    for layer, paths in skins.selections.items():
++        new_paths = []
++        for name in paths.split(','):
++            if name in existing:
++                new_paths.append(name)
++            elif '/' in name and testSkinLayer(skins, name):
++                new_paths.append(name)
++            else:
++                logger.info('Removed no longer existing path %s '
++                            'from skin selection %s.', name, layer)
++        skins.selections[layer] = ','.join(new_paths)
++
++
+ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
+     """Installs a product
  
-     def __iter__(self):
-         return iter(self.storage)
-diff --git a/plone/scale/tests/test_storage.py b/plone/scale/tests/test_storage.py
-index 650f21a..e4df7f1 100644
---- a/plone/scale/tests/test_storage.py
-+++ b/plone/scale/tests/test_storage.py
-@@ -171,7 +171,10 @@ def testPositiveHasKey(self):
+diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
+index 4c4450f..05d639a 100644
+--- a/plone/app/upgrade/v40/alphas.py
++++ b/plone/app/upgrade/v40/alphas.py
+@@ -9,7 +9,6 @@
+ from Acquisition import aq_base
+ from Acquisition import aq_get
+ from Products.CMFCore.CachingPolicyManager import manage_addCachingPolicyManager
+-from Products.CMFCore.DirectoryView import _dirreg
+ from Products.CMFCore.interfaces import ICachingPolicyManager
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.setuphandlers import addCacheHandlers
+@@ -19,6 +18,7 @@
+ from zExceptions import NotFound
+ from plone.app.viewletmanager.interfaces import IViewletSettingsStorage
  
-     def testDeleteNonExistingItem(self):
-         storage = self.storage
--        self.assertRaises(KeyError, delitem, storage, 'foo')
-+        # This used to raise a KeyError, but sometimes the underlying storage
-+        # can get inconsistent, so it is nicer to accept it.
-+        # See https://github.com/plone/plone.scale/issues/15
-+        delitem(storage, 'foo')
++from plone.app.upgrade.utils import cleanUpSkinsTool as generalCleanUpSkinsTool
+ from plone.app.upgrade.utils import logger
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from plone.app.upgrade.utils import unregisterSteps
+@@ -371,33 +371,32 @@ def cleanUpToolRegistry(context):
  
-     def testDeleteRemovesItemAndIndexBBB(self):
-         storage = self.storage
+ 
+ def cleanUpSkinsTool(context):
+-    skins = getToolByName(context, 'portal_skins')
+-    # Remove directory views for directories missing on the filesystem
+-    for name in skins.keys():
+-        directory_view = skins.get(name)
+-        reg_key = getattr(directory_view, '_dirpath', None)
+-        if not reg_key:
+-            # not a directory view, but a persistent folder
+-            continue
+-        try:
+-            reg_key = _dirreg.getCurrentKeyFormat(reg_key)
+-            _dirreg.getDirectoryInfo(reg_key)
+-        except ValueError:
+-            skins._delObject(name)
++    """Cleanup the portal_skins tool.
+ 
+-    transaction.savepoint(optimistic=True)
+-    existing = skins.keys()
+-    # Remove no longer existing entries from skin selections
++    One thing is special for 4.0 alpha:
++
++    - replace plone_styles layer with classic_styles.
++
++    And we do a normal cleanup that would be fine for all Plone versions:
++
++    - Remove directory views for directories missing on the filesystem.
++
++    - Remove invalid skin layers from all skin selections.
++    """
++    skins = getToolByName(context, 'portal_skins')
+     for layer, paths in skins.selections.items():
+         new_paths = []
+         for name in paths.split(','):
+             if name == 'plone_styles':
+                 # plone_styles has been moved and renamed
+                 new_paths.append('classic_styles')
+-            elif name in existing:
++            else:
+                 new_paths.append(name)
+         skins.selections[layer] = ','.join(new_paths)
+ 
++    # Do the general cleanup.
++    generalCleanUpSkinsTool(context)
++
+ 
+ def cleanUpProductRegistry(context):
+     control = getattr(context, 'Control_Panel', None)
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index d7737b1..c0d34b9 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -221,7 +221,7 @@
+ 
+         <genericsetup:upgradeStep
+             title="Cleanup the skins tool."
+-            handler="plone.app.upgrade.v40.alphas.cleanUpSkinsTool"
++            handler="plone.app.upgrade.utils.cleanUpSkinsTool"
+             />
+ 
+         <genericsetup:upgradeStep
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 39bfe7c..3cd893b 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -256,7 +256,7 @@
+ 
+        <gs:upgradeStep
+            title="Cleanup the skins tool."
+-           handler="plone.app.upgrade.v40.alphas.cleanUpSkinsTool"
++           handler="plone.app.upgrade.utils.cleanUpSkinsTool"
+            />
+ 
+        <gs:upgradeStep
 
 
-Repository: plone.scale
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-10-07T07:35:56+02:00
+Date: 2016-10-07T07:40:35+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/f22b598b1a72cc268619329f17e9be0b5b40b58f
+Commit: https://github.com/plone/plone.app.upgrade/commit/ef33cea5b2fb7bcabb6d9a043aff31ffc5a748fe
 
-Merge pull request #20 from plone/origin/catch-keyerror-on-broken-scalesdict-master
+Merge pull request #89 from plone/fix-cleanup-skin-selections
 
-Catch KeyError when deleting non existing scale. [master]
+Don't remove sub skin layers when cleaning `portal_skins`.
 
 Files changed:
+A plone/app/upgrade/tests/skin_test/README.txt
+A plone/app/upgrade/tests/skin_test/sub1/README.txt
+A plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+A plone/app/upgrade/tests/skin_test/sub2/README.txt
+A plone/app/upgrade/tests/test_utils.py
 M CHANGES.rst
-M plone/scale/storage.py
-M plone/scale/tests/test_storage.py
+M plone/app/upgrade/utils.py
+M plone/app/upgrade/v40/alphas.py
+M plone/app/upgrade/v43/configure.zcml
+M plone/app/upgrade/v50/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 730d306..b9a0eb9 100644
+index 960a71d..9dac3cb 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -16,6 +16,10 @@ New features:
+@@ -28,6 +28,12 @@ New features:
  
  Bug fixes:
  
-+- Catch KeyError when deleting non existing scale.  This can happen in corner cases.
-+  Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
++- Don't remove sub skin layers when cleaning ``portal_skins``.
++  Created ``utils.cleanUpSkinsTool`` method which has generally useful
++  code for cleaning up the skins.
++  Fixes `issue 87 <https://github.com/plone/plone.app.upgrade/issues/87>`_.
 +  [maurits]
 +
- - Set ``zip_safe=False`` in ``setup.py``.  Otherwise you cannot run
-   the tests of the released package because the test runner does not
-   find any tests in the egg file.  Note that this is only a problem in
-diff --git a/plone/scale/storage.py b/plone/scale/storage.py
-index 5d3cbc4..4104001 100644
---- a/plone/scale/storage.py
-+++ b/plone/scale/storage.py
-@@ -160,7 +160,7 @@ def scale(self, factory=None, **parameters):
-         storage = self.storage
-         info = self.get_info_by_hash(key)
-         if info is not None and self._modified_since(info['modified']):
--            del storage[info['uid']]
-+            del self[info['uid']]
-             # invalidate when the image was updated
-             info = None
-         elif info is not None:
-@@ -227,11 +227,11 @@ def _cleanup(self):
-             # remove info stored by tuple keys
-             # before refactoring
-             if isinstance(key, tuple):
--                del storage[key]
-+                del self[key]
-             # clear cache from scales older than one day
-             elif (modified_time and
-                     value['modified'] < modified_time - KEEP_SCALE_MILLIS):
--                del storage[key]
-+                del self[key]
+ - Install plone.resource in Plone 5.0 alpha 3.  Fixes possible
+   ``TypeError: argument of type 'NoneType' is not iterable`` when
+   migrating from Plone 4.3 for a site that did not have plone.resource
+diff --git a/plone/app/upgrade/tests/skin_test/README.txt b/plone/app/upgrade/tests/skin_test/README.txt
+new file mode 100644
+index 0000000..3ac528e
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/README.txt
+@@ -0,0 +1 @@
++Recursive skin
+diff --git a/plone/app/upgrade/tests/skin_test/sub1/README.txt b/plone/app/upgrade/tests/skin_test/sub1/README.txt
+new file mode 100644
+index 0000000..b63d3e3
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub1/README.txt
+@@ -0,0 +1 @@
++Recursive sub skin 1
+diff --git a/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt b/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+new file mode 100644
+index 0000000..687025a
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub1/subsub1/README.txt
+@@ -0,0 +1 @@
++Recursive sub sub skin 1
+diff --git a/plone/app/upgrade/tests/skin_test/sub2/README.txt b/plone/app/upgrade/tests/skin_test/sub2/README.txt
+new file mode 100644
+index 0000000..3ccbd81
+--- /dev/null
++++ b/plone/app/upgrade/tests/skin_test/sub2/README.txt
+@@ -0,0 +1 @@
++Recursive sub skin 2
+diff --git a/plone/app/upgrade/tests/test_utils.py b/plone/app/upgrade/tests/test_utils.py
+new file mode 100644
+index 0000000..3483181
+--- /dev/null
++++ b/plone/app/upgrade/tests/test_utils.py
+@@ -0,0 +1,73 @@
++from Products.CMFCore.utils import getToolByName
++from plone.app.upgrade.tests.base import MigrationTest
++from plone.app.upgrade import utils
++
++
++class TestUtils(MigrationTest):
++
++    def testCleanUpSkinsTool(self):
++        # This removes no longer existing layers from the skins tool and the
++        # skin selections.
++        from Products.CMFCore.DirectoryView import DirectoryView
++        from Products.CMFCore.DirectoryView import registerDirectory
++        self.setRoles(['Manager'])
++        skins = getToolByName(self.portal, 'portal_skins')
++        existing = skins.keys()
++        selection = 'Plone Default'
++
++        def layers_in_selection(selection_name):
++            return skins.getSkinPath(selection_name).split(',')
++
++        existing_layers_in_selection = layers_in_selection(selection)
++
++        # An initial cleanup should do nothing.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing))
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection))
++
++        # A second cleanup should also do nothing.  We used to rename
++        # plone_styles to classic_styles on the first run, which would get
++        # removed on a second run because in these tests the class_styles layer
++        # is not available.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing))
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection))
++
++        # Register some test skins layers.  Note: the current module name is
++        # taken from globals()['__name__'], which is how registerDirectory
++        # knows where to find the directory.  Also note that you should not try
++        # to register any layer that is outside of the current directory or in
++        # a 'skins' sub directory.  There is just too much crazyness in the
++        # api.  Better try to load some zcml in that case.
++        skin_name = 'skin_test'
++        # Make it available for Zope.  This is what you would do in zcml.
++        registerDirectory(skin_name, globals(), subdirs=1)
++        # Add the DirectoryView object to portal_skins.
++        directory_info = DirectoryView(
++            skin_name, reg_key='plone.app.upgrade.tests:%s' % skin_name)
++        skins._setObject(skin_name, directory_info)
++
++        # Add its sub skins to a skin selection.
++        self.addSkinLayer('skin_test/sub1', skin=selection)
++        self.addSkinLayer('skin_test/sub1/subsub1', skin=selection)
++        self.addSkinLayer('skin_test/sub2', skin=selection)
++
++        # Did that work?
++        self.assertEqual(len(skins.keys()), len(existing) + 1)
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection) + 3)
++
++        # Clean it up again.  Nothing should be removed.
++        utils.cleanUpSkinsTool(self.portal)
++        self.assertEqual(len(skins.keys()), len(existing) + 1)
++        self.assertEqual(len(layers_in_selection(selection)),
++                         len(existing_layers_in_selection) + 3)
++
++
++def test_suite():
++    from unittest import TestSuite, makeSuite
++    suite = TestSuite()
++    suite.addTest(makeSuite(TestUtils))
++    return suite
+diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
+index 10ed8bc..e85deb1 100644
+--- a/plone/app/upgrade/utils.py
++++ b/plone/app/upgrade/utils.py
+@@ -1,17 +1,20 @@
+-import logging
+-import new
+-import sys
+-from types import ListType, TupleType
+-
+ from Acquisition import aq_base
++from Products.CMFCore.DirectoryView import _dirreg
+ from Products.CMFCore.utils import getToolByName
+ from Products.GenericSetup.interfaces import ISetupTool
+ from Products.GenericSetup.registry import _export_step_registry
+ from Products.GenericSetup.registry import _import_step_registry
+ from Products.ZCatalog.ProgressHandler import ZLogHandler
++from types import ListType
++from types import TupleType
+ from ZODB.POSException import ConflictError
  
-     def __getitem__(self, uid):
-         return self.storage[uid]
-@@ -240,7 +240,12 @@ def __setitem__(self, id, scale):
-         raise RuntimeError('New scales have to be created via scale()')
++import logging
++import new
+ import pkg_resources
++import sys
++import transaction
++
  
-     def __delitem__(self, uid):
--        del self.storage[uid]
+ _marker = []
+ 
+@@ -74,7 +77,11 @@ def saveCloneActions(actionprovider):
+ 
+ 
+ def testSkinLayer(skinsTool, layer):
+-    """Make sure a skin layer exists"""
++    """Make sure a skin layer exists.
++
++    layer can be a sub folder name, like captchas_core/dynamic
++    or a/b/c/d/e.
++    """
+     # code adapted from CMFCore.SkinsContainer.getSkinByPath
+     ob = aq_base(skinsTool)
+     for name in layer.strip().split('/'):
+@@ -100,6 +107,45 @@ def cleanupSkinPath(portal, skinName, test=1):
+     skinstool.addSkinSelection(skinName, ','.join(new_path), test=test)
+ 
+ 
++def cleanUpSkinsTool(context):
++    """Cleanup the portal_skins tool.
++
++    Initially this was created for Plone 4.0 alpha, but was factored out later.
++
++    - Remove directory views for directories missing on the filesystem.
++
++    - Remove invalid skin layers from all skin selections.
++    """
++    skins = getToolByName(context, 'portal_skins')
++    # Remove directory views for directories missing on the filesystem
++    for name in skins.keys():
++        directory_view = skins.get(name)
++        reg_key = getattr(directory_view, '_dirpath', None)
++        if not reg_key:
++            # not a directory view, but a persistent folder
++            continue
 +        try:
-+            del self.storage[uid]
-+        except KeyError:
-+            # This should not happen, but it apparently can happen in corner
-+            # cases.  See https://github.com/plone/plone.scale/issues/15
-+            logger.warn('Could not delete key %s from storage.', uid)
++            reg_key = _dirreg.getCurrentKeyFormat(reg_key)
++            _dirreg.getDirectoryInfo(reg_key)
++        except ValueError:
++            skins._delObject(name)
++
++    transaction.savepoint(optimistic=True)
++    existing = skins.keys()
++    # Remove no longer existing entries from skin selections
++    for layer, paths in skins.selections.items():
++        new_paths = []
++        for name in paths.split(','):
++            if name in existing:
++                new_paths.append(name)
++            elif '/' in name and testSkinLayer(skins, name):
++                new_paths.append(name)
++            else:
++                logger.info('Removed no longer existing path %s '
++                            'from skin selection %s.', name, layer)
++        skins.selections[layer] = ','.join(new_paths)
++
++
+ def installOrReinstallProduct(portal, product_name, out=None, hidden=False):
+     """Installs a product
  
-     def __iter__(self):
-         return iter(self.storage)
-diff --git a/plone/scale/tests/test_storage.py b/plone/scale/tests/test_storage.py
-index 650f21a..e4df7f1 100644
---- a/plone/scale/tests/test_storage.py
-+++ b/plone/scale/tests/test_storage.py
-@@ -171,7 +171,10 @@ def testPositiveHasKey(self):
+diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
+index 4c4450f..05d639a 100644
+--- a/plone/app/upgrade/v40/alphas.py
++++ b/plone/app/upgrade/v40/alphas.py
+@@ -9,7 +9,6 @@
+ from Acquisition import aq_base
+ from Acquisition import aq_get
+ from Products.CMFCore.CachingPolicyManager import manage_addCachingPolicyManager
+-from Products.CMFCore.DirectoryView import _dirreg
+ from Products.CMFCore.interfaces import ICachingPolicyManager
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone.setuphandlers import addCacheHandlers
+@@ -19,6 +18,7 @@
+ from zExceptions import NotFound
+ from plone.app.viewletmanager.interfaces import IViewletSettingsStorage
  
-     def testDeleteNonExistingItem(self):
-         storage = self.storage
--        self.assertRaises(KeyError, delitem, storage, 'foo')
-+        # This used to raise a KeyError, but sometimes the underlying storage
-+        # can get inconsistent, so it is nicer to accept it.
-+        # See https://github.com/plone/plone.scale/issues/15
-+        delitem(storage, 'foo')
++from plone.app.upgrade.utils import cleanUpSkinsTool as generalCleanUpSkinsTool
+ from plone.app.upgrade.utils import logger
+ from plone.app.upgrade.utils import loadMigrationProfile
+ from plone.app.upgrade.utils import unregisterSteps
+@@ -371,33 +371,32 @@ def cleanUpToolRegistry(context):
  
-     def testDeleteRemovesItemAndIndexBBB(self):
-         storage = self.storage
+ 
+ def cleanUpSkinsTool(context):
+-    skins = getToolByName(context, 'portal_skins')
+-    # Remove directory views for directories missing on the filesystem
+-    for name in skins.keys():
+-        directory_view = skins.get(name)
+-        reg_key = getattr(directory_view, '_dirpath', None)
+-        if not reg_key:
+-            # not a directory view, but a persistent folder
+-            continue
+-        try:
+-            reg_key = _dirreg.getCurrentKeyFormat(reg_key)
+-            _dirreg.getDirectoryInfo(reg_key)
+-        except ValueError:
+-            skins._delObject(name)
++    """Cleanup the portal_skins tool.
+ 
+-    transaction.savepoint(optimistic=True)
+-    existing = skins.keys()
+-    # Remove no longer existing entries from skin selections
++    One thing is special for 4.0 alpha:
++
++    - replace plone_styles layer with classic_styles.
++
++    And we do a normal cleanup that would be fine for all Plone versions:
++
++    - Remove directory views for directories missing on the filesystem.
++
++    - Remove invalid skin layers from all skin selections.
++    """
++    skins = getToolByName(context, 'portal_skins')
+     for layer, paths in skins.selections.items():
+         new_paths = []
+         for name in paths.split(','):
+             if name == 'plone_styles':
+                 # plone_styles has been moved and renamed
+                 new_paths.append('classic_styles')
+-            elif name in existing:
++            else:
+                 new_paths.append(name)
+         skins.selections[layer] = ','.join(new_paths)
+ 
++    # Do the general cleanup.
++    generalCleanUpSkinsTool(context)
++
+ 
+ def cleanUpProductRegistry(context):
+     control = getattr(context, 'Control_Panel', None)
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index d7737b1..c0d34b9 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -221,7 +221,7 @@
+ 
+         <genericsetup:upgradeStep
+             title="Cleanup the skins tool."
+-            handler="plone.app.upgrade.v40.alphas.cleanUpSkinsTool"
++            handler="plone.app.upgrade.utils.cleanUpSkinsTool"
+             />
+ 
+         <genericsetup:upgradeStep
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index 39bfe7c..3cd893b 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -256,7 +256,7 @@
+ 
+        <gs:upgradeStep
+            title="Cleanup the skins tool."
+-           handler="plone.app.upgrade.v40.alphas.cleanUpSkinsTool"
++           handler="plone.app.upgrade.utils.cleanUpSkinsTool"
+            />
+ 
+        <gs:upgradeStep
 
 
