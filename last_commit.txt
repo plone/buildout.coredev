@@ -1,158 +1,340 @@
-Repository: mockup
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-10-03T09:06:14-03:00
+Date: 2016-09-29T18:30:20-03:00
 Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
-Commit: https://github.com/plone/mockup/commit/627ed82e898489db67a782d585af59d9d81bc825
+Commit: https://github.com/plone/plone.app.upgrade/commit/27d85d45d2732093912f03b1cc839ce7fe99f3f5
 
-Added options to change default search order
+Add sort_on and sort_reverse fields to search controlpanel
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/livesearch/pattern.js
+M plone/app/upgrade/v43/configure.zcml
+M plone/app/upgrade/v43/final.py
+M plone/app/upgrade/v51/betas.py
+M plone/app/upgrade/v51/configure.zcml
+M plone/app/upgrade/v51/profiles/to_beta1/registry.xml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 31e6d00..1dcae3e 100644
+index 960a71d..87c22bc 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -13,6 +13,9 @@ Incompatibilities:
+@@ -10,6 +10,9 @@ Breaking changes:
  
- New:
+ New features:
  
-+- Change default sort option in livesearch pattern.
++- Add sort_on field to search controlpanel.
 +  [rodfersou]
 +
- - Show expired label in folder contents for expired attributes
-   [vangheem]
- 
-diff --git a/mockup/patterns/livesearch/pattern.js b/mockup/patterns/livesearch/pattern.js
-index ef92046..12b06f5 100644
---- a/mockup/patterns/livesearch/pattern.js
-+++ b/mockup/patterns/livesearch/pattern.js
-@@ -59,10 +59,31 @@ define([
-       if(page === undefined){
-         page = 1;
-       }
-+      var sort_on = function(){
-+        var parameters = location.search,
-+            sorton_position = parameters.indexOf('sort_on');
-+        if(sorton_position === -1){
-+          // return default sort
-+          var $searchResults = $('#search-results');
-+          if($searchResults.length > 0){
-+            return $searchResults.attr('data-default-sort');
-+          }
-+          return '';
-+        }
-+        // cut string before sort_on parameter
-+        var sort_on = parameters.substring(sorton_position);
-+        // cut other parameters
-+        sort_on = sort_on.split('&')[0];
-+        // get just the value
-+        sort_on = sort_on.split('=')[1];
-+        return sort_on;
-+      }();
+ - Support sites without ``portal_quickinstaller``.
+   We use ``get_installer`` in Plone 5.1 migrations.
+   In earlier version we will keep using the ``portal_quickinstaller``,
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index d7737b1..84bf895 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -241,6 +241,7 @@
+             description=""
+             handler="..utils.null_upgrade_step"
+             />
 +
-       $.ajax({
-         url: self.options.ajaxUrl + '?' + query +
-              '&page=' + page +
--             '&perPage=' + self.options.perPage,
-+             '&perPage=' + self.options.perPage +
-+             '&sort_on=' + sort_on,
-         dataType: 'json'
-       }).done(function(data){
-         self.results = data;
-@@ -241,6 +262,10 @@ define([
-           self.render();
-         }
-       });
-+      $('#sorting-options a').click(function(e){
-+        e.preventDefault();
-+        self.onceFocused = false;
-+      });
+     </genericsetup:upgradeSteps>
  
-       /* create result dom */
-       self.$results = $('<ul class="' + self.resultsClass + '"></ul>').hide().insertAfter(self.$input);
+     <genericsetup:upgradeSteps
+@@ -253,6 +254,20 @@
+             description=""
+             handler="..utils.null_upgrade_step"
+             />
++
++    </genericsetup:upgradeSteps>
++
++    <genericsetup:upgradeSteps
++        source="4314"
++        destination="4315"
++        profile="Products.CMFPlone:plone">
++
++        <genericsetup:upgradeStep
++            title="Add default search options"
++            description="Add sort_on field to search controlpanel."
++            handler=".final.addSortOnProperty"
++            />
++
+     </genericsetup:upgradeSteps>
+ 
+ </configure>
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index b3eb1b1..2cda0ba 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -324,3 +324,18 @@ def removeFakeKupu(context):
+     if member_data.getProperty('wysiwyg_editor') == 'Kupu':
+         member_data._updateProperty('wysiwyg_editor', '')
+         logger.info('Changed new member wysiwyg_editor to site default.')
++
++
++def addSortOnProperty(context):
++    """Add sort_on field to search controlpanel.
++    
++    The default value of this field is relevance.
++    """
++    site_properties = getToolByName(context, 'portal_properties').site_properties
++    if not site_properties.hasProperty('sort_on'):
++        if 'sort_on' in site_properties.__dict__:
++            # fix bug if 4.3.1 pending has been tested
++            del site_properties.sort_on
++        site_properties.manage_addProperty('sort_on', 'relevance', 'string')
++        logger.log(logging.INFO,
++                   "Added 'sort_on' property to site_properties.")
+diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
+index f14fc64..8ba9cf5 100644
+--- a/plone/app/upgrade/v51/betas.py
++++ b/plone/app/upgrade/v51/betas.py
+@@ -1,5 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from plone.app.upgrade.utils import loadMigrationProfile
++from plone.registry.interfaces import IRegistry
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import ISearchSchema
++from zope.component import getUtility
+ 
+ import logging
+ 
+@@ -9,3 +13,35 @@
+ 
+ def to51beta1(context):
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v51:to51beta1')
++
++
++def addSortOnProperty(context):
++    """Add sort_on field to search controlpanel.
++    
++    The default value of this field is relevance.
++    """
++    # get the old site properties
++    portal_properties = getToolByName(context, "portal_properties")
++    site_properties = portal_properties.site_properties
++    # get the new registry
++    registry = getUtility(IRegistry)
++    # XXX: Somehow this code is executed for old migration steps as well
++    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
++    # registry interfaces with 'check=False' will not work, because it will
++    # return a settings object and then fail when we try to access the
++    # attributes.
++    try:
++        settings = registry.forInterface(
++            ISearchSchema,
++            prefix='plone',
++        )
++    except KeyError:
++        settings = False
++    if settings:
++        # migrate the old site properties to the new registry
++        if site_properties.hasProperty('sort_on'):
++            settings.sort_on = site_properties.sort_on
++        else:
++            settings.sort_on = 'relevance'
++        logger.log(logging.INFO,
++                   "Added 'sort_on' property to site_properties.")
+diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
+index 4de223a..53b8399 100644
+--- a/plone/app/upgrade/v51/configure.zcml
++++ b/plone/app/upgrade/v51/configure.zcml
+@@ -51,6 +51,12 @@ Add new Mockup 2.4.0 relateditems resource url.
+            handler=".betas.to51beta1"
+            />
+ 
++      <gs:upgradeStep
++           title="Add default search options"
++           description="Add sort_on field to search controlpanel."
++           handler=".betas.addSortOnProperty"
++           />
++
+     </gs:upgradeSteps>
+ 
+ </configure>
+diff --git a/plone/app/upgrade/v51/profiles/to_beta1/registry.xml b/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
+index fab9c06..9593804 100644
+--- a/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
++++ b/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
+@@ -14,4 +14,7 @@
+     <value key="url">++resource++mockup/relateditems</value>
+   </records>
+ 
++  <!-- Add sort_on field to search controlpanel -->
++  <records interface="Products.CMFPlone.interfaces.ISearchSchema"
++           prefix="plone" />
+ </registry>
 
 
-Repository: mockup
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2016-10-07T15:35:42+02:00
+Date: 2016-10-07T15:35:51+02:00
 Author: agitator (agitator) <hpeter@agitator.com>
-Commit: https://github.com/plone/mockup/commit/7c642e26fdd29a2acbac2c921e82e987739f2a39
+Commit: https://github.com/plone/plone.app.upgrade/commit/6bac29d2ee3e576528716d5e7ea67a181058bd87
 
-Merge pull request #713 from plone/issue_1600_5x
+Merge pull request #77 from plone/issue_1600
 
-Issue 1600 - Plone 5.1.x - Added options to change default search order
+Issue 1600 - Add sort_on fields to search controlpanel
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/livesearch/pattern.js
+M plone/app/upgrade/v43/configure.zcml
+M plone/app/upgrade/v43/final.py
+M plone/app/upgrade/v51/betas.py
+M plone/app/upgrade/v51/configure.zcml
+M plone/app/upgrade/v51/profiles/to_beta1/registry.xml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ff09741..add75cd 100644
+index 9dac3cb..760d838 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -13,6 +13,9 @@ Incompatibilities:
+@@ -10,6 +10,9 @@ Breaking changes:
  
- New:
+ New features:
  
-+- Change default sort option in livesearch pattern.
++- Add sort_on field to search controlpanel.
 +  [rodfersou]
 +
- - Show expired label in folder contents for expired attributes
-   [vangheem]
- 
-diff --git a/mockup/patterns/livesearch/pattern.js b/mockup/patterns/livesearch/pattern.js
-index ef92046..12b06f5 100644
---- a/mockup/patterns/livesearch/pattern.js
-+++ b/mockup/patterns/livesearch/pattern.js
-@@ -59,10 +59,31 @@ define([
-       if(page === undefined){
-         page = 1;
-       }
-+      var sort_on = function(){
-+        var parameters = location.search,
-+            sorton_position = parameters.indexOf('sort_on');
-+        if(sorton_position === -1){
-+          // return default sort
-+          var $searchResults = $('#search-results');
-+          if($searchResults.length > 0){
-+            return $searchResults.attr('data-default-sort');
-+          }
-+          return '';
-+        }
-+        // cut string before sort_on parameter
-+        var sort_on = parameters.substring(sorton_position);
-+        // cut other parameters
-+        sort_on = sort_on.split('&')[0];
-+        // get just the value
-+        sort_on = sort_on.split('=')[1];
-+        return sort_on;
-+      }();
+ - Support sites without ``portal_quickinstaller``.
+   We use ``get_installer`` in Plone 5.1 migrations.
+   In earlier version we will keep using the ``portal_quickinstaller``,
+diff --git a/plone/app/upgrade/v43/configure.zcml b/plone/app/upgrade/v43/configure.zcml
+index c0d34b9..23c4469 100644
+--- a/plone/app/upgrade/v43/configure.zcml
++++ b/plone/app/upgrade/v43/configure.zcml
+@@ -241,6 +241,7 @@
+             description=""
+             handler="..utils.null_upgrade_step"
+             />
 +
-       $.ajax({
-         url: self.options.ajaxUrl + '?' + query +
-              '&page=' + page +
--             '&perPage=' + self.options.perPage,
-+             '&perPage=' + self.options.perPage +
-+             '&sort_on=' + sort_on,
-         dataType: 'json'
-       }).done(function(data){
-         self.results = data;
-@@ -241,6 +262,10 @@ define([
-           self.render();
-         }
-       });
-+      $('#sorting-options a').click(function(e){
-+        e.preventDefault();
-+        self.onceFocused = false;
-+      });
+     </genericsetup:upgradeSteps>
  
-       /* create result dom */
-       self.$results = $('<ul class="' + self.resultsClass + '"></ul>').hide().insertAfter(self.$input);
+     <genericsetup:upgradeSteps
+@@ -253,6 +254,20 @@
+             description=""
+             handler="..utils.null_upgrade_step"
+             />
++
++    </genericsetup:upgradeSteps>
++
++    <genericsetup:upgradeSteps
++        source="4314"
++        destination="4315"
++        profile="Products.CMFPlone:plone">
++
++        <genericsetup:upgradeStep
++            title="Add default search options"
++            description="Add sort_on field to search controlpanel."
++            handler=".final.addSortOnProperty"
++            />
++
+     </genericsetup:upgradeSteps>
+ 
+ </configure>
+diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
+index b3eb1b1..2cda0ba 100644
+--- a/plone/app/upgrade/v43/final.py
++++ b/plone/app/upgrade/v43/final.py
+@@ -324,3 +324,18 @@ def removeFakeKupu(context):
+     if member_data.getProperty('wysiwyg_editor') == 'Kupu':
+         member_data._updateProperty('wysiwyg_editor', '')
+         logger.info('Changed new member wysiwyg_editor to site default.')
++
++
++def addSortOnProperty(context):
++    """Add sort_on field to search controlpanel.
++    
++    The default value of this field is relevance.
++    """
++    site_properties = getToolByName(context, 'portal_properties').site_properties
++    if not site_properties.hasProperty('sort_on'):
++        if 'sort_on' in site_properties.__dict__:
++            # fix bug if 4.3.1 pending has been tested
++            del site_properties.sort_on
++        site_properties.manage_addProperty('sort_on', 'relevance', 'string')
++        logger.log(logging.INFO,
++                   "Added 'sort_on' property to site_properties.")
+diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
+index f14fc64..8ba9cf5 100644
+--- a/plone/app/upgrade/v51/betas.py
++++ b/plone/app/upgrade/v51/betas.py
+@@ -1,5 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from plone.app.upgrade.utils import loadMigrationProfile
++from plone.registry.interfaces import IRegistry
++from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.interfaces import ISearchSchema
++from zope.component import getUtility
+ 
+ import logging
+ 
+@@ -9,3 +13,35 @@
+ 
+ def to51beta1(context):
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v51:to51beta1')
++
++
++def addSortOnProperty(context):
++    """Add sort_on field to search controlpanel.
++    
++    The default value of this field is relevance.
++    """
++    # get the old site properties
++    portal_properties = getToolByName(context, "portal_properties")
++    site_properties = portal_properties.site_properties
++    # get the new registry
++    registry = getUtility(IRegistry)
++    # XXX: Somehow this code is executed for old migration steps as well
++    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
++    # registry interfaces with 'check=False' will not work, because it will
++    # return a settings object and then fail when we try to access the
++    # attributes.
++    try:
++        settings = registry.forInterface(
++            ISearchSchema,
++            prefix='plone',
++        )
++    except KeyError:
++        settings = False
++    if settings:
++        # migrate the old site properties to the new registry
++        if site_properties.hasProperty('sort_on'):
++            settings.sort_on = site_properties.sort_on
++        else:
++            settings.sort_on = 'relevance'
++        logger.log(logging.INFO,
++                   "Added 'sort_on' property to site_properties.")
+diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
+index 4de223a..53b8399 100644
+--- a/plone/app/upgrade/v51/configure.zcml
++++ b/plone/app/upgrade/v51/configure.zcml
+@@ -51,6 +51,12 @@ Add new Mockup 2.4.0 relateditems resource url.
+            handler=".betas.to51beta1"
+            />
+ 
++      <gs:upgradeStep
++           title="Add default search options"
++           description="Add sort_on field to search controlpanel."
++           handler=".betas.addSortOnProperty"
++           />
++
+     </gs:upgradeSteps>
+ 
+ </configure>
+diff --git a/plone/app/upgrade/v51/profiles/to_beta1/registry.xml b/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
+index fab9c06..9593804 100644
+--- a/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
++++ b/plone/app/upgrade/v51/profiles/to_beta1/registry.xml
+@@ -14,4 +14,7 @@
+     <value key="url">++resource++mockup/relateditems</value>
+   </records>
+ 
++  <!-- Add sort_on field to search controlpanel -->
++  <records interface="Products.CMFPlone.interfaces.ISearchSchema"
++           prefix="plone" />
+ </registry>
 
 
