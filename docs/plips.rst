@@ -246,7 +246,7 @@ To work on a PLIP,
 you bootstrap buildout and then invoke buildout with your PLIP config::
 
     $ virtualenv .
-    $ ./bin/pip install -U zc.buildout setuptools pip
+    $ ./bin/pip install -r requirements.txt
     $ ./bin/buildout -c plips/plip-1234-widget-frobbing.cfg
 
 If you are using a :file:`local.cfg` to extend your plip file with some changes that you do not want to commit accidentally,
