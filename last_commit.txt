@@ -1,216 +1,334 @@
-Repository: plone.app.linkintegrity
+Repository: plone.scale
 
 
-Branch: refs/heads/master
-Date: 2016-10-22T13:14:24-04:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/756ba4952fc1948af31acb4eddd44bbf4213ec42
+Branch: refs/heads/1.4.x
+Date: 2016-10-22T22:53:44-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/05d238acdf1049f4bf971d56e256848f6222fa56
 
-remove hard dependency on Archetypes (again)
+Avoid TypeErrors when looking for outdated scales.
+
+Fixes https://github.com/plone/plone.scale/issues/12
 
 Files changed:
-A plone/app/linkintegrity/compat.py
 M CHANGES.rst
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/retriever.py
+M plone/scale/storage.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3429a7b..b48995e 100644
+index 4443ece..1145c6c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -17,6 +17,9 @@ Bug fixes:
- - Add coding headers on python files.
-   [gforcada]
+@@ -11,6 +11,10 @@ New:
  
-+- Remove hard dependency on Archetypes (again).
-+  [davisagli]
+ Fixes:
+ 
++- Avoid TypeErrors when looking for outdated scales.
++  Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
++  [maurits]
 +
+ - Catch KeyError when deleting non existing scale.  This can happen in corner cases.
+   Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 1e50266..e7327de 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -107,13 +107,21 @@ def __init__(self, context, modified=None):
+         self.context = context
+         self.modified = modified
  
- 3.0.7 (2016-09-16)
- ------------------
-diff --git a/plone/app/linkintegrity/compat.py b/plone/app/linkintegrity/compat.py
-new file mode 100644
-index 0000000..5f43af7
---- /dev/null
-+++ b/plone/app/linkintegrity/compat.py
-@@ -0,0 +1,14 @@
-+# If Archetypes is not installed, define dummy objects
-+# to replace Archetypes imports.
-+
-+try:
-+    from Products.Archetypes.interfaces import IBaseObject
-+    from Products.Archtypes.Field import TextField
-+except ImportError:
-+    from zope.interface import Interface
-+
-+    class IBaseObject(Interface):
-+        pass
-+
-+    class TextField(object):
-+        pass
-diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py
-index 5e12ffd..4c9845f 100644
---- a/plone/app/linkintegrity/handlers.py
-+++ b/plone/app/linkintegrity/handlers.py
-@@ -1,7 +1,6 @@
- # -*- coding: utf-8 -*-
- from Acquisition import aq_get
- from Acquisition import aq_parent
--from Products.Archetypes.interfaces import IBaseObject
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from ZODB.POSException import ConflictError
-@@ -19,6 +18,7 @@
- from zope.intid.interfaces import IIntIds
- from zope.keyreference.interfaces import NotYet
- from zope.publisher.interfaces import NotFound as ztkNotFound
-+from .compat import IBaseObject
- import logging
+-    def _modified_since(self, since):
++    def _modified_since(self, since, offset=0):
+         if since is None:
+             return False
+-        elif self.modified_time is None:
++        modified_time = self.modified_time
++        if modified_time is None:
+             return False
+-        else:
+-            return self.modified_time > since
++        # We expect either a float or an int, but in corner cases it can be
++        # something else entirely.
++        # https://github.com/plone/plone.scale/issues/12
++        if not isinstance(modified_time, (float, int)):
++            return False
++        if not isinstance(since, (float, int)):
++            return False
++        since = since - offset
++        return modified_time > since
  
- logger = logging.getLogger(__name__)
-diff --git a/plone/app/linkintegrity/retriever.py b/plone/app/linkintegrity/retriever.py
-index ade2a57..afd6307 100644
---- a/plone/app/linkintegrity/retriever.py
-+++ b/plone/app/linkintegrity/retriever.py
-@@ -5,14 +5,14 @@
- from plone.app.linkintegrity.parser import extractLinks
- from zope.component import adapter
- from zope.interface import implementer
--from Products.Archetypes.Field import TextField
--from Products.Archetypes.interfaces import IBaseObject
- from plone.dexterity.interfaces import IDexterityContent
- from zope.component import getUtility
- from plone.dexterity.interfaces import IDexterityFTI
- from plone.dexterity.utils import getAdditionalSchemata
- from zope.schema import getFieldsInOrder
- from plone.app.textfield import RichText
-+from .compat import IBaseObject
-+from .compat import TextField
+     @property
+     def modified_time(self):
+@@ -176,14 +184,19 @@ def scale(self, factory=None, **parameters):
+     def _cleanup(self):
+         storage = self.storage
+         modified_time = self.modified_time
++        if modified_time is None:
++            return
++        if not isinstance(modified_time, (float, int)):
++            # https://github.com/plone/plone.scale/issues/12
++            return
+         for key, value in storage.items():
+             # remove info stored by tuple keys
+             # before refactoring
+             if isinstance(key, tuple):
+                 del self[key]
+             # clear cache from scales older than one day
+-            elif (modified_time and
+-                    value['modified'] < modified_time - KEEP_SCALE_MILLIS):
++            elif self._modified_since(
++                    value['modified'], offset=KEEP_SCALE_MILLIS):
+                 del self[key]
  
- 
- @implementer(IRetriever)
+     def __getitem__(self, uid):
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.scale
 
 
-Branch: refs/heads/master
-Date: 2016-10-22T14:48:32-04:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/a08d2a2ec00fefe56c3c978c1d883fe5d9c43141
+Branch: refs/heads/1.4.x
+Date: 2016-10-22T22:53:44-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/9d952798ad52c8bdfd08bb7808694747fd01cefb
 
-fix typo
+When getting an outdated scale, don't throw it away when there is no factory.
 
 Files changed:
-M plone/app/linkintegrity/compat.py
+M CHANGES.rst
+M plone/scale/storage.py
 
-diff --git a/plone/app/linkintegrity/compat.py b/plone/app/linkintegrity/compat.py
-index 5f43af7..c19cf2f 100644
---- a/plone/app/linkintegrity/compat.py
-+++ b/plone/app/linkintegrity/compat.py
-@@ -3,7 +3,7 @@
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 1145c6c..53b33d0 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -11,6 +11,9 @@ New:
  
- try:
-     from Products.Archetypes.interfaces import IBaseObject
--    from Products.Archtypes.Field import TextField
-+    from Products.Archetypes.Field import TextField
- except ImportError:
-     from zope.interface import Interface
+ Fixes:
  
++- When getting an outdated scale, don't throw it away when there is no
++  factory.  [maurits]
++
+ - Avoid TypeErrors when looking for outdated scales.
+   Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index e7327de..9c45e79 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -162,7 +162,8 @@ def scale(self, factory=None, **parameters):
+         key = self.hash(**parameters)
+         storage = self.storage
+         info = self.get_info_by_hash(key)
+-        if info is not None and self._modified_since(info['modified']):
++        if (info is not None and factory and
++                self._modified_since(info['modified'])):
+             del self[info['uid']]
+             # invalidate when the image was updated
+             info = None
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.scale
 
 
-Branch: refs/heads/master
-Date: 2016-10-22T17:48:15-04:00
+Branch: refs/heads/1.4.x
+Date: 2016-10-22T22:53:44-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/bcca32a1cef525ad288e4e27619f01281cc63eca
+
+modified time can be a long.
+
+Fixes plone.namedfile and plone.app.imaging tests.
+
+Files changed:
+M plone/scale/storage.py
+
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 9c45e79..f57c763 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -13,6 +13,8 @@
+ # This is one day:
+ KEEP_SCALE_MILLIS = 24 * 60 * 60 * 1000
+ 
++number_types = (float, int, long)
++
+ 
+ class IImageScaleStorage(Interface):
+     """ This is an adapter for image content which can store, retrieve and
+@@ -113,12 +115,12 @@ def _modified_since(self, since, offset=0):
+         modified_time = self.modified_time
+         if modified_time is None:
+             return False
+-        # We expect either a float or an int, but in corner cases it can be
++        # We expect a number, but in corner cases it can be
+         # something else entirely.
+         # https://github.com/plone/plone.scale/issues/12
+-        if not isinstance(modified_time, (float, int)):
++        if not isinstance(modified_time, number_types):
+             return False
+-        if not isinstance(since, (float, int)):
++        if not isinstance(since, number_types):
+             return False
+         since = since - offset
+         return modified_time > since
+@@ -187,7 +189,7 @@ def _cleanup(self):
+         modified_time = self.modified_time
+         if modified_time is None:
+             return
+-        if not isinstance(modified_time, (float, int)):
++        if not isinstance(modified_time, number_types):
+             # https://github.com/plone/plone.scale/issues/12
+             return
+         for key, value in storage.items():
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/1.4.x
+Date: 2016-10-22T22:53:44-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/9d0cf3ec443e1eea78e12ea2af9f7c9978084e1e
+
+Fix modified scale comparison with offset.
+
+We were subtracting from the wrong value.
+
+Files changed:
+M plone/scale/storage.py
+
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index f57c763..9330b00 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -110,6 +110,9 @@ def __init__(self, context, modified=None):
+         self.modified = modified
+ 
+     def _modified_since(self, since, offset=0):
++        # offset gets subtracted from the main modified time: this allows to
++        # keep scales for a bit longer if needed, even when the main image has
++        # changed.
+         if since is None:
+             return False
+         modified_time = self.modified_time
+@@ -122,7 +125,7 @@ def _modified_since(self, since, offset=0):
+             return False
+         if not isinstance(since, number_types):
+             return False
+-        since = since - offset
++        modified_time = modified_time - offset
+         return modified_time > since
+ 
+     @property
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/1.4.x
+Date: 2016-10-22T23:07:48-04:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/de15b7e15675289b0a6e56f0b20d6f276fc228ec
+Commit: https://github.com/plone/plone.scale/commit/4938b05693bd062171159457bd2731d287f523ff
 
-Merge pull request #44 from plone/davisagli-AT-cleanup
+Merge pull request #19 from plone/modified-time-compare-14
 
-remove hard dependency on Archetypes (again)
+Various scale storage bug fixes [1.4.x]
 
 Files changed:
-A plone/app/linkintegrity/compat.py
 M CHANGES.rst
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/retriever.py
+M plone/scale/storage.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3429a7b..b48995e 100644
+index 4443ece..53b33d0 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -17,6 +17,9 @@ Bug fixes:
- - Add coding headers on python files.
-   [gforcada]
+@@ -11,6 +11,13 @@ New:
  
-+- Remove hard dependency on Archetypes (again).
-+  [davisagli]
+ Fixes:
+ 
++- When getting an outdated scale, don't throw it away when there is no
++  factory.  [maurits]
++
++- Avoid TypeErrors when looking for outdated scales.
++  Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
++  [maurits]
++
+ - Catch KeyError when deleting non existing scale.  This can happen in corner cases.
+   Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 1e50266..9330b00 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -13,6 +13,8 @@
+ # This is one day:
+ KEEP_SCALE_MILLIS = 24 * 60 * 60 * 1000
+ 
++number_types = (float, int, long)
 +
  
- 3.0.7 (2016-09-16)
- ------------------
-diff --git a/plone/app/linkintegrity/compat.py b/plone/app/linkintegrity/compat.py
-new file mode 100644
-index 0000000..c19cf2f
---- /dev/null
-+++ b/plone/app/linkintegrity/compat.py
-@@ -0,0 +1,14 @@
-+# If Archetypes is not installed, define dummy objects
-+# to replace Archetypes imports.
-+
-+try:
-+    from Products.Archetypes.interfaces import IBaseObject
-+    from Products.Archetypes.Field import TextField
-+except ImportError:
-+    from zope.interface import Interface
-+
-+    class IBaseObject(Interface):
-+        pass
-+
-+    class TextField(object):
-+        pass
-diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py
-index 5e12ffd..4c9845f 100644
---- a/plone/app/linkintegrity/handlers.py
-+++ b/plone/app/linkintegrity/handlers.py
-@@ -1,7 +1,6 @@
- # -*- coding: utf-8 -*-
- from Acquisition import aq_get
- from Acquisition import aq_parent
--from Products.Archetypes.interfaces import IBaseObject
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone.interfaces import IPloneSiteRoot
- from ZODB.POSException import ConflictError
-@@ -19,6 +18,7 @@
- from zope.intid.interfaces import IIntIds
- from zope.keyreference.interfaces import NotYet
- from zope.publisher.interfaces import NotFound as ztkNotFound
-+from .compat import IBaseObject
- import logging
+ class IImageScaleStorage(Interface):
+     """ This is an adapter for image content which can store, retrieve and
+@@ -107,13 +109,24 @@ def __init__(self, context, modified=None):
+         self.context = context
+         self.modified = modified
  
- logger = logging.getLogger(__name__)
-diff --git a/plone/app/linkintegrity/retriever.py b/plone/app/linkintegrity/retriever.py
-index ade2a57..afd6307 100644
---- a/plone/app/linkintegrity/retriever.py
-+++ b/plone/app/linkintegrity/retriever.py
-@@ -5,14 +5,14 @@
- from plone.app.linkintegrity.parser import extractLinks
- from zope.component import adapter
- from zope.interface import implementer
--from Products.Archetypes.Field import TextField
--from Products.Archetypes.interfaces import IBaseObject
- from plone.dexterity.interfaces import IDexterityContent
- from zope.component import getUtility
- from plone.dexterity.interfaces import IDexterityFTI
- from plone.dexterity.utils import getAdditionalSchemata
- from zope.schema import getFieldsInOrder
- from plone.app.textfield import RichText
-+from .compat import IBaseObject
-+from .compat import TextField
+-    def _modified_since(self, since):
++    def _modified_since(self, since, offset=0):
++        # offset gets subtracted from the main modified time: this allows to
++        # keep scales for a bit longer if needed, even when the main image has
++        # changed.
+         if since is None:
+             return False
+-        elif self.modified_time is None:
++        modified_time = self.modified_time
++        if modified_time is None:
+             return False
+-        else:
+-            return self.modified_time > since
++        # We expect a number, but in corner cases it can be
++        # something else entirely.
++        # https://github.com/plone/plone.scale/issues/12
++        if not isinstance(modified_time, number_types):
++            return False
++        if not isinstance(since, number_types):
++            return False
++        modified_time = modified_time - offset
++        return modified_time > since
  
+     @property
+     def modified_time(self):
+@@ -154,7 +167,8 @@ def scale(self, factory=None, **parameters):
+         key = self.hash(**parameters)
+         storage = self.storage
+         info = self.get_info_by_hash(key)
+-        if info is not None and self._modified_since(info['modified']):
++        if (info is not None and factory and
++                self._modified_since(info['modified'])):
+             del self[info['uid']]
+             # invalidate when the image was updated
+             info = None
+@@ -176,14 +190,19 @@ def scale(self, factory=None, **parameters):
+     def _cleanup(self):
+         storage = self.storage
+         modified_time = self.modified_time
++        if modified_time is None:
++            return
++        if not isinstance(modified_time, number_types):
++            # https://github.com/plone/plone.scale/issues/12
++            return
+         for key, value in storage.items():
+             # remove info stored by tuple keys
+             # before refactoring
+             if isinstance(key, tuple):
+                 del self[key]
+             # clear cache from scales older than one day
+-            elif (modified_time and
+-                    value['modified'] < modified_time - KEEP_SCALE_MILLIS):
++            elif self._modified_since(
++                    value['modified'], offset=KEEP_SCALE_MILLIS):
+                 del self[key]
  
- @implementer(IRetriever)
+     def __getitem__(self, uid):
 
 
