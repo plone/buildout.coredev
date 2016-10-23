@@ -1,47 +1,464 @@
-Repository: Products.CMFEditions
+Repository: plone.scale
 
 
 Branch: refs/heads/master
-Date: 2016-10-22T18:23:40-04:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/7c2f00a5d523324f63f008d40f3c830b53d12f27
+Date: 2016-10-22T22:45:43-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/8236f409cdc098b52ecce00ddf8c53bd556fba6d
 
-Fix deprecated import from Globals that is changed in Zope4
+Avoid TypeErrors when looking for outdated scales.
+
+Fixes https://github.com/plone/plone.scale/issues/12
 
 Files changed:
 M CHANGES.rst
-M Products/CMFEditions/__init__.py
+M plone/scale/storage.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3f5e3f4..5ddfd7b 100644
+index b9a0eb9..796f41c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
+@@ -16,6 +16,10 @@ New features:
  
  Bug fixes:
  
-+- Fix deprecated import from Globals that is changed in Zope4.
-+  [pbauer]
++- Avoid TypeErrors when looking for outdated scales.
++  Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
++  [maurits]
 +
- - Do not log using plone restricted python logging script.
-   [jensens]
+ - Catch KeyError when deleting non existing scale.  This can happen in corner cases.
+   Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 4104001..1ddc8bd 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -112,13 +112,21 @@ def __init__(self, context, modified=None):
+         self.context = context
+         self.modified = modified
  
-diff --git a/Products/CMFEditions/__init__.py b/Products/CMFEditions/__init__.py
-index b570f85..cd69a07 100644
---- a/Products/CMFEditions/__init__.py
-+++ b/Products/CMFEditions/__init__.py
-@@ -23,11 +23,7 @@
- """
+-    def _modified_since(self, since):
++    def _modified_since(self, since, offset=0):
+         if since is None:
+             return False
+-        elif self.modified_time is None:
++        modified_time = self.modified_time
++        if modified_time is None:
+             return False
+-        else:
+-            return self.modified_time > since
++        # We expect either a float or an int, but in corner cases it can be
++        # something else entirely.
++        # https://github.com/plone/plone.scale/issues/12
++        if not isinstance(modified_time, (float, int)):
++            return False
++        if not isinstance(since, (float, int)):
++            return False
++        since = since - offset
++        return modified_time > since
  
+     @property
+     def modified_time(self):
+@@ -223,14 +231,19 @@ def scale(self, factory=None, **parameters):
+     def _cleanup(self):
+         storage = self.storage
+         modified_time = self.modified_time
++        if modified_time is None:
++            return
++        if not isinstance(modified_time, (float, int)):
++            # https://github.com/plone/plone.scale/issues/12
++            return
+         for key, value in storage.items():
+             # remove info stored by tuple keys
+             # before refactoring
+             if isinstance(key, tuple):
+                 del self[key]
+             # clear cache from scales older than one day
+-            elif (modified_time and
+-                    value['modified'] < modified_time - KEEP_SCALE_MILLIS):
++            elif self._modified_since(
++                    value['modified'], offset=KEEP_SCALE_MILLIS):
+                 del self[key]
+ 
+     def __getitem__(self, uid):
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2016-10-22T22:49:02-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/329796c0478ade2377210847e5efacbef397a32d
+
+When getting an outdated scale, don't throw it away when there is no factory.
+
+Files changed:
+M CHANGES.rst
+M plone/scale/storage.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 796f41c..bb965ac 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -16,6 +16,9 @@ New features:
+ 
+ Bug fixes:
+ 
++- When getting an outdated scale, don't throw it away when there is no
++  factory.  [maurits]
++
+ - Avoid TypeErrors when looking for outdated scales.
+   Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 1ddc8bd..b0c23fe 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -167,15 +167,16 @@ def scale(self, factory=None, **parameters):
+         key = self.hash(**parameters)
+         storage = self.storage
+         info = self.get_info_by_hash(key)
+-        if info is not None and self._modified_since(info['modified']):
++        scaling_factory = IImageScaleFactory(self.context, None)
++        if (info is not None and
++                (scaling_factory is not None or factory is not None) and
++                self._modified_since(info['modified'])):
+             del self[info['uid']]
+             # invalidate when the image was updated
+             info = None
+         elif info is not None:
+             return info
+ 
+-        scaling_factory = IImageScaleFactory(self.context, None)
+-
+         # BBB/Deprecation handling
+         if factory is not None:
+             if scaling_factory is not None:
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2016-10-22T22:49:04-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/1c3ce6ee3d18c8b7c46bba610e1eff108a8cbd93
+
+modified time can be a long.
+
+Fixes plone.namedfile and plone.app.imaging tests.
+
+Files changed:
+M plone/scale/storage.py
+
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index b0c23fe..4933799 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -18,6 +18,15 @@
+ # This is one day:
+ KEEP_SCALE_MILLIS = 24 * 60 * 60 * 1000
+ 
++try:
++    long
++except NameError:
++    # Python 3 has no long, only int.
++    number_types = (float, int)
++else:
++    # Python 2
++    number_types = (float, int, long)
++
+ 
+ class IImageScaleStorage(Interface):
+     """ This is an adapter for image content which can store, retrieve and
+@@ -118,12 +127,12 @@ def _modified_since(self, since, offset=0):
+         modified_time = self.modified_time
+         if modified_time is None:
+             return False
+-        # We expect either a float or an int, but in corner cases it can be
++        # We expect a number, but in corner cases it can be
+         # something else entirely.
+         # https://github.com/plone/plone.scale/issues/12
+-        if not isinstance(modified_time, (float, int)):
++        if not isinstance(modified_time, number_types):
+             return False
+-        if not isinstance(since, (float, int)):
++        if not isinstance(since, number_types):
+             return False
+         since = since - offset
+         return modified_time > since
+@@ -234,7 +243,7 @@ def _cleanup(self):
+         modified_time = self.modified_time
+         if modified_time is None:
+             return
+-        if not isinstance(modified_time, (float, int)):
++        if not isinstance(modified_time, number_types):
+             # https://github.com/plone/plone.scale/issues/12
+             return
+         for key, value in storage.items():
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2016-10-22T22:49:04-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/e041d816d753d4c7f87b8dea5c2aa79f8b9c0fd1
+
+Require the `six` package so we can more easily check number types.
+
+On Python 3 `long` has been merged into `int`.
+
+Files changed:
+M CHANGES.rst
+M plone/scale/storage.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index bb965ac..30a0288 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -16,6 +16,9 @@ New features:
+ 
+ Bug fixes:
+ 
++- Require the ``six`` package so we can more easily check number types.
++  On Python 3 ``long`` has been merged into ``int``.  [maurits]
++
+ - When getting an outdated scale, don't throw it away when there is no
+   factory.  [maurits]
+ 
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 4933799..dfb842d 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -1,6 +1,7 @@
+ # -*- coding: utf-8 -*-
+ from persistent.dict import PersistentDict
+ from plone.scale.interfaces import IImageScaleFactory
++from six import integer_types
+ from UserDict import DictMixin
+ from uuid import uuid4
+ from ZODB.POSException import ConflictError
+@@ -18,14 +19,10 @@
+ # This is one day:
+ KEEP_SCALE_MILLIS = 24 * 60 * 60 * 1000
  
 -try:
--    from App.Common import package_home
--except ImportError:
--    from Globals import package_home
--
-+from App.Common import package_home
- from AccessControl import ModuleSecurityInfo
+-    long
+-except NameError:
+-    # Python 3 has no long, only int.
+-    number_types = (float, int)
+-else:
+-    # Python 2
+-    number_types = (float, int, long)
++# Number types are float and int, and on Python 2 also long.
++number_types = [float]
++number_types.extend(integer_types)
++number_types = tuple(number_types)
  
- from Products.CMFCore import utils
+ 
+ class IImageScaleStorage(Interface):
+diff --git a/setup.py b/setup.py
+index 4cdc82e..cdcd36c 100644
+--- a/setup.py
++++ b/setup.py
+@@ -56,6 +56,7 @@
+         # 'PIL',
+         # 'Pillow'
+         'setuptools',
++        "six",
+     ],
+     extras_require=dict(
+         test=TESTS_REQUIREMENTS,
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2016-10-22T22:49:04-04:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.scale/commit/111249fae57a3a144f9f6ec528b6826e4d17e1dd
+
+Fix modified scale comparison with offset.
+
+We were subtracting from the wrong value.
+
+Files changed:
+M plone/scale/storage.py
+
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index dfb842d..ce23092 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -119,6 +119,9 @@ def __init__(self, context, modified=None):
+         self.modified = modified
+ 
+     def _modified_since(self, since, offset=0):
++        # offset gets subtracted from the main modified time: this allows to
++        # keep scales for a bit longer if needed, even when the main image has
++        # changed.
+         if since is None:
+             return False
+         modified_time = self.modified_time
+@@ -131,7 +134,7 @@ def _modified_since(self, since, offset=0):
+             return False
+         if not isinstance(since, number_types):
+             return False
+-        since = since - offset
++        modified_time = modified_time - offset
+         return modified_time > since
+ 
+     @property
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2016-10-22T23:08:31-04:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.scale/commit/9bae0a40fa48e0dd677d8c545ec6bbef231fb3c1
+
+Merge pull request #21 from plone/modified-time-compare-master
+
+Various scale storage bug fixes [master]
+
+Files changed:
+M CHANGES.rst
+M plone/scale/storage.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index b9a0eb9..30a0288 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -16,6 +16,16 @@ New features:
+ 
+ Bug fixes:
+ 
++- Require the ``six`` package so we can more easily check number types.
++  On Python 3 ``long`` has been merged into ``int``.  [maurits]
++
++- When getting an outdated scale, don't throw it away when there is no
++  factory.  [maurits]
++
++- Avoid TypeErrors when looking for outdated scales.
++  Fixes `issue 12 <https://github.com/plone/plone.scale/issues/12>`_.
++  [maurits]
++
+ - Catch KeyError when deleting non existing scale.  This can happen in corner cases.
+   Fixes `issue 15 <https://github.com/plone/plone.scale/issues/15>`_.
+   [maurits]
+diff --git a/plone/scale/storage.py b/plone/scale/storage.py
+index 4104001..ce23092 100644
+--- a/plone/scale/storage.py
++++ b/plone/scale/storage.py
+@@ -1,6 +1,7 @@
+ # -*- coding: utf-8 -*-
+ from persistent.dict import PersistentDict
+ from plone.scale.interfaces import IImageScaleFactory
++from six import integer_types
+ from UserDict import DictMixin
+ from uuid import uuid4
+ from ZODB.POSException import ConflictError
+@@ -18,6 +19,11 @@
+ # This is one day:
+ KEEP_SCALE_MILLIS = 24 * 60 * 60 * 1000
+ 
++# Number types are float and int, and on Python 2 also long.
++number_types = [float]
++number_types.extend(integer_types)
++number_types = tuple(number_types)
++
+ 
+ class IImageScaleStorage(Interface):
+     """ This is an adapter for image content which can store, retrieve and
+@@ -112,13 +118,24 @@ def __init__(self, context, modified=None):
+         self.context = context
+         self.modified = modified
+ 
+-    def _modified_since(self, since):
++    def _modified_since(self, since, offset=0):
++        # offset gets subtracted from the main modified time: this allows to
++        # keep scales for a bit longer if needed, even when the main image has
++        # changed.
+         if since is None:
+             return False
+-        elif self.modified_time is None:
++        modified_time = self.modified_time
++        if modified_time is None:
++            return False
++        # We expect a number, but in corner cases it can be
++        # something else entirely.
++        # https://github.com/plone/plone.scale/issues/12
++        if not isinstance(modified_time, number_types):
+             return False
+-        else:
+-            return self.modified_time > since
++        if not isinstance(since, number_types):
++            return False
++        modified_time = modified_time - offset
++        return modified_time > since
+ 
+     @property
+     def modified_time(self):
+@@ -159,15 +176,16 @@ def scale(self, factory=None, **parameters):
+         key = self.hash(**parameters)
+         storage = self.storage
+         info = self.get_info_by_hash(key)
+-        if info is not None and self._modified_since(info['modified']):
++        scaling_factory = IImageScaleFactory(self.context, None)
++        if (info is not None and
++                (scaling_factory is not None or factory is not None) and
++                self._modified_since(info['modified'])):
+             del self[info['uid']]
+             # invalidate when the image was updated
+             info = None
+         elif info is not None:
+             return info
+ 
+-        scaling_factory = IImageScaleFactory(self.context, None)
+-
+         # BBB/Deprecation handling
+         if factory is not None:
+             if scaling_factory is not None:
+@@ -223,14 +241,19 @@ def scale(self, factory=None, **parameters):
+     def _cleanup(self):
+         storage = self.storage
+         modified_time = self.modified_time
++        if modified_time is None:
++            return
++        if not isinstance(modified_time, number_types):
++            # https://github.com/plone/plone.scale/issues/12
++            return
+         for key, value in storage.items():
+             # remove info stored by tuple keys
+             # before refactoring
+             if isinstance(key, tuple):
+                 del self[key]
+             # clear cache from scales older than one day
+-            elif (modified_time and
+-                    value['modified'] < modified_time - KEEP_SCALE_MILLIS):
++            elif self._modified_since(
++                    value['modified'], offset=KEEP_SCALE_MILLIS):
+                 del self[key]
+ 
+     def __getitem__(self, uid):
+diff --git a/setup.py b/setup.py
+index 4cdc82e..cdcd36c 100644
+--- a/setup.py
++++ b/setup.py
+@@ -56,6 +56,7 @@
+         # 'PIL',
+         # 'Pillow'
+         'setuptools',
++        "six",
+     ],
+     extras_require=dict(
+         test=TESTS_REQUIREMENTS,
 
 
