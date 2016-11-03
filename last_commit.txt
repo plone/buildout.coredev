@@ -1,442 +1,364 @@
-Repository: plone.resource
+Repository: Products.TinyMCE
 
 
-Branch: refs/heads/master
-Date: 2016-11-01T00:57:24-03:00
-Author: Juan Pablo Gimenez (jpgimenez) <jpg@rosario.com>
-Commit: https://github.com/plone/plone.resource/commit/43b70acdac2f3e713a432848c194f9ad76cec40e
+Branch: refs/heads/1.3.x
+Date: 2016-11-02T12:38:16+01:00
+Author: Luca Fabbri (keul) <luca@keul.it>
+Commit: https://github.com/plone/Products.TinyMCE/commit/1e1068a06571db8b0806510f0ee7d0b1ed488945
 
-Fire events on resources create and modify
+Prevent broken breadcrumbs when parent is private
+
+This close #150
 
 Files changed:
-M plone/resource/directory.py
-M plone/resource/interfaces.py
+M Products/TinyMCE/adapters/JSONFolderListing.py
+M Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
 
-diff --git a/plone/resource/directory.py b/plone/resource/directory.py
-index 5b9cf37..d4308dd 100644
---- a/plone/resource/directory.py
-+++ b/plone/resource/directory.py
-@@ -3,6 +3,8 @@
- from OFS.Image import File
- from OFS.interfaces import IObjectManager
- from plone.resource.file import FilesystemFile
-+from plone.resource.interfaces import IPloneResourceCreatedEvent
-+from plone.resource.interfaces import IPloneResourceModifiedEvent
- from plone.resource.interfaces import IResourceDirectory
- from plone.resource.interfaces import IWritableResourceDirectory
- from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2
-@@ -10,6 +12,8 @@
- from StringIO import StringIO
- from zExceptions import Forbidden
- from zExceptions import NotFound
-+from zope.component.interfaces import ObjectEvent
-+from zope.event import notify
- from zope.interface import implementer
- from zope.site.hooks import getSite
- import os.path
-@@ -21,6 +25,23 @@
- FILTERS = [re.compile(pattern) for pattern in FILTERS]
+diff --git a/Products/TinyMCE/adapters/JSONFolderListing.py b/Products/TinyMCE/adapters/JSONFolderListing.py
+index a6f54e7..8db9699 100644
+--- a/Products/TinyMCE/adapters/JSONFolderListing.py
++++ b/Products/TinyMCE/adapters/JSONFolderListing.py
+@@ -4,6 +4,7 @@
+ except ImportError:
+     import json
  
++from zope.security import checkPermission
+ from zope.interface import implements
+ from zope.component import getUtility
+ from zope.i18n import translate
+@@ -11,9 +12,11 @@
+ from plone.i18n.normalizer.interfaces import IIDNormalizer
+ from plone.app.layout.navigation.root import getNavigationRootObject
+ from plone.app.layout.navigation.interfaces import INavigationRoot
++from AccessControl import getSecurityManager
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFPlone.interfaces.siteroot import IPloneSiteRoot
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFCore import permissions
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
  
-+@implementer(IPloneResourceCreatedEvent)
-+class PloneResourceCreatedEvent(ObjectEvent):
-+    """A resource has been created"""
-+
-+
-+@implementer(IPloneResourceModifiedEvent)
-+class PloneResourceModifiedEvent(ObjectEvent):
-+    """A resource has been modified"""
-+
-+    def __init__(self, object, *descriptions):
-+        """
-+        Init with a list of modification descriptions.
-+        """
-+        super(PloneResourceModifiedEvent, self).__init__(object)
-+        self.descriptions = descriptions
-+
-+
- @implementer(IWritableResourceDirectory)
- class PersistentResourceDirectory(object):
-     """A resource directory stored in the ZODB.
-@@ -158,9 +179,13 @@ def writeFile(self, path, data):
-             # otherwise HTTPResponse.setBody assumes latin1 and mangles things
-             f.content_type = ct + '; charset=utf-8'
-         container = self.context.unrestrictedTraverse(basepath)
-+        event = PloneResourceCreatedEvent
-         if filename in container:
-             container._delOb(filename)
-+            event = PloneResourceModifiedEvent
-         container._setOb(filename, f)
-+        obj = container._getOb(filename)
-+        notify(event(obj))
+@@ -39,10 +42,11 @@ def getBreadcrumbs(self, path=None):
+         portal_state = self.context.restrictedTraverse('@@plone_portal_state')
+         root = getNavigationRootObject(self.context, portal_state.portal())
+         root_url = root.absolute_url()
++        sm = getSecurityManager()
  
-     def importZip(self, f):
-         if not isinstance(f, zipfile.ZipFile):
-diff --git a/plone/resource/interfaces.py b/plone/resource/interfaces.py
-index 0b4404d..22778a9 100644
---- a/plone/resource/interfaces.py
-+++ b/plone/resource/interfaces.py
+         if path is not None:
+             path = path.replace(root_url, '', 1).strip('/')
+-            root = aq_inner(root.restrictedTraverse(path))
++            root = aq_inner(root.unrestrictedTraverse(path))
+ 
+         relative = aq_inner(self.context).getPhysicalPath()[len(root.getPhysicalPath()):]
+         if path is None:
+@@ -59,15 +63,21 @@ def getBreadcrumbs(self, path=None):
+ 
+         for i in range(len(relative)):
+             now = relative[:i + 1]
+-            obj = aq_inner(root.restrictedTraverse(now))
++            obj = aq_inner(root.unrestrictedTraverse(now))
+ 
+             if IFolderish.providedBy(obj):
+                 if not now[-1] == 'talkback':
+-                    result.append({
+-                        'title': obj.title_or_id(),
+-                        'url': root_url + '/' + '/'.join(now),
+-                        'icon': '<img src="%s" width="16" height="16" />' % self.folder_icon,
+-                    })
++                    if not sm.checkPermission(permissions.View, obj):
++                        result.append({
++                            'title': '...',
++                            'unaccessible': True
++                        })
++                    else:
++                        result.append({
++                            'title': obj.title_or_id(),
++                            'url': root_url + '/' + '/'.join(now),
++                            'icon': '<img src="%s" width="16" height="16" />' % self.folder_icon,
++                        })
+         return result
+ 
+     def getListing(self, filter_portal_types, rooted, document_base_url, upload_type=None, image_types=None):
+diff --git a/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js b/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
+index 8147a55..13f3403 100644
+--- a/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
++++ b/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
+@@ -687,9 +687,9 @@ BrowserDialog.prototype.checkSearch = function (e) {
+     }
+ 
+     // Activate search when we have enough input and either livesearch is
+-    // enabled or the user explicitly pressed Enter (which === 13), or the user 
+-    // clicks (which === 1) on the search icon 
+-    if (len >= 3 && (this.tinyMCEPopup.editor.settings.livesearch === true 
++    // enabled or the user explicitly pressed Enter (which === 13), or the user
++    // clicks (which === 1) on the search icon
++    if (len >= 3 && (this.tinyMCEPopup.editor.settings.livesearch === true
+                     || e.which === 13 || e.which === 1)) {
+         this.is_search_activated = true;
+         this.getFolderListing(this.tinyMCEPopup.editor.settings.navigation_root_url, this.method_search);
+@@ -988,7 +988,11 @@ BrowserDialog.prototype.getFolderListing = function (context_url, method) {
+                 if (i === len - 1) {
+                     html.push('<span>' + item.title + '</span>');
+                 } else {
+-                    html.push('<a href="' + item.url + '">' + item.title + '</a>');
++                    if (item.unaccessible) {
++                      html.push('<em>' + item.title + '</em>');
++                    } else {
++                      html.push('<a href="' + item.url + '">' + item.title + '</a>');
++                    }
+                 }
+             });
+             jq('#internalpath', document).html(html.join(''));
+
+
+Repository: Products.TinyMCE
+
+
+Branch: refs/heads/1.3.x
+Date: 2016-11-02T12:46:24+01:00
+Author: Luca Fabbri (keul) <luca@keul.it>
+Commit: https://github.com/plone/Products.TinyMCE/commit/7eb0615b2d033a95d43fdf47c3ae312ed2b2bd6f
+
+Fix to current folder shortcut
+
+Preventing current folder shortcut to link to a temporary object; fallback to the container
+
+Files changed:
+M Products/TinyMCE/shortcut.py
+
+diff --git a/Products/TinyMCE/shortcut.py b/Products/TinyMCE/shortcut.py
+index e53cfe2..94fb312 100644
+--- a/Products/TinyMCE/shortcut.py
++++ b/Products/TinyMCE/shortcut.py
 @@ -1,6 +1,8 @@
- # -*- coding: utf-8 -*-
- from zope.interface import Attribute
- from zope.interface import Interface
-+from zope.lifecycleevent.interfaces import IObjectCreatedEvent
-+from zope.lifecycleevent.interfaces import IObjectModifiedEvent
- from zope.publisher.interfaces import IPublishTraverse
+ """Shortcuts implementation for Plone"""
+ 
++from Acquisition import aq_parent, aq_inner
+ from Products.TinyMCE.interfaces.utility import _
++from Products.CMFCore.utils import getToolByName
+ from zope.i18n import translate
  
  
-@@ -94,5 +96,14 @@ def rename(oldName, newName):
-         """Rename a child file or folder
-         """
+@@ -9,10 +11,16 @@ class CurrentFolderShortcut(object):
+     title = _(u'Current Folder')
  
-+
- class IUniqueResourceRequest(Interface):
-     """Marker interface for requests to ++unique++<id>"""
-+
-+
-+class IPloneResourceCreatedEvent(IObjectCreatedEvent):
-+    """An resource has been created."""
-+
-+
-+class IPloneResourceModifiedEvent(IObjectModifiedEvent):
-+    """An resource has been created."""
+     def render(self, context):
++        portal_factory = getToolByName(context, 'portal_factory')
++        if portal_factory.isTemporary(context):
++            # Fix current folder URL on creation
++            url = aq_parent(aq_parent(aq_parent(aq_inner(context)))).absolute_url()
++        else:
++            url = context.absolute_url()
+         return ["""
+         <img src="img/folder_current.png" />
+         <a id="currentfolder" href="%s">%s</a>
+-        """ % (context.absolute_url(), translate(self.title, context=context.REQUEST))]
++        """ % (url, translate(self.title, context=context.REQUEST))]
+ 
+ 
+ class HomeShortcut(object):
 
 
-Repository: plone.resource
+Repository: Products.TinyMCE
 
 
-Branch: refs/heads/master
-Date: 2016-11-01T21:42:49+01:00
-Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
-Commit: https://github.com/plone/plone.resource/commit/383f68244b7536ff03d8f98ba69807f1a1317a3a
+Branch: refs/heads/1.3.x
+Date: 2016-11-02T12:54:55+01:00
+Author: Luca Fabbri (keul) <luca@keul.it>
+Commit: https://github.com/plone/Products.TinyMCE/commit/f12f1753f315a0e5fe30d58279f6085b2730b5cf
 
-Fire events: reorganize + add test
+Updated history
 
 Files changed:
-A plone/resource/events.py
 M CHANGES.rst
-M plone/resource/directory.py
-M plone/resource/tests/test_directory.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3e06c34..95fdaf7 100644
+index a50f26d..60fafb1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Fire events on resources creation/modification
-+  [jpgimenez, ebrehault]
+@@ -15,8 +15,9 @@ New features:
  
  Bug fixes:
  
-diff --git a/plone/resource/directory.py b/plone/resource/directory.py
-index d4308dd..9ac7d3e 100644
---- a/plone/resource/directory.py
-+++ b/plone/resource/directory.py
-@@ -2,9 +2,9 @@
- from Acquisition import aq_base, aq_parent
- from OFS.Image import File
- from OFS.interfaces import IObjectManager
-+from plone.resource.events import PloneResourceCreatedEvent
-+from plone.resource.events import PloneResourceModifiedEvent
- from plone.resource.file import FilesystemFile
--from plone.resource.interfaces import IPloneResourceCreatedEvent
--from plone.resource.interfaces import IPloneResourceModifiedEvent
- from plone.resource.interfaces import IResourceDirectory
- from plone.resource.interfaces import IWritableResourceDirectory
- from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2
-@@ -12,7 +12,6 @@
- from StringIO import StringIO
- from zExceptions import Forbidden
- from zExceptions import NotFound
--from zope.component.interfaces import ObjectEvent
- from zope.event import notify
- from zope.interface import implementer
- from zope.site.hooks import getSite
-@@ -25,23 +24,6 @@
- FILTERS = [re.compile(pattern) for pattern in FILTERS]
- 
- 
--@implementer(IPloneResourceCreatedEvent)
--class PloneResourceCreatedEvent(ObjectEvent):
--    """A resource has been created"""
+-- *add item here*
 -
--
--@implementer(IPloneResourceModifiedEvent)
--class PloneResourceModifiedEvent(ObjectEvent):
--    """A resource has been modified"""
--
--    def __init__(self, object, *descriptions):
--        """
--        Init with a list of modification descriptions.
--        """
--        super(PloneResourceModifiedEvent, self).__init__(object)
--        self.descriptions = descriptions
--
--
- @implementer(IWritableResourceDirectory)
- class PersistentResourceDirectory(object):
-     """A resource directory stored in the ZODB.
-@@ -179,10 +161,11 @@ def writeFile(self, path, data):
-             # otherwise HTTPResponse.setBody assumes latin1 and mangles things
-             f.content_type = ct + '; charset=utf-8'
-         container = self.context.unrestrictedTraverse(basepath)
--        event = PloneResourceCreatedEvent
-         if filename in container:
-             container._delOb(filename)
-             event = PloneResourceModifiedEvent
-+        else:
-+            event = PloneResourceCreatedEvent
-         container._setOb(filename, f)
-         obj = container._getOb(filename)
-         notify(event(obj))
-diff --git a/plone/resource/events.py b/plone/resource/events.py
-new file mode 100644
-index 0000000..d475052
---- /dev/null
-+++ b/plone/resource/events.py
-@@ -0,0 +1,14 @@
-+from plone.resource.interfaces import IPloneResourceCreatedEvent
-+from plone.resource.interfaces import IPloneResourceModifiedEvent
-+from zope.component.interfaces import ObjectEvent
-+from zope.interface import implementer
-+
-+
-+@implementer(IPloneResourceCreatedEvent)
-+class PloneResourceCreatedEvent(ObjectEvent):
-+    """A resource has been created"""
-+
-+
-+@implementer(IPloneResourceModifiedEvent)
-+class PloneResourceModifiedEvent(ObjectEvent):
-+    """A resource has been modified"""
-diff --git a/plone/resource/tests/test_directory.py b/plone/resource/tests/test_directory.py
-index b62ce9a..3b25687 100644
---- a/plone/resource/tests/test_directory.py
-+++ b/plone/resource/tests/test_directory.py
-@@ -2,8 +2,13 @@
- import os.path
- import unittest2 as unittest
- from Acquisition import aq_base
-+from plone.resource.events import PloneResourceCreatedEvent
-+from plone.resource.events import PloneResourceModifiedEvent
-+from plone.resource.interfaces import IPloneResourceCreatedEvent
-+from plone.resource.interfaces import IPloneResourceModifiedEvent
- from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2
--
-+from zope.component import adapter
-+from zope.component import provideHandler
++- Breadcrumbs on browser plugin will not longer be emtpy when one of the parents
++  is not accessible. See `#150`_.
++  [keul]
  
- class TestPersistentResourceDirectory(unittest.TestCase):
+ 1.3.23 (2016-08-11)
+ -------------------
+@@ -1828,3 +1829,4 @@ __ https://dev.plone.org/ticket/13566
+   [turgmr2]
  
-@@ -189,6 +194,34 @@ def test_setitem_directory(self):
- 
-         self.assertEqual(dir['demo']['foo']['d2'].__name__, 'd2')
- 
-+    def test_events(self):
-+        events = []
-+
-+        @adapter(IPloneResourceCreatedEvent)
-+        def _handleFileCreated(event):
-+            events.append(event)
-+        provideHandler(_handleFileCreated)
-+
-+        @adapter(IPloneResourceModifiedEvent)
-+        def _handleFileModified(event):
-+            events.append(event)
-+        provideHandler(_handleFileModified)
-+
-+        dir = self._makeOne()
-+        dir.writeFile('test', 'my test')
-+        dir.writeFile('test', 'my test is modified')
-+        self.assertTrue(isinstance(events[0], PloneResourceCreatedEvent))
-+        self.assertEqual(
-+            str(events[0].object), 
-+            'my test'
-+        )
-+        self.assertTrue(isinstance(events[1], PloneResourceModifiedEvent))
-+        self.assertEqual(
-+            str(events[1].object), 
-+            'my test is modified'
-+        )
-+
-+
- class TestFilesystemResourceDirectory(unittest.TestCase):
- 
-     def _makeOne(self):
+ .. _`#99`: https://github.com/collective/sc.social.like/pull/99
++.. _`#150`: https://github.com/plone/Products.TinyMCE/issues/150
 
 
-Repository: plone.resource
+Repository: Products.TinyMCE
 
 
-Branch: refs/heads/master
-Date: 2016-11-03T00:23:12+01:00
+Branch: refs/heads/1.3.x
+Date: 2016-11-03T08:48:09+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.resource/commit/2d36ac37169612b730ab4650d8037cbd03ea5d3c
+Commit: https://github.com/plone/Products.TinyMCE/commit/2e70b7517dc6db507dbb6329f7e726a2abe25215
 
-Merge pull request #17 from plone/ploneconf2016-sprint-rapido
+Merge pull request #151 from plone/fix-150
 
-Ploneconf2016 sprint rapido
+Preventing broken breadcrumbs on unaccessible parents
 
 Files changed:
-A plone/resource/events.py
 M CHANGES.rst
-M plone/resource/directory.py
-M plone/resource/interfaces.py
-M plone/resource/tests/test_directory.py
+M Products/TinyMCE/adapters/JSONFolderListing.py
+M Products/TinyMCE/shortcut.py
+M Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 3e06c34..95fdaf7 100644
+index a50f26d..60fafb1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Fire events on resources creation/modification
-+  [jpgimenez, ebrehault]
+@@ -15,8 +15,9 @@ New features:
  
  Bug fixes:
  
-diff --git a/plone/resource/directory.py b/plone/resource/directory.py
-index 5b9cf37..9ac7d3e 100644
---- a/plone/resource/directory.py
-+++ b/plone/resource/directory.py
-@@ -2,6 +2,8 @@
- from Acquisition import aq_base, aq_parent
- from OFS.Image import File
- from OFS.interfaces import IObjectManager
-+from plone.resource.events import PloneResourceCreatedEvent
-+from plone.resource.events import PloneResourceModifiedEvent
- from plone.resource.file import FilesystemFile
- from plone.resource.interfaces import IResourceDirectory
- from plone.resource.interfaces import IWritableResourceDirectory
-@@ -10,6 +12,7 @@
- from StringIO import StringIO
- from zExceptions import Forbidden
- from zExceptions import NotFound
-+from zope.event import notify
- from zope.interface import implementer
- from zope.site.hooks import getSite
- import os.path
-@@ -160,7 +163,12 @@ def writeFile(self, path, data):
-         container = self.context.unrestrictedTraverse(basepath)
-         if filename in container:
-             container._delOb(filename)
-+            event = PloneResourceModifiedEvent
-+        else:
-+            event = PloneResourceCreatedEvent
-         container._setOb(filename, f)
-+        obj = container._getOb(filename)
-+        notify(event(obj))
- 
-     def importZip(self, f):
-         if not isinstance(f, zipfile.ZipFile):
-diff --git a/plone/resource/events.py b/plone/resource/events.py
-new file mode 100644
-index 0000000..d475052
---- /dev/null
-+++ b/plone/resource/events.py
-@@ -0,0 +1,14 @@
-+from plone.resource.interfaces import IPloneResourceCreatedEvent
-+from plone.resource.interfaces import IPloneResourceModifiedEvent
-+from zope.component.interfaces import ObjectEvent
-+from zope.interface import implementer
-+
-+
-+@implementer(IPloneResourceCreatedEvent)
-+class PloneResourceCreatedEvent(ObjectEvent):
-+    """A resource has been created"""
-+
-+
-+@implementer(IPloneResourceModifiedEvent)
-+class PloneResourceModifiedEvent(ObjectEvent):
-+    """A resource has been modified"""
-diff --git a/plone/resource/interfaces.py b/plone/resource/interfaces.py
-index 0b4404d..22778a9 100644
---- a/plone/resource/interfaces.py
-+++ b/plone/resource/interfaces.py
-@@ -1,6 +1,8 @@
- # -*- coding: utf-8 -*-
- from zope.interface import Attribute
- from zope.interface import Interface
-+from zope.lifecycleevent.interfaces import IObjectCreatedEvent
-+from zope.lifecycleevent.interfaces import IObjectModifiedEvent
- from zope.publisher.interfaces import IPublishTraverse
- 
- 
-@@ -94,5 +96,14 @@ def rename(oldName, newName):
-         """Rename a child file or folder
-         """
- 
-+
- class IUniqueResourceRequest(Interface):
-     """Marker interface for requests to ++unique++<id>"""
-+
-+
-+class IPloneResourceCreatedEvent(IObjectCreatedEvent):
-+    """An resource has been created."""
-+
-+
-+class IPloneResourceModifiedEvent(IObjectModifiedEvent):
-+    """An resource has been created."""
-diff --git a/plone/resource/tests/test_directory.py b/plone/resource/tests/test_directory.py
-index b62ce9a..3b25687 100644
---- a/plone/resource/tests/test_directory.py
-+++ b/plone/resource/tests/test_directory.py
-@@ -2,8 +2,13 @@
- import os.path
- import unittest2 as unittest
- from Acquisition import aq_base
-+from plone.resource.events import PloneResourceCreatedEvent
-+from plone.resource.events import PloneResourceModifiedEvent
-+from plone.resource.interfaces import IPloneResourceCreatedEvent
-+from plone.resource.interfaces import IPloneResourceModifiedEvent
- from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2
+-- *add item here*
 -
-+from zope.component import adapter
-+from zope.component import provideHandler
++- Breadcrumbs on browser plugin will not longer be emtpy when one of the parents
++  is not accessible. See `#150`_.
++  [keul]
  
- class TestPersistentResourceDirectory(unittest.TestCase):
+ 1.3.23 (2016-08-11)
+ -------------------
+@@ -1828,3 +1829,4 @@ __ https://dev.plone.org/ticket/13566
+   [turgmr2]
  
-@@ -189,6 +194,34 @@ def test_setitem_directory(self):
+ .. _`#99`: https://github.com/collective/sc.social.like/pull/99
++.. _`#150`: https://github.com/plone/Products.TinyMCE/issues/150
+diff --git a/Products/TinyMCE/adapters/JSONFolderListing.py b/Products/TinyMCE/adapters/JSONFolderListing.py
+index a6f54e7..8db9699 100644
+--- a/Products/TinyMCE/adapters/JSONFolderListing.py
++++ b/Products/TinyMCE/adapters/JSONFolderListing.py
+@@ -4,6 +4,7 @@
+ except ImportError:
+     import json
  
-         self.assertEqual(dir['demo']['foo']['d2'].__name__, 'd2')
++from zope.security import checkPermission
+ from zope.interface import implements
+ from zope.component import getUtility
+ from zope.i18n import translate
+@@ -11,9 +12,11 @@
+ from plone.i18n.normalizer.interfaces import IIDNormalizer
+ from plone.app.layout.navigation.root import getNavigationRootObject
+ from plone.app.layout.navigation.interfaces import INavigationRoot
++from AccessControl import getSecurityManager
+ from Products.CMFCore.interfaces._content import IFolderish
+ from Products.CMFPlone.interfaces.siteroot import IPloneSiteRoot
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFCore import permissions
+ from Acquisition import aq_inner
+ from Acquisition import aq_parent
  
-+    def test_events(self):
-+        events = []
-+
-+        @adapter(IPloneResourceCreatedEvent)
-+        def _handleFileCreated(event):
-+            events.append(event)
-+        provideHandler(_handleFileCreated)
-+
-+        @adapter(IPloneResourceModifiedEvent)
-+        def _handleFileModified(event):
-+            events.append(event)
-+        provideHandler(_handleFileModified)
-+
-+        dir = self._makeOne()
-+        dir.writeFile('test', 'my test')
-+        dir.writeFile('test', 'my test is modified')
-+        self.assertTrue(isinstance(events[0], PloneResourceCreatedEvent))
-+        self.assertEqual(
-+            str(events[0].object), 
-+            'my test'
-+        )
-+        self.assertTrue(isinstance(events[1], PloneResourceModifiedEvent))
-+        self.assertEqual(
-+            str(events[1].object), 
-+            'my test is modified'
-+        )
-+
-+
- class TestFilesystemResourceDirectory(unittest.TestCase):
+@@ -39,10 +42,11 @@ def getBreadcrumbs(self, path=None):
+         portal_state = self.context.restrictedTraverse('@@plone_portal_state')
+         root = getNavigationRootObject(self.context, portal_state.portal())
+         root_url = root.absolute_url()
++        sm = getSecurityManager()
  
-     def _makeOne(self):
+         if path is not None:
+             path = path.replace(root_url, '', 1).strip('/')
+-            root = aq_inner(root.restrictedTraverse(path))
++            root = aq_inner(root.unrestrictedTraverse(path))
+ 
+         relative = aq_inner(self.context).getPhysicalPath()[len(root.getPhysicalPath()):]
+         if path is None:
+@@ -59,15 +63,21 @@ def getBreadcrumbs(self, path=None):
+ 
+         for i in range(len(relative)):
+             now = relative[:i + 1]
+-            obj = aq_inner(root.restrictedTraverse(now))
++            obj = aq_inner(root.unrestrictedTraverse(now))
+ 
+             if IFolderish.providedBy(obj):
+                 if not now[-1] == 'talkback':
+-                    result.append({
+-                        'title': obj.title_or_id(),
+-                        'url': root_url + '/' + '/'.join(now),
+-                        'icon': '<img src="%s" width="16" height="16" />' % self.folder_icon,
+-                    })
++                    if not sm.checkPermission(permissions.View, obj):
++                        result.append({
++                            'title': '...',
++                            'unaccessible': True
++                        })
++                    else:
++                        result.append({
++                            'title': obj.title_or_id(),
++                            'url': root_url + '/' + '/'.join(now),
++                            'icon': '<img src="%s" width="16" height="16" />' % self.folder_icon,
++                        })
+         return result
+ 
+     def getListing(self, filter_portal_types, rooted, document_base_url, upload_type=None, image_types=None):
+diff --git a/Products/TinyMCE/shortcut.py b/Products/TinyMCE/shortcut.py
+index e53cfe2..94fb312 100644
+--- a/Products/TinyMCE/shortcut.py
++++ b/Products/TinyMCE/shortcut.py
+@@ -1,6 +1,8 @@
+ """Shortcuts implementation for Plone"""
+ 
++from Acquisition import aq_parent, aq_inner
+ from Products.TinyMCE.interfaces.utility import _
++from Products.CMFCore.utils import getToolByName
+ from zope.i18n import translate
+ 
+ 
+@@ -9,10 +11,16 @@ class CurrentFolderShortcut(object):
+     title = _(u'Current Folder')
+ 
+     def render(self, context):
++        portal_factory = getToolByName(context, 'portal_factory')
++        if portal_factory.isTemporary(context):
++            # Fix current folder URL on creation
++            url = aq_parent(aq_parent(aq_parent(aq_inner(context)))).absolute_url()
++        else:
++            url = context.absolute_url()
+         return ["""
+         <img src="img/folder_current.png" />
+         <a id="currentfolder" href="%s">%s</a>
+-        """ % (context.absolute_url(), translate(self.title, context=context.REQUEST))]
++        """ % (url, translate(self.title, context=context.REQUEST))]
+ 
+ 
+ class HomeShortcut(object):
+diff --git a/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js b/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
+index 8147a55..13f3403 100644
+--- a/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
++++ b/Products/TinyMCE/skins/tinymce/plugins/plonebrowser/js/plonebrowser.js
+@@ -687,9 +687,9 @@ BrowserDialog.prototype.checkSearch = function (e) {
+     }
+ 
+     // Activate search when we have enough input and either livesearch is
+-    // enabled or the user explicitly pressed Enter (which === 13), or the user 
+-    // clicks (which === 1) on the search icon 
+-    if (len >= 3 && (this.tinyMCEPopup.editor.settings.livesearch === true 
++    // enabled or the user explicitly pressed Enter (which === 13), or the user
++    // clicks (which === 1) on the search icon
++    if (len >= 3 && (this.tinyMCEPopup.editor.settings.livesearch === true
+                     || e.which === 13 || e.which === 1)) {
+         this.is_search_activated = true;
+         this.getFolderListing(this.tinyMCEPopup.editor.settings.navigation_root_url, this.method_search);
+@@ -988,7 +988,11 @@ BrowserDialog.prototype.getFolderListing = function (context_url, method) {
+                 if (i === len - 1) {
+                     html.push('<span>' + item.title + '</span>');
+                 } else {
+-                    html.push('<a href="' + item.url + '">' + item.title + '</a>');
++                    if (item.unaccessible) {
++                      html.push('<em>' + item.title + '</em>');
++                    } else {
++                      html.push('<a href="' + item.url + '">' + item.title + '</a>');
++                    }
+                 }
+             });
+             jq('#internalpath', document).html(html.join(''));
 
 
