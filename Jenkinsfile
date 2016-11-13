@@ -13,7 +13,7 @@ node {
     }, archetypes: {
         sh 'bin/alltests-at --xml'
     }, robot: {
-        sh 'ROBOTSUITE_PREFIX=ONLYROBOT'
+        env.ROBOTSUITE_PREFIX = 'ONLYROBOT'
         sh 'bin/alltests -t ONLYROBOT --all --xml'
     },
     failFast: false
