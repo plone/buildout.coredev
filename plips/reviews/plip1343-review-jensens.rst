@@ -1,16 +1,22 @@
 PLIP 1343: Assimilate collective.indexing
 =========================================
 
-PLIP ticket: https://github.com/plone/Products.CMFPlone/issues/1343
+PLIP ticket
+    https://github.com/plone/Products.CMFPlone/issues/1343
 
-Review by Jens Klein (jens@bluedynamics.com)
+Review by
+    Jens Klein (jens@bluedynamics.com)
 
-The PLIP was reviewed on Ubuntu 14.04 using python 2.7.12 and Firefox 50 (64-bit).
+Environment
+    The PLIP was reviewed on Ubuntu 14.04 using python 2.7.12 and Firefox 50 (64-bit).
 
-November 25, 2016
+Date
+    November 25, 2016
 
 Involved Packages and its pull requests
 ---------------------------------------
+
+Plone Core
 
 - https://github.com/plone/Products.CMFCore/pull/3
 - https://github.com/plone/Products.Archetypes/pull/57
@@ -21,6 +27,11 @@ Involved Packages and its pull requests
 - https://github.com/plone/Products.ATContentTypes/pull/34
 - https://github.com/plone/Products.CMFUid/pull/3
 - https://github.com/plone/plone.app.blob/pull/27
+
+Collective
+
+- https://github.com/collective.indexing branch ``merge-to-plone-core``
+- https://github.com/collective.solr branch ``collective-indexing-merged``
 
 
 Review steps
