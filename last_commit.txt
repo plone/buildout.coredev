@@ -1,616 +1,88 @@
-Repository: Products.CMFPlone
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2016-12-02T00:37:34+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/3683a93da25eddeccbd25a8c22f11241cbe932d0
+Date: 2016-12-02T09:23:43+01:00
+Author: Peter Holzer (agitator) <hpeter@agitator.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/1fb2e930a065e4302d49936959adc66c75b14fa5
 
-Load only some Products.CMFPlone.patches earlier.
-
-This is how we now do it in 4.3 and soon in 5.0.
-This fixes test failures for plone.formwidget.recurrence and plone.app.referenceablebehavior,
-which are apparently not run by default for Plone 5.1.
+fix SearchableText indexer
 
 Files changed:
-A Products/CMFPlone/earlypatches/__init__.py
-A Products/CMFPlone/earlypatches/security.py
 M CHANGES.rst
-M Products/CMFPlone/__init__.py
-M Products/CMFPlone/patches/__init__.py
-M Products/CMFPlone/patches/security.py
+M plone/app/contenttypes/indexers.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 75502bd..4fd29c5 100644
+index 9d22fa2..22217d0 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,7 @@ Changelog
+@@ -14,6 +14,9 @@ New features:
  
- Breaking changes:
+ Bug fixes:
  
--- Load Products.CMFPlone.patches earlier, instead of in our initialize method.
-+- Load some Products.CMFPlone.patches earlier, instead of in our initialize method.
-   This is part of PloneHotfix20161129.
-   [maurits]
++- Fix SearchableText indexer, using textvalue.mimeType
++  [agitator]
++
+ - Fix Mimetype icon path. With the removal of the skins folder in
+   https://github.com/plone/Products.MimetypesRegistry/pull/8/commits/61acf8327e5c844bff9e5c5676170aaf0ee2c323
+   we need the full resourcepath now
+diff --git a/plone/app/contenttypes/indexers.py b/plone/app/contenttypes/indexers.py
+index d78565c..9e22b21 100644
+--- a/plone/app/contenttypes/indexers.py
++++ b/plone/app/contenttypes/indexers.py
+@@ -46,7 +46,7 @@ def SearchableText(obj):
+             text = transforms.convertTo(
+                 'text/plain',
+                 safe_unicode(textvalue.output).encode('utf8'),
+-                mimetype=textvalue.outputMimeType,
++                mimetype=textvalue.mimeType,
+             ).getData().strip()
  
-diff --git a/Products/CMFPlone/__init__.py b/Products/CMFPlone/__init__.py
-index d0f9f55..a7d23c7 100644
---- a/Products/CMFPlone/__init__.py
-+++ b/Products/CMFPlone/__init__.py
-@@ -115,6 +115,9 @@ def initialize(context):
-     # Make cgi.escape available TTW
-     ModuleSecurityInfo('cgi').declarePublic('escape')
- 
-+    # Apply monkey patches
-+    from Products.CMFPlone import patches  # noqa
-+
-     # Register unicode splitter w/ ZCTextIndex
-     # pipeline registry
-     from Products.CMFPlone import UnicodeSplitter  # noqa
-@@ -208,6 +211,6 @@ def initialize(context):
- from zope.i18nmessageid import MessageFactory
- PloneLocalesMessageFactory = MessageFactory('plonelocales')
- 
--# Apply monkey patches.  If we do this in the initialize method,
--# it is too late for some of them.
--from Products.CMFPlone import patches  # noqa
-+# Apply early monkey patches.  For these patches, it is too late if we do this
-+# in the initialize method.
-+from Products.CMFPlone import earlypatches  # noqa
-diff --git a/Products/CMFPlone/earlypatches/__init__.py b/Products/CMFPlone/earlypatches/__init__.py
-new file mode 100644
-index 0000000..d7d70f5
---- /dev/null
-+++ b/Products/CMFPlone/earlypatches/__init__.py
-@@ -0,0 +1,2 @@
-+# misc security fixes
-+import security  # noqa
-diff --git a/Products/CMFPlone/earlypatches/security.py b/Products/CMFPlone/earlypatches/security.py
-new file mode 100644
-index 0000000..8985591
---- /dev/null
-+++ b/Products/CMFPlone/earlypatches/security.py
-@@ -0,0 +1,106 @@
-+# -*- coding: utf-8 -*-
-+# 1. make sure allow_module can't be called from restricted code
-+import AccessControl
-+AccessControl.allow_module.__roles__ = ()
-+
-+# 2. make sure /@@ doesn't traverse to annotations
-+from zope.traversing import namespace
-+from zope.traversing.interfaces import TraversalError
-+old_traverse = namespace.view.traverse
-+
-+
-+def traverse(self, name, ignored):
-+    if not name:
-+        raise TraversalError(self.context, name)
-+    return old_traverse(self, name, ignored)
-+namespace.view.traverse = traverse
-+
-+# 3. be sure to check Access contents information permission for FTP users
-+from AccessControl import getSecurityManager
-+from zExceptions import Unauthorized
-+from OFS.ObjectManager import ObjectManager
-+ObjectManager.__old_manage_FTPlist = ObjectManager.manage_FTPlist
-+
-+
-+def manage_FTPlist(self, REQUEST):
-+    """Returns a directory listing consisting of a tuple of
-+    (id,stat) tuples, marshaled to a string. Note, the listing it
-+    should include '..' if there is a Folder above the current
-+    one.
-+
-+    In the case of non-foldoid objects it should return a single
-+    tuple (id,stat) representing itself."""
-+
-+    if not getSecurityManager().checkPermission('Access contents information', self):
-+        raise Unauthorized('Not allowed to access contents.')
-+
-+    return self.__old_manage_FTPlist(REQUEST)
-+ObjectManager.manage_FTPlist = manage_FTPlist
-+
-+# 4. Make sure z3c.form widgets don't get declared as public
-+from Products.Five.metaconfigure import ClassDirective
-+old_require = ClassDirective.require
-+
-+
-+def require(self, *args, **kw):
-+    if self._ClassDirective__class.__module__.startswith('z3c.form.browser'):
-+        return
-+    return old_require(self, *args, **kw)
-+ClassDirective.require = require
-+
-+# 5. Check return value of getToolByName
-+# This is an unusual sort of monkey patching...we replace just the func_code
-+# rather than the entire function, to make sure that aliases to the function
-+# that were imported prior to this patch will still run the patched code.
-+code = """
-+from persistent.interfaces import IPersistent
-+from OFS.interfaces import IItem
-+try:
-+    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
-+except ImportError:
-+    FauxArchetypeTool = type('FauxArchetypeTool')
-+
-+def _getToolByName(self, name, default=_marker):
-+    pass
-+
-+def check_getToolByName(obj, name, default=_marker):
-+    result = _getToolByName(obj, name, default)
-+    if IPersistent.providedBy(result) or \
-+            IItem.providedBy(result) or \
-+            name in _tool_interface_registry or \
-+            (isinstance(result, FauxArchetypeTool)) or \
-+            '.test' in result.__class__.__module__ or \
-+            result.__class__.__module__ == 'mock' or \
-+            result is _marker or \
-+            result is default:
-+        return result
-+    else:
-+        raise TypeError("Object found is not a portal tool (%s)" % (name,))
-+    return result
-+"""
-+from Products.CMFCore import utils
-+if '_marker' not in utils.getToolByName.func_globals:
-+    raise Exception("This Version of Products.CMFPlone is not compatible "
-+                    "with Products.PloneHotfix20121106, the fixes are "
-+                    "included already in Products.CMFPlone, please remove "
-+                    "the hotfix")
-+exec code in utils.getToolByName.func_globals
-+utils._getToolByName.func_code = utils.getToolByName.func_code
-+utils.getToolByName.func_code = utils.check_getToolByName.func_code
-+
-+# 6. Protect some methods in ZCatalog
-+from Products.ZCatalog.ZCatalog import ZCatalog
-+ZCatalog.resolve_path__roles__ = ()
-+ZCatalog.resolve_url__roles__ = ()
-+
-+# 7. Prevent publish traversal of the request
-+from ZPublisher.BaseRequest import BaseRequest
-+from ZPublisher.HTTPRequest import HTTPRequest
-+from zope.publisher.base import BaseRequest as ZPBaseRequest
-+from zope.publisher.ftp import FTPRequest
-+from zope.publisher.http import HTTPRequest as ZPHTTPRequest
-+for c in [BaseRequest, HTTPRequest, ZPBaseRequest, FTPRequest, ZPHTTPRequest]:
-+    try:
-+        del c.__doc__
-+    except:
-+        pass
-diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
-index 58a44a2..d4de5f7 100644
---- a/Products/CMFPlone/patches/__init__.py
-+++ b/Products/CMFPlone/patches/__init__.py
-@@ -18,8 +18,6 @@
- import iso8601                  # use `DateTime.ISO8601` for `DateTime.ISO`
- iso8601.applyPatches()
- 
--import security					# misc security fixes
--
- import sendmail
- sendmail.applyPatches()
- 
-diff --git a/Products/CMFPlone/patches/security.py b/Products/CMFPlone/patches/security.py
-index 8985591..ccc9a06 100644
---- a/Products/CMFPlone/patches/security.py
-+++ b/Products/CMFPlone/patches/security.py
-@@ -1,106 +1,4 @@
--# -*- coding: utf-8 -*-
--# 1. make sure allow_module can't be called from restricted code
--import AccessControl
--AccessControl.allow_module.__roles__ = ()
--
--# 2. make sure /@@ doesn't traverse to annotations
--from zope.traversing import namespace
--from zope.traversing.interfaces import TraversalError
--old_traverse = namespace.view.traverse
--
--
--def traverse(self, name, ignored):
--    if not name:
--        raise TraversalError(self.context, name)
--    return old_traverse(self, name, ignored)
--namespace.view.traverse = traverse
--
--# 3. be sure to check Access contents information permission for FTP users
--from AccessControl import getSecurityManager
--from zExceptions import Unauthorized
--from OFS.ObjectManager import ObjectManager
--ObjectManager.__old_manage_FTPlist = ObjectManager.manage_FTPlist
--
--
--def manage_FTPlist(self, REQUEST):
--    """Returns a directory listing consisting of a tuple of
--    (id,stat) tuples, marshaled to a string. Note, the listing it
--    should include '..' if there is a Folder above the current
--    one.
--
--    In the case of non-foldoid objects it should return a single
--    tuple (id,stat) representing itself."""
--
--    if not getSecurityManager().checkPermission('Access contents information', self):
--        raise Unauthorized('Not allowed to access contents.')
--
--    return self.__old_manage_FTPlist(REQUEST)
--ObjectManager.manage_FTPlist = manage_FTPlist
--
--# 4. Make sure z3c.form widgets don't get declared as public
--from Products.Five.metaconfigure import ClassDirective
--old_require = ClassDirective.require
--
--
--def require(self, *args, **kw):
--    if self._ClassDirective__class.__module__.startswith('z3c.form.browser'):
--        return
--    return old_require(self, *args, **kw)
--ClassDirective.require = require
--
--# 5. Check return value of getToolByName
--# This is an unusual sort of monkey patching...we replace just the func_code
--# rather than the entire function, to make sure that aliases to the function
--# that were imported prior to this patch will still run the patched code.
--code = """
--from persistent.interfaces import IPersistent
--from OFS.interfaces import IItem
--try:
--    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
--except ImportError:
--    FauxArchetypeTool = type('FauxArchetypeTool')
--
--def _getToolByName(self, name, default=_marker):
--    pass
--
--def check_getToolByName(obj, name, default=_marker):
--    result = _getToolByName(obj, name, default)
--    if IPersistent.providedBy(result) or \
--            IItem.providedBy(result) or \
--            name in _tool_interface_registry or \
--            (isinstance(result, FauxArchetypeTool)) or \
--            '.test' in result.__class__.__module__ or \
--            result.__class__.__module__ == 'mock' or \
--            result is _marker or \
--            result is default:
--        return result
--    else:
--        raise TypeError("Object found is not a portal tool (%s)" % (name,))
--    return result
--"""
--from Products.CMFCore import utils
--if '_marker' not in utils.getToolByName.func_globals:
--    raise Exception("This Version of Products.CMFPlone is not compatible "
--                    "with Products.PloneHotfix20121106, the fixes are "
--                    "included already in Products.CMFPlone, please remove "
--                    "the hotfix")
--exec code in utils.getToolByName.func_globals
--utils._getToolByName.func_code = utils.getToolByName.func_code
--utils.getToolByName.func_code = utils.check_getToolByName.func_code
--
--# 6. Protect some methods in ZCatalog
--from Products.ZCatalog.ZCatalog import ZCatalog
--ZCatalog.resolve_path__roles__ = ()
--ZCatalog.resolve_url__roles__ = ()
--
--# 7. Prevent publish traversal of the request
--from ZPublisher.BaseRequest import BaseRequest
--from ZPublisher.HTTPRequest import HTTPRequest
--from zope.publisher.base import BaseRequest as ZPBaseRequest
--from zope.publisher.ftp import FTPRequest
--from zope.publisher.http import HTTPRequest as ZPHTTPRequest
--for c in [BaseRequest, HTTPRequest, ZPBaseRequest, FTPRequest, ZPHTTPRequest]:
--    try:
--        del c.__doc__
--    except:
--        pass
-+# Some security patches were done here until Plone 5.1a2, but they needed to
-+# be loaded earlier.  No one should be importing from this place, but let's not
-+# break if that happens.
-+from Products.CMFPlone.earlypatches.security import *  # noqa
+     subject = u' '.join(
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2016-12-02T10:49:45+01:00
+Date: 2016-12-02T11:18:17+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/0cf80bd787ed27dd1deb121eafa2d56a2f7c323f
+Commit: https://github.com/plone/plone.app.contenttypes/commit/d571b359c865cd24616619c707931e68272b9dba
 
-Merge pull request #1861 from plone/load-some-patches-early-51
+Merge pull request #380 from plone/fix-searchabletextindexer
 
-Load only some Products.CMFPlone.patches earlier.
+fix SearchableText indexer
 
 Files changed:
-A Products/CMFPlone/earlypatches/__init__.py
-A Products/CMFPlone/earlypatches/security.py
 M CHANGES.rst
-M Products/CMFPlone/__init__.py
-M Products/CMFPlone/patches/__init__.py
-M Products/CMFPlone/patches/security.py
+M plone/app/contenttypes/indexers.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 75502bd..4fd29c5 100644
+index 9d22fa2..22217d0 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,7 @@ Changelog
+@@ -14,6 +14,9 @@ New features:
  
- Breaking changes:
+ Bug fixes:
  
--- Load Products.CMFPlone.patches earlier, instead of in our initialize method.
-+- Load some Products.CMFPlone.patches earlier, instead of in our initialize method.
-   This is part of PloneHotfix20161129.
-   [maurits]
++- Fix SearchableText indexer, using textvalue.mimeType
++  [agitator]
++
+ - Fix Mimetype icon path. With the removal of the skins folder in
+   https://github.com/plone/Products.MimetypesRegistry/pull/8/commits/61acf8327e5c844bff9e5c5676170aaf0ee2c323
+   we need the full resourcepath now
+diff --git a/plone/app/contenttypes/indexers.py b/plone/app/contenttypes/indexers.py
+index d78565c..9e22b21 100644
+--- a/plone/app/contenttypes/indexers.py
++++ b/plone/app/contenttypes/indexers.py
+@@ -46,7 +46,7 @@ def SearchableText(obj):
+             text = transforms.convertTo(
+                 'text/plain',
+                 safe_unicode(textvalue.output).encode('utf8'),
+-                mimetype=textvalue.outputMimeType,
++                mimetype=textvalue.mimeType,
+             ).getData().strip()
  
-diff --git a/Products/CMFPlone/__init__.py b/Products/CMFPlone/__init__.py
-index d0f9f55..a7d23c7 100644
---- a/Products/CMFPlone/__init__.py
-+++ b/Products/CMFPlone/__init__.py
-@@ -115,6 +115,9 @@ def initialize(context):
-     # Make cgi.escape available TTW
-     ModuleSecurityInfo('cgi').declarePublic('escape')
- 
-+    # Apply monkey patches
-+    from Products.CMFPlone import patches  # noqa
-+
-     # Register unicode splitter w/ ZCTextIndex
-     # pipeline registry
-     from Products.CMFPlone import UnicodeSplitter  # noqa
-@@ -208,6 +211,6 @@ def initialize(context):
- from zope.i18nmessageid import MessageFactory
- PloneLocalesMessageFactory = MessageFactory('plonelocales')
- 
--# Apply monkey patches.  If we do this in the initialize method,
--# it is too late for some of them.
--from Products.CMFPlone import patches  # noqa
-+# Apply early monkey patches.  For these patches, it is too late if we do this
-+# in the initialize method.
-+from Products.CMFPlone import earlypatches  # noqa
-diff --git a/Products/CMFPlone/earlypatches/__init__.py b/Products/CMFPlone/earlypatches/__init__.py
-new file mode 100644
-index 0000000..d7d70f5
---- /dev/null
-+++ b/Products/CMFPlone/earlypatches/__init__.py
-@@ -0,0 +1,2 @@
-+# misc security fixes
-+import security  # noqa
-diff --git a/Products/CMFPlone/earlypatches/security.py b/Products/CMFPlone/earlypatches/security.py
-new file mode 100644
-index 0000000..8985591
---- /dev/null
-+++ b/Products/CMFPlone/earlypatches/security.py
-@@ -0,0 +1,106 @@
-+# -*- coding: utf-8 -*-
-+# 1. make sure allow_module can't be called from restricted code
-+import AccessControl
-+AccessControl.allow_module.__roles__ = ()
-+
-+# 2. make sure /@@ doesn't traverse to annotations
-+from zope.traversing import namespace
-+from zope.traversing.interfaces import TraversalError
-+old_traverse = namespace.view.traverse
-+
-+
-+def traverse(self, name, ignored):
-+    if not name:
-+        raise TraversalError(self.context, name)
-+    return old_traverse(self, name, ignored)
-+namespace.view.traverse = traverse
-+
-+# 3. be sure to check Access contents information permission for FTP users
-+from AccessControl import getSecurityManager
-+from zExceptions import Unauthorized
-+from OFS.ObjectManager import ObjectManager
-+ObjectManager.__old_manage_FTPlist = ObjectManager.manage_FTPlist
-+
-+
-+def manage_FTPlist(self, REQUEST):
-+    """Returns a directory listing consisting of a tuple of
-+    (id,stat) tuples, marshaled to a string. Note, the listing it
-+    should include '..' if there is a Folder above the current
-+    one.
-+
-+    In the case of non-foldoid objects it should return a single
-+    tuple (id,stat) representing itself."""
-+
-+    if not getSecurityManager().checkPermission('Access contents information', self):
-+        raise Unauthorized('Not allowed to access contents.')
-+
-+    return self.__old_manage_FTPlist(REQUEST)
-+ObjectManager.manage_FTPlist = manage_FTPlist
-+
-+# 4. Make sure z3c.form widgets don't get declared as public
-+from Products.Five.metaconfigure import ClassDirective
-+old_require = ClassDirective.require
-+
-+
-+def require(self, *args, **kw):
-+    if self._ClassDirective__class.__module__.startswith('z3c.form.browser'):
-+        return
-+    return old_require(self, *args, **kw)
-+ClassDirective.require = require
-+
-+# 5. Check return value of getToolByName
-+# This is an unusual sort of monkey patching...we replace just the func_code
-+# rather than the entire function, to make sure that aliases to the function
-+# that were imported prior to this patch will still run the patched code.
-+code = """
-+from persistent.interfaces import IPersistent
-+from OFS.interfaces import IItem
-+try:
-+    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
-+except ImportError:
-+    FauxArchetypeTool = type('FauxArchetypeTool')
-+
-+def _getToolByName(self, name, default=_marker):
-+    pass
-+
-+def check_getToolByName(obj, name, default=_marker):
-+    result = _getToolByName(obj, name, default)
-+    if IPersistent.providedBy(result) or \
-+            IItem.providedBy(result) or \
-+            name in _tool_interface_registry or \
-+            (isinstance(result, FauxArchetypeTool)) or \
-+            '.test' in result.__class__.__module__ or \
-+            result.__class__.__module__ == 'mock' or \
-+            result is _marker or \
-+            result is default:
-+        return result
-+    else:
-+        raise TypeError("Object found is not a portal tool (%s)" % (name,))
-+    return result
-+"""
-+from Products.CMFCore import utils
-+if '_marker' not in utils.getToolByName.func_globals:
-+    raise Exception("This Version of Products.CMFPlone is not compatible "
-+                    "with Products.PloneHotfix20121106, the fixes are "
-+                    "included already in Products.CMFPlone, please remove "
-+                    "the hotfix")
-+exec code in utils.getToolByName.func_globals
-+utils._getToolByName.func_code = utils.getToolByName.func_code
-+utils.getToolByName.func_code = utils.check_getToolByName.func_code
-+
-+# 6. Protect some methods in ZCatalog
-+from Products.ZCatalog.ZCatalog import ZCatalog
-+ZCatalog.resolve_path__roles__ = ()
-+ZCatalog.resolve_url__roles__ = ()
-+
-+# 7. Prevent publish traversal of the request
-+from ZPublisher.BaseRequest import BaseRequest
-+from ZPublisher.HTTPRequest import HTTPRequest
-+from zope.publisher.base import BaseRequest as ZPBaseRequest
-+from zope.publisher.ftp import FTPRequest
-+from zope.publisher.http import HTTPRequest as ZPHTTPRequest
-+for c in [BaseRequest, HTTPRequest, ZPBaseRequest, FTPRequest, ZPHTTPRequest]:
-+    try:
-+        del c.__doc__
-+    except:
-+        pass
-diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
-index 58a44a2..d4de5f7 100644
---- a/Products/CMFPlone/patches/__init__.py
-+++ b/Products/CMFPlone/patches/__init__.py
-@@ -18,8 +18,6 @@
- import iso8601                  # use `DateTime.ISO8601` for `DateTime.ISO`
- iso8601.applyPatches()
- 
--import security					# misc security fixes
--
- import sendmail
- sendmail.applyPatches()
- 
-diff --git a/Products/CMFPlone/patches/security.py b/Products/CMFPlone/patches/security.py
-index 8985591..ccc9a06 100644
---- a/Products/CMFPlone/patches/security.py
-+++ b/Products/CMFPlone/patches/security.py
-@@ -1,106 +1,4 @@
--# -*- coding: utf-8 -*-
--# 1. make sure allow_module can't be called from restricted code
--import AccessControl
--AccessControl.allow_module.__roles__ = ()
--
--# 2. make sure /@@ doesn't traverse to annotations
--from zope.traversing import namespace
--from zope.traversing.interfaces import TraversalError
--old_traverse = namespace.view.traverse
--
--
--def traverse(self, name, ignored):
--    if not name:
--        raise TraversalError(self.context, name)
--    return old_traverse(self, name, ignored)
--namespace.view.traverse = traverse
--
--# 3. be sure to check Access contents information permission for FTP users
--from AccessControl import getSecurityManager
--from zExceptions import Unauthorized
--from OFS.ObjectManager import ObjectManager
--ObjectManager.__old_manage_FTPlist = ObjectManager.manage_FTPlist
--
--
--def manage_FTPlist(self, REQUEST):
--    """Returns a directory listing consisting of a tuple of
--    (id,stat) tuples, marshaled to a string. Note, the listing it
--    should include '..' if there is a Folder above the current
--    one.
--
--    In the case of non-foldoid objects it should return a single
--    tuple (id,stat) representing itself."""
--
--    if not getSecurityManager().checkPermission('Access contents information', self):
--        raise Unauthorized('Not allowed to access contents.')
--
--    return self.__old_manage_FTPlist(REQUEST)
--ObjectManager.manage_FTPlist = manage_FTPlist
--
--# 4. Make sure z3c.form widgets don't get declared as public
--from Products.Five.metaconfigure import ClassDirective
--old_require = ClassDirective.require
--
--
--def require(self, *args, **kw):
--    if self._ClassDirective__class.__module__.startswith('z3c.form.browser'):
--        return
--    return old_require(self, *args, **kw)
--ClassDirective.require = require
--
--# 5. Check return value of getToolByName
--# This is an unusual sort of monkey patching...we replace just the func_code
--# rather than the entire function, to make sure that aliases to the function
--# that were imported prior to this patch will still run the patched code.
--code = """
--from persistent.interfaces import IPersistent
--from OFS.interfaces import IItem
--try:
--    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
--except ImportError:
--    FauxArchetypeTool = type('FauxArchetypeTool')
--
--def _getToolByName(self, name, default=_marker):
--    pass
--
--def check_getToolByName(obj, name, default=_marker):
--    result = _getToolByName(obj, name, default)
--    if IPersistent.providedBy(result) or \
--            IItem.providedBy(result) or \
--            name in _tool_interface_registry or \
--            (isinstance(result, FauxArchetypeTool)) or \
--            '.test' in result.__class__.__module__ or \
--            result.__class__.__module__ == 'mock' or \
--            result is _marker or \
--            result is default:
--        return result
--    else:
--        raise TypeError("Object found is not a portal tool (%s)" % (name,))
--    return result
--"""
--from Products.CMFCore import utils
--if '_marker' not in utils.getToolByName.func_globals:
--    raise Exception("This Version of Products.CMFPlone is not compatible "
--                    "with Products.PloneHotfix20121106, the fixes are "
--                    "included already in Products.CMFPlone, please remove "
--                    "the hotfix")
--exec code in utils.getToolByName.func_globals
--utils._getToolByName.func_code = utils.getToolByName.func_code
--utils.getToolByName.func_code = utils.check_getToolByName.func_code
--
--# 6. Protect some methods in ZCatalog
--from Products.ZCatalog.ZCatalog import ZCatalog
--ZCatalog.resolve_path__roles__ = ()
--ZCatalog.resolve_url__roles__ = ()
--
--# 7. Prevent publish traversal of the request
--from ZPublisher.BaseRequest import BaseRequest
--from ZPublisher.HTTPRequest import HTTPRequest
--from zope.publisher.base import BaseRequest as ZPBaseRequest
--from zope.publisher.ftp import FTPRequest
--from zope.publisher.http import HTTPRequest as ZPHTTPRequest
--for c in [BaseRequest, HTTPRequest, ZPBaseRequest, FTPRequest, ZPHTTPRequest]:
--    try:
--        del c.__doc__
--    except:
--        pass
-+# Some security patches were done here until Plone 5.1a2, but they needed to
-+# be loaded earlier.  No one should be importing from this place, but let's not
-+# break if that happens.
-+from Products.CMFPlone.earlypatches.security import *  # noqa
+     subject = u' '.join(
 
 
