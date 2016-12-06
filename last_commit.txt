@@ -1,977 +1,168 @@
-Repository: Products.CMFEditions
+Repository: plone.app.search
 
 
-Branch: refs/heads/master
-Date: 2016-11-27T11:13:28+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/d8d65b827721a6d3595de1619480bf2bf55fcbe6
+Branch: refs/heads/1.1.x
+Date: 2016-12-06T22:51:54+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.search/commit/8a291c44e78b86c8d3d09d06ea94518503a3446d
 
-purge older versions of content about to be removed
-
-Files changed:
-M Products/CMFEditions/configure.zcml
-M Products/CMFEditions/subscriber.py
-M Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-M Products/CMFEditions/tests/test_ZVCStorageTool.py
-
-diff --git a/Products/CMFEditions/configure.zcml b/Products/CMFEditions/configure.zcml
-index 64d4b8c..61584f2 100644
---- a/Products/CMFEditions/configure.zcml
-+++ b/Products/CMFEditions/configure.zcml
-@@ -38,6 +38,10 @@
-     <subscriber for="*
-                      Products.Archetypes.interfaces.IObjectEditedEvent"
-                 handler=".subscriber.objectEdited" />
-+
-+    <subscriber for="*
-+                     zope.lifecycleevent.interfaces.IObjectRemovedEvent"
-+                handler=".subscriber.object_removed" />
-   </configure>
- 
- </configure>
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index effdced..329556e 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -1,64 +1,100 @@
--# -*- coding: utf-8 -*-
--#########################################################################
--# Copyright (c) 2008 Alberto Berti, Gregoire Weber.
--# All Rights Reserved.
--#
--# This file is part of CMFEditions.
--#
--# CMFEditions is free software; you can redistribute it and/or modify
--# it under the terms of the GNU General Public License as published by
--# the Free Software Foundation; either version 2 of the License, or
--# (at your option) any later version.
--#
--# CMFEditions is distributed in the hope that it will be useful,
--# but WITHOUT ANY WARRANTY; without even the implied warranty of
--# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
--# GNU General Public License for more details.
--#
--# You should have received a copy of the GNU General Public License
--# along with CMFEditions; if not, write to the Free Software
--# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
--#########################################################################
--"""Event Subscribers
--
--$Id: ArchivistTool.py,v 1.15 2005/06/24 11:34:08 gregweb Exp $
--"""
--from zope.i18nmessageid import MessageFactory
--from Acquisition import aq_get
--
--from Products.CMFEditions.utilities import isObjectChanged, maybeSaveVersion
--from Products.CMFEditions.interfaces.IModifier import FileTooLargeToVersionError
--from Products.CMFEditions import CMFEditionsMessageFactory as _
--
--PMF = MessageFactory('plone')
--
--def webdavObjectEventHandler(obj, event, comment):
--    obj = event.object
--
--    changed = isObjectChanged(obj)
--
--    if not changed:
--        return
--
--    try:
--        maybeSaveVersion(obj, comment=comment, force=False)
--    except FileTooLargeToVersionError:
--        pass # There's no way to emit a warning here. Or is there?
--
--def webdavObjectInitialized(obj, event):
--    return webdavObjectEventHandler(obj, event, comment=_('Initial revision (WebDAV)'))
--
--def webdavObjectEdited(obj, event):
--    return webdavObjectEventHandler(obj, event, comment=_('Edited (WebDAV)'))
--
--def _getVersionComment(object):
--    request = aq_get(object, 'REQUEST', None)
--    return request and request.get('cmfeditions_version_comment', '')
--
--def objectInitialized(obj, event):
--    comment = _getVersionComment(event.object) or _('Initial revision')
--    return webdavObjectEventHandler(obj, event, comment=comment)
--
--def objectEdited(obj, event):
--    comment = _getVersionComment(event.object) or PMF('Edited')
--    return webdavObjectEventHandler(obj, event, comment=comment)
-+# -*- coding: utf-8 -*-
-+#########################################################################
-+# Copyright (c) 2008 Alberto Berti, Gregoire Weber.
-+# All Rights Reserved.
-+#
-+# This file is part of CMFEditions.
-+#
-+# CMFEditions is free software; you can redistribute it and/or modify
-+# it under the terms of the GNU General Public License as published by
-+# the Free Software Foundation; either version 2 of the License, or
-+# (at your option) any later version.
-+#
-+# CMFEditions is distributed in the hope that it will be useful,
-+# but WITHOUT ANY WARRANTY; without even the implied warranty of
-+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+# GNU General Public License for more details.
-+#
-+# You should have received a copy of the GNU General Public License
-+# along with CMFEditions; if not, write to the Free Software
-+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-+#########################################################################
-+"""Event Subscribers
-+
-+$Id: ArchivistTool.py,v 1.15 2005/06/24 11:34:08 gregweb Exp $
-+"""
-+from zope.i18nmessageid import MessageFactory
-+from Acquisition import aq_get
-+
-+from plone import api
-+from Products.CMFCore.interfaces import IContentish
-+from Products.CMFEditions.utilities import\
-+    isObjectChanged, maybeSaveVersion, dereference
-+from Products.CMFEditions.interfaces.IModifier import\
-+    FileTooLargeToVersionError
-+from Products.CMFEditions.interfaces.IStorage import StorageRetrieveError
-+from Products.CMFEditions import CMFEditionsMessageFactory as _
-+
-+PMF = MessageFactory('plone')
-+
-+def webdavObjectEventHandler(obj, event, comment):
-+    obj = event.object
-+
-+    changed = isObjectChanged(obj)
-+
-+    if not changed:
-+        return
-+
-+    try:
-+        maybeSaveVersion(obj, comment=comment, force=False)
-+    except FileTooLargeToVersionError:
-+        pass # There's no way to emit a warning here. Or is there?
-+
-+def webdavObjectInitialized(obj, event):
-+    return webdavObjectEventHandler(obj, event, comment=_('Initial revision (WebDAV)'))
-+
-+def webdavObjectEdited(obj, event):
-+    return webdavObjectEventHandler(obj, event, comment=_('Edited (WebDAV)'))
-+
-+def _getVersionComment(object):
-+    request = aq_get(object, 'REQUEST', None)
-+    return request and request.get('cmfeditions_version_comment', '')
-+
-+def objectInitialized(obj, event):
-+    comment = _getVersionComment(event.object) or _('Initial revision')
-+    return webdavObjectEventHandler(obj, event, comment=comment)
-+
-+def objectEdited(obj, event):
-+    comment = _getVersionComment(event.object) or PMF('Edited')
-+    return webdavObjectEventHandler(obj, event, comment=comment)
-+
-+def object_removed(obj, event):
-+    """ an object is being deleted -
-+    also delete it's history
-+    """
-+    if not IContentish.providedBy(obj):
-+        return
-+    obj, histid = dereference(obj)
-+    if histid is None:
-+        return
-+    histories_storage = api.portal.get_tool('portal_historiesstorage')
-+    repo_tool = api.portal.get_tool('portal_repository')
-+    metadata = repo_tool.getHistoryMetadata(obj)
-+    num_versions = metadata.getLength(countPurged=False)
-+    current = metadata.retrieve(num_versions - 1)
-+    sys_metadata = current['metadata']['sys_metadata']
-+    if ('parent' in sys_metadata) and \
-+            (sys_metadata['parent']['history_id'] != histid):
-+        try:
-+            histories_storage.retrieve(
-+                history_id=sys_metadata['parent']['history_id'])
-+            return
-+        except StorageRetrieveError:
-+            pass
-+    length = len(histories_storage.getHistory(histid, countPurged=False))
-+    for i in range(length):
-+        histories_storage.purge(
-+            histid,
-+            0,
-+            metadata={'sys_metadata': {'comment': 'purged'}},
-+            countPurged=False)
-diff --git a/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py b/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-index 3921099..c05f0c1 100644
---- a/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-+++ b/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-@@ -199,11 +199,21 @@ def test06_retrieveWithNoMoreExistentObject(self):
-         self.portal.invokeFactory(doc_type, 'doc_tmp')
-         doc = self.portal.doc_tmp
-         portal_hidhandler.setUid(doc, history_id, check_uniqueness=True)
--        vdata = portal_repository.retrieve(doc, selector=0)
--        self.failUnless(verifyObject(IVersionData, vdata))
--        self.assertEqual(vdata.object.text, 'text v1')
--        vdata = portal_repository.retrieve(doc, selector=1)
--        self.assertEqual(vdata.object.text, 'text v2')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.retrieve,
-+            doc,
-+            selector=0)
-+        #vdata = portal_repository.retrieve(doc, selector=0)
-+        #self.failUnless(verifyObject(IVersionData, vdata))
-+        #self.assertEqual(vdata.object.text, 'text v1')
-+        self.assertRaises(
-+              AttributeError,
-+              portal_repository.retrieve,
-+              doc,
-+              selector=1)
-+        #vdata = portal_repository.retrieve(doc, selector=1)
-+        #self.assertEqual(vdata.object.text, 'text v2')
- 
-     def test07_restoreDeletedObject(self):
-         portal_repository = self.portal.portal_repository
-@@ -220,10 +230,16 @@ def test07_restoreDeletedObject(self):
-         # delete the object we want to retrieve later
-         self.portal.manage_delObjects(ids=['doc'])
-         self.failIf('doc' in self.portal.objectIds())
--        portal_repository.restore(history_id, selector=0, container=self.portal)
--        self.failUnless('doc' in self.portal.objectIds())
--        restored = self.portal.doc
--        self.assertEqual(restored.text, 'text v1')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.restore,
-+            history_id,
-+            selector=0,
-+            container=self.portal)
-+        #portal_repository.restore(history_id, selector=0, container=self.portal)
-+        #self.failUnless('doc' in self.portal.objectIds())
-+        #restored = self.portal.doc
-+        #self.assertEqual(restored.text, 'text v1')
- 
-     def test07_restoreDeletedObjectWithNewId(self):
-         portal_repository = self.portal.portal_repository
-@@ -240,11 +256,18 @@ def test07_restoreDeletedObjectWithNewId(self):
-         # delete the object we want to retrieve later
-         self.portal.manage_delObjects(ids=['doc'])
-         self.failIf('doc' in self.portal.objectIds())
--        portal_repository.restore(history_id, selector=0,
--                                         container=self.portal, new_id='doc2')
--        self.failUnless('doc2' in self.portal.objectIds())
--        restored = self.portal.doc2
--        self.assertEqual(restored.text, 'text v1')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.restore,
-+            history_id,
-+            selector=0,
-+            container=self.portal,
-+            new_id='doc2')
-+        #portal_repository.restore(history_id, selector=0,
-+        #                                 container=self.portal, new_id='doc2')
-+        #self.failUnless('doc2' in self.portal.objectIds())
-+        #restored = self.portal.doc2
-+        #self.assertEqual(restored.text, 'text v1')
- 
-     def test08_purgingDisallowedWithoutPurgingPolicy(self):
-         portal_repository = self.portal.portal_repository
-diff --git a/Products/CMFEditions/tests/test_ZVCStorageTool.py b/Products/CMFEditions/tests/test_ZVCStorageTool.py
-index c2fd242..400e9e4 100644
---- a/Products/CMFEditions/tests/test_ZVCStorageTool.py
-+++ b/Products/CMFEditions/tests/test_ZVCStorageTool.py
-@@ -28,8 +28,10 @@
- 
- from zope.interface.verify import verifyObject
- from OFS.ObjectManager import ObjectManager
-+from Acquisition import aq_base
- 
- from Products.CMFEditions.ArchivistTool import ObjectData
-+from Products.CMFEditions.ZVCStorageTool import Removed
- from Products.CMFEditions.interfaces.IStorage import IStorage
- from Products.CMFEditions.interfaces.IStorage import IPurgeSupport
- from Products.CMFEditions.interfaces.IStorage import StorageUnregisteredError
-@@ -40,21 +42,25 @@
- from DummyTools import MemoryStorage
- from DummyTools import notifyModified
- 
-+
- class DummyOM(ObjectManager):
-     pass
- 
-+
- class CMFDummy(Dummy):
- 
-     def __init__(self, id, cmfuid, effective=None, expires=None):
-         super(CMFDummy, self).__init__()
-         self.id = id
-         self.cmf_uid = cmfuid
--        self.effective = effective if effective is not None else self.modification_date
-+        self.effective = \
-+            effective if effective is not None else self.modification_date
-         self.expires = expires
- 
-     def getPortalTypeName(self):
-         return 'Dummy'
- 
-+
- class TestZVCStorageTool(CMFEditionsBaseTestCase):
- 
-     def afterSetUp(self):
-@@ -564,6 +570,54 @@ def test15_storageStatistics(self):
-             # s. https://github.com/plone/Products.CMFEditions/issues/31
-             self.failUnless(actual['size'] > 0)
- 
-+    def test16_delete_history_on_content_deletion(self):
-+        """ If a content item gets deleted, delete it's history
-+        as well
-+        """
-+        portal_hidhandler = self.portal.portal_historyidhandler
-+        portal_storage = self.portal.portal_historiesstorage
-+        self.portal.invokeFactory('Document', 'doc')
-+        self.portal.invokeFactory('Link', 'link')
-+        self.portal.invokeFactory('Folder', 'folder')
-+        # the event subscriber should be able to handle unversioned content
-+        self.portal.invokeFactory('Document', 'unversioned_doc')
-+        doc = self.portal.doc
-+        doc_histid = portal_hidhandler.register(doc)
-+        portal_storage.register(
-+            doc_histid, ObjectData(aq_base(doc)),
-+            metadata=self.buildMetadata('initial'))
-+        portal_storage.save(
-+            doc_histid,
-+            ObjectData(aq_base(doc)),
-+            metadata=self.buildMetadata('v2'))
-+        link = self.portal.link
-+        link_histid = portal_hidhandler.register(link)
-+        portal_storage.register(
-+            link_histid, ObjectData(aq_base(link)),
-+            metadata=self.buildMetadata('initial'))
-+        folder = self.portal.folder
-+        folder_histid = portal_hidhandler.register(folder)
-+        portal_storage.register(
-+            folder_histid, ObjectData(aq_base(folder)),
-+            metadata=self.buildMetadata('first draft'))
-+        dochist = portal_storage.retrieve(doc_histid).object
-+        doctype = dochist.object.portal_type
-+        self.assertEqual('Document', doctype)
-+        linkhist = portal_storage.retrieve(link_histid).object
-+        linktype = linkhist.object.portal_type
-+        self.assertEqual('Link', linktype)
-+        folderhist = portal_storage.retrieve(folder_histid).object
-+        foldertype = folderhist.object.portal_type
-+        self.assertEqual('Folder', foldertype)
-+        self.portal.manage_delObjects(
-+            ids=['doc', 'link', 'folder', 'unversioned_doc'])
-+        removed_doc = portal_storage.retrieve(history_id=doc_histid)
-+        self.assertTrue(type(removed_doc.object) == Removed)
-+        removed_link = portal_storage.retrieve(history_id=link_histid)
-+        self.assertTrue(type(removed_link.object) == Removed)
-+        removed_folder = portal_storage.retrieve(history_id=folder_histid)
-+        self.assertTrue(type(removed_folder.object) == Removed)
-+
- 
- class TestMemoryStorage(TestZVCStorageTool):
- 
-@@ -576,3 +630,8 @@ def test15_storageStatistics(self):
-         """ MemoryStorage does not implement zmi_getStorageStatistics
-         """
-         pass
-+
-+    def test16_delete_history_on_content_deletion(self):
-+        """ MemoryStorage does not implement _getZVCRepo
-+        """
-+        pass
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2016-11-29T14:05:07+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/346eaf1d8e58b8b9bba86e00dc85e6cf9ffe0463
-
-catch AttributeError getLength
-
-Files changed:
-M Products/CMFEditions/subscriber.py
-
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index 329556e..620e405 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -80,7 +80,13 @@ def object_removed(obj, event):
-     histories_storage = api.portal.get_tool('portal_historiesstorage')
-     repo_tool = api.portal.get_tool('portal_repository')
-     metadata = repo_tool.getHistoryMetadata(obj)
--    num_versions = metadata.getLength(countPurged=False)
-+    try:
-+        num_versions = metadata.getLength(countPurged=False)
-+    except AttributeError:
-+        # portal_historiesstorage will return
-+        # an empty list in certain cases,
-+        # do nothing
-+        return
-     current = metadata.retrieve(num_versions - 1)
-     sys_metadata = current['metadata']['sys_metadata']
-     if ('parent' in sys_metadata) and \
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2016-11-30T08:01:01+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/8c1f5d162b8c9811a550d69763614e7bcbc0577b
-
-do not require p.api in 4.3
-
-Files changed:
-M Products/CMFEditions/subscriber.py
-
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index 620e405..7a6f2d4 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -26,8 +26,8 @@
- from zope.i18nmessageid import MessageFactory
- from Acquisition import aq_get
- 
--from plone import api
- from Products.CMFCore.interfaces import IContentish
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFEditions.utilities import\
-     isObjectChanged, maybeSaveVersion, dereference
- from Products.CMFEditions.interfaces.IModifier import\
-@@ -77,8 +77,8 @@ def object_removed(obj, event):
-     obj, histid = dereference(obj)
-     if histid is None:
-         return
--    histories_storage = api.portal.get_tool('portal_historiesstorage')
--    repo_tool = api.portal.get_tool('portal_repository')
-+    histories_storage = getToolByName(obj, 'portal_historiesstorage')
-+    repo_tool = getToolByName(obj, 'portal_repository')
-     metadata = repo_tool.getHistoryMetadata(obj)
-     try:
-         num_versions = metadata.getLength(countPurged=False)
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2016-11-30T10:39:46+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/9a164465001567f832d7077f0d282018d278a199
-
-fix CMFDiffTool/CMFTestCase test for 4.3
-
-Files changed:
-M Products/CMFEditions/subscriber.py
-
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index 7a6f2d4..6417a01 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -77,8 +77,15 @@ def object_removed(obj, event):
-     obj, histid = dereference(obj)
-     if histid is None:
-         return
--    histories_storage = getToolByName(obj, 'portal_historiesstorage')
--    repo_tool = getToolByName(obj, 'portal_repository')
-+    try:
-+        histories_storage = getToolByName(obj, 'portal_historiesstorage')
-+        repo_tool = getToolByName(obj, 'portal_repository')
-+    except AttributeError:
-+        # XXX If tools are missing, there is nothing we can do.
-+        # This occurs in some Products.CMFDiffTool and
-+        # Products.CMFTestCase tests for 4.3.x. Maybe it should
-+        # be fixed there.
-+        return
-     metadata = repo_tool.getHistoryMetadata(obj)
-     try:
-         num_versions = metadata.getLength(countPurged=False)
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2016-11-30T10:43:49+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/64d5bdd940c7882a750dba6d0853d66b95142120
-
-update changelog
+Fixed sometimes failing search order tests.
 
 Files changed:
 M CHANGES.rst
+M plone/app/search/tests/base.py
+M plone/app/search/tests/test_integration.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 90d7ad6..445d3d1 100644
+index c0bfc2d..6f6fc70 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -6,7 +6,8 @@ Changelog
+@@ -15,7 +15,7 @@ New features:
  
- Breaking changes:
+ Bug fixes:
  
 -- *add item here*
-+- Purge all old revisions of content about to be removed.
-+  [tschorr]
++- Fixed sometimes failing search order tests.  [maurits]
  
- New features:
+ 
+ 1.1.10 (2016-12-02)
+diff --git a/plone/app/search/tests/base.py b/plone/app/search/tests/base.py
+index e706942..82ec247 100644
+--- a/plone/app/search/tests/base.py
++++ b/plone/app/search/tests/base.py
+@@ -1,4 +1,5 @@
+ import sys
++import time
+ import unittest2 as unittest
+ 
+ from zope.configuration import xmlconfig
+@@ -56,12 +57,15 @@ def setUpPloneSite(self, portal):
+         applyProfile(portal, 'plone.app.search:default')
+         setRoles(portal, TEST_USER_ID, ['Manager'])
+         login(portal, TEST_USER_NAME)
+-        for i in range(0, 100):
++        for i in range(0, 12):
+             portal.invokeFactory(
+                 'Document',
+                 'my-page' + str(i),
+                 text='spam spam ham eggs'
+             )
++            # Sleep before creating the next one, otherwise ordering by date is
++            # not deterministic.
++            time.sleep(0.1)
+         setRoles(portal, TEST_USER_ID, ['Member'])
+ 
+         # Commit so that the test browser sees these objects
+diff --git a/plone/app/search/tests/test_integration.py b/plone/app/search/tests/test_integration.py
+index b6d88a6..0e13f0f 100644
+--- a/plone/app/search/tests/test_integration.py
++++ b/plone/app/search/tests/test_integration.py
+@@ -76,8 +76,8 @@ def test_default_search_order_relevance(self):
+         res = portal.restrictedTraverse('@@search').results(query=q)
+         ids = [r.getId() for r in res]
+         expected = [
+-            'my-page99', 'my-page98', 'my-page97', 'my-page96', 'my-page95',
+-            'my-page94', 'my-page93', 'my-page92', 'my-page91', 'my-page90'
++            'my-page11', 'my-page10', 'my-page9', 'my-page8', 'my-page7',
++            'my-page6', 'my-page5', 'my-page4', 'my-page3', 'my-page2'
+         ]
+         self.assertEqual(ids, expected)
+ 
+@@ -96,8 +96,8 @@ def test_default_search_order_date(self):
+         res = portal.restrictedTraverse('@@search').results(query=q)
+         ids = [r.getId() for r in res]
+         expected = [
+-            'my-page10', 'my-page9', 'my-page8', 'my-page7', 'my-page6',
+-            'my-page4', 'my-page3', 'my-page2', 'my-page1', 'my-page0'
++            'my-page11', 'my-page10', 'my-page9', 'my-page8', 'my-page7',
++            'my-page6', 'my-page4', 'my-page3', 'my-page2', 'my-page1'
+         ]
+         self.assertEqual(ids, expected)
  
 
 
-Repository: Products.CMFEditions
+Repository: plone.app.search
 
 
-Branch: refs/heads/master
-Date: 2016-11-30T11:12:23+01:00
-Author: tschorr (tschorr) <t_schorr@gmx.de>
-Commit: https://github.com/plone/Products.CMFEditions/commit/518acba7e3f2c8420a6b926d5be51c6a9e053865
+Branch: refs/heads/1.1.x
+Date: 2016-12-06T23:29:16+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.search/commit/d7e6e43911fe1e85b634a5084d1226996b63c529
 
-rearrange
+Merge pull request #21 from plone/fix-search-order-tests-11
 
-Files changed:
-M Products/CMFEditions/subscriber.py
-
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index 6417a01..2d5d750 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -74,9 +74,6 @@ def object_removed(obj, event):
-     """
-     if not IContentish.providedBy(obj):
-         return
--    obj, histid = dereference(obj)
--    if histid is None:
--        return
-     try:
-         histories_storage = getToolByName(obj, 'portal_historiesstorage')
-         repo_tool = getToolByName(obj, 'portal_repository')
-@@ -86,6 +83,9 @@ def object_removed(obj, event):
-         # Products.CMFTestCase tests for 4.3.x. Maybe it should
-         # be fixed there.
-         return
-+    obj, histid = dereference(obj)
-+    if histid is None:
-+        return
-     metadata = repo_tool.getHistoryMetadata(obj)
-     try:
-         num_versions = metadata.getLength(countPurged=False)
-
-
-Repository: Products.CMFEditions
-
-
-Branch: refs/heads/master
-Date: 2016-12-02T10:47:28+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFEditions/commit/2820f6502632db446e8cbbc2469cc43014c2f654
-
-Merge pull request #44 from plone/purge_history_when_removing_content_pr
-
-Purge older versions of content about to be removed
+Fixed sometimes failing search order tests.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFEditions/configure.zcml
-M Products/CMFEditions/subscriber.py
-M Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-M Products/CMFEditions/tests/test_ZVCStorageTool.py
+M plone/app/search/tests/base.py
+M plone/app/search/tests/test_integration.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 90d7ad6..445d3d1 100644
+index c0bfc2d..6f6fc70 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -6,7 +6,8 @@ Changelog
+@@ -15,7 +15,7 @@ New features:
  
- Breaking changes:
+ Bug fixes:
  
 -- *add item here*
-+- Purge all old revisions of content about to be removed.
-+  [tschorr]
++- Fixed sometimes failing search order tests.  [maurits]
  
- New features:
  
-diff --git a/Products/CMFEditions/configure.zcml b/Products/CMFEditions/configure.zcml
-index 64d4b8c..61584f2 100644
---- a/Products/CMFEditions/configure.zcml
-+++ b/Products/CMFEditions/configure.zcml
-@@ -38,6 +38,10 @@
-     <subscriber for="*
-                      Products.Archetypes.interfaces.IObjectEditedEvent"
-                 handler=".subscriber.objectEdited" />
-+
-+    <subscriber for="*
-+                     zope.lifecycleevent.interfaces.IObjectRemovedEvent"
-+                handler=".subscriber.object_removed" />
-   </configure>
+ 1.1.10 (2016-12-02)
+diff --git a/plone/app/search/tests/base.py b/plone/app/search/tests/base.py
+index e706942..82ec247 100644
+--- a/plone/app/search/tests/base.py
++++ b/plone/app/search/tests/base.py
+@@ -1,4 +1,5 @@
+ import sys
++import time
+ import unittest2 as unittest
  
- </configure>
-diff --git a/Products/CMFEditions/subscriber.py b/Products/CMFEditions/subscriber.py
-index effdced..2d5d750 100644
---- a/Products/CMFEditions/subscriber.py
-+++ b/Products/CMFEditions/subscriber.py
-@@ -1,64 +1,113 @@
--# -*- coding: utf-8 -*-
--#########################################################################
--# Copyright (c) 2008 Alberto Berti, Gregoire Weber.
--# All Rights Reserved.
--#
--# This file is part of CMFEditions.
--#
--# CMFEditions is free software; you can redistribute it and/or modify
--# it under the terms of the GNU General Public License as published by
--# the Free Software Foundation; either version 2 of the License, or
--# (at your option) any later version.
--#
--# CMFEditions is distributed in the hope that it will be useful,
--# but WITHOUT ANY WARRANTY; without even the implied warranty of
--# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
--# GNU General Public License for more details.
--#
--# You should have received a copy of the GNU General Public License
--# along with CMFEditions; if not, write to the Free Software
--# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
--#########################################################################
--"""Event Subscribers
--
--$Id: ArchivistTool.py,v 1.15 2005/06/24 11:34:08 gregweb Exp $
--"""
--from zope.i18nmessageid import MessageFactory
--from Acquisition import aq_get
--
--from Products.CMFEditions.utilities import isObjectChanged, maybeSaveVersion
--from Products.CMFEditions.interfaces.IModifier import FileTooLargeToVersionError
--from Products.CMFEditions import CMFEditionsMessageFactory as _
--
--PMF = MessageFactory('plone')
--
--def webdavObjectEventHandler(obj, event, comment):
--    obj = event.object
--
--    changed = isObjectChanged(obj)
--
--    if not changed:
--        return
--
--    try:
--        maybeSaveVersion(obj, comment=comment, force=False)
--    except FileTooLargeToVersionError:
--        pass # There's no way to emit a warning here. Or is there?
--
--def webdavObjectInitialized(obj, event):
--    return webdavObjectEventHandler(obj, event, comment=_('Initial revision (WebDAV)'))
--
--def webdavObjectEdited(obj, event):
--    return webdavObjectEventHandler(obj, event, comment=_('Edited (WebDAV)'))
--
--def _getVersionComment(object):
--    request = aq_get(object, 'REQUEST', None)
--    return request and request.get('cmfeditions_version_comment', '')
--
--def objectInitialized(obj, event):
--    comment = _getVersionComment(event.object) or _('Initial revision')
--    return webdavObjectEventHandler(obj, event, comment=comment)
--
--def objectEdited(obj, event):
--    comment = _getVersionComment(event.object) or PMF('Edited')
--    return webdavObjectEventHandler(obj, event, comment=comment)
-+# -*- coding: utf-8 -*-
-+#########################################################################
-+# Copyright (c) 2008 Alberto Berti, Gregoire Weber.
-+# All Rights Reserved.
-+#
-+# This file is part of CMFEditions.
-+#
-+# CMFEditions is free software; you can redistribute it and/or modify
-+# it under the terms of the GNU General Public License as published by
-+# the Free Software Foundation; either version 2 of the License, or
-+# (at your option) any later version.
-+#
-+# CMFEditions is distributed in the hope that it will be useful,
-+# but WITHOUT ANY WARRANTY; without even the implied warranty of
-+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-+# GNU General Public License for more details.
-+#
-+# You should have received a copy of the GNU General Public License
-+# along with CMFEditions; if not, write to the Free Software
-+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-+#########################################################################
-+"""Event Subscribers
-+
-+$Id: ArchivistTool.py,v 1.15 2005/06/24 11:34:08 gregweb Exp $
-+"""
-+from zope.i18nmessageid import MessageFactory
-+from Acquisition import aq_get
-+
-+from Products.CMFCore.interfaces import IContentish
-+from Products.CMFCore.utils import getToolByName
-+from Products.CMFEditions.utilities import\
-+    isObjectChanged, maybeSaveVersion, dereference
-+from Products.CMFEditions.interfaces.IModifier import\
-+    FileTooLargeToVersionError
-+from Products.CMFEditions.interfaces.IStorage import StorageRetrieveError
-+from Products.CMFEditions import CMFEditionsMessageFactory as _
-+
-+PMF = MessageFactory('plone')
-+
-+def webdavObjectEventHandler(obj, event, comment):
-+    obj = event.object
-+
-+    changed = isObjectChanged(obj)
-+
-+    if not changed:
-+        return
-+
-+    try:
-+        maybeSaveVersion(obj, comment=comment, force=False)
-+    except FileTooLargeToVersionError:
-+        pass # There's no way to emit a warning here. Or is there?
-+
-+def webdavObjectInitialized(obj, event):
-+    return webdavObjectEventHandler(obj, event, comment=_('Initial revision (WebDAV)'))
-+
-+def webdavObjectEdited(obj, event):
-+    return webdavObjectEventHandler(obj, event, comment=_('Edited (WebDAV)'))
-+
-+def _getVersionComment(object):
-+    request = aq_get(object, 'REQUEST', None)
-+    return request and request.get('cmfeditions_version_comment', '')
-+
-+def objectInitialized(obj, event):
-+    comment = _getVersionComment(event.object) or _('Initial revision')
-+    return webdavObjectEventHandler(obj, event, comment=comment)
-+
-+def objectEdited(obj, event):
-+    comment = _getVersionComment(event.object) or PMF('Edited')
-+    return webdavObjectEventHandler(obj, event, comment=comment)
-+
-+def object_removed(obj, event):
-+    """ an object is being deleted -
-+    also delete it's history
-+    """
-+    if not IContentish.providedBy(obj):
-+        return
-+    try:
-+        histories_storage = getToolByName(obj, 'portal_historiesstorage')
-+        repo_tool = getToolByName(obj, 'portal_repository')
-+    except AttributeError:
-+        # XXX If tools are missing, there is nothing we can do.
-+        # This occurs in some Products.CMFDiffTool and
-+        # Products.CMFTestCase tests for 4.3.x. Maybe it should
-+        # be fixed there.
-+        return
-+    obj, histid = dereference(obj)
-+    if histid is None:
-+        return
-+    metadata = repo_tool.getHistoryMetadata(obj)
-+    try:
-+        num_versions = metadata.getLength(countPurged=False)
-+    except AttributeError:
-+        # portal_historiesstorage will return
-+        # an empty list in certain cases,
-+        # do nothing
-+        return
-+    current = metadata.retrieve(num_versions - 1)
-+    sys_metadata = current['metadata']['sys_metadata']
-+    if ('parent' in sys_metadata) and \
-+            (sys_metadata['parent']['history_id'] != histid):
-+        try:
-+            histories_storage.retrieve(
-+                history_id=sys_metadata['parent']['history_id'])
-+            return
-+        except StorageRetrieveError:
-+            pass
-+    length = len(histories_storage.getHistory(histid, countPurged=False))
-+    for i in range(length):
-+        histories_storage.purge(
-+            histid,
-+            0,
-+            metadata={'sys_metadata': {'comment': 'purged'}},
-+            countPurged=False)
-diff --git a/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py b/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-index 3921099..c05f0c1 100644
---- a/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-+++ b/Products/CMFEditions/tests/test_CopyModifyMergeRepositoryTool.py
-@@ -199,11 +199,21 @@ def test06_retrieveWithNoMoreExistentObject(self):
-         self.portal.invokeFactory(doc_type, 'doc_tmp')
-         doc = self.portal.doc_tmp
-         portal_hidhandler.setUid(doc, history_id, check_uniqueness=True)
--        vdata = portal_repository.retrieve(doc, selector=0)
--        self.failUnless(verifyObject(IVersionData, vdata))
--        self.assertEqual(vdata.object.text, 'text v1')
--        vdata = portal_repository.retrieve(doc, selector=1)
--        self.assertEqual(vdata.object.text, 'text v2')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.retrieve,
-+            doc,
-+            selector=0)
-+        #vdata = portal_repository.retrieve(doc, selector=0)
-+        #self.failUnless(verifyObject(IVersionData, vdata))
-+        #self.assertEqual(vdata.object.text, 'text v1')
-+        self.assertRaises(
-+              AttributeError,
-+              portal_repository.retrieve,
-+              doc,
-+              selector=1)
-+        #vdata = portal_repository.retrieve(doc, selector=1)
-+        #self.assertEqual(vdata.object.text, 'text v2')
+ from zope.configuration import xmlconfig
+@@ -56,12 +57,15 @@ def setUpPloneSite(self, portal):
+         applyProfile(portal, 'plone.app.search:default')
+         setRoles(portal, TEST_USER_ID, ['Manager'])
+         login(portal, TEST_USER_NAME)
+-        for i in range(0, 100):
++        for i in range(0, 12):
+             portal.invokeFactory(
+                 'Document',
+                 'my-page' + str(i),
+                 text='spam spam ham eggs'
+             )
++            # Sleep before creating the next one, otherwise ordering by date is
++            # not deterministic.
++            time.sleep(0.1)
+         setRoles(portal, TEST_USER_ID, ['Member'])
  
-     def test07_restoreDeletedObject(self):
-         portal_repository = self.portal.portal_repository
-@@ -220,10 +230,16 @@ def test07_restoreDeletedObject(self):
-         # delete the object we want to retrieve later
-         self.portal.manage_delObjects(ids=['doc'])
-         self.failIf('doc' in self.portal.objectIds())
--        portal_repository.restore(history_id, selector=0, container=self.portal)
--        self.failUnless('doc' in self.portal.objectIds())
--        restored = self.portal.doc
--        self.assertEqual(restored.text, 'text v1')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.restore,
-+            history_id,
-+            selector=0,
-+            container=self.portal)
-+        #portal_repository.restore(history_id, selector=0, container=self.portal)
-+        #self.failUnless('doc' in self.portal.objectIds())
-+        #restored = self.portal.doc
-+        #self.assertEqual(restored.text, 'text v1')
+         # Commit so that the test browser sees these objects
+diff --git a/plone/app/search/tests/test_integration.py b/plone/app/search/tests/test_integration.py
+index b6d88a6..0e13f0f 100644
+--- a/plone/app/search/tests/test_integration.py
++++ b/plone/app/search/tests/test_integration.py
+@@ -76,8 +76,8 @@ def test_default_search_order_relevance(self):
+         res = portal.restrictedTraverse('@@search').results(query=q)
+         ids = [r.getId() for r in res]
+         expected = [
+-            'my-page99', 'my-page98', 'my-page97', 'my-page96', 'my-page95',
+-            'my-page94', 'my-page93', 'my-page92', 'my-page91', 'my-page90'
++            'my-page11', 'my-page10', 'my-page9', 'my-page8', 'my-page7',
++            'my-page6', 'my-page5', 'my-page4', 'my-page3', 'my-page2'
+         ]
+         self.assertEqual(ids, expected)
  
-     def test07_restoreDeletedObjectWithNewId(self):
-         portal_repository = self.portal.portal_repository
-@@ -240,11 +256,18 @@ def test07_restoreDeletedObjectWithNewId(self):
-         # delete the object we want to retrieve later
-         self.portal.manage_delObjects(ids=['doc'])
-         self.failIf('doc' in self.portal.objectIds())
--        portal_repository.restore(history_id, selector=0,
--                                         container=self.portal, new_id='doc2')
--        self.failUnless('doc2' in self.portal.objectIds())
--        restored = self.portal.doc2
--        self.assertEqual(restored.text, 'text v1')
-+        self.assertRaises(
-+            AttributeError,
-+            portal_repository.restore,
-+            history_id,
-+            selector=0,
-+            container=self.portal,
-+            new_id='doc2')
-+        #portal_repository.restore(history_id, selector=0,
-+        #                                 container=self.portal, new_id='doc2')
-+        #self.failUnless('doc2' in self.portal.objectIds())
-+        #restored = self.portal.doc2
-+        #self.assertEqual(restored.text, 'text v1')
+@@ -96,8 +96,8 @@ def test_default_search_order_date(self):
+         res = portal.restrictedTraverse('@@search').results(query=q)
+         ids = [r.getId() for r in res]
+         expected = [
+-            'my-page10', 'my-page9', 'my-page8', 'my-page7', 'my-page6',
+-            'my-page4', 'my-page3', 'my-page2', 'my-page1', 'my-page0'
++            'my-page11', 'my-page10', 'my-page9', 'my-page8', 'my-page7',
++            'my-page6', 'my-page4', 'my-page3', 'my-page2', 'my-page1'
+         ]
+         self.assertEqual(ids, expected)
  
-     def test08_purgingDisallowedWithoutPurgingPolicy(self):
-         portal_repository = self.portal.portal_repository
-diff --git a/Products/CMFEditions/tests/test_ZVCStorageTool.py b/Products/CMFEditions/tests/test_ZVCStorageTool.py
-index c2fd242..400e9e4 100644
---- a/Products/CMFEditions/tests/test_ZVCStorageTool.py
-+++ b/Products/CMFEditions/tests/test_ZVCStorageTool.py
-@@ -28,8 +28,10 @@
- 
- from zope.interface.verify import verifyObject
- from OFS.ObjectManager import ObjectManager
-+from Acquisition import aq_base
- 
- from Products.CMFEditions.ArchivistTool import ObjectData
-+from Products.CMFEditions.ZVCStorageTool import Removed
- from Products.CMFEditions.interfaces.IStorage import IStorage
- from Products.CMFEditions.interfaces.IStorage import IPurgeSupport
- from Products.CMFEditions.interfaces.IStorage import StorageUnregisteredError
-@@ -40,21 +42,25 @@
- from DummyTools import MemoryStorage
- from DummyTools import notifyModified
- 
-+
- class DummyOM(ObjectManager):
-     pass
- 
-+
- class CMFDummy(Dummy):
- 
-     def __init__(self, id, cmfuid, effective=None, expires=None):
-         super(CMFDummy, self).__init__()
-         self.id = id
-         self.cmf_uid = cmfuid
--        self.effective = effective if effective is not None else self.modification_date
-+        self.effective = \
-+            effective if effective is not None else self.modification_date
-         self.expires = expires
- 
-     def getPortalTypeName(self):
-         return 'Dummy'
- 
-+
- class TestZVCStorageTool(CMFEditionsBaseTestCase):
- 
-     def afterSetUp(self):
-@@ -564,6 +570,54 @@ def test15_storageStatistics(self):
-             # s. https://github.com/plone/Products.CMFEditions/issues/31
-             self.failUnless(actual['size'] > 0)
- 
-+    def test16_delete_history_on_content_deletion(self):
-+        """ If a content item gets deleted, delete it's history
-+        as well
-+        """
-+        portal_hidhandler = self.portal.portal_historyidhandler
-+        portal_storage = self.portal.portal_historiesstorage
-+        self.portal.invokeFactory('Document', 'doc')
-+        self.portal.invokeFactory('Link', 'link')
-+        self.portal.invokeFactory('Folder', 'folder')
-+        # the event subscriber should be able to handle unversioned content
-+        self.portal.invokeFactory('Document', 'unversioned_doc')
-+        doc = self.portal.doc
-+        doc_histid = portal_hidhandler.register(doc)
-+        portal_storage.register(
-+            doc_histid, ObjectData(aq_base(doc)),
-+            metadata=self.buildMetadata('initial'))
-+        portal_storage.save(
-+            doc_histid,
-+            ObjectData(aq_base(doc)),
-+            metadata=self.buildMetadata('v2'))
-+        link = self.portal.link
-+        link_histid = portal_hidhandler.register(link)
-+        portal_storage.register(
-+            link_histid, ObjectData(aq_base(link)),
-+            metadata=self.buildMetadata('initial'))
-+        folder = self.portal.folder
-+        folder_histid = portal_hidhandler.register(folder)
-+        portal_storage.register(
-+            folder_histid, ObjectData(aq_base(folder)),
-+            metadata=self.buildMetadata('first draft'))
-+        dochist = portal_storage.retrieve(doc_histid).object
-+        doctype = dochist.object.portal_type
-+        self.assertEqual('Document', doctype)
-+        linkhist = portal_storage.retrieve(link_histid).object
-+        linktype = linkhist.object.portal_type
-+        self.assertEqual('Link', linktype)
-+        folderhist = portal_storage.retrieve(folder_histid).object
-+        foldertype = folderhist.object.portal_type
-+        self.assertEqual('Folder', foldertype)
-+        self.portal.manage_delObjects(
-+            ids=['doc', 'link', 'folder', 'unversioned_doc'])
-+        removed_doc = portal_storage.retrieve(history_id=doc_histid)
-+        self.assertTrue(type(removed_doc.object) == Removed)
-+        removed_link = portal_storage.retrieve(history_id=link_histid)
-+        self.assertTrue(type(removed_link.object) == Removed)
-+        removed_folder = portal_storage.retrieve(history_id=folder_histid)
-+        self.assertTrue(type(removed_folder.object) == Removed)
-+
- 
- class TestMemoryStorage(TestZVCStorageTool):
- 
-@@ -576,3 +630,8 @@ def test15_storageStatistics(self):
-         """ MemoryStorage does not implement zmi_getStorageStatistics
-         """
-         pass
-+
-+    def test16_delete_history_on_content_deletion(self):
-+        """ MemoryStorage does not implement _getZVCRepo
-+        """
-+        pass
 
 
