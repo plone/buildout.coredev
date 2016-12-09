@@ -1,332 +1,504 @@
-Repository: plone.app.theming
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-12-06T08:42:16+01:00
-Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.theming/commit/111adefc7e87d9c1433f94b44498a5f4bbe27473
-
-Make diazo.debug work with DIAZO_ALWAYS_CACHE_RULES
-
-Files changed:
-M CHANGES.rst
-M src/plone/app/theming/tests/test_transform.py
-M src/plone/app/theming/transform.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index d8ffdd4..db4e503 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
- 
- Bug fixes:
- 
--- *add item here*
-+- Make diazo.debug work again when DIAZO_ALWAYS_CACHE_RULES is set.
-+  [ale-rt]
- 
- 
- 1.3.3 (2016-12-02)
-diff --git a/src/plone/app/theming/tests/test_transform.py b/src/plone/app/theming/tests/test_transform.py
-index 223c60a..356740f 100644
---- a/src/plone/app/theming/tests/test_transform.py
-+++ b/src/plone/app/theming/tests/test_transform.py
-@@ -1,24 +1,25 @@
- # -*- coding: utf-8 -*-
--from Products.CMFCore.Expression import Expression
--from Products.CMFCore.Expression import getExprContext
--from Products.CMFCore.utils import getToolByName
- from diazo.compiler import compile_theme
- from lxml import etree
- from os import environ
--from plone.app.testing import TEST_USER_ID
- from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
- from plone.app.theming.interfaces import IThemeSettings
- from plone.app.theming.testing import THEMING_FUNCTIONAL_TESTING
- from plone.app.theming.transform import ThemeTransform
--from plone.app.theming.utils import InternalResolver
--from plone.app.theming.utils import PythonResolver
- from plone.app.theming.utils import applyTheme
- from plone.app.theming.utils import getTheme
-+from plone.app.theming.utils import InternalResolver
-+from plone.app.theming.utils import PythonResolver
- from plone.app.theming.utils import resolvePythonURL
- from plone.registry.interfaces import IRegistry
- from plone.testing.z2 import Browser
-+from Products.CMFCore.Expression import Expression
-+from Products.CMFCore.Expression import getExprContext
-+from Products.CMFCore.utils import getToolByName
- from urllib2 import HTTPError
- from zope.component import getUtility
-+
- import Globals
- import os.path
- import re
-@@ -100,7 +101,7 @@ def test_develop_theme(self):
-         # and clean it up
-         env_var_backup = environ.pop(var_name, None)
- 
--        transform = ThemeTransform(None, None)
-+        transform = ThemeTransform(None, {})
-         # This evaluates to True because we set
-         # Globals.DevelopmentMode to True in the test setup
-         self.assertTrue(transform.develop_theme())
-@@ -109,6 +110,10 @@ def test_develop_theme(self):
-         environ[var_name] = 'true'
-         self.assertFalse(transform.develop_theme())
- 
-+        # If we require to debug.diazo the variable will be ignored
-+        transform = ThemeTransform(None, {'diazo.debug': '1'})
-+        self.assertTrue(transform.develop_theme())
-+
-         # Then we reset our env variables before leaving
-         if env_had_var:
-             environ[var_name] = env_var_backup
-diff --git a/src/plone/app/theming/transform.py b/src/plone/app/theming/transform.py
-index 9b9bfc6..1c96eb3 100644
---- a/src/plone/app/theming/transform.py
-+++ b/src/plone/app/theming/transform.py
-@@ -1,5 +1,6 @@
- # -*- coding: utf-8 -*-
- from lxml import etree
-+from os import environ
- from plone.app.theming.interfaces import IThemingLayer
- from plone.app.theming.utils import compileThemeTransform
- from plone.app.theming.utils import findContext
-@@ -8,14 +9,15 @@
- from plone.app.theming.utils import theming_policy
- from plone.app.theming.zmi import patch_zmi
- from plone.transformchain.interfaces import ITransform
--from os import environ
- from repoze.xmliter.utils import getHTMLSerializer
- from zope.component import adapter
--from zope.interface import Interface
- from zope.interface import implementer
-+from zope.interface import Interface
-+
- import Globals
- import logging
- 
-+
- # Disable theming of ZMI
- patch_zmi()
- 
-@@ -35,16 +37,27 @@ def __init__(self, published, request):
-         self.published = published
-         self.request = request
- 
-+    def debug_theme(self):
-+        ''' Check if the theme should be debugged
-+        We will debug the theme
-+        when we have a truish diazo.debug parameter in the request
-+        '''
-+        if not Globals.DevelopmentMode:
-+            return False
-+        diazo_debug = self.request.get('diazo.debug', '').lower()
-+        return diazo_debug in ('1', 'y', 'yes', 't', 'true')
-+
-     def develop_theme(self):
--        ''' Check if the theme should be recompiled every time the
--        transform is applied
-+        ''' Check if the theme should be recompiled
-+        every time the transform is applied
-         '''
--        if Globals.DevelopmentMode:
--            if environ.get('DIAZO_ALWAYS_CACHE_RULES'):
--                return False
--            else:
--                return True
--        return False
-+        if not Globals.DevelopmentMode:
-+            return False
-+        if self.debug_theme():
-+            return True
-+        if environ.get('DIAZO_ALWAYS_CACHE_RULES'):
-+            return False
-+        return True
- 
-     def setupTransform(self, runtrace=False):
-         DevelopmentMode = self.develop_theme()
-@@ -127,11 +140,7 @@ def transformIterable(self, result, encoding):
-             return None
- 
-         DevelopmentMode = Globals.DevelopmentMode
--        diazo_debug = self.request.get('diazo.debug', '').lower()
--        runtrace = (
--            DevelopmentMode
--            and diazo_debug in ('1', 'y', 'yes', 't', 'true')
--        )
-+        runtrace = self.debug_theme()
- 
-         try:
-             etree.clear_error_log()
-
-
-Repository: plone.app.theming
-
-
-Branch: refs/heads/master
-Date: 2016-12-09T13:49:39+01:00
+Date: 2016-12-09T15:31:40+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.theming/commit/59aac1ba0c3209f70df6ad154098e38a32e60e2a
+Commit: https://github.com/plone/Products.CMFPlone/commit/1a8018994f09fd796957b1ab5d0210f345e2213f
 
-Merge pull request #119 from plone/fix_diazo_debug
-
-Make diazo.debug work with DIAZO_ALWAYS_CACHE_RULES
+Simplify generated Gruntfile.js
 
 Files changed:
 M CHANGES.rst
-M src/plone/app/theming/tests/test_transform.py
-M src/plone/app/theming/transform.py
+M Products/CMFPlone/_scripts/_generate_gruntfile.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index d8ffdd4..db4e503 100644
+index d4e9a8a..d97c92e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -118,6 +118,9 @@ New features:
+ - Resource Registry: If file system version is newer than ``last_compilation`` date of a bundle, use this as ``last_compilation`` date.
+   [jensens]
+ 
++- Simplify generated Gruntfile.js (DRY)
++  [jensens]
++
  
  Bug fixes:
  
--- *add item here*
-+- Make diazo.debug work again when DIAZO_ALWAYS_CACHE_RULES is set.
-+  [ale-rt]
+diff --git a/Products/CMFPlone/_scripts/_generate_gruntfile.py b/Products/CMFPlone/_scripts/_generate_gruntfile.py
+index de55bed..b9587ce 100644
+--- a/Products/CMFPlone/_scripts/_generate_gruntfile.py
++++ b/Products/CMFPlone/_scripts/_generate_gruntfile.py
+@@ -40,11 +40,14 @@
+     IResourceRegistry, prefix="plone.resources", check=False)  # noqa
+ lessvariables = registry.records['plone.lessvariables'].value
  
- 
- 1.3.3 (2016-12-02)
-diff --git a/src/plone/app/theming/tests/test_transform.py b/src/plone/app/theming/tests/test_transform.py
-index 223c60a..356740f 100644
---- a/src/plone/app/theming/tests/test_transform.py
-+++ b/src/plone/app/theming/tests/test_transform.py
-@@ -1,24 +1,25 @@
- # -*- coding: utf-8 -*-
--from Products.CMFCore.Expression import Expression
--from Products.CMFCore.Expression import getExprContext
--from Products.CMFCore.utils import getToolByName
- from diazo.compiler import compile_theme
- from lxml import etree
- from os import environ
--from plone.app.testing import TEST_USER_ID
- from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
- from plone.app.theming.interfaces import IThemeSettings
- from plone.app.theming.testing import THEMING_FUNCTIONAL_TESTING
- from plone.app.theming.transform import ThemeTransform
--from plone.app.theming.utils import InternalResolver
--from plone.app.theming.utils import PythonResolver
- from plone.app.theming.utils import applyTheme
- from plone.app.theming.utils import getTheme
-+from plone.app.theming.utils import InternalResolver
-+from plone.app.theming.utils import PythonResolver
- from plone.app.theming.utils import resolvePythonURL
- from plone.registry.interfaces import IRegistry
- from plone.testing.z2 import Browser
-+from Products.CMFCore.Expression import Expression
-+from Products.CMFCore.Expression import getExprContext
-+from Products.CMFCore.utils import getToolByName
- from urllib2 import HTTPError
- from zope.component import getUtility
+-GRUNTFILE_TEMPLATE = """
++GRUNTFILE_TEMPLATE = """// This file is generated by "plone-compile-resources"
 +
- import Globals
- import os.path
- import re
-@@ -100,7 +101,7 @@ def test_develop_theme(self):
-         # and clean it up
-         env_var_backup = environ.pop(var_name, None)
+ module.exports = function(grunt) {{
+-    'use strict';
++    "use strict";
++    var lessPaths = {lesspaths},
++        modifyVars = {modifyvars};
+     grunt.initConfig({{
+-        pkg: grunt.file.readJSON('package.json'),
++        pkg: grunt.file.readJSON("package.json"),
+         less: {{
+             {less}
+         }},
+@@ -60,19 +63,19 @@
+         watch: {{
+             scripts: {{
+                 files: {files},
+-                tasks: ['requirejs', 'less', 'sed', 'uglify']
++                tasks: ["requirejs", "less", "sed", "uglify"]
+             }}
+         }}
+     }});
  
--        transform = ThemeTransform(None, None)
-+        transform = ThemeTransform(None, {})
-         # This evaluates to True because we set
-         # Globals.DevelopmentMode to True in the test setup
-         self.assertTrue(transform.develop_theme())
-@@ -109,6 +110,10 @@ def test_develop_theme(self):
-         environ[var_name] = 'true'
-         self.assertFalse(transform.develop_theme())
+-    grunt.loadNpmTasks('grunt-contrib-watch');
+-    grunt.loadNpmTasks('grunt-contrib-requirejs');
+-    grunt.loadNpmTasks('grunt-contrib-less');
+-    grunt.loadNpmTasks('grunt-contrib-uglify');
+-    grunt.loadNpmTasks('grunt-sed');
++    grunt.loadNpmTasks("grunt-contrib-watch");
++    grunt.loadNpmTasks("grunt-contrib-requirejs");
++    grunt.loadNpmTasks("grunt-contrib-less");
++    grunt.loadNpmTasks("grunt-contrib-uglify");
++    grunt.loadNpmTasks("grunt-sed");
  
-+        # If we require to debug.diazo the variable will be ignored
-+        transform = ThemeTransform(None, {'diazo.debug': '1'})
-+        self.assertTrue(transform.develop_theme())
+-    grunt.registerTask('default', ['watch']);
+-    grunt.registerTask('compile-all', ['requirejs', 'less', 'sed', 'uglify']);
++    grunt.registerTask("default", ["watch"]);
++    grunt.registerTask("compile-all", ["requirejs", "less", "sed", "uglify"]);
+ 
+ {bundleTasks}
+ }}
+@@ -80,24 +83,24 @@
+ 
+ SED_CONFIG_TEMPLATE = """
+     {name}: {{
+-      path: '{path}',
+-      pattern: '{pattern}',
+-      replacement: '{destination}',
++      path: "{path}",
++      pattern: "{pattern}",
++      replacement: "{destination}",
+     }},
+ """
+ 
+ REQUIREJS_CONFIG_TEMPLATE = """
+             "{bkey}": {{
+                 options: {{
+-                    baseUrl: '/',
++                    baseUrl: "/",
+                     generateSourceMaps: false,
+                     preserveLicenseComments: false,
+                     paths: {paths},
+                     shim: {shims},
+                     wrapShim: true,
+-                    name: '{name}',
+-                    exclude: ['jquery'],
+-                    out: '{out}',
++                    name: "{name}",
++                    exclude: ["jquery"],
++                    out: "{out}",
+                     optimize: "none"
+                 }}
+             }},
+@@ -106,11 +109,11 @@
+         "{bkey}": {{
+           options: {{
+             sourceMap: true,
+-            sourceMapName: '{destination}.map',
++            sourceMapName: "{destination}.map",
+             sourceMapIncludeSources: false
+           }},
+           files: {{
+-            '{destination}': {files}
++            "{destination}": {files}
+           }}
+         }},
+ """
+@@ -130,17 +133,17 @@
+                     sourceMapBasepath: "{base_path}",
+                     relativeUrls: true,
+                     plugins: [
+-                        new require('less-plugin-inline-urls'),
++                        new require("less-plugin-inline-urls"),
+                     ],
+-                    paths: {less_paths},
+-                    modifyVars: {{
+-{globalVars}
+-                    }}
++                    paths: lessPaths,
++                    modifyVars: modifyVars
+                 }}
+-            }}
++            }}\
+ """
+ 
+-COMPILE_TASK_TEMPLATE = "    grunt.registerTask('compile-{name}', {tasks})\n"
++COMPILE_TASK_TEMPLATE = """\
++    grunt.registerTask("compile-{name}", {tasks})\n\
++"""
+ 
+ 
+ def resource_to_dir(resource, file_type='.js'):
+@@ -187,6 +190,7 @@ def resource_to_dir(resource, file_type='.js'):
+ 
+ # REQUIRE JS CONFIGURATION
+ 
 +
-         # Then we reset our env variables before leaving
-         if env_had_var:
-             environ[var_name] = env_var_backup
-diff --git a/src/plone/app/theming/transform.py b/src/plone/app/theming/transform.py
-index 9b9bfc6..1c96eb3 100644
---- a/src/plone/app/theming/transform.py
-+++ b/src/plone/app/theming/transform.py
-@@ -1,5 +1,6 @@
- # -*- coding: utf-8 -*-
- from lxml import etree
-+from os import environ
- from plone.app.theming.interfaces import IThemingLayer
- from plone.app.theming.utils import compileThemeTransform
- from plone.app.theming.utils import findContext
-@@ -8,14 +9,15 @@
- from plone.app.theming.utils import theming_policy
- from plone.app.theming.zmi import patch_zmi
- from plone.transformchain.interfaces import ITransform
--from os import environ
- from repoze.xmliter.utils import getHTMLSerializer
- from zope.component import adapter
--from zope.interface import Interface
- from zope.interface import implementer
-+from zope.interface import Interface
+ paths = {}
+ shims = {}
+ for requirejs, script in resources.items():
+@@ -238,13 +242,13 @@ def resource_to_dir(resource, file_type='.js'):
+ 
+ # LESS CONFIGURATION
+ 
+-globalVars = {}
+-globalVars["sitePath"] = "'/'"
+-globalVars["isPlone"] = "false"
+-globalVars["isMockup"] = "false"
+-globalVars['staticPath'] = "'" + os.path.join(
++modify_vars = {}
++modify_vars['sitePath'] = '/'
++modify_vars['isPlone'] = 'false'
++modify_vars['isMockup'] = 'false'
++modify_vars['staticPath'] = '\'' + os.path.join(
+     os.path.dirname(CMFPlone.__file__),
+-    'static') + "'"
++    'static') + '\''
+ 
+ less_vars_params = {
+     'site_url': 'LOCAL',
+@@ -264,12 +268,12 @@ def resource_to_dir(resource, file_type='.js'):
+         if t_object:
+             t_file = resource_to_dir(t_object)
+             t_file = t_file.replace(os.getcwd() + '/', '')
+-            globalVars[name] = "'%s/'" % t_file
++            modify_vars[name] = "'%s/'" % t_file
+         else:
+             print "No file found: " + \
+                 str(t.replace('LOCAL/', '').replace('\\"', ''))  #
+     else:
+-        globalVars[name] = t
++        modify_vars[name] = t
+ 
+ # Path to search for less
+ less_paths = []
+@@ -312,8 +316,8 @@ def resource_to_dir(resource, file_type='.js'):
+             # relative = ''
+             # for i in range(len(local_file.split('/'))):
+             #     relative += '../'
+-            # globalVars[name.replace('.', '_')] = "'%s'" % local_file  # noqa
+-            globalVars[name.replace('.', '_')] = "'{0}'".format(
++            # modify_vars[name.replace('.', '_')] = "'%s'" % local_file  # noqa
++            modify_vars[name.replace('.', '_')] = "'{0}'".format(
+                 local_file.split('/')[-1]
+             )
+             if '/'.join(local_file.split('/')[:-1]) not in less_paths:
+@@ -321,21 +325,16 @@ def resource_to_dir(resource, file_type='.js'):
+         else:
+             print "No file found: " + css
+ 
+-globalVars_string = ""
+-for key, value in sorted(globalVars.items()):
+-    globalVars_string += '{0}"{1}": "{2}",\n'.format(22 * ' ', key, value)
+-
+-
+ # BUNDLE LOOP
+ 
+-require_configs = ""
+-uglify_cfgs_final = ""
++require_configs = ''
++uglify_cfgs_final = ''
+ less_cfgs_final = []
+-sourceMap_url = ""
+-sed_cfg_final = ""
++sourceMap_url = ''
++sed_cfg_final = ''
+ watch_files = []
+ sed_count = 0
+-bundle_grunt_tasks = ""
++bundle_grunt_tasks = ''
+ 
+ 
+ for bkey, bundle in bundles.items():
+@@ -444,9 +443,7 @@ def resource_to_dir(resource, file_type='.js'):
+         if less_files:
+             less_cfgs_final.append(LESS_CONFIG_TEMPLATE.format(
+                 name=bkey,
+-                globalVars=globalVars_string,
+                 files=json.dumps(less_files),
+-                less_paths=json.dumps(sorted(less_paths), indent=22),
+                 sourcemap_url=sourceMap_url,
+                 base_path=os.getcwd()))
+ 
+@@ -487,6 +484,8 @@ def resource_to_dir(resource, file_type='.js'):
+     gruntfile.write(
+         GRUNTFILE_TEMPLATE.format(
+             less=','.join(less_cfgs_final),
++            lesspaths=json.dumps(sorted(less_paths), indent=12),
++            modifyvars=json.dumps(modify_vars, indent=12, sort_keys=True),
+             requirejs=require_configs,
+             uglify=uglify_cfgs_final,
+             sed=sed_cfg_final,
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2016-12-09T16:13:17+01:00
+Author: agitator (agitator) <hpeter@agitator.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/e7f5bcfd5f5370c09967035e2cb3899a229ba5d7
+
+Merge pull request #1869 from plone/jensens-simplify-generated-gruntfile
+
+Simplify generated Gruntfile.js
+
+Files changed:
+M CHANGES.rst
+M Products/CMFPlone/_scripts/_generate_gruntfile.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index d4e9a8a..d97c92e 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -118,6 +118,9 @@ New features:
+ - Resource Registry: If file system version is newer than ``last_compilation`` date of a bundle, use this as ``last_compilation`` date.
+   [jensens]
+ 
++- Simplify generated Gruntfile.js (DRY)
++  [jensens]
 +
- import Globals
- import logging
+ 
+ Bug fixes:
+ 
+diff --git a/Products/CMFPlone/_scripts/_generate_gruntfile.py b/Products/CMFPlone/_scripts/_generate_gruntfile.py
+index de55bed..b9587ce 100644
+--- a/Products/CMFPlone/_scripts/_generate_gruntfile.py
++++ b/Products/CMFPlone/_scripts/_generate_gruntfile.py
+@@ -40,11 +40,14 @@
+     IResourceRegistry, prefix="plone.resources", check=False)  # noqa
+ lessvariables = registry.records['plone.lessvariables'].value
+ 
+-GRUNTFILE_TEMPLATE = """
++GRUNTFILE_TEMPLATE = """// This file is generated by "plone-compile-resources"
++
+ module.exports = function(grunt) {{
+-    'use strict';
++    "use strict";
++    var lessPaths = {lesspaths},
++        modifyVars = {modifyvars};
+     grunt.initConfig({{
+-        pkg: grunt.file.readJSON('package.json'),
++        pkg: grunt.file.readJSON("package.json"),
+         less: {{
+             {less}
+         }},
+@@ -60,19 +63,19 @@
+         watch: {{
+             scripts: {{
+                 files: {files},
+-                tasks: ['requirejs', 'less', 'sed', 'uglify']
++                tasks: ["requirejs", "less", "sed", "uglify"]
+             }}
+         }}
+     }});
+ 
+-    grunt.loadNpmTasks('grunt-contrib-watch');
+-    grunt.loadNpmTasks('grunt-contrib-requirejs');
+-    grunt.loadNpmTasks('grunt-contrib-less');
+-    grunt.loadNpmTasks('grunt-contrib-uglify');
+-    grunt.loadNpmTasks('grunt-sed');
++    grunt.loadNpmTasks("grunt-contrib-watch");
++    grunt.loadNpmTasks("grunt-contrib-requirejs");
++    grunt.loadNpmTasks("grunt-contrib-less");
++    grunt.loadNpmTasks("grunt-contrib-uglify");
++    grunt.loadNpmTasks("grunt-sed");
+ 
+-    grunt.registerTask('default', ['watch']);
+-    grunt.registerTask('compile-all', ['requirejs', 'less', 'sed', 'uglify']);
++    grunt.registerTask("default", ["watch"]);
++    grunt.registerTask("compile-all", ["requirejs", "less", "sed", "uglify"]);
+ 
+ {bundleTasks}
+ }}
+@@ -80,24 +83,24 @@
+ 
+ SED_CONFIG_TEMPLATE = """
+     {name}: {{
+-      path: '{path}',
+-      pattern: '{pattern}',
+-      replacement: '{destination}',
++      path: "{path}",
++      pattern: "{pattern}",
++      replacement: "{destination}",
+     }},
+ """
+ 
+ REQUIREJS_CONFIG_TEMPLATE = """
+             "{bkey}": {{
+                 options: {{
+-                    baseUrl: '/',
++                    baseUrl: "/",
+                     generateSourceMaps: false,
+                     preserveLicenseComments: false,
+                     paths: {paths},
+                     shim: {shims},
+                     wrapShim: true,
+-                    name: '{name}',
+-                    exclude: ['jquery'],
+-                    out: '{out}',
++                    name: "{name}",
++                    exclude: ["jquery"],
++                    out: "{out}",
+                     optimize: "none"
+                 }}
+             }},
+@@ -106,11 +109,11 @@
+         "{bkey}": {{
+           options: {{
+             sourceMap: true,
+-            sourceMapName: '{destination}.map',
++            sourceMapName: "{destination}.map",
+             sourceMapIncludeSources: false
+           }},
+           files: {{
+-            '{destination}': {files}
++            "{destination}": {files}
+           }}
+         }},
+ """
+@@ -130,17 +133,17 @@
+                     sourceMapBasepath: "{base_path}",
+                     relativeUrls: true,
+                     plugins: [
+-                        new require('less-plugin-inline-urls'),
++                        new require("less-plugin-inline-urls"),
+                     ],
+-                    paths: {less_paths},
+-                    modifyVars: {{
+-{globalVars}
+-                    }}
++                    paths: lessPaths,
++                    modifyVars: modifyVars
+                 }}
+-            }}
++            }}\
+ """
+ 
+-COMPILE_TASK_TEMPLATE = "    grunt.registerTask('compile-{name}', {tasks})\n"
++COMPILE_TASK_TEMPLATE = """\
++    grunt.registerTask("compile-{name}", {tasks})\n\
++"""
+ 
+ 
+ def resource_to_dir(resource, file_type='.js'):
+@@ -187,6 +190,7 @@ def resource_to_dir(resource, file_type='.js'):
+ 
+ # REQUIRE JS CONFIGURATION
  
 +
- # Disable theming of ZMI
- patch_zmi()
+ paths = {}
+ shims = {}
+ for requirejs, script in resources.items():
+@@ -238,13 +242,13 @@ def resource_to_dir(resource, file_type='.js'):
  
-@@ -35,16 +37,27 @@ def __init__(self, published, request):
-         self.published = published
-         self.request = request
+ # LESS CONFIGURATION
  
-+    def debug_theme(self):
-+        ''' Check if the theme should be debugged
-+        We will debug the theme
-+        when we have a truish diazo.debug parameter in the request
-+        '''
-+        if not Globals.DevelopmentMode:
-+            return False
-+        diazo_debug = self.request.get('diazo.debug', '').lower()
-+        return diazo_debug in ('1', 'y', 'yes', 't', 'true')
-+
-     def develop_theme(self):
--        ''' Check if the theme should be recompiled every time the
--        transform is applied
-+        ''' Check if the theme should be recompiled
-+        every time the transform is applied
-         '''
--        if Globals.DevelopmentMode:
--            if environ.get('DIAZO_ALWAYS_CACHE_RULES'):
--                return False
--            else:
--                return True
--        return False
-+        if not Globals.DevelopmentMode:
-+            return False
-+        if self.debug_theme():
-+            return True
-+        if environ.get('DIAZO_ALWAYS_CACHE_RULES'):
-+            return False
-+        return True
+-globalVars = {}
+-globalVars["sitePath"] = "'/'"
+-globalVars["isPlone"] = "false"
+-globalVars["isMockup"] = "false"
+-globalVars['staticPath'] = "'" + os.path.join(
++modify_vars = {}
++modify_vars['sitePath'] = '/'
++modify_vars['isPlone'] = 'false'
++modify_vars['isMockup'] = 'false'
++modify_vars['staticPath'] = '\'' + os.path.join(
+     os.path.dirname(CMFPlone.__file__),
+-    'static') + "'"
++    'static') + '\''
  
-     def setupTransform(self, runtrace=False):
-         DevelopmentMode = self.develop_theme()
-@@ -127,11 +140,7 @@ def transformIterable(self, result, encoding):
-             return None
+ less_vars_params = {
+     'site_url': 'LOCAL',
+@@ -264,12 +268,12 @@ def resource_to_dir(resource, file_type='.js'):
+         if t_object:
+             t_file = resource_to_dir(t_object)
+             t_file = t_file.replace(os.getcwd() + '/', '')
+-            globalVars[name] = "'%s/'" % t_file
++            modify_vars[name] = "'%s/'" % t_file
+         else:
+             print "No file found: " + \
+                 str(t.replace('LOCAL/', '').replace('\\"', ''))  #
+     else:
+-        globalVars[name] = t
++        modify_vars[name] = t
  
-         DevelopmentMode = Globals.DevelopmentMode
--        diazo_debug = self.request.get('diazo.debug', '').lower()
--        runtrace = (
--            DevelopmentMode
--            and diazo_debug in ('1', 'y', 'yes', 't', 'true')
--        )
-+        runtrace = self.debug_theme()
+ # Path to search for less
+ less_paths = []
+@@ -312,8 +316,8 @@ def resource_to_dir(resource, file_type='.js'):
+             # relative = ''
+             # for i in range(len(local_file.split('/'))):
+             #     relative += '../'
+-            # globalVars[name.replace('.', '_')] = "'%s'" % local_file  # noqa
+-            globalVars[name.replace('.', '_')] = "'{0}'".format(
++            # modify_vars[name.replace('.', '_')] = "'%s'" % local_file  # noqa
++            modify_vars[name.replace('.', '_')] = "'{0}'".format(
+                 local_file.split('/')[-1]
+             )
+             if '/'.join(local_file.split('/')[:-1]) not in less_paths:
+@@ -321,21 +325,16 @@ def resource_to_dir(resource, file_type='.js'):
+         else:
+             print "No file found: " + css
  
-         try:
-             etree.clear_error_log()
+-globalVars_string = ""
+-for key, value in sorted(globalVars.items()):
+-    globalVars_string += '{0}"{1}": "{2}",\n'.format(22 * ' ', key, value)
+-
+-
+ # BUNDLE LOOP
+ 
+-require_configs = ""
+-uglify_cfgs_final = ""
++require_configs = ''
++uglify_cfgs_final = ''
+ less_cfgs_final = []
+-sourceMap_url = ""
+-sed_cfg_final = ""
++sourceMap_url = ''
++sed_cfg_final = ''
+ watch_files = []
+ sed_count = 0
+-bundle_grunt_tasks = ""
++bundle_grunt_tasks = ''
+ 
+ 
+ for bkey, bundle in bundles.items():
+@@ -444,9 +443,7 @@ def resource_to_dir(resource, file_type='.js'):
+         if less_files:
+             less_cfgs_final.append(LESS_CONFIG_TEMPLATE.format(
+                 name=bkey,
+-                globalVars=globalVars_string,
+                 files=json.dumps(less_files),
+-                less_paths=json.dumps(sorted(less_paths), indent=22),
+                 sourcemap_url=sourceMap_url,
+                 base_path=os.getcwd()))
+ 
+@@ -487,6 +484,8 @@ def resource_to_dir(resource, file_type='.js'):
+     gruntfile.write(
+         GRUNTFILE_TEMPLATE.format(
+             less=','.join(less_cfgs_final),
++            lesspaths=json.dumps(sorted(less_paths), indent=12),
++            modifyvars=json.dumps(modify_vars, indent=12, sort_keys=True),
+             requirejs=require_configs,
+             uglify=uglify_cfgs_final,
+             sed=sed_cfg_final,
 
 
