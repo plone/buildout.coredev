@@ -1,500 +1,1621 @@
-Repository: plone.app.linkintegrity
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2016-12-10T22:19:37+01:00
-Author: Slavisa Karalic (karalics) <slavisa.karalic@gmail.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/2a4ac39f73ea7e06d3035e02e2832c21e2794895
+Date: 2016-09-21T23:20:53+02:00
+Author: Alexander Loechel (loechel) <Alexander.Loechel@lmu.de>
+Commit: https://github.com/plone/plone.namedfile/commit/df59b59bd67e632f4043619f8b4af01231321c74
 
-Do recursive check and more verbose reporting
+Implemention of PLIP 1673: Automatic image rotation based on Exif data
+
+PLIP 1673: https://github.com/plone/Products.CMFPlone/issues/1673
+This PLIP implementation introduced a straight foreward image rotation based on Exif information for JPEG and TIFF Images stored in plone.namedfile Image fields.
+The concept of Exif orientation is described in detail in the following blog: http://www.daveperrett.com/articles/2012/07/28/exif-orientation-handling-is-a-ghetto/
+
+It requires an additional external library as dependency: piexif (package: https://pypi.python.org/pypi/piexif; docs: http://piexif.readthedocs.org/en/latest/; github: https://github.com/hMatoba/Piexif)
+piexif, allows reading and writing of Exif information, which offers more powerful image handling than a read only library. piexif also works very smart together with Pillow.
+
+This PLIP superseeds prior attemts to add Exif based image rotation to plone.namedfile: #12, #13, #14
+
+For testing of orientation change, images where needed to include for test files.
+This is not part of this implementation.
+The following github repositories have several examples of Images for orientation testing:
+* https://github.com/recurser/exif-orientation-examples (JPEG Images with orientation 1-8 in Landscape and Portrait orientation)
+* https://github.com/ianare/exif-samples (lots of different JPEG and TIFF Images, even corrupted images)
+
+Additional to the PLIP implementation this commit includes a restructuring of the package.
+* Image meta data detection has been moved to a subfolder utils and splited into several files for each image type
+* Moved functions to utils as those are helper methods, so that base functionallity is easier to read
+* Added basic TIFF Image handling. Prior TIFF were handled as Files not Images.
+
+Last but not least:
+Moved package version from 4.1.x to 4.2.0 as it introduced new features, following semantic versioning.
 
 Files changed:
+A plone/namedfile/utils/__init__.py
+A plone/namedfile/utils/jpeg_utils.py
+A plone/namedfile/utils/png_utils.py
+A plone/namedfile/utils/tiff_utils.py
 M CHANGES.rst
-M plone/app/linkintegrity/browser/delete_confirmation_info.pt
-M plone/app/linkintegrity/browser/info.py
-M plone/app/linkintegrity/tests/test_functional.py
+M plone/namedfile/file.py
+M setup.py
+D plone/namedfile/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index b48995e..bf9dfc9 100644
+index 3e4a521..1fd1bac 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
  
+-4.1.1 (unreleased)
++4.2.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+@@ -11,10 +11,22 @@ Breaking changes:
  New features:
  
--- *add item here*
-+- Information about contents within a selected folder for deletion. 
-+  This information contains number of deleted objects, 
-+  number of subfolders and number of published objects.
-+  [karalics]
+ - *add item here*
++- Add automatic image rotation based on EXIF data for all images.
++  Based on piexif library and ideas of maartenkling and ezvirtual.
++  Choosen piexif as it allow read and write of exif data for future enhancements.
++  http://piexif.readthedocs.org/en/latest/
++  For Orientation examples and description see http://www.daveperrett.com/articles/2012/07/28/exif-orientation-handling-is-a-ghetto/ test data https://github.com/recurser/exif-orientation-examples
++  Additional Test Images with different MIME-Types (JPEG and TIFF) and possible problems: https://github.com/ianare/exif-samples.git
++  [loechel]
  
  Bug fixes:
  
-diff --git a/plone/app/linkintegrity/browser/delete_confirmation_info.pt b/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-index 4f1fe50..e2cf7fb 100644
---- a/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-+++ b/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-@@ -1,53 +1,80 @@
- <tal:block
--  tal:define="breaches python:view.breaches"
--  tal:condition="breaches"
-+  tal:define="breaches python:view.breaches;"
-   i18n:domain="plone">
+ - *add item here*
++- Added handler for Tiff Images in getImageInfo.
++  [loechel]
++- Restructured packages.
++  Moved image meta data detection in an own subfolder
++  [loechel]
  
--    <h2 i18n:translate="linkintegrity_breaches_title">Potential link breakage</h2>
+ 
+ 4.1 (2016-09-14)
+diff --git a/plone/namedfile/file.py b/plone/namedfile/file.py
+index bef3519..8a98e44 100644
+--- a/plone/namedfile/file.py
++++ b/plone/namedfile/file.py
+@@ -2,7 +2,7 @@
+ # The implementations in this file are largely borrowed
+ # from zope.app.file and z3c.blobfile
+ # and are licensed under the ZPL.
+-from cStringIO import StringIO
++from logging import getLogger
+ from persistent import Persistent
+ from plone.namedfile.interfaces import INamedBlobFile
+ from plone.namedfile.interfaces import INamedBlobImage
+@@ -10,15 +10,21 @@
+ from plone.namedfile.interfaces import INamedImage
+ from plone.namedfile.interfaces import IStorage
+ from plone.namedfile.utils import get_contenttype
++from plone.namedfile.utils import get_exif
++from plone.namedfile.utils import getImageInfo
++from plone.namedfile.utils import rotate_image
+ from ZODB.blob import Blob
+ from zope.component import getUtility
+ from zope.interface import implementer
+ from zope.schema.fieldproperty import FieldProperty
+ 
+-import struct
++import piexif
+ import transaction
+ 
+ 
++log = getLogger(__name__)
 +
-+    <h2 tal:condition="breaches" i18n:translate="linkintegrity_breaches_title">Potential link breakage</h2>
- 
-     <div id="content-core">
--        <p i18n:translate="linkintegrity_instructions">
 +
-+        <p tal:condition="breaches" i18n:translate="linkintegrity_instructions">
-             By deleting this item, you will break links that exist in the items listed
-             below. If this is indeed what you want to do, we recommend that you remove
-             these references first.
-         </p>
+ MAXCHUNKSIZE = 1 << 16
+ IMAGE_INFO_BYTES = 1024
+ MAX_INFO_BYTES = 1 << 16
+@@ -267,13 +273,24 @@ class NamedImage(NamedFile):
  
-         <div tal:define="token context/@@authenticator/token">
--            <article tal:repeat="breach breaches" class="breach-container">
+     def __init__(self, data='', contentType='', filename=None):
+         self.contentType, self._width, self._height = getImageInfo(data)
+-        self.data = data
+         self.filename = filename
++        self._setData(data)
+ 
+         # Allow override of the image sniffer
+         if contentType:
+             self.contentType = contentType
+ 
++        exif_data = get_exif(data)
++        if exif_data is not None:
++            log.debug('Image contains Exif Informations. '
++                      'Test for Image Orientation and Rotate if necessary.'
++                      'Exif Data: %s', exif_data)
++            orientation = exif_data['0th'].get(piexif.ImageIFD.Orientation, 1)
++            if 1 < orientation <= 8:
++                self.data, self._width, self._height, self.exif = rotate_image(
++                    self.data)
++            self.exif_data = exif_data
++
+     def _setData(self, data):
+         super(NamedImage, self)._setData(data)
+ 
+@@ -288,81 +305,6 @@ def getImageSize(self):
+     data = property(NamedFile._getData, _setData)
+ 
+ 
+-def getImageInfo(data):
+-    data = str(data)
+-    size = len(data)
+-    height = -1
+-    width = -1
+-    content_type = ''
 -
--              <tal:target  tal:define="target breach/target">
--                <header><a href="${target/url}" tal:content="target/title" /></header>
--                <p>
--                    <span i18n:translate="linkintegrity_is_referenced">
--                        This <span i18n:name="portal_type" tal:content="target/type_title" />
--                        is referenced by the following items:
--                    </span>
--                </p>
--              </tal:target>
+-    # handle GIFs
+-    if (size >= 10) and data[:6] in ('GIF87a', 'GIF89a'):
+-        # Check to see if content_type is correct
+-        content_type = 'image/gif'
+-        w, h = struct.unpack('<HH', data[6:10])
+-        width = int(w)
+-        height = int(h)
 -
--              <ul>
--                <li tal:repeat="source python:breach['sources']" class="breach-item">
--                  <tal:visible condition="source/accessible">
--                    <a tal:attributes="href source/url" tal:content="source/title" />
--                    [<a tal:attributes="href string:${source/url}/edit?_authenticator=${token}"
--                      i18n:translate="linkintegrity_edit_in_new_window"
--                      target="_blank">Edit in new window</a>]
--                  </tal:visible>
--                  <tal:private condition="not: source/accessible"
--                               i18n:translate="linkintegrity_item_not_accessible">
--                    The item is not accessible.
--                  </tal:private>
--                </li>
--              </ul>
+-    # See PNG 2. Edition spec (http://www.w3.org/TR/PNG/)
+-    # Bytes 0-7 are below, 4-byte chunk length, then 'IHDR'
+-    # and finally the 4-byte width, height
+-    elif (
+-        (size >= 24) and data.startswith('\211PNG\r\n\032\n') and
+-        (data[12:16] == 'IHDR')
+-    ):
+-        content_type = 'image/png'
+-        w, h = struct.unpack('>LL', data[16:24])
+-        width = int(w)
+-        height = int(h)
 -
--            </article>
+-    # Maybe this is for an older PNG version.
+-    elif (size >= 16) and data.startswith('\211PNG\r\n\032\n'):
+-        # Check to see if we have the right content type
+-        content_type = 'image/png'
+-        w, h = struct.unpack('>LL', data[8:16])
+-        width = int(w)
+-        height = int(h)
 -
--        <br />
-+	<article tal:repeat="breach breaches" class="breach-container">
-+
-+	  <tal:target  tal:define="target breach/target">
-+	    <header><a href="${target/url}" tal:content="target/title" /></header>
-+	    <p>
-+		<span i18n:translate="linkintegrity_is_referenced">
-+		    This <span i18n:name="portal_type" tal:content="target/type_title" />
-+		    is referenced by the following items:
-+		</span>
-+	    </p>
-+	  </tal:target>
-+
-+	  <ul>
-+	    <li tal:repeat="source python:breach['sources']" class="breach-item">
-+	      <tal:visible condition="source/accessible">
-+		<a tal:attributes="href source/url" tal:content="source/title" />
-+		[<a tal:attributes="href string:${source/url}/edit?_authenticator=${token}"
-+		  i18n:translate="linkintegrity_edit_in_new_window"
-+		  target="_blank">Edit in new window</a>]
-+	      </tal:visible>
-+	      <tal:private condition="not: source/accessible"
-+			   i18n:translate="linkintegrity_item_not_accessible">
-+		The item is not accessible.
-+	      </tal:private>
-+	    </li>
-+	  </ul>
-+
-+	</article>
-+
-+        <div tal:define="breach_count view/breach_count" tal:condition="breach_count">
-+
-+        <h2 i18n:translate="deleting_overview" >Deleting overview</h2>
-+          <p>
-+              <span  tal:define="refs python:len(breach_count)"
-+                     i18n:translate="selected_folders_with_content">
-+                     Number of selected, non-empty folders: <strong><span tal:replace="refs" i18n:name="refs" /></strong>
-+                </span>
-+          </p>
-+          <ul>
-+            <li tal:repeat="content python:breach_count">
-+              <span i18n:translate="deleting_contents"> Following content within
-+                  <strong><span tal:replace="content" i18n:name="content" /></strong>  will also be deleted:
-+              </span><br>
-+                <ul>
-+                  <li tal:define="objects python:['Objects in all', 'Folders', 'Published objects'] "
-+                      tal:repeat="item python:range(3) "
-+                          i18n:translate="" >
-+                      <span tal:replace="python: breach_count[content][item]" />
-+                      <span i18n:translate="" tal:replace="python: objects[item]" />
-+                  </li>
-+                </ul>
-+            </li>
-+          </ul>
-+
-+
-+
-+        </div>
- 
-         <p i18n:translate="linkintegrity_delete_anyway">
-             Would you like to delete it anyway?
-         </p>
+-    # handle JPEGs
+-    elif (size >= 2) and data.startswith('\377\330'):
+-        content_type = 'image/jpeg'
+-        jpeg = StringIO(data)
+-        jpeg.read(2)
+-        b = jpeg.read(1)
+-        try:
+-            w = -1
+-            h = -1
+-            while (b and ord(b) != 0xDA):
+-                while (ord(b) != 0xFF):
+-                    b = jpeg.read(1)
+-                while (ord(b) == 0xFF):
+-                    b = jpeg.read(1)
+-                if (ord(b) >= 0xC0 and ord(b) <= 0xC3):
+-                    jpeg.read(3)
+-                    h, w = struct.unpack('>HH', jpeg.read(4))
+-                    break
+-                else:
+-                    jpeg.read(int(struct.unpack('>H', jpeg.read(2))[0]) - 2)
+-                b = jpeg.read(1)
+-            width = int(w)
+-            height = int(h)
+-        except struct.error:
+-            pass
+-        except ValueError:
+-            pass
+-        except TypeError:
+-            pass
 -
-         </div>
-     </div>
- </tal:block>
-diff --git a/plone/app/linkintegrity/browser/info.py b/plone/app/linkintegrity/browser/info.py
-index 7363028..eb10069 100644
---- a/plone/app/linkintegrity/browser/info.py
-+++ b/plone/app/linkintegrity/browser/info.py
-@@ -16,6 +16,7 @@
- class DeleteConfirmationInfo(BrowserView):
- 
-     template = ViewPageTemplateFile('delete_confirmation_info.pt')
-+    breach_count = {}
- 
-     def __init__(self, context, request):
-         self.linkintegrity_enabled = linkintegrity_enabled()
-@@ -41,26 +42,38 @@ def get_breaches(self, items=None):
-         or their children (if a object is a folder) will be ignored.
-         """
-         if items is None:
+-    # handle BMPs
+-    elif (size >= 30) and data.startswith('BM'):
+-        kind = struct.unpack('<H', data[14:16])[0]
+-        if kind == 40:  # Windows 3.x bitmap
+-            content_type = 'image/x-ms-bmp'
+-            width, height = struct.unpack('<LL', data[18:26])
 -
-             items = [self.context]
-         catalog = getToolByName(self.context, 'portal_catalog')
-         results = []
-         uids_to_ignore = []
-+        uids_visited = set()
-+        self.breach_count = {}
-         for obj in items:
-             obj_path = '/'.join(obj.getPhysicalPath())
-             brains_to_delete = catalog(path={'query': obj_path})
-             # add the current items uid and all its childrens uids to the
-             # list of uids that are ignored
-             uids_to_ignore.extend([i.UID for i in brains_to_delete])
--            for breach in self.get_breaches_for_item(obj):
--                add_breach = False
--                for source in breach['sources']:
--                    # Only add the breach if one the sources is not in the
--                    # list of items that are to be deleted.
--                    if source['uid'] not in uids_to_ignore:
--                        add_breach = True
--                if add_breach:
--                    results.append(breach)
-+            for brain_to_delete in brains_to_delete:
-+                obj_to_delete = brain_to_delete.getObject()
-+                for breach in self.get_breaches_for_item(obj):
-+                    add_breach = False
-+                    for source in breach['sources']:
-+                        # Only add the breach if one the sources is not in the
-+                        # list of items that are to be deleted.
-+                        if source['uid'] not in uids_to_ignore and \
-+                           source['uid'] not in uids_visited:
-+                            add_breach = True
-+                            uids_visited.add(source['uid'])
-+                            break
-+                    if add_breach:
-+                        results.append(breach)
-+            if IFolder.providedBy(obj):
-+                count = len(catalog(path={'query': obj_path}))
-+                count_dirs = len(catalog(path={'query': obj_path}, is_folderish=True))
-+                count_public = len(catalog(path={'query': obj_path}, review_state='published'))
-+                if count:
-+                    self.breach_count[obj_path]=[count, count_dirs, count_public]
+-    return content_type, width, height
+-
+-
+ @implementer(INamedBlobFile)
+ class NamedBlobFile(Persistent):
+     """A file stored in a ZODB BLOB, with a filename"""
+@@ -397,6 +339,7 @@ def _setData(self, data):
+         # Search for a storable that is able to store the data
+         dottedName = '.'.join((data.__class__.__module__,
+                                data.__class__.__name__))
++        log.debug('Storage selected for data: %s', dottedName)
+         storable = getUtility(IStorage, name=dottedName)
+         storable.store(data, self._blob)
  
-         # Cleanup: Some breaches where added before it was known
-         # that their source will be deleted too.
-@@ -76,6 +89,7 @@ def get_breaches(self, items=None):
-                         results.remove(result)
-         return results
+@@ -430,17 +373,30 @@ class NamedBlobImage(NamedBlobFile):
+     """
  
+     def __init__(self, data='', contentType='', filename=None):
+-        super(NamedBlobImage, self).__init__(data, filename=filename)
++        super(NamedBlobImage, self).__init__(data,
++                                             contentType=contentType,
++                                             filename=filename)
+ 
+         # Allow override of the image sniffer
+         if contentType:
+             self.contentType = contentType
++        exif_data = get_exif(self.data)
++        if exif_data is not None:
++            log.debug('Image contains Exif Informations. '
++                      'Test for Image Orientation and Rotate if necessary.'
++                      'Exif Data: %s', exif_data)
++            orientation = exif_data['0th'].get(piexif.ImageIFD.Orientation, 1)
++            if 1 < orientation <= 8:
++                self.data, self._width, self._height, self.exif = rotate_image(
++                    self.data)
++            else:
++                self.exif = exif_data
+ 
+     def _setData(self, data):
+         super(NamedBlobImage, self)._setData(data)
+         firstbytes = self.getFirstBytes()
+         res = getImageInfo(firstbytes)
+-        if res == ('image/jpeg', -1, -1):
++        if res == ('image/jpeg', -1, -1) or res == ('image/tiff', -1, -1):
+             # header was longer than firstbytes
+             start = len(firstbytes)
+             length = max(0, MAX_INFO_BYTES - start)
+@@ -468,6 +424,5 @@ def getImageSize(self):
+         if (self._width, self._height) != (-1, -1):
+             return (self._width, self._height)
+ 
+-        res = getImageInfo(self.data)
+-        contentType, self._width, self._height = res
++        contentType, self._width, self._height = getImageInfo(self.data)
+         return (self._width, self._height)
+diff --git a/plone/namedfile/utils.py b/plone/namedfile/utils.py
+deleted file mode 100644
+index 982df4c..0000000
+--- a/plone/namedfile/utils.py
++++ /dev/null
+@@ -1,77 +0,0 @@
+-# -*- coding: utf-8 -*-
+-from plone.namedfile.interfaces import IBlobby
+-
+-import mimetypes
+-import os.path
+-import urllib
+-
+-
+-try:
+-    # use this to stream data if we can
+-    from ZPublisher.Iterators import filestream_iterator
+-except ImportError:
+-    filestream_iterator = None
+-
+-
+-def safe_basename(filename):
+-    """Get the basename of the given filename, regardless of which platform
+-    (Windows or Unix) it originated from.
+-    """
+-    fslice = max(
+-        filename.rfind('/'),
+-        filename.rfind('\\'),
+-        filename.rfind(':'),
+-    ) + 1
+-    return filename[fslice:]
+-
+-
+-def get_contenttype(
+-        file=None,
+-        filename=None,
+-        default='application/octet-stream'):
+-    """Get the MIME content type of the given file and/or filename.
+-    """
+-
+-    file_type = getattr(file, 'contentType', None)
+-    if file_type:
+-        return file_type
+-
+-    filename = getattr(file, 'filename', filename)
+-    if filename:
+-        extension = os.path.splitext(filename)[1].lower()
+-        return mimetypes.types_map.get(extension, 'application/octet-stream')
+-
+-    return default
+-
+-
+-def set_headers(file, response, filename=None):
+-    """Set response headers for the given file. If filename is given, set
+-    the Content-Disposition to attachment.
+-    """
+-
+-    contenttype = get_contenttype(file)
+-
+-    response.setHeader('Content-Type', contenttype)
+-    response.setHeader('Content-Length', file.getSize())
+-
+-    if filename is not None:
+-        if not isinstance(filename, unicode):
+-            filename = unicode(filename, 'utf-8', errors='ignore')
+-        filename = urllib.quote(filename.encode('utf8'))
+-        response.setHeader(
+-            'Content-Disposition',
+-            'attachment; filename*=UTF-8\'\'{0}'.format(filename)
+-        )
+-
+-
+-def stream_data(file):
+-    """Return the given file as a stream if possible.
+-    """
+-
+-    if IBlobby.providedBy(file):
+-        if file._blob._p_blob_uncommitted:
+-            return file.data
+-        if filestream_iterator is not None:
+-            return filestream_iterator(file._blob.committed(), 'rb')
+-
+-    return file.data
+diff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py
+new file mode 100644
+index 0000000..3c1d71f
+--- /dev/null
++++ b/plone/namedfile/utils/__init__.py
+@@ -0,0 +1,246 @@
++# -*- coding: utf-8 -*-
 +
-     def get_breaches_for_item(self, obj=None):
-         """Get breaches for one object and its children.
- 
-@@ -153,3 +167,4 @@ def get_portal_type_title(self, obj):
- 
-     def is_accessible(self, obj):
-         return _checkPermission(AccessContentsInformation, obj)
++from logging import getLogger
++from plone.namedfile.interfaces import IBlobby
++from plone.namedfile.utils.jpeg_utils import process_jpeg
++from plone.namedfile.utils.png_utils import process_png
++from plone.namedfile.utils.tiff_utils import process_tiff
++from StringIO import StringIO
 +
-diff --git a/plone/app/linkintegrity/tests/test_functional.py b/plone/app/linkintegrity/tests/test_functional.py
-index a1fbf36..b13c1a8 100644
---- a/plone/app/linkintegrity/tests/test_functional.py
-+++ b/plone/app/linkintegrity/tests/test_functional.py
-@@ -352,6 +352,16 @@ def test_removal_via_zmi(self):
-         self.browser.getControl('Delete').click()
-         self.assertNotIn('doc2', self.portal.objectIds())
- 
-+    def test_warn_about_content(self):
-+        folder1 = self.portal.folder1
-+        doc1 = self.portal.folder1.doc1
-+        self.browser.open('{0:s}/delete_confirmation?_authenticator={1:s}'.format(
-+            folder1.absolute_url(), self._get_token(folder1)))
-+        self.assertIn('Number of selected', self.browser.contents)
-+        self.assertIn('2 Objects in all', self.browser.contents)
-+        self.assertIn('1 Folders', self.browser.contents)
-+        self.assertIn('0 Published objects', self.browser.contents)
++import mimetypes
++import os.path
++import piexif
++import PIL.Image
++import struct
++import urllib
 +
++
++log = getLogger(__name__)
++
++
++try:
++    # use this to stream data if we can
++    from ZPublisher.Iterators import filestream_iterator
++except ImportError:
++    filestream_iterator = None
++
++
++def safe_basename(filename):
++    """Get the basename of the given filename, regardless of which platform
++    (Windows or Unix) it originated from.
++    """
++    fslice = max(
++        filename.rfind('/'),
++        filename.rfind('\\'),
++        filename.rfind(':'),
++    ) + 1
++    return filename[fslice:]
++
++
++def get_contenttype(
++        file=None,
++        filename=None,
++        default='application/octet-stream'):
++    """Get the MIME content type of the given file and/or filename.
++    """
++
++    file_type = getattr(file, 'contentType', None)
++    if file_type:
++        return file_type
++
++    filename = getattr(file, 'filename', filename)
++    if filename:
++        extension = os.path.splitext(filename)[1].lower()
++        return mimetypes.types_map.get(extension, 'application/octet-stream')
++
++    return default
++
++
++def set_headers(file, response, filename=None):
++    """Set response headers for the given file. If filename is given, set
++    the Content-Disposition to attachment.
++    """
++
++    contenttype = get_contenttype(file)
++
++    response.setHeader('Content-Type', contenttype)
++    response.setHeader('Content-Length', file.getSize())
++
++    if filename is not None:
++        if not isinstance(filename, unicode):
++            filename = unicode(filename, 'utf-8', errors='ignore')
++        filename = urllib.quote(filename.encode('utf8'))
++        response.setHeader(
++            'Content-Disposition',
++            'attachment; filename*=UTF-8\'\'{0}'.format(filename)
++        )
++
++
++def stream_data(file):
++    """Return the given file as a stream if possible.
++    """
++
++    if IBlobby.providedBy(file):
++        if file._blob._p_blob_uncommitted:
++            return file.data
++        if filestream_iterator is not None:
++            return filestream_iterator(file._blob.committed(), 'rb')
++
++    return file.data
++
++
++def _ensure_data(image):
++    data = None
++    if getattr(image, 'read', None):
++        data = image.read()
++        image.seek(0)
++    else:
++        data = image
++    return str(data)
++
++
++def getImageInfo(data):
++    data = _ensure_data(data)
++    size = len(data)
++    height = -1
++    width = -1
++    content_type = ''
++
++    if (size >= 10) and data[:6] in ('GIF87a', 'GIF89a'):
++        # handle GIFs
++        content_type = 'image/gif'
++        w, h = struct.unpack('<HH', data[6:10])
++        width = int(w)
++        height = int(h)
++
++    elif data[:8] == '\211PNG\r\n\032\n':
++        # handle PNG
++        content_type, width, height = process_png(data)
++
++    elif data[:2] == '\377\330':
++        # handle JPEGs
++        content_type, width, height = process_jpeg(data)
++
++    elif (size >= 30) and data.startswith('BM'):
++        # handle BMPs
++        kind = struct.unpack('<H', data[14:16])[0]
++        if kind == 40:  # Windows 3.x bitmap
++            content_type = 'image/x-ms-bmp'
++            width, height = struct.unpack('<LL', data[18:26])
++
++    elif (size >= 4) and data[:4] in ['MM\x00*', 'II*\x00']:
++        # handle TIFFs
++        content_type, width, height = process_tiff(data)
++
++    else:
++        # Use PIL / Pillow to determ Image Information
++        try:
++            img = PIL.Image.open(StringIO(data))
++            width, height = img.size
++            content_type = img.format
++        except Exception as e:
++            # TODO: determ wich error really happens
++            # Should happen if data is to short --> first_bytes
++            log.error(e)
++            # return 'image/jpeg', -1, -1
++
++    log.debug('Image Info (Type: %s, Width: %s, Height: %s)',
++              content_type, width, height)
++    return content_type, width, height
++
++
++def get_exif(image):
++    #
++    exif_data = None
++    image_data = _ensure_data(image)
++
++    content_type, width, height = getImageInfo(image_data)
++    if content_type in ['image/jpeg', 'image/tiff']:
++        # Only this two Image Types could have Exif informations
++        # see http://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
++        try:
++            exif_data = piexif.load(image_data)
++        except Exception as e:
++            # TODO: determ wich error really happens
++            # Should happen if data is to short --> first_bytes
++            log.warn(e)
++            exif_data = exif_data = {
++                '0th': {
++                    piexif.ImageIFD.XResolution: (width, 1),
++                    piexif.ImageIFD.YResolution: (height, 1),
++                }
++            }
++    return exif_data
++
++
++def rotate_image(image_data, method=None, REQUEST=None):
++    """Rotate Image if it has Exif Orientation Informations other than 1.
++
++    Do not use PIL.Image.rotate function as this did not transpose the image,
++    rotate keeps the image width and height and rotates the image around a
++    central point. PIL.Image.transpose also changes Image Orientation.
++    """
++    orientation = 1  # if not set assume correct orrinetation --> 1
++    data = _ensure_data(image_data)
++    img = PIL.Image.open(StringIO(data))
++
++    exif_data = None
++    if 'exif' in img.info:
++        try:
++            exif_data = piexif.load(img.info['exif'])
++        except ValueError:
++            log.warn('Exif information currupt')
++            pass
++        if exif_data and piexif.ImageIFD.Orientation in exif_data['0th']:
++            orientation = exif_data['0th'][piexif.ImageIFD.Orientation]
++    if exif_data is None:
++        width, height = img.size
++        exif_data = {
++            '0th': {
++                piexif.ImageIFD.XResolution: (width, 1),
++                piexif.ImageIFD.YResolution: (height, 1),
++            }
++        }
++
++    if method is not None:
++        orientation = method
++
++    log.debug('Rotate image with input orientation: %s', orientation)
++
++    fmt = img.format
++    if orientation == 1:  # not transform necessary
++        # img = img
++        pass
++    elif orientation == 2:
++        img = img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
++    elif orientation == 3:
++        img = img.transpose(PIL.Image.ROTATE_180)
++    elif orientation == 4:
++        img = img.transpose(PIL.Image.ROTATE_180).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++    elif orientation == 5:
++        img = img.transpose(PIL.Image.ROTATE_270).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 6:
++        img = img.transpose(PIL.Image.ROTATE_270)
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 7:
++        img = img.transpose(PIL.Image.ROTATE_90).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 8:
++        img = img.transpose(PIL.Image.ROTATE_90)
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++
++    # set orientation to normal
++    exif_data['0th'][piexif.ImageIFD.Orientation] = 1
++
++    try:
++        exif_bytes = piexif.dump(exif_data)
++    except Exception as e:
++        log.warn(e)
++        del(exif_data['Exif'][piexif.ExifIFD.SceneType])
++        # This Element piexif.ExifIFD.SceneType cause error on dump
++        exif_bytes = piexif.dump(exif_data)
++    output_image_data = StringIO()
++    img.save(output_image_data, format=fmt, exif=exif_bytes)
++    width, height = img.size
++    return output_image_data.getvalue(), width, height, exif_data
+diff --git a/plone/namedfile/utils/jpeg_utils.py b/plone/namedfile/utils/jpeg_utils.py
+new file mode 100644
+index 0000000..b89cd36
+--- /dev/null
++++ b/plone/namedfile/utils/jpeg_utils.py
+@@ -0,0 +1,45 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++from StringIO import StringIO
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_jpeg(data):
++    size = len(data)
++    content_type, w, h = None, -1, -1
++
++    if (size >= 2) and data.startswith('\377\330'):  # handle JPEGs
++        content_type = 'image/jpeg'
++        jpeg = StringIO(data)
++        jpeg.read(2)
++        b = jpeg.read(1)
++        try:
++            w = -1
++            h = -1
++            while (b and ord(b) != 0xDA):
++                while (ord(b) != 0xFF):
++                    b = jpeg.read(1)
++                while (ord(b) == 0xFF):
++                    b = jpeg.read(1)
++                if (ord(b) >= 0xC0 and ord(b) <= 0xC3):
++                    jpeg.read(3)
++                    h, w = struct.unpack('>HH', jpeg.read(4))
++                    break
++                else:
++                    jpeg.read(int(struct.unpack('>H', jpeg.read(2))[0]) - 2)
++                b = jpeg.read(1)
++            width = int(w)
++            height = int(h)
++        except struct.error:
++            pass
++        except ValueError:
++            pass
++        except TypeError:
++            pass
++
++    return content_type, width, height
+diff --git a/plone/namedfile/utils/png_utils.py b/plone/namedfile/utils/png_utils.py
+new file mode 100644
+index 0000000..3ef5510
+--- /dev/null
++++ b/plone/namedfile/utils/png_utils.py
+@@ -0,0 +1,34 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_png(data):
++    content_type, w, h = None, -1, -1
++    size = len(data)
++    # See PNG 2. Edition spec (http://www.w3.org/TR/PNG/)
++    # Bytes 0-7 are below, 4-byte chunk length, then 'IHDR'
++    # and finally the 4-byte width, height
++    if (
++        (size >= 24) and data.startswith('\211PNG\r\n\032\n') and
++        (data[12:16] == 'IHDR')
++    ):
++        content_type = 'image/png'
++        w, h = struct.unpack('>LL', data[16:24])
++        width = int(w)
++        height = int(h)
++
++    # Maybe this is for an older PNG version.
++    elif (size >= 16) and data.startswith('\211PNG\r\n\032\n'):
++        # Check to see if we have the right content type
++        content_type = 'image/png'
++        w, h = struct.unpack('>LL', data[8:16])
++        width = int(w)
++        height = int(h)
++
++    return content_type, width, height
+diff --git a/plone/namedfile/utils/tiff_utils.py b/plone/namedfile/utils/tiff_utils.py
+new file mode 100644
+index 0000000..7f4a509
+--- /dev/null
++++ b/plone/namedfile/utils/tiff_utils.py
+@@ -0,0 +1,94 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++from StringIO import StringIO
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_tiff(data):
++    """handle Tiff Images
++    --> Doc http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
++
++    """
++#    import ipdb; ipdb.set_trace()
++    content_type = 'image/tiff'
++    w = -1
++    h = -1
++    # check for '42' as flag for tiff:
++    # TODO: implement correct Image Length and Image Width lookup --> Page 14ff
++    # Page 18: Tags:
++    # ImageLength: Tag: 257 (101.H) Short or Long
++    # ImageWidth: Tag: 256 (100.H) Short or Long
++
++    try:
++        # Image File Header (Page 13-14):
++        # First 2 Bytes: Determ Byte Order
++        # --> II (4949.H) --> little-endian
++        # --> MM (4D4D.H) --> big-endian
++        # next 2 Bytes always Number: 42
++        if data[:2] == 'MM' and struct.unpack('>I', data[2:4])[0] == 42:
++            endian = '>'  # big-endian encoding for the whole data stream
++            log.info('Tiff Image in big-endian encoding')
++        elif data[:2] == 'II' and struct.unpack('<I', data[2:4])[0] == 42:
++            endian = '<'  # little-endian encoding for the whole data stream
++            log.info('Tiff Image in little-endian encoding')
++        else:
++            # not a tiff image
++            log.info('Endian or 42 Check failed')
++            pass
++        tiff = StringIO(data)
++        tiff.read(4)  # Magic Header, could be skipped, already processed
++        offset = struct.unpack_from(endian + 'I', tiff)  # first IFD offset
++        b = tiff.read(offset)
++        # Process Image File Directory
++        while (b and ord(b) != 0xDA):
++            field_tag = struct.unpack_from(endian + 'I', tiff)
++            field_type = struct.unpack_from(endian + 'I', tiff)
++            field_type = translate_field_type.get(field_type, field_type)
++            field_value = struct.unpack_from(endian + field_type, tiff)
++            if field_tag == '256':  # ImageWidth
++                w = field_value
++            elif field_tag == '257':  # ImageLength
++                h = field_value
++                # as fields has to appear in ascending order
++                # we could skip all other fields
++                break
++            next_offset = struct.unpack_from(endian + 'I', tiff)
++            b.read(next_offset)
++        width = int(w)
++        height = int(h)
++    except struct.error:
++        pass
++    except ValueError:
++        pass
++    except TypeError:
++        pass
++    return content_type, width, height
++
++
++translate_field_type = {
++    """handle Tiff Image File Directory Types
++    --> Doc http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
++    page 14-16
++    """
++    # TODO: translate to correct python struct mapping
++    # TODO: check mappings
++    '1': 'I',  # BYTE: 8-bit unsigned Integer
++    '2': 'c',  # 'b' 'B'
++               # ASCII: 8-bit byte that contains a 7-bit ASCII code
++    '3': 'H',  # SHORT: 16-bit (2-byte) unsigned integer
++    '4': 'L',  # LONG: 32-bit (4-byte) unsigned integer
++    '5': '',  # RATIONAL, two LONGs: the first represents the numerator
++              # of a fraction; the second, the donominator
++    '6': '',  # SBYTE: An 8-bit signed (twos-complement) integer
++    '7': '',  # UNDEFINED
++    '8': '',  # SSHORT: A 16-bit (2-byte) signed (twos-complement) integer
++    '9': '',   # SLONG: A 32-bit (4-byte) signed (twos-complement) integer
++    '10': '',  # SRATIONAL: Two SLONG's (mutator, denominator)
++    '11': '',  # FLOAT: Single precision (4-byte) IEEE format.
++    '12': '',  # DOUBLE: Double precision (8-byte) IEEE format.
++}
+diff --git a/setup.py b/setup.py
+index 435e542..7a459ac 100644
+--- a/setup.py
++++ b/setup.py
+@@ -4,7 +4,7 @@
+ import os
  
- class FunctionalReferenceDXTestCase(DXBaseTestCase, ReferenceTestCase):
-     """Functional reference testcase for dx content types"""
+ 
+-version = '4.1.1.dev0'
++version = '4.2.0.dev0'
+ description = 'File types and fields for images, files and blob files with ' \
+               'filenames'
+ long_description = ('\n\n'.join([
+@@ -47,6 +47,7 @@
+         'zope.copy',
+         'zope.security',
+         'zope.traversing',
++        'piexif',
+     ],
+     extras_require={
+         'test': [
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2016-12-15T17:35:54+01:00
+Date: 2016-12-15T17:53:17+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/b6c2da9e186294a4d992216395bb43cd307c0596
+Commit: https://github.com/plone/plone.namedfile/commit/b1fe4efc9014cd45e7c3ffd8b78f615e0356b7c6
 
-Merge pull request #45 from FHNW/verbose_message
+Merge pull request #36 from plone/plip-1673-automatic-image-rotation-based-on-exif-data
 
-Let the linkintegrity report be more verbose
+Implemention of PLIP 1673: Automatic image rotation based on Exif data
 
 Files changed:
+A plone/namedfile/utils/__init__.py
+A plone/namedfile/utils/jpeg_utils.py
+A plone/namedfile/utils/png_utils.py
+A plone/namedfile/utils/tiff_utils.py
 M CHANGES.rst
-M plone/app/linkintegrity/browser/delete_confirmation_info.pt
-M plone/app/linkintegrity/browser/info.py
-M plone/app/linkintegrity/tests/test_functional.py
+M plone/namedfile/file.py
+M setup.py
+D plone/namedfile/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 24c6f6e..74d4874 100644
+index 3e4a521..1fd1bac 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
  
+-4.1.1 (unreleased)
++4.2.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+@@ -11,10 +11,22 @@ Breaking changes:
  New features:
  
--- *add item here*
-+- Information about contents within a selected folder for deletion. 
-+  This information contains number of deleted objects, 
-+  number of subfolders and number of published objects.
-+  [karalics]
+ - *add item here*
++- Add automatic image rotation based on EXIF data for all images.
++  Based on piexif library and ideas of maartenkling and ezvirtual.
++  Choosen piexif as it allow read and write of exif data for future enhancements.
++  http://piexif.readthedocs.org/en/latest/
++  For Orientation examples and description see http://www.daveperrett.com/articles/2012/07/28/exif-orientation-handling-is-a-ghetto/ test data https://github.com/recurser/exif-orientation-examples
++  Additional Test Images with different MIME-Types (JPEG and TIFF) and possible problems: https://github.com/ianare/exif-samples.git
++  [loechel]
  
  Bug fixes:
  
-diff --git a/plone/app/linkintegrity/browser/delete_confirmation_info.pt b/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-index 4f1fe50..e2cf7fb 100644
---- a/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-+++ b/plone/app/linkintegrity/browser/delete_confirmation_info.pt
-@@ -1,53 +1,80 @@
- <tal:block
--  tal:define="breaches python:view.breaches"
--  tal:condition="breaches"
-+  tal:define="breaches python:view.breaches;"
-   i18n:domain="plone">
+ - *add item here*
++- Added handler for Tiff Images in getImageInfo.
++  [loechel]
++- Restructured packages.
++  Moved image meta data detection in an own subfolder
++  [loechel]
  
--    <h2 i18n:translate="linkintegrity_breaches_title">Potential link breakage</h2>
+ 
+ 4.1 (2016-09-14)
+diff --git a/plone/namedfile/file.py b/plone/namedfile/file.py
+index bef3519..8a98e44 100644
+--- a/plone/namedfile/file.py
++++ b/plone/namedfile/file.py
+@@ -2,7 +2,7 @@
+ # The implementations in this file are largely borrowed
+ # from zope.app.file and z3c.blobfile
+ # and are licensed under the ZPL.
+-from cStringIO import StringIO
++from logging import getLogger
+ from persistent import Persistent
+ from plone.namedfile.interfaces import INamedBlobFile
+ from plone.namedfile.interfaces import INamedBlobImage
+@@ -10,15 +10,21 @@
+ from plone.namedfile.interfaces import INamedImage
+ from plone.namedfile.interfaces import IStorage
+ from plone.namedfile.utils import get_contenttype
++from plone.namedfile.utils import get_exif
++from plone.namedfile.utils import getImageInfo
++from plone.namedfile.utils import rotate_image
+ from ZODB.blob import Blob
+ from zope.component import getUtility
+ from zope.interface import implementer
+ from zope.schema.fieldproperty import FieldProperty
+ 
+-import struct
++import piexif
+ import transaction
+ 
+ 
++log = getLogger(__name__)
 +
-+    <h2 tal:condition="breaches" i18n:translate="linkintegrity_breaches_title">Potential link breakage</h2>
- 
-     <div id="content-core">
--        <p i18n:translate="linkintegrity_instructions">
 +
-+        <p tal:condition="breaches" i18n:translate="linkintegrity_instructions">
-             By deleting this item, you will break links that exist in the items listed
-             below. If this is indeed what you want to do, we recommend that you remove
-             these references first.
-         </p>
+ MAXCHUNKSIZE = 1 << 16
+ IMAGE_INFO_BYTES = 1024
+ MAX_INFO_BYTES = 1 << 16
+@@ -267,13 +273,24 @@ class NamedImage(NamedFile):
  
-         <div tal:define="token context/@@authenticator/token">
--            <article tal:repeat="breach breaches" class="breach-container">
+     def __init__(self, data='', contentType='', filename=None):
+         self.contentType, self._width, self._height = getImageInfo(data)
+-        self.data = data
+         self.filename = filename
++        self._setData(data)
+ 
+         # Allow override of the image sniffer
+         if contentType:
+             self.contentType = contentType
+ 
++        exif_data = get_exif(data)
++        if exif_data is not None:
++            log.debug('Image contains Exif Informations. '
++                      'Test for Image Orientation and Rotate if necessary.'
++                      'Exif Data: %s', exif_data)
++            orientation = exif_data['0th'].get(piexif.ImageIFD.Orientation, 1)
++            if 1 < orientation <= 8:
++                self.data, self._width, self._height, self.exif = rotate_image(
++                    self.data)
++            self.exif_data = exif_data
++
+     def _setData(self, data):
+         super(NamedImage, self)._setData(data)
+ 
+@@ -288,81 +305,6 @@ def getImageSize(self):
+     data = property(NamedFile._getData, _setData)
+ 
+ 
+-def getImageInfo(data):
+-    data = str(data)
+-    size = len(data)
+-    height = -1
+-    width = -1
+-    content_type = ''
 -
--              <tal:target  tal:define="target breach/target">
--                <header><a href="${target/url}" tal:content="target/title" /></header>
--                <p>
--                    <span i18n:translate="linkintegrity_is_referenced">
--                        This <span i18n:name="portal_type" tal:content="target/type_title" />
--                        is referenced by the following items:
--                    </span>
--                </p>
--              </tal:target>
+-    # handle GIFs
+-    if (size >= 10) and data[:6] in ('GIF87a', 'GIF89a'):
+-        # Check to see if content_type is correct
+-        content_type = 'image/gif'
+-        w, h = struct.unpack('<HH', data[6:10])
+-        width = int(w)
+-        height = int(h)
 -
--              <ul>
--                <li tal:repeat="source python:breach['sources']" class="breach-item">
--                  <tal:visible condition="source/accessible">
--                    <a tal:attributes="href source/url" tal:content="source/title" />
--                    [<a tal:attributes="href string:${source/url}/edit?_authenticator=${token}"
--                      i18n:translate="linkintegrity_edit_in_new_window"
--                      target="_blank">Edit in new window</a>]
--                  </tal:visible>
--                  <tal:private condition="not: source/accessible"
--                               i18n:translate="linkintegrity_item_not_accessible">
--                    The item is not accessible.
--                  </tal:private>
--                </li>
--              </ul>
+-    # See PNG 2. Edition spec (http://www.w3.org/TR/PNG/)
+-    # Bytes 0-7 are below, 4-byte chunk length, then 'IHDR'
+-    # and finally the 4-byte width, height
+-    elif (
+-        (size >= 24) and data.startswith('\211PNG\r\n\032\n') and
+-        (data[12:16] == 'IHDR')
+-    ):
+-        content_type = 'image/png'
+-        w, h = struct.unpack('>LL', data[16:24])
+-        width = int(w)
+-        height = int(h)
 -
--            </article>
+-    # Maybe this is for an older PNG version.
+-    elif (size >= 16) and data.startswith('\211PNG\r\n\032\n'):
+-        # Check to see if we have the right content type
+-        content_type = 'image/png'
+-        w, h = struct.unpack('>LL', data[8:16])
+-        width = int(w)
+-        height = int(h)
 -
--        <br />
-+	<article tal:repeat="breach breaches" class="breach-container">
-+
-+	  <tal:target  tal:define="target breach/target">
-+	    <header><a href="${target/url}" tal:content="target/title" /></header>
-+	    <p>
-+		<span i18n:translate="linkintegrity_is_referenced">
-+		    This <span i18n:name="portal_type" tal:content="target/type_title" />
-+		    is referenced by the following items:
-+		</span>
-+	    </p>
-+	  </tal:target>
-+
-+	  <ul>
-+	    <li tal:repeat="source python:breach['sources']" class="breach-item">
-+	      <tal:visible condition="source/accessible">
-+		<a tal:attributes="href source/url" tal:content="source/title" />
-+		[<a tal:attributes="href string:${source/url}/edit?_authenticator=${token}"
-+		  i18n:translate="linkintegrity_edit_in_new_window"
-+		  target="_blank">Edit in new window</a>]
-+	      </tal:visible>
-+	      <tal:private condition="not: source/accessible"
-+			   i18n:translate="linkintegrity_item_not_accessible">
-+		The item is not accessible.
-+	      </tal:private>
-+	    </li>
-+	  </ul>
-+
-+	</article>
-+
-+        <div tal:define="breach_count view/breach_count" tal:condition="breach_count">
-+
-+        <h2 i18n:translate="deleting_overview" >Deleting overview</h2>
-+          <p>
-+              <span  tal:define="refs python:len(breach_count)"
-+                     i18n:translate="selected_folders_with_content">
-+                     Number of selected, non-empty folders: <strong><span tal:replace="refs" i18n:name="refs" /></strong>
-+                </span>
-+          </p>
-+          <ul>
-+            <li tal:repeat="content python:breach_count">
-+              <span i18n:translate="deleting_contents"> Following content within
-+                  <strong><span tal:replace="content" i18n:name="content" /></strong>  will also be deleted:
-+              </span><br>
-+                <ul>
-+                  <li tal:define="objects python:['Objects in all', 'Folders', 'Published objects'] "
-+                      tal:repeat="item python:range(3) "
-+                          i18n:translate="" >
-+                      <span tal:replace="python: breach_count[content][item]" />
-+                      <span i18n:translate="" tal:replace="python: objects[item]" />
-+                  </li>
-+                </ul>
-+            </li>
-+          </ul>
-+
-+
-+
-+        </div>
- 
-         <p i18n:translate="linkintegrity_delete_anyway">
-             Would you like to delete it anyway?
-         </p>
+-    # handle JPEGs
+-    elif (size >= 2) and data.startswith('\377\330'):
+-        content_type = 'image/jpeg'
+-        jpeg = StringIO(data)
+-        jpeg.read(2)
+-        b = jpeg.read(1)
+-        try:
+-            w = -1
+-            h = -1
+-            while (b and ord(b) != 0xDA):
+-                while (ord(b) != 0xFF):
+-                    b = jpeg.read(1)
+-                while (ord(b) == 0xFF):
+-                    b = jpeg.read(1)
+-                if (ord(b) >= 0xC0 and ord(b) <= 0xC3):
+-                    jpeg.read(3)
+-                    h, w = struct.unpack('>HH', jpeg.read(4))
+-                    break
+-                else:
+-                    jpeg.read(int(struct.unpack('>H', jpeg.read(2))[0]) - 2)
+-                b = jpeg.read(1)
+-            width = int(w)
+-            height = int(h)
+-        except struct.error:
+-            pass
+-        except ValueError:
+-            pass
+-        except TypeError:
+-            pass
 -
-         </div>
-     </div>
- </tal:block>
-diff --git a/plone/app/linkintegrity/browser/info.py b/plone/app/linkintegrity/browser/info.py
-index 7363028..eb10069 100644
---- a/plone/app/linkintegrity/browser/info.py
-+++ b/plone/app/linkintegrity/browser/info.py
-@@ -16,6 +16,7 @@
- class DeleteConfirmationInfo(BrowserView):
- 
-     template = ViewPageTemplateFile('delete_confirmation_info.pt')
-+    breach_count = {}
- 
-     def __init__(self, context, request):
-         self.linkintegrity_enabled = linkintegrity_enabled()
-@@ -41,26 +42,38 @@ def get_breaches(self, items=None):
-         or their children (if a object is a folder) will be ignored.
-         """
-         if items is None:
+-    # handle BMPs
+-    elif (size >= 30) and data.startswith('BM'):
+-        kind = struct.unpack('<H', data[14:16])[0]
+-        if kind == 40:  # Windows 3.x bitmap
+-            content_type = 'image/x-ms-bmp'
+-            width, height = struct.unpack('<LL', data[18:26])
 -
-             items = [self.context]
-         catalog = getToolByName(self.context, 'portal_catalog')
-         results = []
-         uids_to_ignore = []
-+        uids_visited = set()
-+        self.breach_count = {}
-         for obj in items:
-             obj_path = '/'.join(obj.getPhysicalPath())
-             brains_to_delete = catalog(path={'query': obj_path})
-             # add the current items uid and all its childrens uids to the
-             # list of uids that are ignored
-             uids_to_ignore.extend([i.UID for i in brains_to_delete])
--            for breach in self.get_breaches_for_item(obj):
--                add_breach = False
--                for source in breach['sources']:
--                    # Only add the breach if one the sources is not in the
--                    # list of items that are to be deleted.
--                    if source['uid'] not in uids_to_ignore:
--                        add_breach = True
--                if add_breach:
--                    results.append(breach)
-+            for brain_to_delete in brains_to_delete:
-+                obj_to_delete = brain_to_delete.getObject()
-+                for breach in self.get_breaches_for_item(obj):
-+                    add_breach = False
-+                    for source in breach['sources']:
-+                        # Only add the breach if one the sources is not in the
-+                        # list of items that are to be deleted.
-+                        if source['uid'] not in uids_to_ignore and \
-+                           source['uid'] not in uids_visited:
-+                            add_breach = True
-+                            uids_visited.add(source['uid'])
-+                            break
-+                    if add_breach:
-+                        results.append(breach)
-+            if IFolder.providedBy(obj):
-+                count = len(catalog(path={'query': obj_path}))
-+                count_dirs = len(catalog(path={'query': obj_path}, is_folderish=True))
-+                count_public = len(catalog(path={'query': obj_path}, review_state='published'))
-+                if count:
-+                    self.breach_count[obj_path]=[count, count_dirs, count_public]
+-    return content_type, width, height
+-
+-
+ @implementer(INamedBlobFile)
+ class NamedBlobFile(Persistent):
+     """A file stored in a ZODB BLOB, with a filename"""
+@@ -397,6 +339,7 @@ def _setData(self, data):
+         # Search for a storable that is able to store the data
+         dottedName = '.'.join((data.__class__.__module__,
+                                data.__class__.__name__))
++        log.debug('Storage selected for data: %s', dottedName)
+         storable = getUtility(IStorage, name=dottedName)
+         storable.store(data, self._blob)
  
-         # Cleanup: Some breaches where added before it was known
-         # that their source will be deleted too.
-@@ -76,6 +89,7 @@ def get_breaches(self, items=None):
-                         results.remove(result)
-         return results
+@@ -430,17 +373,30 @@ class NamedBlobImage(NamedBlobFile):
+     """
  
+     def __init__(self, data='', contentType='', filename=None):
+-        super(NamedBlobImage, self).__init__(data, filename=filename)
++        super(NamedBlobImage, self).__init__(data,
++                                             contentType=contentType,
++                                             filename=filename)
+ 
+         # Allow override of the image sniffer
+         if contentType:
+             self.contentType = contentType
++        exif_data = get_exif(self.data)
++        if exif_data is not None:
++            log.debug('Image contains Exif Informations. '
++                      'Test for Image Orientation and Rotate if necessary.'
++                      'Exif Data: %s', exif_data)
++            orientation = exif_data['0th'].get(piexif.ImageIFD.Orientation, 1)
++            if 1 < orientation <= 8:
++                self.data, self._width, self._height, self.exif = rotate_image(
++                    self.data)
++            else:
++                self.exif = exif_data
+ 
+     def _setData(self, data):
+         super(NamedBlobImage, self)._setData(data)
+         firstbytes = self.getFirstBytes()
+         res = getImageInfo(firstbytes)
+-        if res == ('image/jpeg', -1, -1):
++        if res == ('image/jpeg', -1, -1) or res == ('image/tiff', -1, -1):
+             # header was longer than firstbytes
+             start = len(firstbytes)
+             length = max(0, MAX_INFO_BYTES - start)
+@@ -468,6 +424,5 @@ def getImageSize(self):
+         if (self._width, self._height) != (-1, -1):
+             return (self._width, self._height)
+ 
+-        res = getImageInfo(self.data)
+-        contentType, self._width, self._height = res
++        contentType, self._width, self._height = getImageInfo(self.data)
+         return (self._width, self._height)
+diff --git a/plone/namedfile/utils.py b/plone/namedfile/utils.py
+deleted file mode 100644
+index 982df4c..0000000
+--- a/plone/namedfile/utils.py
++++ /dev/null
+@@ -1,77 +0,0 @@
+-# -*- coding: utf-8 -*-
+-from plone.namedfile.interfaces import IBlobby
+-
+-import mimetypes
+-import os.path
+-import urllib
+-
+-
+-try:
+-    # use this to stream data if we can
+-    from ZPublisher.Iterators import filestream_iterator
+-except ImportError:
+-    filestream_iterator = None
+-
+-
+-def safe_basename(filename):
+-    """Get the basename of the given filename, regardless of which platform
+-    (Windows or Unix) it originated from.
+-    """
+-    fslice = max(
+-        filename.rfind('/'),
+-        filename.rfind('\\'),
+-        filename.rfind(':'),
+-    ) + 1
+-    return filename[fslice:]
+-
+-
+-def get_contenttype(
+-        file=None,
+-        filename=None,
+-        default='application/octet-stream'):
+-    """Get the MIME content type of the given file and/or filename.
+-    """
+-
+-    file_type = getattr(file, 'contentType', None)
+-    if file_type:
+-        return file_type
+-
+-    filename = getattr(file, 'filename', filename)
+-    if filename:
+-        extension = os.path.splitext(filename)[1].lower()
+-        return mimetypes.types_map.get(extension, 'application/octet-stream')
+-
+-    return default
+-
+-
+-def set_headers(file, response, filename=None):
+-    """Set response headers for the given file. If filename is given, set
+-    the Content-Disposition to attachment.
+-    """
+-
+-    contenttype = get_contenttype(file)
+-
+-    response.setHeader('Content-Type', contenttype)
+-    response.setHeader('Content-Length', file.getSize())
+-
+-    if filename is not None:
+-        if not isinstance(filename, unicode):
+-            filename = unicode(filename, 'utf-8', errors='ignore')
+-        filename = urllib.quote(filename.encode('utf8'))
+-        response.setHeader(
+-            'Content-Disposition',
+-            'attachment; filename*=UTF-8\'\'{0}'.format(filename)
+-        )
+-
+-
+-def stream_data(file):
+-    """Return the given file as a stream if possible.
+-    """
+-
+-    if IBlobby.providedBy(file):
+-        if file._blob._p_blob_uncommitted:
+-            return file.data
+-        if filestream_iterator is not None:
+-            return filestream_iterator(file._blob.committed(), 'rb')
+-
+-    return file.data
+diff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py
+new file mode 100644
+index 0000000..3c1d71f
+--- /dev/null
++++ b/plone/namedfile/utils/__init__.py
+@@ -0,0 +1,246 @@
++# -*- coding: utf-8 -*-
 +
-     def get_breaches_for_item(self, obj=None):
-         """Get breaches for one object and its children.
- 
-@@ -153,3 +167,4 @@ def get_portal_type_title(self, obj):
- 
-     def is_accessible(self, obj):
-         return _checkPermission(AccessContentsInformation, obj)
++from logging import getLogger
++from plone.namedfile.interfaces import IBlobby
++from plone.namedfile.utils.jpeg_utils import process_jpeg
++from plone.namedfile.utils.png_utils import process_png
++from plone.namedfile.utils.tiff_utils import process_tiff
++from StringIO import StringIO
 +
-diff --git a/plone/app/linkintegrity/tests/test_functional.py b/plone/app/linkintegrity/tests/test_functional.py
-index a1fbf36..b13c1a8 100644
---- a/plone/app/linkintegrity/tests/test_functional.py
-+++ b/plone/app/linkintegrity/tests/test_functional.py
-@@ -352,6 +352,16 @@ def test_removal_via_zmi(self):
-         self.browser.getControl('Delete').click()
-         self.assertNotIn('doc2', self.portal.objectIds())
- 
-+    def test_warn_about_content(self):
-+        folder1 = self.portal.folder1
-+        doc1 = self.portal.folder1.doc1
-+        self.browser.open('{0:s}/delete_confirmation?_authenticator={1:s}'.format(
-+            folder1.absolute_url(), self._get_token(folder1)))
-+        self.assertIn('Number of selected', self.browser.contents)
-+        self.assertIn('2 Objects in all', self.browser.contents)
-+        self.assertIn('1 Folders', self.browser.contents)
-+        self.assertIn('0 Published objects', self.browser.contents)
++import mimetypes
++import os.path
++import piexif
++import PIL.Image
++import struct
++import urllib
 +
++
++log = getLogger(__name__)
++
++
++try:
++    # use this to stream data if we can
++    from ZPublisher.Iterators import filestream_iterator
++except ImportError:
++    filestream_iterator = None
++
++
++def safe_basename(filename):
++    """Get the basename of the given filename, regardless of which platform
++    (Windows or Unix) it originated from.
++    """
++    fslice = max(
++        filename.rfind('/'),
++        filename.rfind('\\'),
++        filename.rfind(':'),
++    ) + 1
++    return filename[fslice:]
++
++
++def get_contenttype(
++        file=None,
++        filename=None,
++        default='application/octet-stream'):
++    """Get the MIME content type of the given file and/or filename.
++    """
++
++    file_type = getattr(file, 'contentType', None)
++    if file_type:
++        return file_type
++
++    filename = getattr(file, 'filename', filename)
++    if filename:
++        extension = os.path.splitext(filename)[1].lower()
++        return mimetypes.types_map.get(extension, 'application/octet-stream')
++
++    return default
++
++
++def set_headers(file, response, filename=None):
++    """Set response headers for the given file. If filename is given, set
++    the Content-Disposition to attachment.
++    """
++
++    contenttype = get_contenttype(file)
++
++    response.setHeader('Content-Type', contenttype)
++    response.setHeader('Content-Length', file.getSize())
++
++    if filename is not None:
++        if not isinstance(filename, unicode):
++            filename = unicode(filename, 'utf-8', errors='ignore')
++        filename = urllib.quote(filename.encode('utf8'))
++        response.setHeader(
++            'Content-Disposition',
++            'attachment; filename*=UTF-8\'\'{0}'.format(filename)
++        )
++
++
++def stream_data(file):
++    """Return the given file as a stream if possible.
++    """
++
++    if IBlobby.providedBy(file):
++        if file._blob._p_blob_uncommitted:
++            return file.data
++        if filestream_iterator is not None:
++            return filestream_iterator(file._blob.committed(), 'rb')
++
++    return file.data
++
++
++def _ensure_data(image):
++    data = None
++    if getattr(image, 'read', None):
++        data = image.read()
++        image.seek(0)
++    else:
++        data = image
++    return str(data)
++
++
++def getImageInfo(data):
++    data = _ensure_data(data)
++    size = len(data)
++    height = -1
++    width = -1
++    content_type = ''
++
++    if (size >= 10) and data[:6] in ('GIF87a', 'GIF89a'):
++        # handle GIFs
++        content_type = 'image/gif'
++        w, h = struct.unpack('<HH', data[6:10])
++        width = int(w)
++        height = int(h)
++
++    elif data[:8] == '\211PNG\r\n\032\n':
++        # handle PNG
++        content_type, width, height = process_png(data)
++
++    elif data[:2] == '\377\330':
++        # handle JPEGs
++        content_type, width, height = process_jpeg(data)
++
++    elif (size >= 30) and data.startswith('BM'):
++        # handle BMPs
++        kind = struct.unpack('<H', data[14:16])[0]
++        if kind == 40:  # Windows 3.x bitmap
++            content_type = 'image/x-ms-bmp'
++            width, height = struct.unpack('<LL', data[18:26])
++
++    elif (size >= 4) and data[:4] in ['MM\x00*', 'II*\x00']:
++        # handle TIFFs
++        content_type, width, height = process_tiff(data)
++
++    else:
++        # Use PIL / Pillow to determ Image Information
++        try:
++            img = PIL.Image.open(StringIO(data))
++            width, height = img.size
++            content_type = img.format
++        except Exception as e:
++            # TODO: determ wich error really happens
++            # Should happen if data is to short --> first_bytes
++            log.error(e)
++            # return 'image/jpeg', -1, -1
++
++    log.debug('Image Info (Type: %s, Width: %s, Height: %s)',
++              content_type, width, height)
++    return content_type, width, height
++
++
++def get_exif(image):
++    #
++    exif_data = None
++    image_data = _ensure_data(image)
++
++    content_type, width, height = getImageInfo(image_data)
++    if content_type in ['image/jpeg', 'image/tiff']:
++        # Only this two Image Types could have Exif informations
++        # see http://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
++        try:
++            exif_data = piexif.load(image_data)
++        except Exception as e:
++            # TODO: determ wich error really happens
++            # Should happen if data is to short --> first_bytes
++            log.warn(e)
++            exif_data = exif_data = {
++                '0th': {
++                    piexif.ImageIFD.XResolution: (width, 1),
++                    piexif.ImageIFD.YResolution: (height, 1),
++                }
++            }
++    return exif_data
++
++
++def rotate_image(image_data, method=None, REQUEST=None):
++    """Rotate Image if it has Exif Orientation Informations other than 1.
++
++    Do not use PIL.Image.rotate function as this did not transpose the image,
++    rotate keeps the image width and height and rotates the image around a
++    central point. PIL.Image.transpose also changes Image Orientation.
++    """
++    orientation = 1  # if not set assume correct orrinetation --> 1
++    data = _ensure_data(image_data)
++    img = PIL.Image.open(StringIO(data))
++
++    exif_data = None
++    if 'exif' in img.info:
++        try:
++            exif_data = piexif.load(img.info['exif'])
++        except ValueError:
++            log.warn('Exif information currupt')
++            pass
++        if exif_data and piexif.ImageIFD.Orientation in exif_data['0th']:
++            orientation = exif_data['0th'][piexif.ImageIFD.Orientation]
++    if exif_data is None:
++        width, height = img.size
++        exif_data = {
++            '0th': {
++                piexif.ImageIFD.XResolution: (width, 1),
++                piexif.ImageIFD.YResolution: (height, 1),
++            }
++        }
++
++    if method is not None:
++        orientation = method
++
++    log.debug('Rotate image with input orientation: %s', orientation)
++
++    fmt = img.format
++    if orientation == 1:  # not transform necessary
++        # img = img
++        pass
++    elif orientation == 2:
++        img = img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
++    elif orientation == 3:
++        img = img.transpose(PIL.Image.ROTATE_180)
++    elif orientation == 4:
++        img = img.transpose(PIL.Image.ROTATE_180).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++    elif orientation == 5:
++        img = img.transpose(PIL.Image.ROTATE_270).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 6:
++        img = img.transpose(PIL.Image.ROTATE_270)
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 7:
++        img = img.transpose(PIL.Image.ROTATE_90).transpose(PIL.Image.FLIP_LEFT_RIGHT)  # NOQA
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++    elif orientation == 8:
++        img = img.transpose(PIL.Image.ROTATE_90)
++        exif_data['0th'][piexif.ImageIFD.XResolution], exif_data['0th'][piexif.ImageIFD.YResolution] = exif_data['0th'][piexif.ImageIFD.YResolution], exif_data['0th'][piexif.ImageIFD.XResolution]  # NOQA
++
++    # set orientation to normal
++    exif_data['0th'][piexif.ImageIFD.Orientation] = 1
++
++    try:
++        exif_bytes = piexif.dump(exif_data)
++    except Exception as e:
++        log.warn(e)
++        del(exif_data['Exif'][piexif.ExifIFD.SceneType])
++        # This Element piexif.ExifIFD.SceneType cause error on dump
++        exif_bytes = piexif.dump(exif_data)
++    output_image_data = StringIO()
++    img.save(output_image_data, format=fmt, exif=exif_bytes)
++    width, height = img.size
++    return output_image_data.getvalue(), width, height, exif_data
+diff --git a/plone/namedfile/utils/jpeg_utils.py b/plone/namedfile/utils/jpeg_utils.py
+new file mode 100644
+index 0000000..b89cd36
+--- /dev/null
++++ b/plone/namedfile/utils/jpeg_utils.py
+@@ -0,0 +1,45 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++from StringIO import StringIO
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_jpeg(data):
++    size = len(data)
++    content_type, w, h = None, -1, -1
++
++    if (size >= 2) and data.startswith('\377\330'):  # handle JPEGs
++        content_type = 'image/jpeg'
++        jpeg = StringIO(data)
++        jpeg.read(2)
++        b = jpeg.read(1)
++        try:
++            w = -1
++            h = -1
++            while (b and ord(b) != 0xDA):
++                while (ord(b) != 0xFF):
++                    b = jpeg.read(1)
++                while (ord(b) == 0xFF):
++                    b = jpeg.read(1)
++                if (ord(b) >= 0xC0 and ord(b) <= 0xC3):
++                    jpeg.read(3)
++                    h, w = struct.unpack('>HH', jpeg.read(4))
++                    break
++                else:
++                    jpeg.read(int(struct.unpack('>H', jpeg.read(2))[0]) - 2)
++                b = jpeg.read(1)
++            width = int(w)
++            height = int(h)
++        except struct.error:
++            pass
++        except ValueError:
++            pass
++        except TypeError:
++            pass
++
++    return content_type, width, height
+diff --git a/plone/namedfile/utils/png_utils.py b/plone/namedfile/utils/png_utils.py
+new file mode 100644
+index 0000000..3ef5510
+--- /dev/null
++++ b/plone/namedfile/utils/png_utils.py
+@@ -0,0 +1,34 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_png(data):
++    content_type, w, h = None, -1, -1
++    size = len(data)
++    # See PNG 2. Edition spec (http://www.w3.org/TR/PNG/)
++    # Bytes 0-7 are below, 4-byte chunk length, then 'IHDR'
++    # and finally the 4-byte width, height
++    if (
++        (size >= 24) and data.startswith('\211PNG\r\n\032\n') and
++        (data[12:16] == 'IHDR')
++    ):
++        content_type = 'image/png'
++        w, h = struct.unpack('>LL', data[16:24])
++        width = int(w)
++        height = int(h)
++
++    # Maybe this is for an older PNG version.
++    elif (size >= 16) and data.startswith('\211PNG\r\n\032\n'):
++        # Check to see if we have the right content type
++        content_type = 'image/png'
++        w, h = struct.unpack('>LL', data[8:16])
++        width = int(w)
++        height = int(h)
++
++    return content_type, width, height
+diff --git a/plone/namedfile/utils/tiff_utils.py b/plone/namedfile/utils/tiff_utils.py
+new file mode 100644
+index 0000000..7f4a509
+--- /dev/null
++++ b/plone/namedfile/utils/tiff_utils.py
+@@ -0,0 +1,94 @@
++# -*- coding: utf-8 -*-
++
++from logging import getLogger
++from StringIO import StringIO
++
++import struct
++
++
++log = getLogger(__name__)
++
++
++def process_tiff(data):
++    """handle Tiff Images
++    --> Doc http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
++
++    """
++#    import ipdb; ipdb.set_trace()
++    content_type = 'image/tiff'
++    w = -1
++    h = -1
++    # check for '42' as flag for tiff:
++    # TODO: implement correct Image Length and Image Width lookup --> Page 14ff
++    # Page 18: Tags:
++    # ImageLength: Tag: 257 (101.H) Short or Long
++    # ImageWidth: Tag: 256 (100.H) Short or Long
++
++    try:
++        # Image File Header (Page 13-14):
++        # First 2 Bytes: Determ Byte Order
++        # --> II (4949.H) --> little-endian
++        # --> MM (4D4D.H) --> big-endian
++        # next 2 Bytes always Number: 42
++        if data[:2] == 'MM' and struct.unpack('>I', data[2:4])[0] == 42:
++            endian = '>'  # big-endian encoding for the whole data stream
++            log.info('Tiff Image in big-endian encoding')
++        elif data[:2] == 'II' and struct.unpack('<I', data[2:4])[0] == 42:
++            endian = '<'  # little-endian encoding for the whole data stream
++            log.info('Tiff Image in little-endian encoding')
++        else:
++            # not a tiff image
++            log.info('Endian or 42 Check failed')
++            pass
++        tiff = StringIO(data)
++        tiff.read(4)  # Magic Header, could be skipped, already processed
++        offset = struct.unpack_from(endian + 'I', tiff)  # first IFD offset
++        b = tiff.read(offset)
++        # Process Image File Directory
++        while (b and ord(b) != 0xDA):
++            field_tag = struct.unpack_from(endian + 'I', tiff)
++            field_type = struct.unpack_from(endian + 'I', tiff)
++            field_type = translate_field_type.get(field_type, field_type)
++            field_value = struct.unpack_from(endian + field_type, tiff)
++            if field_tag == '256':  # ImageWidth
++                w = field_value
++            elif field_tag == '257':  # ImageLength
++                h = field_value
++                # as fields has to appear in ascending order
++                # we could skip all other fields
++                break
++            next_offset = struct.unpack_from(endian + 'I', tiff)
++            b.read(next_offset)
++        width = int(w)
++        height = int(h)
++    except struct.error:
++        pass
++    except ValueError:
++        pass
++    except TypeError:
++        pass
++    return content_type, width, height
++
++
++translate_field_type = {
++    """handle Tiff Image File Directory Types
++    --> Doc http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
++    page 14-16
++    """
++    # TODO: translate to correct python struct mapping
++    # TODO: check mappings
++    '1': 'I',  # BYTE: 8-bit unsigned Integer
++    '2': 'c',  # 'b' 'B'
++               # ASCII: 8-bit byte that contains a 7-bit ASCII code
++    '3': 'H',  # SHORT: 16-bit (2-byte) unsigned integer
++    '4': 'L',  # LONG: 32-bit (4-byte) unsigned integer
++    '5': '',  # RATIONAL, two LONGs: the first represents the numerator
++              # of a fraction; the second, the donominator
++    '6': '',  # SBYTE: An 8-bit signed (twos-complement) integer
++    '7': '',  # UNDEFINED
++    '8': '',  # SSHORT: A 16-bit (2-byte) signed (twos-complement) integer
++    '9': '',   # SLONG: A 32-bit (4-byte) signed (twos-complement) integer
++    '10': '',  # SRATIONAL: Two SLONG's (mutator, denominator)
++    '11': '',  # FLOAT: Single precision (4-byte) IEEE format.
++    '12': '',  # DOUBLE: Double precision (8-byte) IEEE format.
++}
+diff --git a/setup.py b/setup.py
+index 435e542..7a459ac 100644
+--- a/setup.py
++++ b/setup.py
+@@ -4,7 +4,7 @@
+ import os
  
- class FunctionalReferenceDXTestCase(DXBaseTestCase, ReferenceTestCase):
-     """Functional reference testcase for dx content types"""
+ 
+-version = '4.1.1.dev0'
++version = '4.2.0.dev0'
+ description = 'File types and fields for images, files and blob files with ' \
+               'filenames'
+ long_description = ('\n\n'.join([
+@@ -47,6 +47,7 @@
+         'zope.copy',
+         'zope.security',
+         'zope.traversing',
++        'piexif',
+     ],
+     extras_require={
+         'test': [
 
 
