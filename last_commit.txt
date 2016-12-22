@@ -2,109 +2,401 @@ Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-11-24T11:05:25+02:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/Products.CMFPlone/commit/22efd424cc7da15b8983af05becccdde944451e6
+Date: 2016-12-20T23:47:16-06:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/933bd1171d66585ea7d0a53774ae5b1343dfefef
 
-Add support for TinyMCE content CSS set by theme to point to a remote site
+Don't minify CSS or JavaScript resources if they end with .min.css resp. .min.js.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/patterns/tinymce.py
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/tests/testResourceRegistries.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index d59bb45..be190e0 100644
+index 6985e7d..3b4cc36 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -142,8 +142,13 @@ Bug fixes:
- - Style display menu headings differently from actions [alecm]
+@@ -65,6 +65,9 @@ Breaking changes:
  
- - Avoid dependency on plone.app.imaging. [davisagli]
+ New features:
+ 
++- Don't minify CSS or JavaScript resources if they end with ``.min.css`` resp. ``.min.js``.
++  [thet]
 +
- - Fix TinyMCE table styles [vangheem]
+ - Add ``safe_encode`` utility function to ``utils`` to safely encode unicode to a specified encoding.
+   The encoding defaults to ``utf-8``.
+   [thet]
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index c29c419..d3a9ebd 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -66,7 +66,7 @@ def cookWhenChangingSettings(context, bundle=None):
+         return
  
-+- Fix TinyMCE content CSS support to allow themes to define
-+  external content CSS URLs (as with CDN like setup).
-+  [datakurre]
+     # Let's join all css and js
+-    css_file = ''
++    cooked_css = ''
+     cooked_js = REQUIREJS_RESET_PREFIX
+     siteUrl = getSite().absolute_url()
+     request = getRequest()
+@@ -74,33 +74,44 @@ def cookWhenChangingSettings(context, bundle=None):
+         if package not in resources:
+             continue
+         resource = resources[package]
+-        for css in resource.css:
+-            url = siteUrl + '/' + css
+-            response = subrequest(url)
 +
- - Add utf8 headers to all Python source files. [jensens]
++        for css_resource in resource.css:
++            css_url = siteUrl + '/' + css_resource
++            response = subrequest(css_url)
+             if response.status == 200:
+-                css_file += response.getBody()
+-                css_file += '\n'
++                css = response.getBody()
++                cooked_css += '\n/* Resource: {0} */\n{1}\n'.format(
++                    css_resource,
++                    css if '.min.css' == css_resource[-8:] else cssmin(css)
++                )
+             else:
+-                css_file += '\n/* Could not find resource: %s */\n\n' % url
++                cooked_css += '\n/* Could not find resource: {0} */\n\n'.format(  # noqa
++                    css_resource
++                )
++
+         if not resource.js:
+             continue
+-        url = siteUrl + '/' + resource.js
+-        response = subrequest(url)
++        js_url = siteUrl + '/' + resource.js
++        response = subrequest(js_url)
+         if response.status == 200:
+             js = response.getBody()
+             try:
+-                cooked_js += '\n/* resource: %s */\n%s' % (
++                cooked_js += '\n/* resource: {0} */\n{1}'.format(
+                     resource.js,
++                    js if '.min.js' == resource.js[-7:] else
+                     minify(js, mangle=False, mangle_toplevel=False)
+                 )
+             except SyntaxError:
+-                cooked_js += '\n/* resource(error cooking): %s */\n%s' % (
+-                    resource.js, js)
++                cooked_js += '\n/* resource(error cooking): {0} */\n{1}'.format(  # noqa
++                    resource.js,
++                    js
++                )
+         else:
+-            cooked_js += '\n/* Could not find resource: %s */\n\n' % url
++            cooked_js += '\n/* Could not find resource: {0} */\n\n'.format(
++                js_url
++            )
  
- - Add default icon for top-level contentview and contentmenu toolbar entries [alecm]
-diff --git a/Products/CMFPlone/patterns/tinymce.py b/Products/CMFPlone/patterns/tinymce.py
-index 8627a1b..5e9e5dc 100644
---- a/Products/CMFPlone/patterns/tinymce.py
-+++ b/Products/CMFPlone/patterns/tinymce.py
-@@ -42,10 +42,11 @@ def get_content_css(self, style_css=''):
-         theme = self.get_theme()
-         tinymce_content_css = getattr(theme, 'tinymce_content_css', None)
-         if tinymce_content_css is not None:
--            files.extend([
--                self.nav_root_url + _
--                for _ in theme.tinymce_content_css.split(',')
--            ])
-+            for path in theme.tinymce_content_css.split(','):
-+                if path.startswith('http://') or path.startswith('https://'):
-+                    files.append(path)
-+                else:
-+                    files.append(self.nav_root_url + path)
+     cooked_js += REQUIREJS_RESET_POSTFIX
+-    cooked_css = cssmin(css_file)
  
-         return ','.join(files)
+     js_path = bundle.jscompilation
+     css_path = bundle.csscompilation
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index f897899..df460a3 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -60,8 +60,7 @@ def get_data(self, bundle, result):
+             ) and
+             bundle.resources
+         ):
+-            # Its a legacy css bundle OR compiling is happening outside of
+-            # plone
++            # Its a legacy bundle OR compiling is happening outside of plone
  
+             # We need to combine files. It's possible no resources are
+             # defined because the compiling is done outside of plone
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index b24d681..fd36abb 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -41,6 +41,7 @@ def test_cooking_resources(self):
+         resource = resources.add('foobar')
+ 
+         resource.js = '++plone++static/foobar.js'
++        resource.css = ['++plone++static/foobar.css']
+         bundle.resources = ['foobar']
+ 
+         persistent_directory = getUtility(
+@@ -51,16 +52,67 @@ def test_cooking_resources(self):
+         container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+         container.makeDirectory('static')
+         directory = container['static']
+-        directory.writeFile('foobar.js', 'alert("Hi!");')
++        directory.writeFile('foobar.js', 'alert("Hi!");\n\nalert("Ho!");')
++        directory.writeFile('foobar.css', 'body {\ncolor: blue;\n}')
+ 
+         cookWhenChangingSettings(self.portal, bundle)
+-        resp = subrequest(
++
++        resp_js = subrequest(
++            '{0}/++plone++static/foobar-compiled.js'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('alert("Hi!");alert("Ho!");' in resp_js.getBody())
++
++        resp_css = subrequest(
++            '{0}/++plone++static/foobar-compiled.css'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('body{color:blue}' in resp_css.getBody())
++
++    def test_dont_minify_already_minified(self):
++        registry = getUtility(IRegistry)
++        bundles = registry.collectionOfInterface(IBundleRegistry,
++                                                 prefix="plone.bundles")
++        bundle = bundles.add('foobar')
++        bundle.jscompilation = '++plone++static/foobar-compiled.js'
++        bundle.csscompilation = '++plone++static/foobar-compiled.css'
++
++        resources = registry.collectionOfInterface(IResourceRegistry,
++                                                   prefix="plone.resources")
++        resource = resources.add('foobar')
++
++        resource.js = '++plone++static/foobar.min.js'
++        resource.css = ['++plone++static/foobar.min.css']
++        bundle.resources = ['foobar']
++
++        persistent_directory = getUtility(
++            IResourceDirectory, name="persistent")
++        if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
++            persistent_directory.makeDirectory(
++                OVERRIDE_RESOURCE_DIRECTORY_NAME)
++        container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++        container.makeDirectory('static')
++        directory = container['static']
++        directory.writeFile('foobar.min.js', 'alert("Hi!");\n\nalert("Ho!");')
++        directory.writeFile('foobar.min.css', 'body {\ncolor: blue;\n}')
++
++        cookWhenChangingSettings(self.portal, bundle)
++
++        resp_js = subrequest(
+             '{0}/++plone++static/foobar-compiled.js'.format(
+                 self.portal.absolute_url()
+             )
+         )
++        self.assertTrue('alert("Hi!");\n\nalert("Ho!");' in resp_js.getBody())
+ 
+-        self.assertTrue('alert(' in resp.getBody())
++        resp_css = subrequest(
++            '{0}/++plone++static/foobar-compiled.css'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('body {\ncolor: blue;\n}' in resp_css.getBody())
+ 
+     def test_cooking_missing(self):
+         registry = getUtility(IRegistry)
 
 
 Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2016-12-22T01:06:23+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/f993fc23799819078a59c3dfbf5e61c176a59556
+Date: 2016-12-22T11:48:51+01:00
+Author: Eric BREHAULT (ebrehault) <ebrehault@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/b9b26087d0f58e46cf03854bd03480cef60e4176
 
-Merge pull request #1850 from plone/datakurre-tinymce-content-css
+Merge pull request #1880 from plone/thet-minifyopts
 
-Add support for TinyMCE content CSS set by theme to point to a remote site
+Don't minify already minified resources
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/patterns/tinymce.py
+M Products/CMFPlone/resources/browser/cook.py
+M Products/CMFPlone/resources/browser/scripts.py
+M Products/CMFPlone/tests/testResourceRegistries.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6985e7d..e1025a8 100644
+index e1025a8..97d490a 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -175,8 +175,13 @@ Bug fixes:
- - Style display menu headings differently from actions [alecm]
+@@ -65,6 +65,9 @@ Breaking changes:
  
- - Avoid dependency on plone.app.imaging. [davisagli]
+ New features:
+ 
++- Don't minify CSS or JavaScript resources if they end with ``.min.css`` resp. ``.min.js``.
++  [thet]
 +
- - Fix TinyMCE table styles [vangheem]
+ - Add ``safe_encode`` utility function to ``utils`` to safely encode unicode to a specified encoding.
+   The encoding defaults to ``utf-8``.
+   [thet]
+diff --git a/Products/CMFPlone/resources/browser/cook.py b/Products/CMFPlone/resources/browser/cook.py
+index c29c419..d3a9ebd 100644
+--- a/Products/CMFPlone/resources/browser/cook.py
++++ b/Products/CMFPlone/resources/browser/cook.py
+@@ -66,7 +66,7 @@ def cookWhenChangingSettings(context, bundle=None):
+         return
  
-+- Fix TinyMCE content CSS support to allow themes to define
-+  external content CSS URLs (as with CDN like setup).
-+  [datakurre]
+     # Let's join all css and js
+-    css_file = ''
++    cooked_css = ''
+     cooked_js = REQUIREJS_RESET_PREFIX
+     siteUrl = getSite().absolute_url()
+     request = getRequest()
+@@ -74,33 +74,44 @@ def cookWhenChangingSettings(context, bundle=None):
+         if package not in resources:
+             continue
+         resource = resources[package]
+-        for css in resource.css:
+-            url = siteUrl + '/' + css
+-            response = subrequest(url)
 +
- - Add utf8 headers to all Python source files. [jensens]
++        for css_resource in resource.css:
++            css_url = siteUrl + '/' + css_resource
++            response = subrequest(css_url)
+             if response.status == 200:
+-                css_file += response.getBody()
+-                css_file += '\n'
++                css = response.getBody()
++                cooked_css += '\n/* Resource: {0} */\n{1}\n'.format(
++                    css_resource,
++                    css if '.min.css' == css_resource[-8:] else cssmin(css)
++                )
+             else:
+-                css_file += '\n/* Could not find resource: %s */\n\n' % url
++                cooked_css += '\n/* Could not find resource: {0} */\n\n'.format(  # noqa
++                    css_resource
++                )
++
+         if not resource.js:
+             continue
+-        url = siteUrl + '/' + resource.js
+-        response = subrequest(url)
++        js_url = siteUrl + '/' + resource.js
++        response = subrequest(js_url)
+         if response.status == 200:
+             js = response.getBody()
+             try:
+-                cooked_js += '\n/* resource: %s */\n%s' % (
++                cooked_js += '\n/* resource: {0} */\n{1}'.format(
+                     resource.js,
++                    js if '.min.js' == resource.js[-7:] else
+                     minify(js, mangle=False, mangle_toplevel=False)
+                 )
+             except SyntaxError:
+-                cooked_js += '\n/* resource(error cooking): %s */\n%s' % (
+-                    resource.js, js)
++                cooked_js += '\n/* resource(error cooking): {0} */\n{1}'.format(  # noqa
++                    resource.js,
++                    js
++                )
+         else:
+-            cooked_js += '\n/* Could not find resource: %s */\n\n' % url
++            cooked_js += '\n/* Could not find resource: {0} */\n\n'.format(
++                js_url
++            )
  
- - Add default icon for top-level contentview and contentmenu toolbar entries [alecm]
-diff --git a/Products/CMFPlone/patterns/tinymce.py b/Products/CMFPlone/patterns/tinymce.py
-index 8627a1b..5e9e5dc 100644
---- a/Products/CMFPlone/patterns/tinymce.py
-+++ b/Products/CMFPlone/patterns/tinymce.py
-@@ -42,10 +42,11 @@ def get_content_css(self, style_css=''):
-         theme = self.get_theme()
-         tinymce_content_css = getattr(theme, 'tinymce_content_css', None)
-         if tinymce_content_css is not None:
--            files.extend([
--                self.nav_root_url + _
--                for _ in theme.tinymce_content_css.split(',')
--            ])
-+            for path in theme.tinymce_content_css.split(','):
-+                if path.startswith('http://') or path.startswith('https://'):
-+                    files.append(path)
-+                else:
-+                    files.append(self.nav_root_url + path)
+     cooked_js += REQUIREJS_RESET_POSTFIX
+-    cooked_css = cssmin(css_file)
  
-         return ','.join(files)
+     js_path = bundle.jscompilation
+     css_path = bundle.csscompilation
+diff --git a/Products/CMFPlone/resources/browser/scripts.py b/Products/CMFPlone/resources/browser/scripts.py
+index f897899..df460a3 100644
+--- a/Products/CMFPlone/resources/browser/scripts.py
++++ b/Products/CMFPlone/resources/browser/scripts.py
+@@ -60,8 +60,7 @@ def get_data(self, bundle, result):
+             ) and
+             bundle.resources
+         ):
+-            # Its a legacy css bundle OR compiling is happening outside of
+-            # plone
++            # Its a legacy bundle OR compiling is happening outside of plone
  
+             # We need to combine files. It's possible no resources are
+             # defined because the compiling is done outside of plone
+diff --git a/Products/CMFPlone/tests/testResourceRegistries.py b/Products/CMFPlone/tests/testResourceRegistries.py
+index b24d681..fd36abb 100644
+--- a/Products/CMFPlone/tests/testResourceRegistries.py
++++ b/Products/CMFPlone/tests/testResourceRegistries.py
+@@ -41,6 +41,7 @@ def test_cooking_resources(self):
+         resource = resources.add('foobar')
+ 
+         resource.js = '++plone++static/foobar.js'
++        resource.css = ['++plone++static/foobar.css']
+         bundle.resources = ['foobar']
+ 
+         persistent_directory = getUtility(
+@@ -51,16 +52,67 @@ def test_cooking_resources(self):
+         container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
+         container.makeDirectory('static')
+         directory = container['static']
+-        directory.writeFile('foobar.js', 'alert("Hi!");')
++        directory.writeFile('foobar.js', 'alert("Hi!");\n\nalert("Ho!");')
++        directory.writeFile('foobar.css', 'body {\ncolor: blue;\n}')
+ 
+         cookWhenChangingSettings(self.portal, bundle)
+-        resp = subrequest(
++
++        resp_js = subrequest(
++            '{0}/++plone++static/foobar-compiled.js'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('alert("Hi!");alert("Ho!");' in resp_js.getBody())
++
++        resp_css = subrequest(
++            '{0}/++plone++static/foobar-compiled.css'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('body{color:blue}' in resp_css.getBody())
++
++    def test_dont_minify_already_minified(self):
++        registry = getUtility(IRegistry)
++        bundles = registry.collectionOfInterface(IBundleRegistry,
++                                                 prefix="plone.bundles")
++        bundle = bundles.add('foobar')
++        bundle.jscompilation = '++plone++static/foobar-compiled.js'
++        bundle.csscompilation = '++plone++static/foobar-compiled.css'
++
++        resources = registry.collectionOfInterface(IResourceRegistry,
++                                                   prefix="plone.resources")
++        resource = resources.add('foobar')
++
++        resource.js = '++plone++static/foobar.min.js'
++        resource.css = ['++plone++static/foobar.min.css']
++        bundle.resources = ['foobar']
++
++        persistent_directory = getUtility(
++            IResourceDirectory, name="persistent")
++        if OVERRIDE_RESOURCE_DIRECTORY_NAME not in persistent_directory:
++            persistent_directory.makeDirectory(
++                OVERRIDE_RESOURCE_DIRECTORY_NAME)
++        container = persistent_directory[OVERRIDE_RESOURCE_DIRECTORY_NAME]
++        container.makeDirectory('static')
++        directory = container['static']
++        directory.writeFile('foobar.min.js', 'alert("Hi!");\n\nalert("Ho!");')
++        directory.writeFile('foobar.min.css', 'body {\ncolor: blue;\n}')
++
++        cookWhenChangingSettings(self.portal, bundle)
++
++        resp_js = subrequest(
+             '{0}/++plone++static/foobar-compiled.js'.format(
+                 self.portal.absolute_url()
+             )
+         )
++        self.assertTrue('alert("Hi!");\n\nalert("Ho!");' in resp_js.getBody())
+ 
+-        self.assertTrue('alert(' in resp.getBody())
++        resp_css = subrequest(
++            '{0}/++plone++static/foobar-compiled.css'.format(
++                self.portal.absolute_url()
++            )
++        )
++        self.assertTrue('body {\ncolor: blue;\n}' in resp_css.getBody())
+ 
+     def test_cooking_missing(self):
+         registry = getUtility(IRegistry)
 
 
