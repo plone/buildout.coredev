@@ -1,144 +1,207 @@
-Repository: plone.app.dexterity
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2017-01-22T02:43:19+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.dexterity/commit/d902f6cf501523a251de4f26198337b937ec8315
+Date: 2017-01-23T16:05:20+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.content/commit/e8c5e14b821e24eadea86747fb353b929f72e2ab
 
-import from cononical source
+Check for containerish behavior in ``@@allow_upload``.
+Fixes a case, where ``@allow_upload`` reported ``True`` for content of type ``File``.
 
 Files changed:
 M CHANGES.rst
-M plone/app/dexterity/interfaces.py
+M plone/app/content/browser/file.py
+M plone/app/content/tests/test_contents.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index b8f6867..69b874c 100644
+index f67ea6a..6e64236 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,9 @@ New features:
+@@ -15,7 +15,9 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- Do not import ``IFileFactory`` in interfaces from plone.app.widgets.
-+  It is only imported over there.
-+  [jensens]
++- Check for containerish behavior in ``@@allow_upload``.
++  Fixes a case, where ``@allow_upload`` reported ``True`` for content of type ``File``.
++  [thet]
  
  
- 2.3.6 (2017-01-20)
-diff --git a/plone/app/dexterity/interfaces.py b/plone/app/dexterity/interfaces.py
-index 1fb34d2..6a0d776 100644
---- a/plone/app/dexterity/interfaces.py
-+++ b/plone/app/dexterity/interfaces.py
-@@ -1,10 +1,10 @@
+ 3.3.4 (2016-12-30)
+diff --git a/plone/app/content/browser/file.py b/plone/app/content/browser/file.py
+index a783a46..6fce2c6 100644
+--- a/plone/app/content/browser/file.py
++++ b/plone/app/content/browser/file.py
+@@ -1,5 +1,6 @@
  # -*- coding: utf-8 -*-
- from Acquisition import aq_base
- from plone.app.dexterity import _
--from plone.app.widgets.interfaces import IFileFactory
- from Products.CMFCore.utils import getToolByName
- from z3c.form import validator
- from zope import schema
-+from zope.filerepresentation.interfaces import IFileFactory
- from zope.interface import Attribute
- from zope.interface import Interface
- from zope.interface import Invalid
-@@ -30,6 +30,7 @@ class InvalidIdError(schema.ValidationError):
-     __doc__ = _(
-         u'Please use only letters, numbers and the following characters: .-_')
- 
+ from AccessControl import getSecurityManager
++from OFS.interfaces import IFolder
+ from plone.app.dexterity.interfaces import IDXFileFactory
+ from plone.dexterity.interfaces import IDexterityFTI
+ from plone.uuid.interfaces import IUUID
+@@ -208,9 +209,14 @@ def __call__(self):
+         context = self.context
+         if self.request.form.get('path'):
+             context = context.restrictedTraverse(self.request.form.get('path'))
+-        allowed_types = [t.getId() for t in context.allowedContentTypes()]
+-        allow_images = u'Image' in allowed_types
+-        allow_files = u'File' in allowed_types
 +
- # a letter followed by letters, numbers, period, hyphen, or underscore
- ID_RE = re.compile(r'^[a-z][\w\d\.-]*$')
- 
-@@ -107,6 +108,7 @@ def validate(self, value):
-             msg = u"There is already a content type named '${name}'"
-             raise Invalid(_(msg, mapping={'name': value}))
- 
++        allow_images = False
++        allow_files = False
++        if IFolder.providedBy(context):
++            allowed_types = [t.getId() for t in context.allowedContentTypes()]
++            allow_images = u'Image' in allowed_types
++            allow_files = u'File' in allowed_types
 +
- validator.WidgetValidatorDiscriminators(
-     TypeIdValidator,
-     field=ITypeSettings['id']
-@@ -127,6 +129,7 @@ def validate(self, value):
-                 msg = u"There is already a content type named '${name}'"
-                 raise Invalid(_(msg, mapping={'name': value}))
+         return json.dumps({
+             'allowUpload': allow_images or allow_files,
+             'allowImages': allow_images,
+diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
+index ff9e1a2..8ad496d 100644
+--- a/plone/app/content/tests/test_contents.py
++++ b/plone/app/content/tests/test_contents.py
+@@ -97,16 +97,36 @@ def setUp(self):
+         self.portal.portal_types._setObject('type1', type1_fti)
+         self.type1_fti = type1_fti
  
++        # TYPE 2
++        type2_fti = DexterityFTI('type1')
++        type2_fti.klass = 'plone.dexterity.content.Item'
++        type2_fti.filter_content_types = True
++        type2_fti.allowed_content_types = []
++        type2_fti.behaviors = (
++            'plone.app.dexterity.behaviors.metadata.IBasic'
++        )
++        self.portal.portal_types._setObject('type2', type2_fti)
++        self.type2_fti = type2_fti
 +
- validator.WidgetValidatorDiscriminators(
-     TypeTitleValidator,
-     field=ITypeSettings['title']
+         login(self.portal, TEST_USER_NAME)
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+ 
+         self.portal.invokeFactory('type1', id='it1', title='Item 1')
++        self.portal.invokeFactory('type2', id='it2', title='Item 2')
+ 
+     def test_allow_upload(self):
+         """Test, if file or images are allowed in a container in different FTI
+         configurations.
+         """
+ 
++        # Test non-container, none allowed
++        allow_upload = self.portal.it2.restrictedTraverse('@@allow_upload')
++        allow_upload = json.loads(allow_upload())
++
++        self.assertEqual(allow_upload['allowUpload'], False)
++        self.assertEqual(allow_upload['allowImages'], False)
++        self.assertEqual(allow_upload['allowFiles'], False)
++
+         # Test none allowed
+         self.type1_fti.allowed_content_types = []
+         allow_upload = self.portal.it1.restrictedTraverse('@@allow_upload')
 
 
-Repository: plone.app.dexterity
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2017-01-22T18:56:36+01:00
+Date: 2017-01-23T21:24:32+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.dexterity/commit/fbc21e911cbc9bf0ea37222b18f4393971491808
+Commit: https://github.com/plone/plone.app.content/commit/d2d1606d7add36d91b4d11058c26766eb0101332
 
-Merge pull request #233 from plone/jensens-clean-import
+Merge pull request #117 from plone/thet-allowupload-folderish
 
-import from canonical source
+Check for containerish behavior in ``@@allow_upload``.
 
 Files changed:
 M CHANGES.rst
-M plone/app/dexterity/interfaces.py
+M plone/app/content/browser/file.py
+M plone/app/content/tests/test_contents.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index b8f6867..69b874c 100644
+index f67ea6a..6e64236 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,9 @@ New features:
+@@ -15,7 +15,9 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- Do not import ``IFileFactory`` in interfaces from plone.app.widgets.
-+  It is only imported over there.
-+  [jensens]
++- Check for containerish behavior in ``@@allow_upload``.
++  Fixes a case, where ``@allow_upload`` reported ``True`` for content of type ``File``.
++  [thet]
  
  
- 2.3.6 (2017-01-20)
-diff --git a/plone/app/dexterity/interfaces.py b/plone/app/dexterity/interfaces.py
-index 1fb34d2..6a0d776 100644
---- a/plone/app/dexterity/interfaces.py
-+++ b/plone/app/dexterity/interfaces.py
-@@ -1,10 +1,10 @@
+ 3.3.4 (2016-12-30)
+diff --git a/plone/app/content/browser/file.py b/plone/app/content/browser/file.py
+index a783a46..6fce2c6 100644
+--- a/plone/app/content/browser/file.py
++++ b/plone/app/content/browser/file.py
+@@ -1,5 +1,6 @@
  # -*- coding: utf-8 -*-
- from Acquisition import aq_base
- from plone.app.dexterity import _
--from plone.app.widgets.interfaces import IFileFactory
- from Products.CMFCore.utils import getToolByName
- from z3c.form import validator
- from zope import schema
-+from zope.filerepresentation.interfaces import IFileFactory
- from zope.interface import Attribute
- from zope.interface import Interface
- from zope.interface import Invalid
-@@ -30,6 +30,7 @@ class InvalidIdError(schema.ValidationError):
-     __doc__ = _(
-         u'Please use only letters, numbers and the following characters: .-_')
- 
+ from AccessControl import getSecurityManager
++from OFS.interfaces import IFolder
+ from plone.app.dexterity.interfaces import IDXFileFactory
+ from plone.dexterity.interfaces import IDexterityFTI
+ from plone.uuid.interfaces import IUUID
+@@ -208,9 +209,14 @@ def __call__(self):
+         context = self.context
+         if self.request.form.get('path'):
+             context = context.restrictedTraverse(self.request.form.get('path'))
+-        allowed_types = [t.getId() for t in context.allowedContentTypes()]
+-        allow_images = u'Image' in allowed_types
+-        allow_files = u'File' in allowed_types
 +
- # a letter followed by letters, numbers, period, hyphen, or underscore
- ID_RE = re.compile(r'^[a-z][\w\d\.-]*$')
- 
-@@ -107,6 +108,7 @@ def validate(self, value):
-             msg = u"There is already a content type named '${name}'"
-             raise Invalid(_(msg, mapping={'name': value}))
- 
++        allow_images = False
++        allow_files = False
++        if IFolder.providedBy(context):
++            allowed_types = [t.getId() for t in context.allowedContentTypes()]
++            allow_images = u'Image' in allowed_types
++            allow_files = u'File' in allowed_types
 +
- validator.WidgetValidatorDiscriminators(
-     TypeIdValidator,
-     field=ITypeSettings['id']
-@@ -127,6 +129,7 @@ def validate(self, value):
-                 msg = u"There is already a content type named '${name}'"
-                 raise Invalid(_(msg, mapping={'name': value}))
+         return json.dumps({
+             'allowUpload': allow_images or allow_files,
+             'allowImages': allow_images,
+diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
+index ff9e1a2..8ad496d 100644
+--- a/plone/app/content/tests/test_contents.py
++++ b/plone/app/content/tests/test_contents.py
+@@ -97,16 +97,36 @@ def setUp(self):
+         self.portal.portal_types._setObject('type1', type1_fti)
+         self.type1_fti = type1_fti
  
++        # TYPE 2
++        type2_fti = DexterityFTI('type1')
++        type2_fti.klass = 'plone.dexterity.content.Item'
++        type2_fti.filter_content_types = True
++        type2_fti.allowed_content_types = []
++        type2_fti.behaviors = (
++            'plone.app.dexterity.behaviors.metadata.IBasic'
++        )
++        self.portal.portal_types._setObject('type2', type2_fti)
++        self.type2_fti = type2_fti
 +
- validator.WidgetValidatorDiscriminators(
-     TypeTitleValidator,
-     field=ITypeSettings['title']
+         login(self.portal, TEST_USER_NAME)
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+ 
+         self.portal.invokeFactory('type1', id='it1', title='Item 1')
++        self.portal.invokeFactory('type2', id='it2', title='Item 2')
+ 
+     def test_allow_upload(self):
+         """Test, if file or images are allowed in a container in different FTI
+         configurations.
+         """
+ 
++        # Test non-container, none allowed
++        allow_upload = self.portal.it2.restrictedTraverse('@@allow_upload')
++        allow_upload = json.loads(allow_upload())
++
++        self.assertEqual(allow_upload['allowUpload'], False)
++        self.assertEqual(allow_upload['allowImages'], False)
++        self.assertEqual(allow_upload['allowFiles'], False)
++
+         # Test none allowed
+         self.type1_fti.allowed_content_types = []
+         allow_upload = self.portal.it1.restrictedTraverse('@@allow_upload')
 
 
