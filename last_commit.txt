@@ -1,36 +1,278 @@
-Repository: mockup
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2017-02-07T00:06:28+01:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/mockup/commit/924bcc2b1ae4819c81220c63072274d61ff5279d
+Date: 2017-02-07T13:15:29+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.api/commit/2ea04137fa8a860300f96602c8e3a002b07d8c87
 
-use jquery-form 3.51 which allows dotted-path form ids
+Allow to only get local roles for groups and do not assign global roles as local
 
 Files changed:
-M bower.json
+M docs/CHANGES.rst
+M docs/group.rst
+M src/plone/api/group.py
+M src/plone/api/tests/test_group.py
 
-diff --git a/bower.json b/bower.json
-index 23ae0f8..ea2c528 100644
---- a/bower.json
-+++ b/bower.json
-@@ -11,7 +11,7 @@
-     "es5-shim": "4.5.9",
-     "jqtree": "1.3.3",
-     "jquery": "1.11.3",
--    "jquery-form": "3.46.0",
-+    "jquery-form": "3.51",
-     "jquery.cookie": "1.4.1",
-     "jquery.recurrenceinput.js": "v1.5.2",
-     "logging": "",
-@@ -32,6 +32,7 @@
-   "resolutions": {
-     "bootstrap": "3.3.6",
-     "jquery": "1.11.3",
-+    "jquery-form": "3.51",
-     "select2": "3.5.4",
-     "moment": "2.10.6"
-   }
+diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
+index 6d64530..939cb98 100644
+--- a/docs/CHANGES.rst
++++ b/docs/CHANGES.rst
+@@ -10,7 +10,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Passing inherit=False to groups.get_roles() will only get local roles for the group.
++  [pbauer]
+ 
+ Bug fixes:
+ 
+@@ -19,7 +20,7 @@ Bug fixes:
+ 
+ - Fix imports from Globals that was removed in Zope4
+   [pbauer]
+-  
++
+ - Fix 'bad' quotes.
+   [adamcheasley]
+ 
+@@ -30,6 +31,10 @@ Bug fixes:
+   silently in Zope4.
+   [MatthewWilkes]
+ 
++- Do not reassign global roles as local roles when using group.grant_roles()
++  [pbauer]
++
++
+ 1.5.1 (2016-12-06)
+ ------------------
+ 
+diff --git a/docs/group.rst b/docs/group.rst
+index 0e3fcce..3a5d4d4 100644
+--- a/docs/group.rst
++++ b/docs/group.rst
+@@ -261,7 +261,6 @@ By default it returns site-wide roles.
+     EXPECTED_SITE_ROLES = ['Authenticated', 'Editor', 'Reader']
+     self.assertEqual(set(EXPECTED_SITE_ROLES), set(roles))
+ 
+-
+ If you pass in a content object, it will return the local roles of the group in that particular context.
+ 
+ .. code-block:: python
+@@ -280,6 +279,21 @@ If you pass in a content object, it will return the local roles of the group in
+ 
+     self.assertEqual(set(EXPECTED_SITE_ROLES), set(roles))
+ 
++If you pass in a content object and `inherit=False`, it will return only the local roles of the group on that particular object and ignore global roles.
++
++.. code-block:: python
++
++    api.group.grant_roles(
++        groupname='staff', roles=['Contributor'], obj=portal['folder_four'])
++
++    roles = api.group.get_roles(
++        groupname='staff', obj=portal['folder_four'], inherit=False)
++
++.. invisible-code-block: python
++
++    EXPECTED_OBJ_ROLES = ['Contributor']
++    self.assertEqual(set(EXPECTED_OBJ_ROLES), set(roles))
++
+ 
+ .. _group_grant_roles_example:
+ 
+@@ -318,6 +332,8 @@ If you pass in a content object, roles will be assigned in that particular conte
+ .. invisible-code-block: python
+ 
+     EXPECTED_CONTEXT_ROLES = EXPECTED_SITE_ROLES + ['Contributor']
++    roles = api.group.get_roles(groupname='staff', obj=portal['folder_five'], inherit=False)
++    self.assertEqual(set(['Contributor']), set(roles))
+     roles = api.group.get_roles(groupname='staff', obj=portal['folder_five'])
+     self.assertEqual(set(EXPECTED_CONTEXT_ROLES), set(roles))
+ 
+@@ -344,6 +360,13 @@ To revoke roles already granted to a group, use the :meth:`api.group.revoke_role
+ 
+ If you pass in a content object, it will revoke roles granted in that particular context.
+ 
++.. invisible-code-block: python
++
++    EXPECTED_CONTEXT_ROLES = ['Contributor']
++    roles = api.group.get_roles(groupname='staff', obj=portal['folder_five'], inherit=False)
++    self.assertEqual(['Contributor'], roles)
++
++
+ .. code-block:: python
+ 
+     from plone import api
+@@ -353,8 +376,8 @@ If you pass in a content object, it will revoke roles granted in that particular
+ 
+ .. invisible-code-block: python
+ 
+-    EXPECTED_CONTEXT_ROLES.remove('Contributor')
+-    roles = api.group.get_roles(groupname='staff', obj=portal['folder_five'])
++    EXPECTED_CONTEXT_ROLES = []
++    roles = api.group.get_roles(groupname='staff', obj=portal['folder_five'], inherit=False)
+     self.assertEqual(set(EXPECTED_CONTEXT_ROLES), set(roles))
+ 
+ 
+diff --git a/src/plone/api/group.py b/src/plone/api/group.py
+index 824529a..95f6497 100644
+--- a/src/plone/api/group.py
++++ b/src/plone/api/group.py
+@@ -196,7 +196,7 @@ def remove_user(groupname=None, group=None, username=None, user=None):
+ 
+ @mutually_exclusive_parameters('groupname', 'group')
+ @at_least_one_of('groupname', 'group')
+-def get_roles(groupname=None, group=None, obj=None):
++def get_roles(groupname=None, group=None, obj=None, inherit=True):
+     """Get group's site-wide or local roles.
+ 
+     Arguments ``groupname`` and ``group`` are mutually exclusive. You can
+@@ -219,12 +219,24 @@ def get_roles(groupname=None, group=None, obj=None):
+         raise GroupNotFoundError
+ 
+     group = group.getGroup()
+-    # when context obj is available we bypass getRolesInContext method
+-    # from PloneGroup class to use PloneUser class implementation because
+-    # PloneGroup class disables all local roles support
+-    # see: Products.PlonePAS.plugins.group.PloneGroup
+-    return group.getRoles() if obj is None else \
+-        super(group.__class__, group).getRolesInContext(obj)
++    if obj is None:
++        return group.getRoles()
++    elif inherit:
++        # when context obj is available we bypass getRolesInContext method
++        # from PloneGroup class to use PloneUser class implementation because
++        # PloneGroup class disables all local roles support
++        # see: Products.PlonePAS.plugins.group.PloneGroup
++        roles = super(group.__class__, group).getRolesInContext(obj)
++        return list(roles)
++    else:
++        # get only the local roles on a object
++        # same as above we use the PloneUser version of getRolesInContext
++        plone_user = super(group.__class__, group)
++        lrmanagers = plone_user._getLocalRolesPlugins()
++        roles = set([])
++        for _, lrmanager in lrmanagers:
++            roles.update(lrmanager.getRolesInContext(plone_user, obj))
++        return list(roles)
+ 
+ 
+ @required_parameters('roles')
+@@ -253,7 +265,11 @@ def grant_roles(groupname=None, group=None, roles=None, obj=None):
+ 
+     group_id = groupname or group.id
+ 
+-    actual_roles = get_roles(groupname=group_id, obj=obj)
++    if obj is None:
++        actual_roles = get_roles(groupname=group_id)
++    else:
++        actual_roles = get_roles(groupname=group_id, obj=obj, inherit=False)
++
+     if actual_roles.count('Anonymous'):
+         actual_roles.remove('Anonymous')
+     if actual_roles.count('Authenticated'):
+@@ -294,7 +310,10 @@ def revoke_roles(groupname=None, group=None, roles=None, obj=None):
+ 
+     group_id = groupname or group.id
+ 
+-    actual_roles = get_roles(groupname=group_id, obj=obj)
++    if obj is None:
++        actual_roles = get_roles(groupname=group_id)
++    else:
++        actual_roles = get_roles(groupname=group_id, obj=obj, inherit=False)
+     if actual_roles.count('Anonymous'):
+         actual_roles.remove('Anonymous')
+     if actual_roles.count('Authenticated'):
+diff --git a/src/plone/api/tests/test_group.py b/src/plone/api/tests/test_group.py
+index 76b7c0a..b7c7406 100644
+--- a/src/plone/api/tests/test_group.py
++++ b/src/plone/api/tests/test_group.py
+@@ -471,6 +471,84 @@ def test_grant_roles_in_context(self):
+             ROLES,
+             set(api.group.get_roles(group=group, obj=document)),
+         )
++        ROLES = set(['Editor', 'Contributor'])
++        self.assertEqual(
++            ROLES,
++            set(api.group.get_roles(
++                groupname='foo', obj=folder, inherit=False)),
++        )
++        self.assertEqual(
++            ROLES,
++            set(api.group.get_roles(group=group, obj=folder, inherit=False)),
++        )
++        self.assertEqual(
++            ROLES,
++            set(api.group.get_roles(
++                groupname='foo', obj=document, inherit=False)),
++        )
++        self.assertEqual(
++            ROLES,
++            set(api.group.get_roles(group=group, obj=document, inherit=False)),
++        )
++
++    def test_local_roles_without_inheritance(self):
++        """Test granting and getting local_roles."""
++
++        api.group.create(groupname='foo')
++
++        portal = api.portal.get()
++        folder = api.content.create(
++            container=portal,
++            type='Folder',
++            id='folder_one',
++            title='Folder One',
++        )
++        document = api.content.create(
++            container=folder,
++            type='Document',
++            id='document_one',
++            title='Document One',
++        )
++        self.assertEqual(
++            ['Authenticated'],
++            api.group.get_roles(groupname='foo'),
++        )
++        # Add the editor-role as global role
++        api.group.grant_roles(groupname='foo', roles=['Editor'])
++        self.assertEqual(
++            ['Authenticated', 'Editor'],
++            api.group.get_roles(groupname='foo'),
++        )
++        # local_roles plus global_roles
++        self.assertEqual(
++            ['Authenticated', 'Editor'],
++            api.group.get_roles(groupname='foo', obj=folder),
++        )
++        # only local_roles
++        self.assertEqual(
++            [],
++            api.group.get_roles(groupname='foo', obj=folder, inherit=False),
++        )
++
++        # The Contributor-role is added
++        api.group.grant_roles(
++            groupname='foo', roles=['Contributor'], obj=folder)
++        self.assertEqual(
++            ['Contributor'],
++            api.group.get_roles(groupname='foo', obj=folder, inherit=False),
++        )
++        # local_roles plus global_roles
++        self.assertEqual(
++            set(['Authenticated', 'Editor', 'Contributor']),
++            set(api.group.get_roles(groupname='foo', obj=document)),
++        )
++        # The Editor-role is added even though it is already a global role
++        api.group.grant_roles(groupname='foo', roles=['Editor'], obj=folder)
++        self.assertEqual(
++            set(['Contributor', 'Editor']),
++            set(api.group.get_roles(
++                groupname='foo', obj=folder, inherit=False)),
++        )
+ 
+     def test_revoke_roles_in_context(self):
+         """Test revoke roles."""
 
 
