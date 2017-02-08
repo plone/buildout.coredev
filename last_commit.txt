@@ -1,153 +1,302 @@
-Repository: plone.app.uuid
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2017-02-02T22:31:30+01:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.uuid/commit/d560469257975a5dd0e19fc13410ee06fd9aae7e
+Date: 2017-02-08T15:36:52+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.querystring/commit/f9516fc473304e3a5830838603877a3cbe240a2b
 
-Fix test for 404 response
+Fix QueryBuilder with empty queries to return a Batch when requested.
 
 Files changed:
 M CHANGES.rst
-M plone/app/uuid/tests.py
+M plone/app/querystring/querybuilder.py
+M plone/app/querystring/tests/testQueryBuilder.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ca7a892..53f972a 100644
+index f814158..7ed115f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -14,6 +14,9 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Fix test in Zope 4.
-+  [davisagli]
++- Fix ``QueryBuilder`` with empty queries to return a Batch when requested.
++  [thet]
++
+ - Disable "Subject" ("Tags") as sortable index.
+   Keyword Indexes are not sortable.
+   [jensens]
+@@ -286,7 +289,7 @@ Fixes:
+   [sdelcourt]
  
+ - Fix querybuilder code if results object does not provide an
+-  actual_results_count attribute. This regression has been introduced in
++  actual_result_count attribute. This regression has been introduced in
+   release 1.1.1 (fixed broken handling of limit and batch size).
+   [timo]
  
- 1.1.2 (2016-11-17)
-diff --git a/plone/app/uuid/tests.py b/plone/app/uuid/tests.py
-index 420f0af..9bdb906 100644
---- a/plone/app/uuid/tests.py
-+++ b/plone/app/uuid/tests.py
-@@ -151,8 +151,6 @@ def test_redirect_to_uuid_view(self):
-         self.assertEqual(d1.absolute_url(), browser.url)
+diff --git a/plone/app/querystring/querybuilder.py b/plone/app/querystring/querybuilder.py
+index 2e6cebd..08b808e 100644
+--- a/plone/app/querystring/querybuilder.py
++++ b/plone/app/querystring/querybuilder.py
+@@ -135,11 +135,7 @@ def _makequery(self, query=None, batch=False, b_start=0, b_size=30,
+                 "Using empty query because there are no valid indexes used.")
+             parsedquery = {}
  
-     def test_redirect_to_uuid_invalid_uuid(self):
--        from mechanize import HTTPError
+-        if not parsedquery:
+-            if brains:
+-                return []
+-            else:
+-                return IContentListing([])
++        empty_query = not parsedquery  # store emptiness
+ 
+         if batch:
+             parsedquery['b_start'] = b_start
+@@ -150,16 +146,19 @@ def _makequery(self, query=None, batch=False, b_start=0, b_size=30,
+         if 'path' not in parsedquery:
+             parsedquery['path'] = {'query': ''}
+ 
+-        if isinstance(custom_query, dict):
++        if isinstance(custom_query, dict) and custom_query:
+             # Update the parsed query with an extra query dictionary. This may
+             # override the parsed query. The custom_query is a dictonary of
+             # index names and their associated query values.
+             parsedquery.update(custom_query)
 -
-         portal = self.layer['portal']
-         app = self.layer['app']
+-        results = catalog(**parsedquery)
+-        if getattr(results, 'actual_result_count', False) and limit\
+-                and results.actual_result_count > limit:
+-            results.actual_result_count = limit
++            empty_query = False
++
++        results = []
++        if not empty_query:
++            results = catalog(**parsedquery)
++            if getattr(results, 'actual_result_count', False) and limit\
++                    and results.actual_result_count > limit:
++                results.actual_result_count = limit
  
-@@ -166,14 +164,13 @@ def test_redirect_to_uuid_invalid_uuid(self):
+         if not brains:
+             results = IContentListing(results)
+diff --git a/plone/app/querystring/tests/testQueryBuilder.py b/plone/app/querystring/tests/testQueryBuilder.py
+index bf61061..dd97420 100644
+--- a/plone/app/querystring/tests/testQueryBuilder.py
++++ b/plone/app/querystring/tests/testQueryBuilder.py
+@@ -189,6 +189,62 @@ def testQueryBuilderCustomQuery(self):
+         self.assertEqual(results[0].Title(), 'Test Folder')
  
-         from plone.testing.z2 import Browser
-         browser = Browser(app)
-+        browser.handleErrors = False
-         browser.addHeader(
-             'Authorization',
-             'Basic {0}:{1}'.format(TEST_USER_ID, TEST_USER_PASSWORD, )
-         )
  
--        try:
--            url = '{0}/@@redirect-to-uuid/gibberish'
-+        url = '{0}/@@redirect-to-uuid/gibberish'
-+        from zExceptions import NotFound
-+        with self.assertRaises(NotFound):
-             browser.open(url.format(portal.absolute_url()))
--            self.fail('No error raised')
--        except HTTPError, e:
--            self.assertEqual(e.code, 404)
++class TestQuerybuilderResultTypes(unittest.TestCase):
++
++    layer = TEST_PROFILE_PLONEAPPQUERYSTRING_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = TestRequest()
++        self.querybuilder = getMultiAdapter(
++            (self.portal, self.request),
++            name='querybuilderresults'
++        )
++        self.query = [{
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Non-existent',
++        }]
++
++    def testQueryBuilderEmptyQueryContentListing(self):
++        results = self.querybuilder(query={})
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++    def testQueryBuilderEmptyQueryBrains(self):
++        results = self.querybuilder(query={}, brains=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(results, [])
++
++    def testQueryBuilderEmptyQueryBatch(self):
++        results = self.querybuilder(query={}, batch=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'BaseBatch')
++
++    def testQueryBuilderNonEmptyQueryContentListing(self):
++        results = self.querybuilder(query=self.query)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++    def testQueryBuilderNonEmptyQueryBrains(self):
++        results = self.querybuilder(query=self.query, brains=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'LazyCat')
++
++    def testQueryBuilderNonEmptyQueryBatch(self):
++        results = self.querybuilder(query=self.query, batch=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'BaseBatch')
++
++    def testQueryBuilderNonEmptyContentListingCustomQuery(self):
++        results = self.querybuilder(
++            query={},
++            custom_query={'portal_type': 'NonExistent'}
++        )
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++
+ class TestConfigurationFetcher(unittest.TestCase):
+ 
+     layer = TEST_PROFILE_PLONEAPPQUERYSTRING_INTEGRATION_TESTING
 
 
-Repository: plone.app.uuid
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2017-02-07T08:21:51+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.uuid/commit/ed74ba77a97da4e60fe8517d3971af02949b7d10
-
-fix test to work with new exceptions
-
-Files changed:
-M plone/app/uuid/tests.py
-
-diff --git a/plone/app/uuid/tests.py b/plone/app/uuid/tests.py
-index 9bdb906..0933b50 100644
---- a/plone/app/uuid/tests.py
-+++ b/plone/app/uuid/tests.py
-@@ -171,6 +171,6 @@ def test_redirect_to_uuid_invalid_uuid(self):
-         )
- 
-         url = '{0}/@@redirect-to-uuid/gibberish'
--        from zExceptions import NotFound
-+        from zope.publisher.interfaces import NotFound
-         with self.assertRaises(NotFound):
-             browser.open(url.format(portal.absolute_url()))
-
-
-Repository: plone.app.uuid
-
-
-Branch: refs/heads/master
-Date: 2017-02-08T16:27:42+01:00
+Date: 2017-02-08T18:10:31+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.uuid/commit/b82cfa2b5d4629fba6dd2522cea587168bb12203
+Commit: https://github.com/plone/plone.app.querystring/commit/ec671cf9a4439b893fe5ebf8c571cc1e205a53b4
 
-Merge pull request #3 from plone/plonezope4
+Merge pull request #74 from plone/thet-querybuilder-emptybatch
 
-Fix test for 404 response (Zope4)
+Fix QueryBuilder with empty queries to return a Batch when requested.
 
 Files changed:
 M CHANGES.rst
-M plone/app/uuid/tests.py
+M plone/app/querystring/querybuilder.py
+M plone/app/querystring/tests/testQueryBuilder.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index ca7a892..53f972a 100644
+index f814158..7ed115f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -14,6 +14,9 @@ New features:
  
  Bug fixes:
  
--- *add item here*
-+- Fix test in Zope 4.
-+  [davisagli]
++- Fix ``QueryBuilder`` with empty queries to return a Batch when requested.
++  [thet]
++
+ - Disable "Subject" ("Tags") as sortable index.
+   Keyword Indexes are not sortable.
+   [jensens]
+@@ -286,7 +289,7 @@ Fixes:
+   [sdelcourt]
  
+ - Fix querybuilder code if results object does not provide an
+-  actual_results_count attribute. This regression has been introduced in
++  actual_result_count attribute. This regression has been introduced in
+   release 1.1.1 (fixed broken handling of limit and batch size).
+   [timo]
  
- 1.1.2 (2016-11-17)
-diff --git a/plone/app/uuid/tests.py b/plone/app/uuid/tests.py
-index 420f0af..0933b50 100644
---- a/plone/app/uuid/tests.py
-+++ b/plone/app/uuid/tests.py
-@@ -151,8 +151,6 @@ def test_redirect_to_uuid_view(self):
-         self.assertEqual(d1.absolute_url(), browser.url)
+diff --git a/plone/app/querystring/querybuilder.py b/plone/app/querystring/querybuilder.py
+index 2e6cebd..08b808e 100644
+--- a/plone/app/querystring/querybuilder.py
++++ b/plone/app/querystring/querybuilder.py
+@@ -135,11 +135,7 @@ def _makequery(self, query=None, batch=False, b_start=0, b_size=30,
+                 "Using empty query because there are no valid indexes used.")
+             parsedquery = {}
  
-     def test_redirect_to_uuid_invalid_uuid(self):
--        from mechanize import HTTPError
+-        if not parsedquery:
+-            if brains:
+-                return []
+-            else:
+-                return IContentListing([])
++        empty_query = not parsedquery  # store emptiness
+ 
+         if batch:
+             parsedquery['b_start'] = b_start
+@@ -150,16 +146,19 @@ def _makequery(self, query=None, batch=False, b_start=0, b_size=30,
+         if 'path' not in parsedquery:
+             parsedquery['path'] = {'query': ''}
+ 
+-        if isinstance(custom_query, dict):
++        if isinstance(custom_query, dict) and custom_query:
+             # Update the parsed query with an extra query dictionary. This may
+             # override the parsed query. The custom_query is a dictonary of
+             # index names and their associated query values.
+             parsedquery.update(custom_query)
 -
-         portal = self.layer['portal']
-         app = self.layer['app']
+-        results = catalog(**parsedquery)
+-        if getattr(results, 'actual_result_count', False) and limit\
+-                and results.actual_result_count > limit:
+-            results.actual_result_count = limit
++            empty_query = False
++
++        results = []
++        if not empty_query:
++            results = catalog(**parsedquery)
++            if getattr(results, 'actual_result_count', False) and limit\
++                    and results.actual_result_count > limit:
++                results.actual_result_count = limit
  
-@@ -166,14 +164,13 @@ def test_redirect_to_uuid_invalid_uuid(self):
+         if not brains:
+             results = IContentListing(results)
+diff --git a/plone/app/querystring/tests/testQueryBuilder.py b/plone/app/querystring/tests/testQueryBuilder.py
+index bf61061..dd97420 100644
+--- a/plone/app/querystring/tests/testQueryBuilder.py
++++ b/plone/app/querystring/tests/testQueryBuilder.py
+@@ -189,6 +189,62 @@ def testQueryBuilderCustomQuery(self):
+         self.assertEqual(results[0].Title(), 'Test Folder')
  
-         from plone.testing.z2 import Browser
-         browser = Browser(app)
-+        browser.handleErrors = False
-         browser.addHeader(
-             'Authorization',
-             'Basic {0}:{1}'.format(TEST_USER_ID, TEST_USER_PASSWORD, )
-         )
  
--        try:
--            url = '{0}/@@redirect-to-uuid/gibberish'
-+        url = '{0}/@@redirect-to-uuid/gibberish'
-+        from zope.publisher.interfaces import NotFound
-+        with self.assertRaises(NotFound):
-             browser.open(url.format(portal.absolute_url()))
--            self.fail('No error raised')
--        except HTTPError, e:
--            self.assertEqual(e.code, 404)
++class TestQuerybuilderResultTypes(unittest.TestCase):
++
++    layer = TEST_PROFILE_PLONEAPPQUERYSTRING_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = TestRequest()
++        self.querybuilder = getMultiAdapter(
++            (self.portal, self.request),
++            name='querybuilderresults'
++        )
++        self.query = [{
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Non-existent',
++        }]
++
++    def testQueryBuilderEmptyQueryContentListing(self):
++        results = self.querybuilder(query={})
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++    def testQueryBuilderEmptyQueryBrains(self):
++        results = self.querybuilder(query={}, brains=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(results, [])
++
++    def testQueryBuilderEmptyQueryBatch(self):
++        results = self.querybuilder(query={}, batch=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'BaseBatch')
++
++    def testQueryBuilderNonEmptyQueryContentListing(self):
++        results = self.querybuilder(query=self.query)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++    def testQueryBuilderNonEmptyQueryBrains(self):
++        results = self.querybuilder(query=self.query, brains=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'LazyCat')
++
++    def testQueryBuilderNonEmptyQueryBatch(self):
++        results = self.querybuilder(query=self.query, batch=True)
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'BaseBatch')
++
++    def testQueryBuilderNonEmptyContentListingCustomQuery(self):
++        results = self.querybuilder(
++            query={},
++            custom_query={'portal_type': 'NonExistent'}
++        )
++        self.assertEqual(len(results), 0)
++        self.assertEqual(type(results).__name__, 'ContentListing')
++
++
+ class TestConfigurationFetcher(unittest.TestCase):
+ 
+     layer = TEST_PROFILE_PLONEAPPQUERYSTRING_INTEGRATION_TESTING
 
 
