@@ -7,25 +7,21 @@ Reviewing PLIPs
 Expectations
 ============
 A good PLIP review takes about 4 hours so please plan accordingly.
-When you are done,
-if you have access to core please commit the review to the PLIPSs folder and reference the PLIP in your commit message.
-If you do not have access,
-please attach your review to the PLIP ticket itself.
+When you are done, if you have access to core please commit the review to the PLIPSs folder and reference the PLIP in your commit message.
+If you do not have access, please attach your review to the PLIP ticket itself.
 
 Setting up the environment
 ==========================
 Follow the instructions on :ref:`setup-development-environment`.
 You will need to checkout the branch to which the PLIP is assigned.
-Instead of running the buildout with the default buildout file,
-you will run the config specific to that PLIP::
+Instead of running the buildout with the default buildout file, you will run the config specific to that PLIP::
 
   > ./bin/buildout -c plips/plipXXXX.cfg
 
 Functionality Review
 ====================
 There are several things that could be addressed in a PLIP review depending on the nature of the PLIP itself.
-This is by no means an exhaustive list,
-but a place to start.
+This is by no means an exhaustive list, but a place to start.
 Things to think about when reviewing:
 
 General
@@ -72,9 +68,7 @@ Documentation Issues
 * Is the change itself properly documented?
 
 Please report bugs/issues on GitHub as you would for any Plone bug.
-Reference the PLIP in the bug,
-assign to its implementer,
-and add a tag for the PLIP in the form of plip-xxx.
+Reference the PLIP in the bug, assign to its implementer, and add a tag for the PLIP in the form of plip-xxx.
 This way the implementer can find help if he needs it.
 Please also prioritize the ticket.
 The PLIP will not be merged until all blockers and critical bugs are fixed.
@@ -102,5 +96,3 @@ ME/TAL
 * Is there any code in a loop that could potentially be a performance issue?
 * Are there any deprecated or old style ME/TAL lines of code such as using DateTime?
 * Is the rendered html standards compliant? Are ids and classes used appropriately?
-
-

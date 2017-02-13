@@ -5,30 +5,29 @@ Contributor’s Agreement for Plone Explained
 ===========================================
 
 Prospective contributors to the Plone core code base are required to sign a contributor’s agreement,
-which assigns copyright in the code to the Plone Foundation,
-the non-profit organization which stewards the Plone code base.
-This document explains the purposes of this,
-along with questions and answers about what this means.
+which assigns copyright in the code to the Plone Foundation, the non-profit organization which stewards the Plone code base.
 
-The Plone Contributor Agreement can be found at: 
-`http://plone.org/foundation/contributors-agreement/agreement.pdf`_
+This document explains the purposes of this, along with questions and answers about what this means.
+
+The Plone Contributor Agreement can be found at:
+`https://plone.org/foundation/contributors-agreement/agreement.pdf`_
 
 About the Plone Contributor Agreement
 =====================================
 
 The Foundation feels that it benefits the community for a single organization to hold the rights to Plone.
-Prior to the Foundation,
-the intellectual property of Plone was jointly held by individual developers and by Alan Runyan and Alexander Limi.
+Prior to the Foundation, the intellectual property of Plone was jointly held by individual developers and by Alan Runyan and Alexander Limi.
+
 The community members who formed the Foundation felt that having the Foundation hold these rights provides several benefits:
 
 1.  **Minimizing confusion / maximizing business compatibility** --
     Organizations considering adopting Plone have a simple answer for "Who owns this?",
     rather than a more complicated answer that might scare away the legally-cautious.
-    
+
 2.  **Trademark protection** --
     By having the Foundation hold the trademarks and rights to the Plone branding assets,
     it can effectively protect these from unfair use.
-    
+
 3.  **Guarantee of future Open Source versions** --
     The Foundation's contributor agreement ensures that there will **always** be an OSI-approved version of Plone.
 
@@ -47,8 +46,8 @@ What does the contributor's agreement cover?
   which requires derived works to be GPL licensed.
 
 What rights will I continue to have for my contributions?
-  
-  Contributors are asked to transfer their intellectual property rights to the Foundation. 
+
+  Contributors are asked to transfer their intellectual property rights to the Foundation.
   In return,
   they will be given back irrevocable rights to use and distribute their contributions.
   They can even give their contributions to other Open Source projects
@@ -60,7 +59,7 @@ Do I have to sign the contributor's agreement to make changes to the Plone core 
   Yes.
 
 Do I have to sign the contributor's agreement to submit a patch to the Plone core codebase?
-  
+
   We enthusiastically welcome patches,
   but we can't merge them until you sign and return a contributor's agreement.
   (Unless, in the judgement of the Plone Release Manager, the patch is so tiny as not to constitute a "creative work".
@@ -85,7 +84,7 @@ Couldn't the Board change its mind about this?
 
 Will Plone ever be available under a non-GPL license?
 
-  The current Plone approach states that companies can negotiate a non-GPL license. 
+  The current Plone approach states that companies can negotiate a non-GPL license.
   Thus,
   the Foundation might pursue a dual-licensing (GPL and non-GPL) scheme -
   but,

@@ -22,38 +22,27 @@ Our repository on GitHub has the following layout:
 Git Basics
 ==========
 
-Some introductory definitions and concepts,
-if you are already familiar enough with Git,
+Some introductory definitions and concepts, if you are already familiar enough with Git,
 head to next section: :ref:`general-guidelines-label`.
 
 
 Mental working model
 --------------------
 
-With Git
-(as well as all modern `DVCS <http://en.wikipedia.org/wiki/Distributed_revision_control>`_),
-distributing changes to others is a two steps process
-(contrary to traditional VCS like ``svn``).
+With Git (as well as all modern `DVCS <http://en.wikipedia.org/wiki/Distributed_revision_control>`_),
+distributing changes to others is a two steps process (contrary to traditional VCS like ``svn``).
 
-This way what on svn is a single ``svn ci`` in Git is two commands:
-``git commit`` and ``git push``.
+This way what on svn is a single ``svn ci`` in Git is two commands: ``git commit`` and ``git push``.
 
-This may seem to be a drawback,
-but instead it's a feature.
+This may seem to be a drawback, but instead it's a feature.
 
 **You are working locally until you decide to push your changes.**
 
-Not a single commit anymore,
-but a series of them,
-meaning that all those fears,
-concerns,
-doubts are taken away!
+Not a single commit anymore, but a series of them, meaning that all those fears, concerns, doubts are taken away!
 
 You can freely fix/change/remove/rework/update/... your commits afterwards.
 
-Just push your changes whenever you are sure they are what you,
-and others,
-expect them to be.
+Push your changes whenever you are sure they are what you, and others, expect them to be.
 
 
 Concepts
@@ -95,16 +84,14 @@ Stash
 Branches
 --------
 
-Another great feature of DVCS is cheap branching,
-i.e. branching in Git is effortless and really useful.
-As it's no longer too much effort to branch,
-there is no need to always work on the master branch.
+Another great feature of DVCS is cheap branching, i.e. branching in Git is effortless and really useful.
+As it's no longer too much effort to branch, there is no need to always work on the master branch.
+
 A developer can branch easily for each fix/feature.
 
 Branches allow you to tinker with your changes while keeping the master branch clean.
 
-Not only that,
-it also allows you to keep modifying your changes until you and your peers are fine with them.
+Not only that, it also allows you to keep modifying your changes until you and your peers are fine with them.
 
 Further documentation:
 `Introduction to branching <http://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell>`_.
@@ -113,8 +100,7 @@ Further documentation:
 Commands
 --------
 
-Some of the most useful/common commands
-(note that most of them have switches that enhance/*completely twist* their functionality):
+Some of the most useful/common commands (note that most of them have switches that enhance/*completely twist* their functionality):
 
 Just append ``--help`` on all of them to get their full definitions and options,
 i.e. ``git add --help``.
@@ -282,8 +268,7 @@ With::
    * ccccccc master evolves
    * aaaaaaa commit on master
 
-What do we see above?
-Actually and contrary to what it seems,
+What do we see above? Actually and contrary to what it seems,
 exactly the same **result**
 (as how the files and its content look like on commit ``333333``).
 
@@ -314,8 +299,7 @@ http://stevenharman.net/git-pull-with-automatic-rebase
 
 http://www.slideshare.net/michalczyzcs3b/git-merge-vs-rebase-miksturait-4
 
-Just search for ``git merge vs rebase``,
-you will find plenty of literature.
+Search for ``git merge vs rebase``, you will find plenty of literature.
 
 
 Reviewing your changes
@@ -333,34 +317,26 @@ The ``--patch`` (also ``-p``) switch allows you to select which hunks you want t
 This is not only great to split changes into different commits,
 but is also the time when you actually **review** your code before anyone else sees it.
 
-This is the time when you spot typos,
-pep8 errors,
-misaligned code,
-lack of docstrings in methods,
-that a permission is not defined on Generic Setup,
-that an upgrade should be needed...
+This is the time when you spot typos, pep8 errors, misaligned code, lack of docstrings in methods,
+that a permission is not defined on Generic Setup, that an upgrade should be needed...
 
 Remember that the first code review is the one you do on your own.
 Some inspiration/better phrasing:
 http://ada.mbecker.cc/2012/11/22/be-your-own-code-review/
 
-And please,
-do remember the gold metric about reviewing code:
+And please, do remember the gold metric about reviewing code:
 http://www.osnews.com/story/19266/WTFs_m
 
 
 One commit does one thing
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Repeat with me:
-*One commit does one thing*.
-Period.
+Repeat with me: *One commit does one thing*. Period.
 
-When someone else needs to review your code,
-most probably she will give up or just skim over your code if there are too many (unrelated) changes.
+When someone else needs to review your code, most probably she will give up or just skim over your code
+if there are too many (unrelated) changes.
 
-Reviewing commits with +20 files doing all sorts of changes on them
-(maybe even unrelated)
+Reviewing commits with +20 files doing all sorts of changes on them (maybe even unrelated)
 is no fun and adds complexity and `cognitive load <http://en.wikipedia.org/wiki/Cognitive_load>`_.
 
 Something that should mostly be a verification of a checklist like:
@@ -377,19 +353,14 @@ Turns instead into a list of questions:
   am I missing something?
 - *others*
 
-If you can not express what has been changed within 50 characters
-(suggested length of a commit message subject),
-or you say it like "it does XXX and YYY",
-you most probably need to split that commit into,
-at least,
+If you can not express what has been changed within 50 characters (suggested length of a commit message subject),
+or you say it like "it does XXX and YYY", you most probably need to split that commit into, at least,
 two or more commits.
 
-That doesn't mean that a +20 files or +100 lines of code changes are bad per se,
-you may be doing a simple refactoring across lots of files,
-that's fine and good actually.
+That doesn't mean that a +20 files or +100 lines of code changes are bad per se, you may be doing
+a simple refactoring across lots of files, that's fine and good actually.
 
-As long as a commit is just and only about a specific purpose,
-and not a mixed selection of the following:
+As long as a commit is just and only about a specific purpose, and not a mixed selection of the following:
 
 - refactoring code
 - moving things around
@@ -422,16 +393,12 @@ Adding references to issues
 
 Always add the full URL to the issue/pull request you are fixing/referring to.
 
-Maybe within the Git repository it makes sense,
-but as soon as you are outside of it,
-it will not.
+Maybe within the Git repository it makes sense, but as soon as you are outside of it, it will not.
 
-Take into account mr.roboto automatic commits to buildout.coredev for example,
-if your commit message goes like *Fix for #33*,
+Take into account mr.roboto automatic commits to buildout.coredev for example, if your commit message goes like *Fix for #33*,
 which issue/pull request is that fixing?
-The one in buildout.coredev itself?
-On another issue tracker?
-Somewhere else?
+
+The one in buildout.coredev itself? On another issue tracker? Somewhere else?
 
 It would be far better if the commit goes instead like::
 
@@ -450,29 +417,18 @@ https://github.com/plone/plone.app.content/commit/0f3a6c65b2018e0ecc65d0ad1581e3
 
 Commit messages goes like *"Make note about how this interface is now for BBB only"*.
 
-Question:
-if it's BBB only,
-where is the new place to look for that interface now?
+Question: if it's BBB only, where is the new place to look for that interface now?
 
-The problem is that,
-in this case Martin,
-wrote that in 2009,
-so most probably once a refactor of that package is done later on 2015,
-Martin is no longer around,
-and if he was,
-most probably he would not remember something from +6 years ago.
+The problem is that, in this case Martin, wrote that in 2009, so most probably once a refactor of that package
+is done later on 2015, Martin is no longer around, and if he was, most probably he would not remember something from +6 years ago.
 
 Ask yourself a question:
-if someone comes to you asking details about a random commit done by you +5 years ago,
-what will you reply?
 
-Try that,
-get one project that you worked 5 years ago,
-get a random commit and:
+If someone comes to you asking details about a random commit done by you +5 years ago, what will you reply?
 
-See if,
-just by reading the commit message,
-you are given enough information of what changes have been made,
+Try that, get one project that you worked 5 years ago, get a random commit and:
+
+See if, just by reading the commit message, you are given enough information of what changes have been made,
 when comparing the commit message and the actual code.
 Does the commit message match the code changed?
 
@@ -480,28 +436,19 @@ Does the commit message match the code changed?
 Before pushing commits
 ----------------------
 
-Code is reviewed,
-spread into nice isolated commits,
-descriptive enough commit messages are written,
-so,
-*what's left?*
+Code is reviewed, spread into nice isolated commits, descriptive enough commit messages are written, *what's left?*
 
-A final overview of what you are about to push!
+A final overview of what you are about to push.
 
-To do so,
-you can get an idea with the following Git alias
-(to be added on your ``~/.gitconfig``)::
+To do so, you can get an idea with the following Git alias (to be added on your ``~/.gitconfig``)::
 
     [alias]
         fulllog = log --graph --decorate --pretty=oneline --abbrev-commit --all
 
-Now run :command:`git fulllog` on your Git repository,
-you will see a nice graph showing you the current situation.
+Now run :command:`git fulllog` on your Git repository, you will see a nice graph showing you the current situation.
 
-Maybe it makes you realize that commits need to be reordered,
-commit messages could get some improvements,
-that you forgot to add a reference to an issue,
-etc.
+Maybe it makes you realize that commits need to be reordered, commit messages could get some improvements,
+that you forgot to add a reference to an issue, ...
 
 
 Pull requests
@@ -514,8 +461,7 @@ Always rebase
 -------------
 
 Always rebase on top of the branch you want your changes to be merged before sending a pull request,
-and as your pull request is still pending to be merged and the master branch evolves,
-keep rebasing it.
+and as your pull request is still pending to be merged and the master branch evolves, keep rebasing it.
 
 To do so::
 
@@ -525,13 +471,10 @@ To do so::
     # or if there are conflicts,
     # fix them and follow instructions from git itself
 
-The principle here is:
-if you do merges with master,
-you are actually spreading your pull request into more commits,
+The principle is, if you do merges with master, you are actually spreading your pull request into more commits,
 and at the end making it more difficult to track what was changed.
 
-On top of that,
-the commit history is more complex to follow.
+On top of that, the commit history is more complex to follow.
 
 See the history example above: :ref:`general-guidelines-label`.
 
@@ -546,8 +489,7 @@ On a series of commits make sure the same code line is not changed twice,
 the worst thing you can do to the one reviewing your changes,
 is to make him/her spend time reviewing some code changes that one the next commit are changed again to do something else.
 
-It will not only make your commits smaller,
-but it will also make it easy to do atomic commits.
+It will not only make your commits smaller, but it will also make it easy to do atomic commits.
 
 
 No cleanup commits please
@@ -555,19 +497,15 @@ No cleanup commits please
 
 *On the context of a pull request*
 
-Ask yourself: What relation does a cleanup commit,
-say pep8 fixes or other code analysis fixes,
+Ask yourself: What relation does a cleanup commit, say pep8 fixes or other code analysis fixes,
 have with your pull request?
 
 Couldn't that pep8 fixes commit or small refactoring go straight into master branch?
 
-Or even if you send a pull request for it,
-chances are that it will be merged right away.
-As long as it is a cleanup commit,
-there's not much to argue with it.
+Or even if you send a pull request for it, chances are that it will be merged right away.
+As long as it is a cleanup commit, there's not much to argue with it.
 
-The same goes with commits that improve or actually fix previous commits
-(within the same pull request).
+The same goes with commits that improve or actually fix previous commits (within the same pull request).
 A series of commits like this::
 
     * 11ba28c Last fix, finally
@@ -578,18 +516,15 @@ A series of commits like this::
 
 Only tells you that the author did not take care at all about the one who will review it,
 and specially about the person that in +5 years will try to understand that test.
-Specially because now the test is not only spread between 4 commits,
-but most probably during those 5 years it has already been refactored,
-so maybe a :command:`git blame` will report that within that test method,
-there are +5 related current commits to check,
-not nice right?
+Specially because now the test is not only spread between 4 commits, but most probably during those 5 years
+it has already been refactored, maybe a :command:`git blame` will report that within that test method,
+there are +5 related current commits to check, not nice right?
 
 
 Squashing commits
 ^^^^^^^^^^^^^^^^^
 
-To fix the previous example,
-run the following command::
+To fix the previous example, run the following command::
 
     git rebase ---interactive <base> # which mostly is usually master
 
@@ -610,9 +545,7 @@ To actually make it easier you can do commits like this::
 
 Where ``HASH`` is the commit hash you want the changes you are about to commit be merged with.
 
-This way,
-when running :command:`git rebase --interactive`,
-Git will already reorder the commits as you already want.
+This way, when running :command:`git rebase --interactive`, Git will already reorder the commits as you already want.
 
 
 No side changes
@@ -620,8 +553,7 @@ No side changes
 
 That's an extension to the previous point.
 
-Keeping pull requests simple and to the point,
-without changes not related to the pull request itself,
+Keeping pull requests simple and to the point, without changes not related to the pull request itself,
 will make your changes easier to understand and easier to follow.
 
 Again this applies:
@@ -642,14 +574,9 @@ how to proceed forward?
 
 **Solution:** ``git stash`` or ``git commit --amend -m"TMP"``.
 
-The basic idea here is: store your current changes safely
-(either on a Git stash commit or directly on a commit on the branch,
-whichever you prefer),
-move to the canonical branch (``master`` usually),
-do the fixes/cleanups/refactorings there,
-commit those changes,
-rebase your branch on top of the changes you made,
-hack away.
+The basic idea here is: store your current changes safely (either on a Git stash commit or directly on a commit on the branch,
+whichever you prefer), move to the canonical branch (``master`` usually), do the fixes/cleanups/refactorings there,
+commit those changes, rebase your branch on top of the changes you made, hack away.
 
 Command line version::
 
@@ -665,8 +592,7 @@ Command line version::
 Git visual applications
 -----------------------
 
-Not everyone is a fan of the command line,
-for them there is a list of GUI clients on the official Git website:
+Not everyone is a fan of the command line, for them there is a list of GUI clients on the official Git website:
 
 http://git-scm.com/downloads/guis
 
@@ -692,11 +618,9 @@ https://github.com/plone/plone.dotfiles.
 Learn more
 ==========
 
-What's here is just the tip of the iceberg,
-there's plenty of Git knowledge on the web.
+What's here is just the tip of the iceberg, there's plenty of Git knowledge on the web.
 
-A few good further resources are listed here
-(contributions welcome):
+A few good further resources are listed here (contributions welcome):
 
 - official online Git book: `Pro Git <http://git-scm.com/book/en/v2>`_
 - PyCon 2015 talk: `Advanced Git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_

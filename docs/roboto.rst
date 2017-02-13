@@ -6,8 +6,8 @@ Mr. Roboto
 
 GitHub push
 ===========
-When a push happens on GitHub,
-``mr.roboto`` is triggered so starts to analyze the push.
+
+When a push happens on GitHub, ``mr.roboto`` is triggered so starts to analyze the push.
 
 * If it's on ``buildout-coredev`` it starts the job of the branch that has been pushed.
   In this case we send to plone-cvs the commit to keep track of the commits on that list.
@@ -18,6 +18,7 @@ When a push happens on GitHub,
 
 Job finishes
 ============
+
 When jenkins finish a job it does a callback to ``mr.roboto`` in order to :
 
 * If it comes from a ``coredev`` job,
@@ -32,17 +33,12 @@ When jenkins finish a job it does a callback to ``mr.roboto`` in order to :
 
 For all kgs jobs jenkins sends a mail to the author with the results when is finished.
 
-All the notifications has a url like :
-http://jenkins.plone.org/roboto/get_info?push=9a183de85b3f48abb363fa8286928a10
+All the notifications has a url like: http://jenkins.plone.org/roboto/get_info?push=9a183de85b3f48abb363fa8286928a10.
 
-on this url there is the commit,
-who,
-the diff,
-the files and the result for each jenkins job.
+On this url there is the commit, who, the diff, the files and the result for each jenkins job.
 
-So ...
 
-* `plone-testbot <http://lists.plone.org/mailman/listinfo/plone-testbot>`_ mailing list is receiving only when a test fails on kgs environment and may take max 10 min from the push. 
+* `plone-testbot <http://lists.plone.org/mailman/listinfo/plone-testbot>`_ mailing list is receiving only when a test fails on kgs environment and may take max 10 min from the push.
 * `plone-cvs <https://lists.sourceforge.net/lists/listinfo/plone-cvs>`_ always has the commit there with the diff and the information and may take 10 min to get there after the push.
 * author receives the results of tests failing against kgs on 10 min
 
