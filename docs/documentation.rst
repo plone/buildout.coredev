@@ -7,8 +7,8 @@ Writing documentation
 Documentation of Plone
 ======================
 
-The comprehensive resource for Plone documentation is http://docs.plone.org/. The following sections among 
-others are included: 
+The comprehensive resource for Plone documentation is http://docs.plone.org/. The following sections among
+others are included:
 
 * :doc:`User Manual </working-with-content/index>`
 * :doc:`Installing Plone </manage/installing/index>`
@@ -23,8 +23,7 @@ Documenting a package
 The basics
 ----------
 
-At the very least,
-your package should include the following forms of documentation:
+At the very least, your package should include the following forms of documentation:
 
   :file:`README.rst`
     The readme is the first entry point for most people to your package.
