@@ -10,6 +10,7 @@ Release process for Plone packages
 
 To keep the Plone software stack maintainable, the Python egg release process must be automated to high degree.
 This happens by enforcing Python packaging best practices and then making automated releases using the `zest.releaser <https://github.com/zestsoftware/zest.releaser/>`_  tool.
+
 This is extended with Plone coredev specific features by `plone.releaser <https://github.com/plone/plone.releaser>`.
 
 * Anyone with necessary PyPi permissions must be able to make a new release by running the ``fullrelease`` command
@@ -43,13 +44,12 @@ More information:
 Special packages
 ================
 
-The Plone Release Team releases the core Plone packages.  Several
-others also have the rights to release individual packages on
-https://pypi.python.org.  If you have those rights on your account, you
-should feel free to make releases.
+The Plone Release Team releases the core Plone packages.
+Several others also have the rights to release individual packages on https://pypi.python.org.
+If you have those rights on your account, you should feel free to make releases.
 
-Some packages need special care or should be done only by specific
-people as they know what they are doing.  These are:
+Some packages need special care or should be done only by specific people as they know what they are doing.
+These are:
 
 ``Products.CMFPlone``, ``Plone``, and ``plone.app.upgrade``:
   Please leave these to the release manager, Eric Steele.
@@ -63,10 +63,7 @@ Plone core release process checklist
 
 1. Check Jenkins Status
 
-Check latest Plone coredev job on jenkins.plone.org,
-it should be green,
-if it is not,
-fix the problem first.
+Check latest Plone coredev job on jenkins.plone.org, it should be green, if it is not, fix the problem first.
 
 2. Check out buildout.coredev
 
@@ -83,15 +80,13 @@ Note that ``release.cfg`` installs ``plone.releaser`` which hooks into
 
 3. Check Packages for Updates
 
-Check all packages for updates,
-add to/remove from checkouts.cfg accordingly.
+Check all packages for updates, add to/remove from checkouts.cfg accordingly.
 
 This script may help::
 
   bin/manage report --interactive
 
-This step should not be needed,
-because we do the check for every single commit,
+This step should not be needed, because we do the check for every single commit,
 but people may still have forgotten to add a package to the ``checkouts.cfg`` file.
 
 4. Check packages individually
@@ -167,8 +162,7 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 
 20. Mark release page as "final" (launchpad?)
 
-20. Update PloneSoftwareCenter pointer to the newest release,
-    so that it's linked from the homepage
+20. Update PloneSoftwareCenter pointer to the newest release, that it's linked from the homepage
 
 21. Send out announcement to plone-announce
 
