@@ -1,318 +1,293 @@
-Repository: Products.PortalTransforms
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2017-02-12T17:19:25+01:00
-Author: Pavel Bogdanovic (pabo3000) <pb@prontonet.eu>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/f326f4bb38b025483ef9e1698c529c73cea53b6f
+Date: 2017-02-16T23:51:03+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/1c92b69cd22b25bd82884468203aa2cb083f79e0
 
-Add the possibility to switch on markdown extension through the zmi.
+Moved getToolByName early patch to the later patches.
+
+This fixes a circular import.
+See https://github.com/plone/Products.CMFPlone/issues/1950
 
 Files changed:
+A Products/CMFPlone/patches/gtbn.py
 M CHANGES.rst
-M Products/PortalTransforms/setuphandlers.py
-M Products/PortalTransforms/transforms/markdown_to_html.py
+M Products/CMFPlone/earlypatches/security.py
+M Products/CMFPlone/patches/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a04b2dd..6c8df32 100644
+index 0c59567..9c9e08c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Add the possibility to switch on markdown extension through the zmi.
-+  [pabo3000]
+@@ -153,6 +153,12 @@ New features:
  
  Bug fixes:
  
-diff --git a/Products/PortalTransforms/setuphandlers.py b/Products/PortalTransforms/setuphandlers.py
-index 00c71aa..81c2018 100644
---- a/Products/PortalTransforms/setuphandlers.py
-+++ b/Products/PortalTransforms/setuphandlers.py
-@@ -27,23 +27,23 @@ def correctMapping(out, portal):
-                         print >> out, "...ok"
- 
- 
--def updateSafeHtml(out, portal):
--    print >> out, 'Update safe_html...'
--    safe_html_id = 'safe_html'
--    safe_html_module = "Products.PortalTransforms.transforms.safe_html"
-+def updateTransform(out, portal, id):
-+    print >> out, 'Update {0}...'.format(id)
-+    transform_id = id
-+    transform_module = "Products.PortalTransforms.transforms.{0}".format(id)
-     pt = getToolByName(portal, 'portal_transforms')
-     for id in pt.objectIds():
-         transform = getattr(pt, id)
--        if transform.id == safe_html_id and \
--                transform.module == safe_html_module:
-+        if transform.id == transform_id and \
-+                transform.module == transform_module:
-             try:
-                 transform.get_parameter_value('disable_transform')
-             except KeyError:
--                print >> out, '  replace safe_html (%s, %s) ...' % (
--                    transform.name(), transform.module)
-+                print >> out, '  replace {0} ({1}, {2}) ...'.format(
-+                    id, transform.name(), transform.module)
-                 try:
-                     pt.unregisterTransform(id)
--                    pt.manage_addTransform(id, safe_html_module)
-+                    pt.manage_addTransform(id, transform_module)
-                 except:
-                     raise
-                 else:
-@@ -55,7 +55,8 @@ def updateSafeHtml(out, portal):
- def installPortalTransforms(portal):
-     out = StringIO()
- 
--    updateSafeHtml(out, portal)
-+    updateTransform(out, portal, 'safe_html')
-+    updateTransform(out, portal, 'markdown_to_html')
- 
-     correctMapping(out, portal)
- 
-diff --git a/Products/PortalTransforms/transforms/markdown_to_html.py b/Products/PortalTransforms/transforms/markdown_to_html.py
-index 6854794..44362de 100644
---- a/Products/PortalTransforms/transforms/markdown_to_html.py
-+++ b/Products/PortalTransforms/transforms/markdown_to_html.py
-@@ -26,9 +26,32 @@ class markdown(object):
-     inputs = ("text/x-web-markdown",)
-     output = "text/html"
- 
-+    def __init__(self, name=None, enabled_extensions=('markdown.extensions.fenced_code', 'markdown.extensions.nl2br', ), **kwargs):
-+        self.config = {
-+            'enabled_extensions': enabled_extensions,
-+        }
 +
-+        self.config_metadata = {
-+            'enabled_extensions': (
-+                'list',
-+                'enabled_extensions',
-+                'Look for available extensions at ' +
-+                'https://pythonhosted.org/Markdown/extensions/index.html ' +
-+                'or write your own.'
-+            ),
-+        }
++- Moved getToolByName early patch to the later patches.
++  This fixes a circular import.
++  See `issue #1950 <https://github.com/plone/Products.CMFPlone/issues/1950>`_.
++  [maurits]
 +
-+        if name:
-+            self.__name__ = name
-+
-     def name(self):
-         return self.__name__
+ - Include JS Patterns when loading a page via ajax or an iframe [displacedaussie]
  
-+    def __getattr__(self, attr):
-+        if attr in self.config:
-+            return self.config[attr]
-+        raise AttributeError(attr)
+ - Restore ability to include head when loading via ajax [displacedaussie]
+diff --git a/Products/CMFPlone/earlypatches/security.py b/Products/CMFPlone/earlypatches/security.py
+index 8985591..dde89c4 100644
+--- a/Products/CMFPlone/earlypatches/security.py
++++ b/Products/CMFPlone/earlypatches/security.py
+@@ -49,44 +49,7 @@ def require(self, *args, **kw):
+ ClassDirective.require = require
+ 
+ # 5. Check return value of getToolByName
+-# This is an unusual sort of monkey patching...we replace just the func_code
+-# rather than the entire function, to make sure that aliases to the function
+-# that were imported prior to this patch will still run the patched code.
+-code = """
+-from persistent.interfaces import IPersistent
+-from OFS.interfaces import IItem
+-try:
+-    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
+-except ImportError:
+-    FauxArchetypeTool = type('FauxArchetypeTool')
+-
+-def _getToolByName(self, name, default=_marker):
+-    pass
+-
+-def check_getToolByName(obj, name, default=_marker):
+-    result = _getToolByName(obj, name, default)
+-    if IPersistent.providedBy(result) or \
+-            IItem.providedBy(result) or \
+-            name in _tool_interface_registry or \
+-            (isinstance(result, FauxArchetypeTool)) or \
+-            '.test' in result.__class__.__module__ or \
+-            result.__class__.__module__ == 'mock' or \
+-            result is _marker or \
+-            result is default:
+-        return result
+-    else:
+-        raise TypeError("Object found is not a portal tool (%s)" % (name,))
+-    return result
+-"""
+-from Products.CMFCore import utils
+-if '_marker' not in utils.getToolByName.func_globals:
+-    raise Exception("This Version of Products.CMFPlone is not compatible "
+-                    "with Products.PloneHotfix20121106, the fixes are "
+-                    "included already in Products.CMFPlone, please remove "
+-                    "the hotfix")
+-exec code in utils.getToolByName.func_globals
+-utils._getToolByName.func_code = utils.getToolByName.func_code
+-utils.getToolByName.func_code = utils.check_getToolByName.func_code
++# Moved to patches/gtbn.py due to circular imports.
+ 
+ # 6. Protect some methods in ZCatalog
+ from Products.ZCatalog.ZCatalog import ZCatalog
+diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
+index d4de5f7..4da5cc0 100644
+--- a/Products/CMFPlone/patches/__init__.py
++++ b/Products/CMFPlone/patches/__init__.py
+@@ -27,3 +27,5 @@
+ import publishing
+ 
+ import z3c_form
 +
-     def convert(self, orig, data, **kwargs):
-         if HAS_MARKDOWN:
-             # markdown expects unicode input:
-@@ -36,7 +59,7 @@ def convert(self, orig, data, **kwargs):
-             # PortalTransforms, however expects a string as result,
-             # so we encode the unicode result back to UTF8:
-             html = markdown_transformer \
--                .markdown(orig, extensions=['markdown.extensions.fenced_code']) \
-+                .markdown(orig, extensions=self.config.get('enabled_extensions', [])) \
-                 .encode('utf-8')
-         else:
-             html = orig
++import gtbn
+diff --git a/Products/CMFPlone/patches/gtbn.py b/Products/CMFPlone/patches/gtbn.py
+new file mode 100644
+index 0000000..94027a3
+--- /dev/null
++++ b/Products/CMFPlone/patches/gtbn.py
+@@ -0,0 +1,43 @@
++# -*- coding: utf-8 -*-
++from Products.CMFCore import utils
++
++# Check return value of getToolByName
++# this used to be step 5 in earlypatches, but was moved to avoid
++# circular imports.
++# This is an unusual sort of monkey patching...we replace just the func_code
++# rather than the entire function, to make sure that aliases to the function
++# that were imported prior to this patch will still run the patched code.
++code = """
++from persistent.interfaces import IPersistent
++from OFS.interfaces import IItem
++try:
++    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
++except ImportError:
++    FauxArchetypeTool = type('FauxArchetypeTool')
++
++def _getToolByName(self, name, default=_marker):
++    pass
++
++def check_getToolByName(obj, name, default=_marker):
++    result = _getToolByName(obj, name, default)
++    if IPersistent.providedBy(result) or \
++            IItem.providedBy(result) or \
++            name in _tool_interface_registry or \
++            (isinstance(result, FauxArchetypeTool)) or \
++            '.test' in result.__class__.__module__ or \
++            result.__class__.__module__ == 'mock' or \
++            result is _marker or \
++            result is default:
++        return result
++    else:
++        raise TypeError("Object found is not a portal tool (%s)" % (name,))
++    return result
++"""
++if '_marker' not in utils.getToolByName.func_globals:
++    raise Exception("This Version of Products.CMFPlone is not compatible "
++                    "with Products.PloneHotfix20121106, the fixes are "
++                    "included already in Products.CMFPlone, please remove "
++                    "the hotfix")
++exec code in utils.getToolByName.func_globals
++utils._getToolByName.func_code = utils.getToolByName.func_code
++utils.getToolByName.func_code = utils.check_getToolByName.func_code
 
 
-Repository: Products.PortalTransforms
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2017-02-16T19:16:30+01:00
-Author: Pavel Bogdanovic (pabo3000) <pb@prontonet.eu>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/43dec09fc9e97274b1ca706f7f6326c39365927f
-
-refactor setuphandlers.
-
-Files changed:
-M Products/PortalTransforms/setuphandlers.py
-
-diff --git a/Products/PortalTransforms/setuphandlers.py b/Products/PortalTransforms/setuphandlers.py
-index 81c2018..a09e9e8 100644
---- a/Products/PortalTransforms/setuphandlers.py
-+++ b/Products/PortalTransforms/setuphandlers.py
-@@ -27,29 +27,28 @@ def correctMapping(out, portal):
-                         print >> out, "...ok"
- 
- 
--def updateTransform(out, portal, id):
--    print >> out, 'Update {0}...'.format(id)
--    transform_id = id
--    transform_module = "Products.PortalTransforms.transforms.{0}".format(id)
-+def updateTransform(out, portal, transform_id):
-+    print >> out, 'Update {0}...'.format(transform_id)
-+    transform_module = "Products.PortalTransforms.transforms.{0}".format(transform_id)
-     pt = getToolByName(portal, 'portal_transforms')
--    for id in pt.objectIds():
--        transform = getattr(pt, id)
-+    for item in pt.objectIds():
-+        transform = getattr(pt, item)
-         if transform.id == transform_id and \
-                 transform.module == transform_module:
-             try:
-                 transform.get_parameter_value('disable_transform')
-             except KeyError:
--                print >> out, '  replace {0} ({1}, {2}) ...'.format(
--                    id, transform.name(), transform.module)
-+                out.write('  replace {0} ({1}, {2}) ...'.format(
-+                    item, transform.name(), transform.module))
-                 try:
--                    pt.unregisterTransform(id)
--                    pt.manage_addTransform(id, transform_module)
-+                    pt.unregisterTransform(item)
-+                    pt.manage_addTransform(item, transform_module)
-                 except:
-                     raise
-                 else:
--                    print >> out, '  ...done'
-+                    out.write('  ...done')
- 
--    print >> out, '...done'
-+    out.write('  ...done')
- 
- 
- def installPortalTransforms(portal):
-
-
-Repository: Products.PortalTransforms
-
-
-Branch: refs/heads/master
-Date: 2017-02-17T14:25:00+01:00
+Date: 2017-02-20T01:16:32+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/cca9f945a3026242d58d63232b440525d1d2d0fd
+Commit: https://github.com/plone/Products.CMFPlone/commit/f8be19ab18027ba36215f949199546a55a01641d
 
-Merge pull request #18 from pabo3000/master
+Merge pull request #1951 from plone/issue-1950-gtbn-circular-import
 
-Add the possibility to switch on markdown extension through the zmi.
+Moved getToolByName early patch to the later patches.
 
 Files changed:
+A Products/CMFPlone/patches/gtbn.py
 M CHANGES.rst
-M Products/PortalTransforms/setuphandlers.py
-M Products/PortalTransforms/transforms/markdown_to_html.py
+M Products/CMFPlone/earlypatches/security.py
+M Products/CMFPlone/patches/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a04b2dd..6c8df32 100644
+index 0c59567..9c9e08c 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,8 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Add the possibility to switch on markdown extension through the zmi.
-+  [pabo3000]
+@@ -153,6 +153,12 @@ New features:
  
  Bug fixes:
  
-diff --git a/Products/PortalTransforms/setuphandlers.py b/Products/PortalTransforms/setuphandlers.py
-index 00c71aa..a09e9e8 100644
---- a/Products/PortalTransforms/setuphandlers.py
-+++ b/Products/PortalTransforms/setuphandlers.py
-@@ -27,35 +27,35 @@ def correctMapping(out, portal):
-                         print >> out, "...ok"
- 
- 
--def updateSafeHtml(out, portal):
--    print >> out, 'Update safe_html...'
--    safe_html_id = 'safe_html'
--    safe_html_module = "Products.PortalTransforms.transforms.safe_html"
-+def updateTransform(out, portal, transform_id):
-+    print >> out, 'Update {0}...'.format(transform_id)
-+    transform_module = "Products.PortalTransforms.transforms.{0}".format(transform_id)
-     pt = getToolByName(portal, 'portal_transforms')
--    for id in pt.objectIds():
--        transform = getattr(pt, id)
--        if transform.id == safe_html_id and \
--                transform.module == safe_html_module:
-+    for item in pt.objectIds():
-+        transform = getattr(pt, item)
-+        if transform.id == transform_id and \
-+                transform.module == transform_module:
-             try:
-                 transform.get_parameter_value('disable_transform')
-             except KeyError:
--                print >> out, '  replace safe_html (%s, %s) ...' % (
--                    transform.name(), transform.module)
-+                out.write('  replace {0} ({1}, {2}) ...'.format(
-+                    item, transform.name(), transform.module))
-                 try:
--                    pt.unregisterTransform(id)
--                    pt.manage_addTransform(id, safe_html_module)
-+                    pt.unregisterTransform(item)
-+                    pt.manage_addTransform(item, transform_module)
-                 except:
-                     raise
-                 else:
--                    print >> out, '  ...done'
-+                    out.write('  ...done')
- 
--    print >> out, '...done'
-+    out.write('  ...done')
- 
- 
- def installPortalTransforms(portal):
-     out = StringIO()
- 
--    updateSafeHtml(out, portal)
-+    updateTransform(out, portal, 'safe_html')
-+    updateTransform(out, portal, 'markdown_to_html')
- 
-     correctMapping(out, portal)
- 
-diff --git a/Products/PortalTransforms/transforms/markdown_to_html.py b/Products/PortalTransforms/transforms/markdown_to_html.py
-index 6854794..44362de 100644
---- a/Products/PortalTransforms/transforms/markdown_to_html.py
-+++ b/Products/PortalTransforms/transforms/markdown_to_html.py
-@@ -26,9 +26,32 @@ class markdown(object):
-     inputs = ("text/x-web-markdown",)
-     output = "text/html"
- 
-+    def __init__(self, name=None, enabled_extensions=('markdown.extensions.fenced_code', 'markdown.extensions.nl2br', ), **kwargs):
-+        self.config = {
-+            'enabled_extensions': enabled_extensions,
-+        }
 +
-+        self.config_metadata = {
-+            'enabled_extensions': (
-+                'list',
-+                'enabled_extensions',
-+                'Look for available extensions at ' +
-+                'https://pythonhosted.org/Markdown/extensions/index.html ' +
-+                'or write your own.'
-+            ),
-+        }
++- Moved getToolByName early patch to the later patches.
++  This fixes a circular import.
++  See `issue #1950 <https://github.com/plone/Products.CMFPlone/issues/1950>`_.
++  [maurits]
 +
-+        if name:
-+            self.__name__ = name
-+
-     def name(self):
-         return self.__name__
+ - Include JS Patterns when loading a page via ajax or an iframe [displacedaussie]
  
-+    def __getattr__(self, attr):
-+        if attr in self.config:
-+            return self.config[attr]
-+        raise AttributeError(attr)
+ - Restore ability to include head when loading via ajax [displacedaussie]
+diff --git a/Products/CMFPlone/earlypatches/security.py b/Products/CMFPlone/earlypatches/security.py
+index 8985591..dde89c4 100644
+--- a/Products/CMFPlone/earlypatches/security.py
++++ b/Products/CMFPlone/earlypatches/security.py
+@@ -49,44 +49,7 @@ def require(self, *args, **kw):
+ ClassDirective.require = require
+ 
+ # 5. Check return value of getToolByName
+-# This is an unusual sort of monkey patching...we replace just the func_code
+-# rather than the entire function, to make sure that aliases to the function
+-# that were imported prior to this patch will still run the patched code.
+-code = """
+-from persistent.interfaces import IPersistent
+-from OFS.interfaces import IItem
+-try:
+-    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
+-except ImportError:
+-    FauxArchetypeTool = type('FauxArchetypeTool')
+-
+-def _getToolByName(self, name, default=_marker):
+-    pass
+-
+-def check_getToolByName(obj, name, default=_marker):
+-    result = _getToolByName(obj, name, default)
+-    if IPersistent.providedBy(result) or \
+-            IItem.providedBy(result) or \
+-            name in _tool_interface_registry or \
+-            (isinstance(result, FauxArchetypeTool)) or \
+-            '.test' in result.__class__.__module__ or \
+-            result.__class__.__module__ == 'mock' or \
+-            result is _marker or \
+-            result is default:
+-        return result
+-    else:
+-        raise TypeError("Object found is not a portal tool (%s)" % (name,))
+-    return result
+-"""
+-from Products.CMFCore import utils
+-if '_marker' not in utils.getToolByName.func_globals:
+-    raise Exception("This Version of Products.CMFPlone is not compatible "
+-                    "with Products.PloneHotfix20121106, the fixes are "
+-                    "included already in Products.CMFPlone, please remove "
+-                    "the hotfix")
+-exec code in utils.getToolByName.func_globals
+-utils._getToolByName.func_code = utils.getToolByName.func_code
+-utils.getToolByName.func_code = utils.check_getToolByName.func_code
++# Moved to patches/gtbn.py due to circular imports.
+ 
+ # 6. Protect some methods in ZCatalog
+ from Products.ZCatalog.ZCatalog import ZCatalog
+diff --git a/Products/CMFPlone/patches/__init__.py b/Products/CMFPlone/patches/__init__.py
+index d4de5f7..4da5cc0 100644
+--- a/Products/CMFPlone/patches/__init__.py
++++ b/Products/CMFPlone/patches/__init__.py
+@@ -27,3 +27,5 @@
+ import publishing
+ 
+ import z3c_form
 +
-     def convert(self, orig, data, **kwargs):
-         if HAS_MARKDOWN:
-             # markdown expects unicode input:
-@@ -36,7 +59,7 @@ def convert(self, orig, data, **kwargs):
-             # PortalTransforms, however expects a string as result,
-             # so we encode the unicode result back to UTF8:
-             html = markdown_transformer \
--                .markdown(orig, extensions=['markdown.extensions.fenced_code']) \
-+                .markdown(orig, extensions=self.config.get('enabled_extensions', [])) \
-                 .encode('utf-8')
-         else:
-             html = orig
++import gtbn
+diff --git a/Products/CMFPlone/patches/gtbn.py b/Products/CMFPlone/patches/gtbn.py
+new file mode 100644
+index 0000000..94027a3
+--- /dev/null
++++ b/Products/CMFPlone/patches/gtbn.py
+@@ -0,0 +1,43 @@
++# -*- coding: utf-8 -*-
++from Products.CMFCore import utils
++
++# Check return value of getToolByName
++# this used to be step 5 in earlypatches, but was moved to avoid
++# circular imports.
++# This is an unusual sort of monkey patching...we replace just the func_code
++# rather than the entire function, to make sure that aliases to the function
++# that were imported prior to this patch will still run the patched code.
++code = """
++from persistent.interfaces import IPersistent
++from OFS.interfaces import IItem
++try:
++    from Products.ATContentTypes.tool.factory import FauxArchetypeTool
++except ImportError:
++    FauxArchetypeTool = type('FauxArchetypeTool')
++
++def _getToolByName(self, name, default=_marker):
++    pass
++
++def check_getToolByName(obj, name, default=_marker):
++    result = _getToolByName(obj, name, default)
++    if IPersistent.providedBy(result) or \
++            IItem.providedBy(result) or \
++            name in _tool_interface_registry or \
++            (isinstance(result, FauxArchetypeTool)) or \
++            '.test' in result.__class__.__module__ or \
++            result.__class__.__module__ == 'mock' or \
++            result is _marker or \
++            result is default:
++        return result
++    else:
++        raise TypeError("Object found is not a portal tool (%s)" % (name,))
++    return result
++"""
++if '_marker' not in utils.getToolByName.func_globals:
++    raise Exception("This Version of Products.CMFPlone is not compatible "
++                    "with Products.PloneHotfix20121106, the fixes are "
++                    "included already in Products.CMFPlone, please remove "
++                    "the hotfix")
++exec code in utils.getToolByName.func_globals
++utils._getToolByName.func_code = utils.getToolByName.func_code
++utils.getToolByName.func_code = utils.check_getToolByName.func_code
 
 
