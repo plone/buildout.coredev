@@ -1,96 +1,865 @@
-Repository: Products.LinguaPlone
+Repository: plone.app.registry
 
 
-Branch: refs/heads/master
-Date: 2017-02-16T03:03:25+01:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/Products.LinguaPlone/commit/696490c35477dd07e2961adb2ccdf2ba527e3788
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T12:25:11+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/eb8088179e793f3f3cfb5d7d5de0a330684f4cf4
 
-Don't fail while uninstalling, if LinguaPlone is already uninstalled.
+Add support for import conditions in registry.xml records
 
 Files changed:
 M CHANGES.rst
-M Products/LinguaPlone/setuphandlers.py
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index c7094b7..e2e1565 100644
+index 73beb18..bb2ca62 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -4,7 +4,20 @@ Changelog
+ 1.2.5 (unreleased)
+ ------------------
  
- Bug fixes:
+-- Nothing changed yet.
++Breaking changes:
++
++- *add item here*
++
++New features:
++
++- Add support for optional condition attribute in registry.xml entries
++  to allow conditional importing of records. Conditions themselves are
++  not import (nor exported).
++  [datakurre]
++
++Bug fixes:
++
++- *add item here*
  
--- *add item here*
-+- Don't fail while uninstalling, if LinguaPlone is already uninstalled.
-+  [thet]
+ 
+ 1.2.4 (2015-05-04)
+diff --git a/README.rst b/README.rst
+index 4f86f9b..3505ad6 100644
+--- a/README.rst
++++ b/README.rst
+@@ -159,6 +159,32 @@ pairs. They can be configured like so::
+         </value>
+     </record>
+ 
++
++Conditional records
++~~~~~~~~~~~~~~~~~~~
++
++Importable records in ``registry.xml`` can be marked conditional with
++``condition`` attribute, which supports the following condition values:
++
++* ``installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is available to be imported.
++
++* ``not-installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is *not* available to be imported:
++
++For example, the following ``registry.xml`` step at the GenericSetup profile of
++your policy product, would only import records when module ``my.package`` is
++available::
++
++    <registry>
++      <records interface="my.package.interfaces.IZooSettings"
++               condition="installed my.package">
++        <value key="entryPrice">40</value>
++        <value key="messageOfTheDay">We've got lions and tigers!</value>
++      </records>
++    </registry>
++
++
+ Field references
+ ~~~~~~~~~~~~~~~~
+ 
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 17d0abb..85a54ec 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -23,6 +23,36 @@
+ _marker = object()
  
  
- 4.1.8 (2017-01-12)
-diff --git a/Products/LinguaPlone/setuphandlers.py b/Products/LinguaPlone/setuphandlers.py
-index 81f5c64..28342c7 100644
---- a/Products/LinguaPlone/setuphandlers.py
-+++ b/Products/LinguaPlone/setuphandlers.py
-@@ -32,7 +32,11 @@ def uninstall(context):
-     site = context.getSite()
-     logger = context.getLogger('LinguaPlone')
-     qi = getToolByName(site, 'portal_quickinstaller')
--    qi.uninstallProducts(products=['LinguaPlone'])
++def evaluateCondition(expression):
++    """Evaluate import condition.
++
++    ``expression`` is a string of the form "verb arguments".
++
++    Currently the supported verbs are ``installed`` and ``not-installed``.
++    """
++    arguments = expression.split(None)
++    verb = arguments.pop(0)
++
++    if verb in ('installed', 'not-installed'):
++        if not arguments:
++            raise ValueError("Package name missing: %r" % expression)
++        if len(arguments) > 1:
++            raise ValueError("Only one package allowed: %r" % expression)
++
++        try:
++            __import__(arguments[0])
++            installed = True
++        except ImportError:
++            installed = False
++
++        if verb == 'installed':
++            return installed
++        elif verb == 'not-installed':
++            return not installed
++    else:
++        raise ValueError("Invalid import condition: %r" % expression)
++
++
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
+         attrib = child.attrib
+@@ -88,6 +118,9 @@ def importDocument(self, document):
+         for node in tree:
+             if not isinstance(node.tag, str):
+                 continue
++            condition = node.attrib.get('condition', None)
++            if condition and not evaluateCondition(condition):
++                continue
+             if node.tag.lower() == 'record':
+                 self.importRecord(node)
+             elif node.tag.lower() == 'records':
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 4557be9..6497116 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -293,6 +293,40 @@ def test_import_records_with_values(self):
+         self.assertEqual(self.registry['plone.app.registry.tests.data.SomethingElse.name'], 'Magic')
+         self.assertEqual(self.registry['plone.app.registry.tests.data.SomethingElse.age'], 42)
+ 
++    def test_import_records_nonexistant_interface(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.assertRaises(ImportError, importRegistry, context)
++
++    def test_import_records_nonexistant_interface_condition(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="not-installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.assertRaises(ImportError, importRegistry, context)
++
++    def test_import_records_nonexistant_interface_condition_skip(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++        importRegistry(context)
++
+     def test_import_value_only(self):
+         xml = """\
+ <registry>
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T12:25:15+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/24c2ed28afb7431e098a2747087de0e633608893
+
+Flatten evaluateConditions for better readability
+
+Files changed:
+M plone/app/registry/exportimport/handler.py
+
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 85a54ec..2849879 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -33,25 +33,25 @@ def evaluateCondition(expression):
+     arguments = expression.split(None)
+     verb = arguments.pop(0)
+ 
+-    if verb in ('installed', 'not-installed'):
+-        if not arguments:
+-            raise ValueError("Package name missing: %r" % expression)
+-        if len(arguments) > 1:
+-            raise ValueError("Only one package allowed: %r" % expression)
+-
+-        try:
+-            __import__(arguments[0])
+-            installed = True
+-        except ImportError:
+-            installed = False
+-
+-        if verb == 'installed':
+-            return installed
+-        elif verb == 'not-installed':
+-            return not installed
+-    else:
++    if verb not in ('installed', 'not-installed'):
+         raise ValueError("Invalid import condition: %r" % expression)
+ 
++    if not arguments:
++        raise ValueError("Package name missing: %r" % expression)
++    if len(arguments) > 1:
++        raise ValueError("Only one package allowed: %r" % expression)
++
 +    try:
-+        qi.uninstallProducts(products=['LinguaPlone'])
-+    except AttributeError:
-+        # Already uninstalled. Don't fail.
-+        pass
-     o = qi._getOb('LinguaPlone', None)
-     if o:
-         assert(not o.isInstalled())
++        __import__(arguments[0])
++        installed = True
++    except ImportError:
++        installed = False
++
++    if verb == 'installed':
++        return installed
++    elif verb == 'not-installed':
++        return not installed
++
+ 
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
 
 
-Repository: Products.LinguaPlone
+Repository: plone.app.registry
 
 
-Branch: refs/heads/master
-Date: 2017-02-16T18:27:58+01:00
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T12:25:16+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/88a65ae3da48ee5c11896c9e9d09e0afcd02727f
+
+Add test for skipping import with condition
+
+Files changed:
+M plone/app/registry/tests/test_exportimport.py
+
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 6497116..bee9c58 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -316,21 +316,37 @@ def test_import_records_nonexistant_interface_condition(self):
+ 
+         self.assertRaises(ImportError, importRegistry, context)
+ 
+-    def test_import_records_nonexistant_interface_condition_skip(self):
++    def test_import_value_only(self):
+         xml = """\
+ <registry>
+-    <records interface="non.existant.ISchema"
+-             condition="installed non" />
++    <record name="test.export.simple">
++        <value>Imported value</value>
++    </record>
+ </registry>
+ """
+         context = DummyImportContext(self.site, purge=False)
+         context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
+         importRegistry(context)
+ 
+-    def test_import_value_only(self):
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_skip(self):
+         xml = """\
+ <registry>
+-    <record name="test.export.simple">
++    <record name="test.export.simple"
++            condition="installed non">
+         <value>Imported value</value>
+     </record>
+ </registry>
+@@ -344,8 +360,14 @@ def test_import_value_only(self):
+         importRegistry(context)
+ 
+         self.assertEquals(1, len(self.registry.records))
+-        self.assertEquals(u"Simple record", self.registry.records['test.export.simple'].field.title)
+-        self.assertEquals(u"Imported value", self.registry['test.export.simple'])
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
+ 
+     def test_import_interface_and_value(self):
+         xml = """\
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T12:25:17+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/5e3474a006a68e33f6710a7deefc72dcd83a5071
+
+Add support for have and not-have import conditions on Zope2
+
+Files changed:
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
+
+diff --git a/README.rst b/README.rst
+index 3505ad6..0d0b37d 100644
+--- a/README.rst
++++ b/README.rst
+@@ -172,6 +172,12 @@ Importable records in ``registry.xml`` can be marked conditional with
+ * ``not-installed my.package``, which causes record to be imported only when
+   python module ``my.package`` is *not* available to be imported:
+ 
++* ``have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has been registered (Zope2 only)
++
++* ``not-have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has *not* been registered (Zope2 only)
++
+ For example, the following ``registry.xml`` step at the GenericSetup profile of
+ your policy product, would only import records when module ``my.package`` is
+ available::
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 2849879..787a04c 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -20,6 +20,9 @@
+ 
+ from plone.supermodel.utils import prettyXML, elementToValue, valueToElement, ns
+ 
++from zope.configuration import config
++from zope.configuration import xmlconfig
++
+ _marker = object()
+ 
+ 
+@@ -28,29 +31,20 @@ def evaluateCondition(expression):
+ 
+     ``expression`` is a string of the form "verb arguments".
+ 
+-    Currently the supported verbs are ``installed`` and ``not-installed``.
+-    """
+-    arguments = expression.split(None)
+-    verb = arguments.pop(0)
+-
+-    if verb not in ('installed', 'not-installed'):
+-        raise ValueError("Invalid import condition: %r" % expression)
+-
+-    if not arguments:
+-        raise ValueError("Package name missing: %r" % expression)
+-    if len(arguments) > 1:
+-        raise ValueError("Only one package allowed: %r" % expression)
++    Currently the supported verbs are 'have', 'not-have',
++    'installed' and 'not-installed'.
+ 
++    The 'have' verb takes one argument: the name of a feature.
++    """
+     try:
+-        __import__(arguments[0])
+-        installed = True
++        import Zope2.App.zcml
++        context = Zope2.App.zcml._context or config.ConfigurationMachine()
+     except ImportError:
+-        installed = False
++        context = config.ConfigurationMachine()
++
++    handler = xmlconfig.ConfigurationHandler(context)
++    return handler.evaluateCondition(expression)
+ 
+-    if verb == 'installed':
+-        return installed
+-    elif verb == 'not-installed':
+-        return not installed
+ 
+ 
+ def shouldPurgeList(value_node, key):
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index bee9c58..a318662 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -27,7 +27,9 @@
+ from plone.app.registry.tests import data
+ 
+ configuration = """\
+-<configure xmlns="http://namespaces.zope.org/zope">
++<configure xmlns="http://namespaces.zope.org/zope"
++           xmlns:meta="http://namespaces.zope.org/meta">
++    <meta:provides feature="plone" />
+     <include package="zope.component" file="meta.zcml" />
+     <include package="plone.registry" />
+     <include package="plone.app.registry.exportimport" file="handlers.zcml" />
+@@ -43,7 +45,20 @@ def setUp(self):
+         self.site = ObjectManager('plone')
+         self.registry = Registry('portal_registry')
+         provideUtility(provides=IRegistry, component=self.registry)
+-        xmlconfig.xmlconfig(StringIO(configuration))
++        context = xmlconfig.string(configuration, execute=True)
++        try:
++            import Zope2.App.zcml
++            self._context = Zope2.App.zcml._context
++            Zope2.App.zcml._context = context
++        except ImportError:
++            pass
++
++    def tearDown(self):
++        try:
++            import Zope2.App.zcml
++            Zope2.App.zcml._context = self._context
++        except ImportError:
++            pass
+ 
+     def assertXmlEquals(self, expected, actual):
+ 
+@@ -304,7 +319,7 @@ def test_import_records_nonexistant_interface(self):
+ 
+         self.assertRaises(ImportError, importRegistry, context)
+ 
+-    def test_import_records_nonexistant_interface_condition(self):
++    def test_import_records_nonexistant_interface_condition_not_installed(self):  # noqa
+         xml = """\
+ <registry>
+     <records interface="non.existant.ISchema"
+@@ -342,7 +357,7 @@ def test_import_value_only(self):
+             self.registry['test.export.simple']
+         )
+ 
+-    def test_import_value_only_condition_skip(self):
++    def test_import_value_only_condition_installed(self):
+         xml = """\
+ <registry>
+     <record name="test.export.simple"
+@@ -369,6 +384,60 @@ def test_import_value_only_condition_skip(self):
+             self.registry['test.export.simple']
+         )
+ 
++    def test_import_value_only_condition_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_not_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="not-have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
++
+     def test_import_interface_and_value(self):
+         xml = """\
+ <registry>
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T12:25:17+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.registry/commit/b4a8bbb900fea9c984c344cb6440b42d8116da67
+
+Add changelog entry
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index bb2ca62..bee90da 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,21 +4,17 @@ Changelog
+ 1.2.5 (unreleased)
+ ------------------
+ 
+-Breaking changes:
+-
+-- *add item here*
+-
+ New features:
+ 
++- Add support for *have* and *have-not* import conditions in
++  registry.xml
++  [datakurre]
++
+ - Add support for optional condition attribute in registry.xml entries
+   to allow conditional importing of records. Conditions themselves are
+   not import (nor exported).
+   [datakurre]
+ 
+-Bug fixes:
+-
+-- *add item here*
+-
+ 
+ 1.2.4 (2015-05-04)
+ ------------------
+
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/1.2.x
+Date: 2017-02-21T17:04:16+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.LinguaPlone/commit/f22b66d388bb76979ccaf21e99ab47623f2da891
+Commit: https://github.com/plone/plone.app.registry/commit/28f3c57a18dce27a018b5ae40010e90016f3226d
 
-Merge pull request #22 from plone/thet-fixunin
+Merge pull request #25 from plone/datakurre-conditions
 
-Don't fail while uninstalling, if LinguaPlone is already uninstalled.
+Backport PLIP 1406 for plone.app.registry 1.2.x
 
 Files changed:
 M CHANGES.rst
-M Products/LinguaPlone/setuphandlers.py
+M README.rst
+M plone/app/registry/exportimport/handler.py
+M plone/app/registry/tests/test_exportimport.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index c7094b7..e2e1565 100644
+index 73beb18..bee90da 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -4,7 +4,16 @@ Changelog
+ 1.2.5 (unreleased)
+ ------------------
  
- Bug fixes:
+-- Nothing changed yet.
++New features:
++
++- Add support for *have* and *have-not* import conditions in
++  registry.xml
++  [datakurre]
++
++- Add support for optional condition attribute in registry.xml entries
++  to allow conditional importing of records. Conditions themselves are
++  not import (nor exported).
++  [datakurre]
  
--- *add item here*
-+- Don't fail while uninstalling, if LinguaPlone is already uninstalled.
-+  [thet]
+ 
+ 1.2.4 (2015-05-04)
+diff --git a/README.rst b/README.rst
+index 4f86f9b..0d0b37d 100644
+--- a/README.rst
++++ b/README.rst
+@@ -159,6 +159,38 @@ pairs. They can be configured like so::
+         </value>
+     </record>
+ 
++
++Conditional records
++~~~~~~~~~~~~~~~~~~~
++
++Importable records in ``registry.xml`` can be marked conditional with
++``condition`` attribute, which supports the following condition values:
++
++* ``installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is available to be imported.
++
++* ``not-installed my.package``, which causes record to be imported only when
++  python module ``my.package`` is *not* available to be imported:
++
++* ``have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has been registered (Zope2 only)
++
++* ``not-have my-feature``, which causes record to be imported only when
++  ZCML feature flag ``my-feature`` has *not* been registered (Zope2 only)
++
++For example, the following ``registry.xml`` step at the GenericSetup profile of
++your policy product, would only import records when module ``my.package`` is
++available::
++
++    <registry>
++      <records interface="my.package.interfaces.IZooSettings"
++               condition="installed my.package">
++        <value key="entryPrice">40</value>
++        <value key="messageOfTheDay">We've got lions and tigers!</value>
++      </records>
++    </registry>
++
++
+ Field references
+ ~~~~~~~~~~~~~~~~
+ 
+diff --git a/plone/app/registry/exportimport/handler.py b/plone/app/registry/exportimport/handler.py
+index 17d0abb..787a04c 100644
+--- a/plone/app/registry/exportimport/handler.py
++++ b/plone/app/registry/exportimport/handler.py
+@@ -20,9 +20,33 @@
+ 
+ from plone.supermodel.utils import prettyXML, elementToValue, valueToElement, ns
+ 
++from zope.configuration import config
++from zope.configuration import xmlconfig
++
+ _marker = object()
  
  
- 4.1.8 (2017-01-12)
-diff --git a/Products/LinguaPlone/setuphandlers.py b/Products/LinguaPlone/setuphandlers.py
-index 81f5c64..28342c7 100644
---- a/Products/LinguaPlone/setuphandlers.py
-+++ b/Products/LinguaPlone/setuphandlers.py
-@@ -32,7 +32,11 @@ def uninstall(context):
-     site = context.getSite()
-     logger = context.getLogger('LinguaPlone')
-     qi = getToolByName(site, 'portal_quickinstaller')
--    qi.uninstallProducts(products=['LinguaPlone'])
++def evaluateCondition(expression):
++    """Evaluate import condition.
++
++    ``expression`` is a string of the form "verb arguments".
++
++    Currently the supported verbs are 'have', 'not-have',
++    'installed' and 'not-installed'.
++
++    The 'have' verb takes one argument: the name of a feature.
++    """
 +    try:
-+        qi.uninstallProducts(products=['LinguaPlone'])
-+    except AttributeError:
-+        # Already uninstalled. Don't fail.
-+        pass
-     o = qi._getOb('LinguaPlone', None)
-     if o:
-         assert(not o.isInstalled())
++        import Zope2.App.zcml
++        context = Zope2.App.zcml._context or config.ConfigurationMachine()
++    except ImportError:
++        context = config.ConfigurationMachine()
++
++    handler = xmlconfig.ConfigurationHandler(context)
++    return handler.evaluateCondition(expression)
++
++
++
+ def shouldPurgeList(value_node, key):
+     for child in value_node:
+         attrib = child.attrib
+@@ -88,6 +112,9 @@ def importDocument(self, document):
+         for node in tree:
+             if not isinstance(node.tag, str):
+                 continue
++            condition = node.attrib.get('condition', None)
++            if condition and not evaluateCondition(condition):
++                continue
+             if node.tag.lower() == 'record':
+                 self.importRecord(node)
+             elif node.tag.lower() == 'records':
+diff --git a/plone/app/registry/tests/test_exportimport.py b/plone/app/registry/tests/test_exportimport.py
+index 4557be9..a318662 100644
+--- a/plone/app/registry/tests/test_exportimport.py
++++ b/plone/app/registry/tests/test_exportimport.py
+@@ -27,7 +27,9 @@
+ from plone.app.registry.tests import data
+ 
+ configuration = """\
+-<configure xmlns="http://namespaces.zope.org/zope">
++<configure xmlns="http://namespaces.zope.org/zope"
++           xmlns:meta="http://namespaces.zope.org/meta">
++    <meta:provides feature="plone" />
+     <include package="zope.component" file="meta.zcml" />
+     <include package="plone.registry" />
+     <include package="plone.app.registry.exportimport" file="handlers.zcml" />
+@@ -43,7 +45,20 @@ def setUp(self):
+         self.site = ObjectManager('plone')
+         self.registry = Registry('portal_registry')
+         provideUtility(provides=IRegistry, component=self.registry)
+-        xmlconfig.xmlconfig(StringIO(configuration))
++        context = xmlconfig.string(configuration, execute=True)
++        try:
++            import Zope2.App.zcml
++            self._context = Zope2.App.zcml._context
++            Zope2.App.zcml._context = context
++        except ImportError:
++            pass
++
++    def tearDown(self):
++        try:
++            import Zope2.App.zcml
++            Zope2.App.zcml._context = self._context
++        except ImportError:
++            pass
+ 
+     def assertXmlEquals(self, expected, actual):
+ 
+@@ -293,6 +308,29 @@ def test_import_records_with_values(self):
+         self.assertEqual(self.registry['plone.app.registry.tests.data.SomethingElse.name'], 'Magic')
+         self.assertEqual(self.registry['plone.app.registry.tests.data.SomethingElse.age'], 42)
+ 
++    def test_import_records_nonexistant_interface(self):
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.assertRaises(ImportError, importRegistry, context)
++
++    def test_import_records_nonexistant_interface_condition_not_installed(self):  # noqa
++        xml = """\
++<registry>
++    <records interface="non.existant.ISchema"
++             condition="not-installed non" />
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.assertRaises(ImportError, importRegistry, context)
++
+     def test_import_value_only(self):
+         xml = """\
+ <registry>
+@@ -310,8 +348,95 @@ def test_import_value_only(self):
+         importRegistry(context)
+ 
+         self.assertEquals(1, len(self.registry.records))
+-        self.assertEquals(u"Simple record", self.registry.records['test.export.simple'].field.title)
+-        self.assertEquals(u"Imported value", self.registry['test.export.simple'])
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_installed(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="installed non">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Imported value",
++            self.registry['test.export.simple']
++        )
++
++    def test_import_value_only_condition_not_have(self):
++        xml = """\
++<registry>
++    <record name="test.export.simple"
++            condition="not-have plone">
++        <value>Imported value</value>
++    </record>
++</registry>
++"""
++        context = DummyImportContext(self.site, purge=False)
++        context._files = {'registry.xml': xml}
++
++        self.registry.records['test.export.simple'] = \
++            Record(field.TextLine(title=u"Simple record", default=u"N/A"),
++                   value=u"Sample value")
++        importRegistry(context)
++
++        self.assertEquals(1, len(self.registry.records))
++        self.assertEquals(
++            u"Simple record",
++            self.registry.records['test.export.simple'].field.title
++        )
++        self.assertEquals(
++            u"Sample value",
++            self.registry['test.export.simple']
++        )
+ 
+     def test_import_interface_and_value(self):
+         xml = """\
 
 
