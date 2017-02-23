@@ -1,94 +1,1608 @@
-Repository: mockup
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2017-02-15T22:18:46+01:00
-Author: Diederik Veeze (didrix) <d.veeze@zestsoftware.nl>
-Commit: https://github.com/plone/mockup/commit/b585658eaf21353f4490b375936e5f9646626153
+Date: 2017-02-02T11:59:46+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/7c6abab743ecbde7272930d6a916e4bfccfb023e
 
-Add srcset attribute to image modal
+Fix issue where public ESI tiles failed to get correct Cache-Control
 
-Fall back on empty string if image has no data-modal-srcset attribute
+Files changed:
+M plone/tiles/configure.zcml
+M plone/tiles/esi.py
+M plone/tiles/tile.py
+
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index 7a672e8..5b64c9b 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -1,6 +1,7 @@
+ <configure
+     xmlns="http://namespaces.zope.org/zope"
+     xmlns:browser="http://namespaces.zope.org/browser"
++    xmlns:zcml="http://namespaces.zope.org/zcml"
+     i18n_domain="plone.tiles">
+ 
+     <!-- Data manager -->
+@@ -60,6 +61,22 @@
+         permission="zope.Public"
+         />
+ 
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".esi.ESIHead *"
++        factory=".esi.ESIProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".esi.ESIBody *"
++        factory=".esi.ESIProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
+     <!-- Field Type converters -->
+     <adapter for="zope.schema.interfaces.IBytesLine"
+              factory="plone.tiles.fieldtypeconverters.NoConverter"
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 2e83596..031f9be 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -1,14 +1,16 @@
+ # -*- coding: utf-8 -*-
+-
+ from plone.tiles.interfaces import ESI_HEADER
+ from plone.tiles.interfaces import ESI_HEADER_KEY
+ from plone.tiles.interfaces import IESIRendered
+ from plone.tiles.tile import PersistentTile
+ from plone.tiles.tile import Tile
++from Products.Five import BrowserView
+ from zope.interface import implementer
+ 
+ import re
++import os
+ 
++X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ 
+ HEAD_CHILDREN = re.compile(r'<head[^>]*>(.*)</head>', re.I | re.S)
+ BODY_CHILDREN = re.compile(r'<body[^>]*>(.*)</body>', re.I | re.S)
+@@ -96,14 +98,10 @@ class ESIPersistentTile(ConditionalESIRendering, PersistentTile):
+ 
+ # ESI views
+ 
+-class ESIHead(object):
++class ESIHead(BrowserView):
+     """Render the head portion of a tile independently.
+     """
+ 
+-    def __init__(self, context, request):
+-        self.tile = context
+-        self.request = request
+-
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
+@@ -111,7 +109,7 @@ def __call__(self):
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+ 
+-        document = self.tile()  # render the tile
++        document = self.context()  # render the tile
+ 
+         match = HEAD_CHILDREN.search(document)
+         if not match:
+@@ -119,14 +117,10 @@ def __call__(self):
+         return match.group(1).strip()
+ 
+ 
+-class ESIBody(object):
++class ESIBody(BrowserView):
+     """Render the head portion of a tile independently.
+     """
+ 
+-    def __init__(self, context, request):
+-        self.tile = context
+-        self.request = request
+-
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
+@@ -134,9 +128,39 @@ def __call__(self):
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+ 
+-        document = self.tile()  # render the tile
++        document = self.context()  # render the tile
+ 
+         match = BODY_CHILDREN.search(document)
+         if not match:
+             return document
+         return match.group(1).strip()
++
++
++class ESIProtectTransform(object):
++    """Replacement transform for plone.protect's ProtectTransform,
++    because ESI tile responses' HTML should not be transformed to
++    avoid wrapping them with <html>-tag
++    """
++
++    order = 9000
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++
++    def transform(self, result, encoding):
++        # clickjacking protection from plone.protect
++        if X_FRAME_OPTIONS:
++            if not self.request.response.getHeader('X-Frame-Options'):
++                self.request.response.setHeader(
++                    'X-Frame-Options', X_FRAME_OPTIONS)
++        return None
++
++    def transformBytes(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformUnicode(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformIterable(self, result, encoding):
++        return self.transform(result, encoding)
+diff --git a/plone/tiles/tile.py b/plone/tiles/tile.py
+index 98f83c7..390b349 100644
+--- a/plone/tiles/tile.py
++++ b/plone/tiles/tile.py
+@@ -2,9 +2,9 @@
+ from plone.tiles.interfaces import IPersistentTile
+ from plone.tiles.interfaces import ITile
+ from plone.tiles.interfaces import ITileDataManager
++from Products.Five import BrowserView
+ from zope.component import queryMultiAdapter
+ from zope.interface import implementer
+-from zope.publisher.browser import BrowserView
+ from zope.traversing.browser.absoluteurl import absoluteURL
+ 
+ 
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-02T12:02:43+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/d317fef5d3ffb266bffda84ccc14328199165931
+
+Update changelog
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/modal/pattern.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 86ddb0e..8afde35 100644
+index 664d9b0..f6be12d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -118,6 +118,9 @@ New:
- - Add an option to set the path operator in QueryHelp and tinymce pattern.
-   [Gagaro]
+@@ -1,10 +1,21 @@
+ Changelog
+ =========
  
-+- Add srcset attribute to image modal
-+  [didrix]
+-1.8.3 (unreleased)
++2.0.0 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++Bug fixes:
 +
- Fixes:
++- Fix issue where ESI tile helper views didn't get correct
++  Cache-Control-headers, because ESI helpers views were not acquisition
++  wrapped
++  [datakurre]
++
++New features:
++
++- Added X-Frame-Options -header for ESI tile views with matching behavior
++  with plone.protect
++  [datakurre]
  
- - Change ``bool`` function in mockup-utils to allow for truthy values and match on falsy values.
-diff --git a/mockup/patterns/modal/pattern.js b/mockup/patterns/modal/pattern.js
-index 3fa97b1..5164493 100644
---- a/mockup/patterns/modal/pattern.js
-+++ b/mockup/patterns/modal/pattern.js
-@@ -608,8 +608,9 @@ define([
-       var self = this;
-       self.$wrapper.addClass('image-modal');
-       var src = self.$el.attr('href');
-+      var srcset = self.$el.attr('data-modal-srcset') || '';
-       // XXX aria?
--      self.$raw = $('<div><h1>Image</h1><div id="content"><div class="modal-image"><img src="' + src + '" /></div></div></div>');
-+      self.$raw = $('<div><h1>Image</h1><div id="content"><div class="modal-image"><img src="' + src + '" srcset="' + srcset + '" /></div></div></div>');
-       self._show();
-     },
  
+ 1.8.2 (2017-01-10)
 
 
-Repository: mockup
+Repository: plone.tiles
 
 
 Branch: refs/heads/master
-Date: 2017-02-23T12:13:18+01:00
+Date: 2017-02-03T08:26:25+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/131ba2562048c2e2eec1780e24a7a7ea8dff64d8
+
+Change to only add X-Tile-Url after successful render
+
+Files changed:
+M CHANGES.rst
+M plone/tiles/tile.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index f6be12d..bad8999 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -4,11 +4,11 @@ Changelog
+ 2.0.0 (unreleased)
+ ------------------
+ 
+-Bug fixes:
++Breaking changes:
+ 
+-- Fix issue where ESI tile helper views didn't get correct
+-  Cache-Control-headers, because ESI helpers views were not acquisition
+-  wrapped
++- Tile traversal no longer adds ``X-Tile-Url``-header with absolute URL.
++  Relative ``X-Tile-Url`` is still set, but only after successful rendering
++  of tile (in default view class ``__call__``).
+   [datakurre]
+ 
+ New features:
+@@ -17,6 +17,13 @@ New features:
+   with plone.protect
+   [datakurre]
+ 
++Bug fixes:
++
++- Fix issue where ESI tile helper views didn't get correct
++  Cache-Control-headers, because ESI helpers views were not acquisition
++  wrapped
++  [datakurre]
++
+ 
+ 1.8.2 (2017-01-10)
+ ------------------
+diff --git a/plone/tiles/tile.py b/plone/tiles/tile.py
+index 390b349..2bcf5d9 100644
+--- a/plone/tiles/tile.py
++++ b/plone/tiles/tile.py
+@@ -46,11 +46,6 @@ def __getitem__(self, name):
+             if self.__doc__ is None:
+                 self.__doc__ = 'For Zope 2, to keep the ZPublisher happy'
+ 
+-            self.request.response.setHeader(
+-                'X-Tile-Url',
+-                self.url
+-            )
+-
+             return self
+ 
+         # Also allow views on tiles even without @@.
+@@ -82,12 +77,17 @@ def __call__(self, *args, **kwargs):
+                 u'Override __call__ or set a class variable "index" to point '
+                 u'to a view page template file'
+             )
++
++        # Rendering tile may raise Unauthorized exception
++        output = self.index(*args, **kwargs)
++
++        # X-Tile-Url is set only after tile has been successfully rendered
+         if self.id is not None:
+             self.request.response.setHeader(
+                 'X-Tile-Url',
+                 self.url[len(self.context.absolute_url()) + 1:]
+             )
+-        return self.index(*args, **kwargs)
++        return output
+ 
+     @property
+     def data(self):
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-03T10:52:29+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/f731cec001c3a5de15e7f5ad01d1e690709b75d0
+
+Fix to prefer PATH_INFO over URL in ESI links to properly support ESI with https and virtua hosting
+
+Files changed:
+M plone/tiles/esi.py
+
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 031f9be..1d4eb0b 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -62,7 +62,7 @@ def __call__(self, *args, **kwargs):
+             if self.head:
+                 mode = 'esi-head'
+             return ESI_TEMPLATE.format(
+-                url=self.request.getURL(),
++                url=self.request.get('PATH_INFO') or self.request.getURL(),
+                 queryString=self.request.get('QUERY_STRING', ''),
+                 esiMode=mode
+             )
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-03T22:23:43+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/3bb851ad94130762bfc1d0259aba42041a8085d2
+
+Restore X-Tile-Url to be added during traversal, but remove it in transform when request is not authorized
+
+Files changed:
+M CHANGES.rst
+M plone/tiles/configure.zcml
+M plone/tiles/esi.py
+M plone/tiles/tile.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index bad8999..d7044fb 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -6,21 +6,21 @@ Changelog
+ 
+ Breaking changes:
+ 
+-- Tile traversal no longer adds ``X-Tile-Url``-header with absolute URL.
+-  Relative ``X-Tile-Url`` is still set, but only after successful rendering
+-  of tile (in default view class ``__call__``).
++- Tiles no longer add relative ``X-Tile-Url``-header in ``__call__``.
++  Tiles still add absolute ``X-Tile-Url``-header during traversal, but
++  it is removed after rendering if request is not CSRF-authorized.
+   [datakurre]
+ 
+ New features:
+ 
+-- Added X-Frame-Options -header for ESI tile views with matching behavior
++- Added X-Frame-Options -header for ESI-tile views with matching behavior
+   with plone.protect
+   [datakurre]
+ 
+ Bug fixes:
+ 
+-- Fix issue where ESI tile helper views didn't get correct
+-  Cache-Control-headers, because ESI helpers views were not acquisition
++- Fix issue where ESI-tile helper views didn't get correct
++  Cache-Control-headers, because ESI-helpers views were not acquisition
+   wrapped
+   [datakurre]
+ 
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index 5b64c9b..cd64cd4 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -77,6 +77,16 @@
+         zcml:condition="installed plone.transformchain"
+         />
+ 
++    <configure zcml:condition="installed plone.protect">
++      <adapter
++        name="plone.tiles.tileurl"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".tile.Tile *"
++        factory=".tile.TileUrlTransform"
++        zcml:condition="installed plone.transformchain"
++      />
++    </configure>
++
+     <!-- Field Type converters -->
+     <adapter for="zope.schema.interfaces.IBytesLine"
+              factory="plone.tiles.fieldtypeconverters.NoConverter"
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 1d4eb0b..9aec5b9 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -62,7 +62,9 @@ def __call__(self, *args, **kwargs):
+             if self.head:
+                 mode = 'esi-head'
+             return ESI_TEMPLATE.format(
+-                url=self.request.get('PATH_INFO') or self.request.getURL(),
++                url=(self.request.get('PATH_INFO') and
++                     self.request.get('PATH_INFO').replace(' ', '%20') or
++                     self.request.getURL()),
+                 queryString=self.request.get('QUERY_STRING', ''),
+                 esiMode=mode
+             )
+@@ -111,6 +113,9 @@ def __call__(self):
+ 
+         document = self.context()  # render the tile
+ 
++        # Disable the theme so we don't <html/>-wrapped
++        self.request.response.setHeader('X-Theme-Disabled', '1')
++
+         match = HEAD_CHILDREN.search(document)
+         if not match:
+             return document
+@@ -130,6 +135,9 @@ def __call__(self):
+ 
+         document = self.context()  # render the tile
+ 
++        # Disable the theme so we don't <html/>-wrapped
++        self.request.response.setHeader('X-Theme-Disabled', '1')
++
+         match = BODY_CHILDREN.search(document)
+         if not match:
+             return document
+@@ -154,6 +162,9 @@ def transform(self, result, encoding):
+             if not self.request.response.getHeader('X-Frame-Options'):
+                 self.request.response.setHeader(
+                     'X-Frame-Options', X_FRAME_OPTIONS)
++        # drop X-Tile-Url
++        if 'x-tile-url' in self.request.response.headers:
++            del self.request.response.headers['x-tile-url']
+         return None
+ 
+     def transformBytes(self, result, encoding):
+diff --git a/plone/tiles/tile.py b/plone/tiles/tile.py
+index 2bcf5d9..f052398 100644
+--- a/plone/tiles/tile.py
++++ b/plone/tiles/tile.py
+@@ -46,6 +46,16 @@ def __getitem__(self, name):
+             if self.__doc__ is None:
+                 self.__doc__ = 'For Zope 2, to keep the ZPublisher happy'
+ 
++            # Note: X-Tile-Url was added to make it easier for editor to know
++            # the URL of a new tile after receiving the redirected response
++            # from a tile form. That's why it's only set for customizable tiles
++            # (tiles with id).
++            if self.id is not None:
++                self.request.response.setHeader(
++                    'X-Tile-Url',
++                    self.url
++                )
++
+             return self
+ 
+         # Also allow views on tiles even without @@.
+@@ -77,17 +87,7 @@ def __call__(self, *args, **kwargs):
+                 u'Override __call__ or set a class variable "index" to point '
+                 u'to a view page template file'
+             )
+-
+-        # Rendering tile may raise Unauthorized exception
+-        output = self.index(*args, **kwargs)
+-
+-        # X-Tile-Url is set only after tile has been successfully rendered
+-        if self.id is not None:
+-            self.request.response.setHeader(
+-                'X-Tile-Url',
+-                self.url[len(self.context.absolute_url()) + 1:]
+-            )
+-        return output
++        return self.index(*args, **kwargs)
+ 
+     @property
+     def data(self):
+@@ -106,3 +106,33 @@ class PersistentTile(Tile):
+     """Base class for persistent tiles. Identical to `Tile`, except that the
+     data dict is never serialized with the URL.
+     """
++
++
++class TileUrlTransform(object):
++    """Drop X-Tile-Url when not authorized for editing"""
++    order = 9000
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++
++    def transform(self, result, encoding):
++        # drop X-Tile-Url when not authorized for editing
++        if 'x-tile-url' in self.request.response.headers:
++            from plone.protect import CheckAuthenticator
++            from zExceptions import Forbidden
++            try:
++                CheckAuthenticator(self.request)
++            except Forbidden:
++                del self.request.response.headers['x-tile-url']
++
++        return None
++
++    def transformBytes(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformUnicode(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformIterable(self, result, encoding):
++        return self.transform(result, encoding)
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-06T11:54:03+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/3a7923298fe890a1986947bb6d80df88a96c7252
+
+Fix generic ESI helper views to check for the registered view permission of the current tile before render
+
+Files changed:
+M plone/tiles/esi.py
+
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 9aec5b9..b16177d 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -2,10 +2,14 @@
+ from plone.tiles.interfaces import ESI_HEADER
+ from plone.tiles.interfaces import ESI_HEADER_KEY
+ from plone.tiles.interfaces import IESIRendered
++from plone.tiles.interfaces import ITileType
+ from plone.tiles.tile import PersistentTile
+ from plone.tiles.tile import Tile
+ from Products.Five import BrowserView
++from zExceptions import Unauthorized
++from zope.component import queryUtility
+ from zope.interface import implementer
++from zope.security import checkPermission
+ 
+ import re
+ import os
+@@ -107,6 +111,15 @@ class ESIHead(BrowserView):
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
++        # Check for the registered view permission
++        try:
++            type_ = queryUtility(ITileType, self.context.__name__)
++            permission = type_.view_permission
++        except AttributeError:
++            permission = None
++        if permission:
++            if not checkPermission(permission, self.context):
++                raise Unauthorized()
+ 
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+@@ -129,6 +142,15 @@ class ESIBody(BrowserView):
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
++        # Check for the registered view permission
++        try:
++            type_ = queryUtility(ITileType, self.context.__name__)
++            permission = type_.view_permission
++        except AttributeError:
++            permission = None
++        if permission:
++            if not checkPermission(permission, self.context):
++                raise Unauthorized()
+ 
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-06T11:55:50+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/c05c2f1ec2593250a4521db73a08d782fd0f71a0
+
+Update changelog
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index d7044fb..4aa067c 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,7 +8,11 @@ Breaking changes:
+ 
+ - Tiles no longer add relative ``X-Tile-Url``-header in ``__call__``.
+   Tiles still add absolute ``X-Tile-Url``-header during traversal, but
+-  it is removed after rendering if request is not CSRF-authorized.
++  it gest removed after rendering when request is not CSRF-authorized.
++  [datakurre]
++
++- Generic ESI helper do now check the request is authorized to render
++  the tile according to the registered view permission fo the tile.
+   [datakurre]
+ 
+ New features:
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-06T14:25:30+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/c1add5f370548b8d112a3a22636aec79b6561c86
+
+Fix ESI tests permission protection of ESI views
+
+Files changed:
+M plone/tiles/esi.py
+M plone/tiles/esi.rst
+
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index b16177d..91aa4d3 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -9,7 +9,10 @@
+ from zExceptions import Unauthorized
+ from zope.component import queryUtility
+ from zope.interface import implementer
+-from zope.security import checkPermission
++try:
++    from AccessControl.security import checkPermission
++except ImportError:
++    from zope.security import checkPermission
+ 
+ import re
+ import os
+diff --git a/plone/tiles/esi.rst b/plone/tiles/esi.rst
+index 45fcdc6..6541d61 100644
+--- a/plone/tiles/esi.rst
++++ b/plone/tiles/esi.rst
+@@ -59,6 +59,8 @@ Ordinarily, of course, it would be registered via ZCML.
+ .. code-block:: python
+ 
+     >>> from plone.tiles.type import TileType
++    >>> from zope.security.permission import Permission
++    >>> permission = Permission('dummy.Permission')
+     >>> sampleTileType = TileType(
+     ...     name=u'sample.tile',
+     ...     title=u'Sample tile',
+@@ -71,6 +73,7 @@ Ordinarily, of course, it would be registered via ZCML.
+     >>> from zope.interface import Interface
+     >>> from plone.tiles.interfaces import IBasicTile
+ 
++    >>> provideUtility(permission, name=u'dummy.Permission')
+     >>> provideUtility(sampleTileType, name=u'sample.tile')
+     >>> provideAdapter(SampleTile, (Interface, Interface), IBasicTile, name=u'sample.tile')
+ 
+@@ -139,6 +142,16 @@ At this point, we can look up the ESI views:
+ .. code-block:: python
+ 
+     >>> head = getMultiAdapter((tile, request), name='esi-head')
++    >>> head()
++    Traceback (most recent call last):
++    ...
++    Unauthorized: Unauthorized()
++
++But we can only render them when we have the required permissions:
++
++    >>> from AccessControl.SecurityManagement import newSecurityManager
++    >>> from AccessControl.User import UnrestrictedUser
++    >>> newSecurityManager(None, UnrestrictedUser('manager', '', ['Manager'], []))
+     >>> print head()
+     <title>Title</title>
+ 
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-06T14:50:59+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/fba7783024d6aa50dae5945b59d400716968432a
+
+Disable ProtectTransform for authorized tile-editing requests; Abort transaction for all ESI tile calls
+
+Files changed:
+M plone/tiles/configure.zcml
+M plone/tiles/esi.py
+M plone/tiles/tile.py
+
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index cd64cd4..44562a4 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -77,12 +77,20 @@
+         zcml:condition="installed plone.transformchain"
+         />
+ 
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".tile.Tile *"
++        factory=".tile.TileProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
+     <configure zcml:condition="installed plone.protect">
+       <adapter
+-        name="plone.tiles.tileurl"
++        name="plone.tiles.tiletheming"
+         provides="plone.transformchain.interfaces.ITransform"
+         for=".tile.Tile *"
+-        factory=".tile.TileUrlTransform"
++        factory=".tile.TileThemingTransform"
+         zcml:condition="installed plone.transformchain"
+       />
+     </configure>
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 91aa4d3..e285d09 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -14,8 +14,9 @@
+ except ImportError:
+     from zope.security import checkPermission
+ 
+-import re
+ import os
++import re
++import transaction
+ 
+ X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ 
+@@ -190,6 +191,8 @@ def transform(self, result, encoding):
+         # drop X-Tile-Url
+         if 'x-tile-url' in self.request.response.headers:
+             del self.request.response.headers['x-tile-url']
++        # ESI requests are always GET request and should not mutate DB
++        transaction.abort()
+         return None
+ 
+     def transformBytes(self, result, encoding):
+diff --git a/plone/tiles/tile.py b/plone/tiles/tile.py
+index f052398..292d354 100644
+--- a/plone/tiles/tile.py
++++ b/plone/tiles/tile.py
+@@ -6,6 +6,7 @@
+ from zope.component import queryMultiAdapter
+ from zope.interface import implementer
+ from zope.traversing.browser.absoluteurl import absoluteURL
++from zExceptions import Forbidden
+ 
+ 
+ @implementer(ITile)
+@@ -108,24 +109,17 @@ class PersistentTile(Tile):
+     """
+ 
+ 
+-class TileUrlTransform(object):
+-    """Drop X-Tile-Url when not authorized for editing"""
+-    order = 9000
++class TileThemingTransform(object):
++    """Disable plone.app.theming for tile responses"""
++
++    order = 8800
+ 
+     def __init__(self, published, request):
+         self.published = published
+         self.request = request
+ 
+     def transform(self, result, encoding):
+-        # drop X-Tile-Url when not authorized for editing
+-        if 'x-tile-url' in self.request.response.headers:
+-            from plone.protect import CheckAuthenticator
+-            from zExceptions import Forbidden
+-            try:
+-                CheckAuthenticator(self.request)
+-            except Forbidden:
+-                del self.request.response.headers['x-tile-url']
+-
++        self.request.response.setHeader('X-Theme-Disabled', '1')
+         return None
+ 
+     def transformBytes(self, result, encoding):
+@@ -136,3 +130,60 @@ def transformUnicode(self, result, encoding):
+ 
+     def transformIterable(self, result, encoding):
+         return self.transform(result, encoding)
++
++
++class TileProtectTransform(object):
++    """Replacement transform for plone.protect's ProtectTransform, to drop
++    X-Tile-Url-header from unauthorized responses and disable the default
++    ProtectTransform for authorized responses (to avoid causing issues
++    like extra protect.js-injections for tile editors)
++    """
++
++    order = 9000
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++        try:
++            from plone.protect.auto import ProtectTransform
++            self.protect = ProtectTransform(published, request)
++        except ImportError:
++            self.protect = None
++
++    def transform(self, result, encoding):
++        from plone.protect import CheckAuthenticator
++        CheckAuthenticator(self.request)
++        return None
++
++    def transformBytes(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformBytes(result, encoding)
++            else:
++                return None
++
++    def transformUnicode(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformUnicode(result, encoding)
++            else:
++                return None
++
++    def transformIterable(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformIterable(result, encoding)
++            else:
++                return None
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-06T14:56:22+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/0313cbda593ac3f5c44cf5bb18e2a88ed8d43db4
+
+Update changelog
+
+Files changed:
+M CHANGES.rst
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 4aa067c..f333ee2 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -8,13 +8,26 @@ Breaking changes:
+ 
+ - Tiles no longer add relative ``X-Tile-Url``-header in ``__call__``.
+   Tiles still add absolute ``X-Tile-Url``-header during traversal, but
+-  it gest removed after rendering when request is not CSRF-authorized.
++  it gets removed after rendering when request is not CSRF-authorized.
+   [datakurre]
+ 
+-- Generic ESI helper do now check the request is authorized to render
++- Generic ESI helper check now taht the request is authorized to render
+   the tile according to the registered view permission fo the tile.
+   [datakurre]
+ 
++- Transactions of requests to ESI helper views are automatically aborted,
++  because ESI requests should always be immutable GET requests
++  [datakurre]
++
++- plone.app.theming (transform) is now disabled with X-Theme-Disabled-header
++  for requests rendering tiles
++  [datakurre]
++
++- plone.protect's ProtectTransform is skipped for tile requests with correct
++  CSRF token prevent its side-effects on tile editors rendering tiles
++  individually
++  [datakurre]
++
+ New features:
+ 
+ - Added X-Frame-Options -header for ESI-tile views with matching behavior
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-09T14:43:44+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/8828861179ac2d13d55fd38d55695c7c0c76f4d1
+
+Fix to not abort transaction on ESI requests when CSRF protection is explicitly disabled on request
+
+Files changed:
+M plone/tiles/esi.py
+
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index e285d09..d57d995 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -183,6 +183,7 @@ def __init__(self, published, request):
+         self.request = request
+ 
+     def transform(self, result, encoding):
++        from plone.protect.interfaces import IDisableCSRFProtection
+         # clickjacking protection from plone.protect
+         if X_FRAME_OPTIONS:
+             if not self.request.response.getHeader('X-Frame-Options'):
+@@ -192,7 +193,9 @@ def transform(self, result, encoding):
+         if 'x-tile-url' in self.request.response.headers:
+             del self.request.response.headers['x-tile-url']
+         # ESI requests are always GET request and should not mutate DB
+-        transaction.abort()
++        # unless they provide IDisableCSRFProtection
++        if not IDisableCSRFProtection.providedBy(self.request):
++            transaction.abort()
+         return None
+ 
+     def transformBytes(self, result, encoding):
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-23T13:32:56+02:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.tiles/commit/d7802f322ffeda87bd14db5980fa4d69a9bfccb0
+
+Fix absolute URL adapter for tiles to not encode data into querystring for tiles with id and persistent storage
+
+Files changed:
+M plone/tiles/absoluteurl.py
+M plone/tiles/testing.py
+M plone/tiles/tiles.rst
+
+diff --git a/plone/tiles/absoluteurl.py b/plone/tiles/absoluteurl.py
+index 6d487d3..9fe4776 100644
+--- a/plone/tiles/absoluteurl.py
++++ b/plone/tiles/absoluteurl.py
+@@ -1,8 +1,8 @@
+ # -*- coding: utf-8 -*-
+-
+ from plone.tiles.data import encode
+ from plone.tiles.interfaces import ITileDataManager
+ from plone.tiles.interfaces import ITileType
++from zope.annotation import IAnnotations
+ from zope.component import getMultiAdapter
+ from zope.component import queryUtility
+ from zope.traversing.browser.absoluteurl import AbsoluteURL
+@@ -72,14 +72,30 @@ class TransientTileAbsoluteURL(BaseTileAbsoluteURL):
+ 
+     def __str__(self):
+         url = super(TransientTileAbsoluteURL, self).__str__()
+-        data = ITileDataManager(self.context).get()
+-        if data:
+-            tileType = queryUtility(ITileType, name=self.context.__name__)
+-            if tileType is not None and tileType.schema is not None:
+-                if '?' in url:
+-                    url += '&' + encode(data, tileType.schema)
+-                else:
+-                    url += '?' + encode(data, tileType.schema)
++        manager = ITileDataManager(self.context)
++
++        # Transient looking tile with id is only really transient
++        # if it caches its decoded query data in request annotations
++        transient = manager.storage == IAnnotations(self.request)
++
++        # When transient looking tile with id is not really transient,
++        # its data should not be encoded into query string
++        if self.context.id and not transient:
++            return url
++
++        # All tiles don't need / have configuration data at all.
++        data = manager.get()
++        if not data:
++            return url
++
++        # But when configuration data is really read from query string
++        # and not persisted, it should also be kept in query string
++        tileType = queryUtility(ITileType, name=self.context.__name__)
++        if tileType is not None and tileType.schema is not None:
++            if '?' in url:
++                url += '&' + encode(data, tileType.schema)
++            else:
++                url += '?' + encode(data, tileType.schema)
+         return url
+ 
+ 
+diff --git a/plone/tiles/testing.py b/plone/tiles/testing.py
+index 30f0376..3ea86a1 100644
+--- a/plone/tiles/testing.py
++++ b/plone/tiles/testing.py
+@@ -38,10 +38,12 @@ class PloneTiles(Layer):
+     defaultBases = (z2.STARTUP,)
+ 
+     def setUp(self):
+-        import plone.tiles
+         self['configurationContext'] = context = zca.stackConfigurationContext(
+             self.get('configurationContext')
+         )
++        import zope.annotation
++        xmlconfig.file('configure.zcml', zope.annotation, context=context)
++        import plone.tiles
+         xmlconfig.file('configure.zcml', plone.tiles, context=context)
+ 
+     def tearDown(self):
+diff --git a/plone/tiles/tiles.rst b/plone/tiles/tiles.rst
+index 7366498..16361db 100644
+--- a/plone/tiles/tiles.rst
++++ b/plone/tiles/tiles.rst
+@@ -154,9 +154,13 @@ and verify how the tile is instantiated.
+ .. code-block:: python
+ 
+     >>> from zope.component import getMultiAdapter
++    >>> from zope.interface import classImplements
+     >>> from zope.interface import Interface
+     >>> from zope.interface import implementer
+     >>> from zope.publisher.browser import TestRequest
++    >>> from zope.annotation.interfaces import IAnnotations
++    >>> from zope.annotation.interfaces import IAttributeAnnotatable
++    >>> classImplements(TestRequest, IAttributeAnnotatable)
+ 
+     >>> class IContext(Interface):
+     ...     pass
+@@ -531,7 +535,6 @@ Yet, just adding the flag, doesn't create new persistent annotations on GET requ
+     >>> sorted(ITileDataManager(tile).get().items(), key=lambda x: x[0])
+     [('count', 5), ('cssClass', 'foo'), ('title', u'My title')]
+ 
+-    >>> from zope.annotation.interfaces import IAnnotations
+     >>> list(IAnnotations(context).keys())
+     []
+ 
+
+
+Repository: plone.tiles
+
+
+Branch: refs/heads/master
+Date: 2017-02-23T18:23:56+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/mockup/commit/7f4eb605a899805a6c200ed0bc16b67bc55c9b1b
+Commit: https://github.com/plone/plone.tiles/commit/194e125fc69a46a2e65b3ab85354fcb3ece34945
 
-Merge pull request #679 from plone/plip-1483-retina-image-scales
+Merge pull request #22 from plone/datakurre-fix-esi-caching
 
-Plip 1483 retina image scales
+Fix ESI support
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/modal/pattern.js
+M plone/tiles/absoluteurl.py
+M plone/tiles/configure.zcml
+M plone/tiles/esi.py
+M plone/tiles/esi.rst
+M plone/tiles/testing.py
+M plone/tiles/tile.py
+M plone/tiles/tiles.rst
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7cd4900..d964144 100644
+index 664d9b0..f333ee2 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -134,6 +134,9 @@ New:
- - Add an option to set the path operator in QueryHelp and relateditem pattern.
-   [Gagaro]
+@@ -1,10 +1,45 @@
+ Changelog
+ =========
  
-+- Add srcset attribute to image modal
-+  [didrix]
+-1.8.3 (unreleased)
++2.0.0 (unreleased)
+ ------------------
+ 
+-- Nothing changed yet.
++Breaking changes:
 +
- Fixes:
++- Tiles no longer add relative ``X-Tile-Url``-header in ``__call__``.
++  Tiles still add absolute ``X-Tile-Url``-header during traversal, but
++  it gets removed after rendering when request is not CSRF-authorized.
++  [datakurre]
++
++- Generic ESI helper check now taht the request is authorized to render
++  the tile according to the registered view permission fo the tile.
++  [datakurre]
++
++- Transactions of requests to ESI helper views are automatically aborted,
++  because ESI requests should always be immutable GET requests
++  [datakurre]
++
++- plone.app.theming (transform) is now disabled with X-Theme-Disabled-header
++  for requests rendering tiles
++  [datakurre]
++
++- plone.protect's ProtectTransform is skipped for tile requests with correct
++  CSRF token prevent its side-effects on tile editors rendering tiles
++  individually
++  [datakurre]
++
++New features:
++
++- Added X-Frame-Options -header for ESI-tile views with matching behavior
++  with plone.protect
++  [datakurre]
++
++Bug fixes:
++
++- Fix issue where ESI-tile helper views didn't get correct
++  Cache-Control-headers, because ESI-helpers views were not acquisition
++  wrapped
++  [datakurre]
  
- - Change ``bool`` function in mockup-utils to allow for truthy values and match on falsy values.
-diff --git a/mockup/patterns/modal/pattern.js b/mockup/patterns/modal/pattern.js
-index 3fa97b1..5164493 100644
---- a/mockup/patterns/modal/pattern.js
-+++ b/mockup/patterns/modal/pattern.js
-@@ -608,8 +608,9 @@ define([
-       var self = this;
-       self.$wrapper.addClass('image-modal');
-       var src = self.$el.attr('href');
-+      var srcset = self.$el.attr('data-modal-srcset') || '';
-       // XXX aria?
--      self.$raw = $('<div><h1>Image</h1><div id="content"><div class="modal-image"><img src="' + src + '" /></div></div></div>');
-+      self.$raw = $('<div><h1>Image</h1><div id="content"><div class="modal-image"><img src="' + src + '" srcset="' + srcset + '" /></div></div></div>');
-       self._show();
-     },
+ 
+ 1.8.2 (2017-01-10)
+diff --git a/plone/tiles/absoluteurl.py b/plone/tiles/absoluteurl.py
+index 6d487d3..9fe4776 100644
+--- a/plone/tiles/absoluteurl.py
++++ b/plone/tiles/absoluteurl.py
+@@ -1,8 +1,8 @@
+ # -*- coding: utf-8 -*-
+-
+ from plone.tiles.data import encode
+ from plone.tiles.interfaces import ITileDataManager
+ from plone.tiles.interfaces import ITileType
++from zope.annotation import IAnnotations
+ from zope.component import getMultiAdapter
+ from zope.component import queryUtility
+ from zope.traversing.browser.absoluteurl import AbsoluteURL
+@@ -72,14 +72,30 @@ class TransientTileAbsoluteURL(BaseTileAbsoluteURL):
+ 
+     def __str__(self):
+         url = super(TransientTileAbsoluteURL, self).__str__()
+-        data = ITileDataManager(self.context).get()
+-        if data:
+-            tileType = queryUtility(ITileType, name=self.context.__name__)
+-            if tileType is not None and tileType.schema is not None:
+-                if '?' in url:
+-                    url += '&' + encode(data, tileType.schema)
+-                else:
+-                    url += '?' + encode(data, tileType.schema)
++        manager = ITileDataManager(self.context)
++
++        # Transient looking tile with id is only really transient
++        # if it caches its decoded query data in request annotations
++        transient = manager.storage == IAnnotations(self.request)
++
++        # When transient looking tile with id is not really transient,
++        # its data should not be encoded into query string
++        if self.context.id and not transient:
++            return url
++
++        # All tiles don't need / have configuration data at all.
++        data = manager.get()
++        if not data:
++            return url
++
++        # But when configuration data is really read from query string
++        # and not persisted, it should also be kept in query string
++        tileType = queryUtility(ITileType, name=self.context.__name__)
++        if tileType is not None and tileType.schema is not None:
++            if '?' in url:
++                url += '&' + encode(data, tileType.schema)
++            else:
++                url += '?' + encode(data, tileType.schema)
+         return url
+ 
+ 
+diff --git a/plone/tiles/configure.zcml b/plone/tiles/configure.zcml
+index 7a672e8..44562a4 100644
+--- a/plone/tiles/configure.zcml
++++ b/plone/tiles/configure.zcml
+@@ -1,6 +1,7 @@
+ <configure
+     xmlns="http://namespaces.zope.org/zope"
+     xmlns:browser="http://namespaces.zope.org/browser"
++    xmlns:zcml="http://namespaces.zope.org/zcml"
+     i18n_domain="plone.tiles">
+ 
+     <!-- Data manager -->
+@@ -60,6 +61,40 @@
+         permission="zope.Public"
+         />
+ 
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".esi.ESIHead *"
++        factory=".esi.ESIProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".esi.ESIBody *"
++        factory=".esi.ESIProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
++    <adapter
++        name="plone.protect.autocsrf"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".tile.Tile *"
++        factory=".tile.TileProtectTransform"
++        zcml:condition="installed plone.transformchain"
++        />
++
++    <configure zcml:condition="installed plone.protect">
++      <adapter
++        name="plone.tiles.tiletheming"
++        provides="plone.transformchain.interfaces.ITransform"
++        for=".tile.Tile *"
++        factory=".tile.TileThemingTransform"
++        zcml:condition="installed plone.transformchain"
++      />
++    </configure>
++
+     <!-- Field Type converters -->
+     <adapter for="zope.schema.interfaces.IBytesLine"
+              factory="plone.tiles.fieldtypeconverters.NoConverter"
+diff --git a/plone/tiles/esi.py b/plone/tiles/esi.py
+index 2e83596..d57d995 100644
+--- a/plone/tiles/esi.py
++++ b/plone/tiles/esi.py
+@@ -1,14 +1,24 @@
+ # -*- coding: utf-8 -*-
+-
+ from plone.tiles.interfaces import ESI_HEADER
+ from plone.tiles.interfaces import ESI_HEADER_KEY
+ from plone.tiles.interfaces import IESIRendered
++from plone.tiles.interfaces import ITileType
+ from plone.tiles.tile import PersistentTile
+ from plone.tiles.tile import Tile
++from Products.Five import BrowserView
++from zExceptions import Unauthorized
++from zope.component import queryUtility
+ from zope.interface import implementer
++try:
++    from AccessControl.security import checkPermission
++except ImportError:
++    from zope.security import checkPermission
+ 
++import os
+ import re
++import transaction
+ 
++X_FRAME_OPTIONS = os.environ.get('PLONE_X_FRAME_OPTIONS', 'SAMEORIGIN')
+ 
+ HEAD_CHILDREN = re.compile(r'<head[^>]*>(.*)</head>', re.I | re.S)
+ BODY_CHILDREN = re.compile(r'<body[^>]*>(.*)</body>', re.I | re.S)
+@@ -60,7 +70,9 @@ def __call__(self, *args, **kwargs):
+             if self.head:
+                 mode = 'esi-head'
+             return ESI_TEMPLATE.format(
+-                url=self.request.getURL(),
++                url=(self.request.get('PATH_INFO') and
++                     self.request.get('PATH_INFO').replace(' ', '%20') or
++                     self.request.getURL()),
+                 queryString=self.request.get('QUERY_STRING', ''),
+                 esiMode=mode
+             )
+@@ -96,22 +108,30 @@ class ESIPersistentTile(ConditionalESIRendering, PersistentTile):
+ 
+ # ESI views
+ 
+-class ESIHead(object):
++class ESIHead(BrowserView):
+     """Render the head portion of a tile independently.
+     """
+ 
+-    def __init__(self, context, request):
+-        self.tile = context
+-        self.request = request
+-
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
++        # Check for the registered view permission
++        try:
++            type_ = queryUtility(ITileType, self.context.__name__)
++            permission = type_.view_permission
++        except AttributeError:
++            permission = None
++        if permission:
++            if not checkPermission(permission, self.context):
++                raise Unauthorized()
+ 
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+ 
+-        document = self.tile()  # render the tile
++        document = self.context()  # render the tile
++
++        # Disable the theme so we don't <html/>-wrapped
++        self.request.response.setHeader('X-Theme-Disabled', '1')
+ 
+         match = HEAD_CHILDREN.search(document)
+         if not match:
+@@ -119,24 +139,70 @@ def __call__(self):
+         return match.group(1).strip()
+ 
+ 
+-class ESIBody(object):
++class ESIBody(BrowserView):
+     """Render the head portion of a tile independently.
+     """
+ 
+-    def __init__(self, context, request):
+-        self.tile = context
+-        self.request = request
+-
+     def __call__(self):
+         """Return the children of the <head> tag as a fragment.
+         """
++        # Check for the registered view permission
++        try:
++            type_ = queryUtility(ITileType, self.context.__name__)
++            permission = type_.view_permission
++        except AttributeError:
++            permission = None
++        if permission:
++            if not checkPermission(permission, self.context):
++                raise Unauthorized()
+ 
+         if self.request.getHeader(ESI_HEADER):
+             del self.request.environ[ESI_HEADER_KEY]
+ 
+-        document = self.tile()  # render the tile
++        document = self.context()  # render the tile
++
++        # Disable the theme so we don't <html/>-wrapped
++        self.request.response.setHeader('X-Theme-Disabled', '1')
+ 
+         match = BODY_CHILDREN.search(document)
+         if not match:
+             return document
+         return match.group(1).strip()
++
++
++class ESIProtectTransform(object):
++    """Replacement transform for plone.protect's ProtectTransform,
++    because ESI tile responses' HTML should not be transformed to
++    avoid wrapping them with <html>-tag
++    """
++
++    order = 9000
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++
++    def transform(self, result, encoding):
++        from plone.protect.interfaces import IDisableCSRFProtection
++        # clickjacking protection from plone.protect
++        if X_FRAME_OPTIONS:
++            if not self.request.response.getHeader('X-Frame-Options'):
++                self.request.response.setHeader(
++                    'X-Frame-Options', X_FRAME_OPTIONS)
++        # drop X-Tile-Url
++        if 'x-tile-url' in self.request.response.headers:
++            del self.request.response.headers['x-tile-url']
++        # ESI requests are always GET request and should not mutate DB
++        # unless they provide IDisableCSRFProtection
++        if not IDisableCSRFProtection.providedBy(self.request):
++            transaction.abort()
++        return None
++
++    def transformBytes(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformUnicode(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformIterable(self, result, encoding):
++        return self.transform(result, encoding)
+diff --git a/plone/tiles/esi.rst b/plone/tiles/esi.rst
+index 45fcdc6..6541d61 100644
+--- a/plone/tiles/esi.rst
++++ b/plone/tiles/esi.rst
+@@ -59,6 +59,8 @@ Ordinarily, of course, it would be registered via ZCML.
+ .. code-block:: python
+ 
+     >>> from plone.tiles.type import TileType
++    >>> from zope.security.permission import Permission
++    >>> permission = Permission('dummy.Permission')
+     >>> sampleTileType = TileType(
+     ...     name=u'sample.tile',
+     ...     title=u'Sample tile',
+@@ -71,6 +73,7 @@ Ordinarily, of course, it would be registered via ZCML.
+     >>> from zope.interface import Interface
+     >>> from plone.tiles.interfaces import IBasicTile
+ 
++    >>> provideUtility(permission, name=u'dummy.Permission')
+     >>> provideUtility(sampleTileType, name=u'sample.tile')
+     >>> provideAdapter(SampleTile, (Interface, Interface), IBasicTile, name=u'sample.tile')
+ 
+@@ -139,6 +142,16 @@ At this point, we can look up the ESI views:
+ .. code-block:: python
+ 
+     >>> head = getMultiAdapter((tile, request), name='esi-head')
++    >>> head()
++    Traceback (most recent call last):
++    ...
++    Unauthorized: Unauthorized()
++
++But we can only render them when we have the required permissions:
++
++    >>> from AccessControl.SecurityManagement import newSecurityManager
++    >>> from AccessControl.User import UnrestrictedUser
++    >>> newSecurityManager(None, UnrestrictedUser('manager', '', ['Manager'], []))
+     >>> print head()
+     <title>Title</title>
+ 
+diff --git a/plone/tiles/testing.py b/plone/tiles/testing.py
+index 30f0376..3ea86a1 100644
+--- a/plone/tiles/testing.py
++++ b/plone/tiles/testing.py
+@@ -38,10 +38,12 @@ class PloneTiles(Layer):
+     defaultBases = (z2.STARTUP,)
+ 
+     def setUp(self):
+-        import plone.tiles
+         self['configurationContext'] = context = zca.stackConfigurationContext(
+             self.get('configurationContext')
+         )
++        import zope.annotation
++        xmlconfig.file('configure.zcml', zope.annotation, context=context)
++        import plone.tiles
+         xmlconfig.file('configure.zcml', plone.tiles, context=context)
+ 
+     def tearDown(self):
+diff --git a/plone/tiles/tile.py b/plone/tiles/tile.py
+index 98f83c7..292d354 100644
+--- a/plone/tiles/tile.py
++++ b/plone/tiles/tile.py
+@@ -2,10 +2,11 @@
+ from plone.tiles.interfaces import IPersistentTile
+ from plone.tiles.interfaces import ITile
+ from plone.tiles.interfaces import ITileDataManager
++from Products.Five import BrowserView
+ from zope.component import queryMultiAdapter
+ from zope.interface import implementer
+-from zope.publisher.browser import BrowserView
+ from zope.traversing.browser.absoluteurl import absoluteURL
++from zExceptions import Forbidden
+ 
+ 
+ @implementer(ITile)
+@@ -46,10 +47,15 @@ def __getitem__(self, name):
+             if self.__doc__ is None:
+                 self.__doc__ = 'For Zope 2, to keep the ZPublisher happy'
+ 
+-            self.request.response.setHeader(
+-                'X-Tile-Url',
+-                self.url
+-            )
++            # Note: X-Tile-Url was added to make it easier for editor to know
++            # the URL of a new tile after receiving the redirected response
++            # from a tile form. That's why it's only set for customizable tiles
++            # (tiles with id).
++            if self.id is not None:
++                self.request.response.setHeader(
++                    'X-Tile-Url',
++                    self.url
++                )
+ 
+             return self
+ 
+@@ -82,11 +88,6 @@ def __call__(self, *args, **kwargs):
+                 u'Override __call__ or set a class variable "index" to point '
+                 u'to a view page template file'
+             )
+-        if self.id is not None:
+-            self.request.response.setHeader(
+-                'X-Tile-Url',
+-                self.url[len(self.context.absolute_url()) + 1:]
+-            )
+         return self.index(*args, **kwargs)
+ 
+     @property
+@@ -106,3 +107,83 @@ class PersistentTile(Tile):
+     """Base class for persistent tiles. Identical to `Tile`, except that the
+     data dict is never serialized with the URL.
+     """
++
++
++class TileThemingTransform(object):
++    """Disable plone.app.theming for tile responses"""
++
++    order = 8800
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++
++    def transform(self, result, encoding):
++        self.request.response.setHeader('X-Theme-Disabled', '1')
++        return None
++
++    def transformBytes(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformUnicode(self, result, encoding):
++        return self.transform(result, encoding)
++
++    def transformIterable(self, result, encoding):
++        return self.transform(result, encoding)
++
++
++class TileProtectTransform(object):
++    """Replacement transform for plone.protect's ProtectTransform, to drop
++    X-Tile-Url-header from unauthorized responses and disable the default
++    ProtectTransform for authorized responses (to avoid causing issues
++    like extra protect.js-injections for tile editors)
++    """
++
++    order = 9000
++
++    def __init__(self, published, request):
++        self.published = published
++        self.request = request
++        try:
++            from plone.protect.auto import ProtectTransform
++            self.protect = ProtectTransform(published, request)
++        except ImportError:
++            self.protect = None
++
++    def transform(self, result, encoding):
++        from plone.protect import CheckAuthenticator
++        CheckAuthenticator(self.request)
++        return None
++
++    def transformBytes(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformBytes(result, encoding)
++            else:
++                return None
++
++    def transformUnicode(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformUnicode(result, encoding)
++            else:
++                return None
++
++    def transformIterable(self, result, encoding):
++        try:
++            return self.transform(result, encoding)
++        except Forbidden:
++            if 'x-tile-url' in self.request.response.headers:
++                del self.request.response.headers['x-tile-url']
++            if self.protect is not None:
++                return self.protect.transformIterable(result, encoding)
++            else:
++                return None
+diff --git a/plone/tiles/tiles.rst b/plone/tiles/tiles.rst
+index 7366498..16361db 100644
+--- a/plone/tiles/tiles.rst
++++ b/plone/tiles/tiles.rst
+@@ -154,9 +154,13 @@ and verify how the tile is instantiated.
+ .. code-block:: python
+ 
+     >>> from zope.component import getMultiAdapter
++    >>> from zope.interface import classImplements
+     >>> from zope.interface import Interface
+     >>> from zope.interface import implementer
+     >>> from zope.publisher.browser import TestRequest
++    >>> from zope.annotation.interfaces import IAnnotations
++    >>> from zope.annotation.interfaces import IAttributeAnnotatable
++    >>> classImplements(TestRequest, IAttributeAnnotatable)
+ 
+     >>> class IContext(Interface):
+     ...     pass
+@@ -531,7 +535,6 @@ Yet, just adding the flag, doesn't create new persistent annotations on GET requ
+     >>> sorted(ITileDataManager(tile).get().items(), key=lambda x: x[0])
+     [('count', 5), ('cssClass', 'foo'), ('title', u'My title')]
+ 
+-    >>> from zope.annotation.interfaces import IAnnotations
+     >>> list(IAnnotations(context).keys())
+     []
  
 
 
