@@ -1,530 +1,106 @@
-Repository: plone.api
+Repository: archetypes.schemaextender
 
 
 Branch: refs/heads/master
-Date: 2017-02-24T14:27:39Z
-Author: Adam Forsythe-Cheasley (adamcheasley) <adam@prezola.com>
-Commit: https://github.com/plone/plone.api/commit/8d7ed78ee70f552a9162d9390e5e87fc80a144fb
+Date: 2016-12-14T13:24:07-06:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/archetypes.schemaextender/commit/bb01d02c11fb108bc22fc635a78a24c710759c04
 
-simplify delete and transition functions
-
-Files changed:
-M src/plone/api/content.py
-
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 65cbe68..0c7b451 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -291,37 +291,27 @@ def delete(obj=None, objects=None, check_linkintegrity=True):
-             context=site,
-             request=site.REQUEST)
- 
-+        objects_to_check = objects or [obj]
-+        breaches = linkintegrity_view.get_breaches(objects_to_check)
-+        if breaches:
-+            raise LinkIntegrityNotificationException(
-+                'Linkintegrity-breaches: {0}'.format(breaches)
-+            )
-+
-     if obj is not None:
--        if check_linkintegrity:
--            if NEW_LINKINTEGRITY:
--                # new: look for breaches and manually raise a exception
--                breaches = linkintegrity_view.get_breaches([obj])
--                if breaches:
--                    raise LinkIntegrityNotificationException(
--                        'Linkintegrity-breaches: {0}'.format(breaches)
--                    )
--            # old: exception will be raised when there are breaches
-+        if check_linkintegrity or (
-+                not check_linkintegrity and NEW_LINKINTEGRITY):
-             obj.aq_parent.manage_delObjects([obj.getId()])
-         else:
--            if NEW_LINKINTEGRITY:
--                # new: deleting ignores linkintegrity-breaches
-+            # old: we have to explicitly ignore the exception
-+            try:
-                 obj.aq_parent.manage_delObjects([obj.getId()])
--            else:
--                # old: we have to explicitly ignore the exception
--                try:
--                    obj.aq_parent.manage_delObjects([obj.getId()])
--                except LinkIntegrityNotificationException:
--                    pass
-+            except LinkIntegrityNotificationException:
-+                pass
- 
-     else:
-         if check_linkintegrity:
-             if NEW_LINKINTEGRITY:
--                # new: check for unresolved breaches for all objects
--                breaches = linkintegrity_view.get_breaches(objects)
--                if breaches:
--                    raise LinkIntegrityNotificationException(
--                        'Linkintegrity-breaches: {0}'.format(breaches)
--                    )
-                 # there are no breaches so we need to skip the check
-                 for obj in objects:
-                     delete(obj=obj, check_linkintegrity=False)
-@@ -358,6 +348,37 @@ def get_state(obj=None, default=_marker):
-     return workflow.getInfoFor(ob=obj, name='review_state')
- 
- 
-+# work backwards from our end state
-+def _find_path(maps, path, current_state, start_state):
-+    paths = []
-+    # current_state could not be on maps if it only has outgoing
-+    # transitions. i.e an initial state you are not able to return to.
-+    if current_state not in maps:
-+        return
-+    for new_transition, from_states in maps[current_state]:
-+        next_path = _copy(path)
-+        if new_transition in path:
-+            # Don't go in a circle
-+            continue
-+
-+        next_path.insert(0, new_transition)
-+        if start_state in from_states:
-+            paths.append(next_path)
-+            continue
-+
-+        for state in from_states:
-+            recursive_paths = _find_path(
-+                maps,
-+                next_path,
-+                state,
-+                start_state,
-+            )
-+            if recursive_paths:
-+                paths.append(recursive_paths)
-+
-+    return len(paths) and min(paths, key=len) or None
-+
-+
- def _wf_transitions_for(workflow, from_state, to_state):
-     """Get a list of transition IDs required to transition
-     from ``from_state`` to ``to_state``.
-@@ -390,37 +411,38 @@ def _wf_transitions_for(workflow, from_state, to_state):
-         # impossible to reach via this workflow
-         return None
- 
--    # work backwards from our end state
--    def find_path(maps, path, current_state, start_state):
--        paths = []
--        # current_state could not be on maps if it only has outgoing
--        # transitions. i.e an initial state you are not able to return to.
--        if current_state not in maps:
-+    return _find_path(transition_maps, [], to_state, from_state)
-+
-+
-+def _transition_to(obj, workflow, to_state, **kwargs):
-+    # move from the current state to the given state
-+    # via any route we can find
-+    for wf in workflow.getWorkflowsFor(obj):
-+        status = workflow.getStatusOf(wf.getId(), obj)
-+        if not status or not status.get('review_state'):
-+            continue
-+        if status['review_state'] == to_state:
-             return
--        for new_transition, from_states in maps[current_state]:
--            next_path = _copy(path)
--            if new_transition in path:
--                # Don't go in a circle
--                continue
--
--            next_path.insert(0, new_transition)
--            if start_state in from_states:
--                paths.append(next_path)
--                continue
--
--            for state in from_states:
--                recursive_paths = find_path(
--                    maps,
--                    next_path,
--                    state,
--                    start_state,
--                )
--                if recursive_paths:
--                    paths.append(recursive_paths)
- 
--        return len(paths) and min(paths, key=len) or None
-+        transitions = _wf_transitions_for(
-+            wf,
-+            status['review_state'],
-+            to_state,
-+        )
-+        if not transitions:
-+            continue
-+
-+        for transition in transitions:
-+            try:
-+                workflow.doActionFor(obj, transition, **kwargs)
-+            except WorkflowException:
-+                # take into account automatic transitions.
-+                # If the transitions list that are being iterated over
-+                # have automatic transitions they need to be skipped
-+                if get_state(obj) == to_state:
-+                    break
- 
--    return find_path(transition_maps, [], to_state, from_state)
-+        break
- 
- 
- @required_parameters('obj')
-@@ -460,35 +482,7 @@ def transition(obj=None, transition=None, to_state=None, **kwargs):
-                 '{1}'.format(transition, '\n'.join(sorted(transitions)))
-             )
-     else:
--        # move from the current state to the given state
--        # via any route we can find
--        for wf in workflow.getWorkflowsFor(obj):
--            status = workflow.getStatusOf(wf.getId(), obj)
--            if not status or not status.get('review_state'):
--                continue
--            if status['review_state'] == to_state:
--                return
--
--            transitions = _wf_transitions_for(
--                wf,
--                status['review_state'],
--                to_state,
--            )
--            if not transitions:
--                continue
--
--            for transition in transitions:
--                try:
--                    workflow.doActionFor(obj, transition, **kwargs)
--                except WorkflowException:
--                    # take into account automatic transitions.
--                    # If the transitions list that are being iterated over
--                    # have automatic transitions they need to be skipped
--                    if get_state(obj) == to_state:
--                        break
--
--            break
--
-+        _transition_to(obj, workflow, to_state, **kwargs)
-         if workflow.getInfoFor(obj, 'review_state') != to_state:
-             raise InvalidParameterError(
-                 'Could not find workflow to set state to {0} on {1}'.format(
-
-
-Repository: plone.api
-
-
-Branch: refs/heads/master
-Date: 2017-02-24T15:01:59Z
-Author: Adam Forsythe-Cheasley (adamcheasley) <adam@prezola.com>
-Commit: https://github.com/plone/plone.api/commit/23aaaf3f027893a58b7654af8a73c8956967beb0
-
-simplify delete further
-
-Files changed:
-M src/plone/api/content.py
-
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 0c7b451..4aa0d04 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -310,19 +310,11 @@ def delete(obj=None, objects=None, check_linkintegrity=True):
-                 pass
- 
-     else:
--        if check_linkintegrity:
--            if NEW_LINKINTEGRITY:
--                # there are no breaches so we need to skip the check
--                for obj in objects:
--                    delete(obj=obj, check_linkintegrity=False)
--            else:
--                # old the check will be done by manage_delObjects
--                for obj in objects:
--                    delete(obj=obj, check_linkintegrity=True)
--
--        else:
--            for obj in objects:
--                delete(obj=obj, check_linkintegrity=False)
-+        check = False
-+        if check_linkintegrity and not NEW_LINKINTEGRITY:
-+            check = True
-+        for obj in objects:
-+            delete(obj=obj, check_linkintegrity=check)
- 
- 
- @required_parameters('obj')
-
-
-Repository: plone.api
-
-
-Branch: refs/heads/master
-Date: 2017-02-24T15:04:49Z
-Author: Adam Forsythe-Cheasley (adamcheasley) <adam@prezola.com>
-Commit: https://github.com/plone/plone.api/commit/324508b4ef40c4a83702f36e524bf7be2f86fe4b
-
-add changelog entry
+Fix import location for Products.ATContentTypes.interfaces.
 
 Files changed:
 M CHANGES.rst
+M README.rst
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f5be929..9956820 100644
+index b60bfc7..c689e3e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,6 +14,9 @@ New features:
  
  Bug fixes:
  
-+- Simplify delete and transition functions.
-+  [adamcheasley]
++- Update docs about ``Products.ATContentTypes.interfaces`` import location.
++  [thet]
 +
- - Do not reassign dynamic roles as local roles when using user.grant_roles().
-   Fixes same issue as #351 for groups.
+ - Fix imports from Globals that was removed in Zope4
    [pbauer]
+ 
+diff --git a/README.rst b/README.rst
+index 50fd523..5f5aea5 100644
+--- a/README.rst
++++ b/README.rst
+@@ -62,7 +62,7 @@ Next we have to create an adapter that will add this field::
+     from zope.interface import implements
+     from archetypes.schemaextender.interfaces import ISchemaExtender
+     from Products.Archetypes.public import BooleanWidget
+-    from Products.ATContentTypes.interface import IATDocument
++    from Products.ATContentTypes.interfaces import IATDocument
+ 
+     class PageExtender(object):
+         adapts(IATDocument)
+@@ -166,7 +166,7 @@ Below is an example of ``extender.py`` which adds new field on *Dates* edit tab:
+         from zope.interface import implements
+ 
+         from Products.Archetypes.public import BooleanWidget
+-        from Products.ATContentTypes.interface import IATDocument
++        from Products.ATContentTypes.interfaces import IATDocument
+         from Products.Archetypes import public as atapi
+         from Products.Archetypes.interfaces import IBaseContent
+ 
 
 
-Repository: plone.api
+Repository: archetypes.schemaextender
 
 
 Branch: refs/heads/master
-Date: 2017-02-24T23:45:32+01:00
+Date: 2017-02-25T00:10:13+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.api/commit/d65c81e6eeb69f0a581fa50e9f0500372efe45b5
+Commit: https://github.com/plone/archetypes.schemaextender/commit/f9b77913784fbf11641d5e53a88aba6b686e3aa9
 
-Merge pull request #358 from plone/simplify-complex-functions
+Merge pull request #3 from plone/thet-atifix
 
-Simplify complex functions
+Fix import location for Products.ATContentTypes.interfaces.
 
 Files changed:
 M CHANGES.rst
-M src/plone/api/content.py
+M README.rst
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f5be929..9956820 100644
+index b60bfc7..c689e3e 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,6 +14,9 @@ New features:
  
  Bug fixes:
  
-+- Simplify delete and transition functions.
-+  [adamcheasley]
++- Update docs about ``Products.ATContentTypes.interfaces`` import location.
++  [thet]
 +
- - Do not reassign dynamic roles as local roles when using user.grant_roles().
-   Fixes same issue as #351 for groups.
+ - Fix imports from Globals that was removed in Zope4
    [pbauer]
-diff --git a/src/plone/api/content.py b/src/plone/api/content.py
-index 65cbe68..4aa0d04 100644
---- a/src/plone/api/content.py
-+++ b/src/plone/api/content.py
-@@ -291,48 +291,30 @@ def delete(obj=None, objects=None, check_linkintegrity=True):
-             context=site,
-             request=site.REQUEST)
  
-+        objects_to_check = objects or [obj]
-+        breaches = linkintegrity_view.get_breaches(objects_to_check)
-+        if breaches:
-+            raise LinkIntegrityNotificationException(
-+                'Linkintegrity-breaches: {0}'.format(breaches)
-+            )
-+
-     if obj is not None:
--        if check_linkintegrity:
--            if NEW_LINKINTEGRITY:
--                # new: look for breaches and manually raise a exception
--                breaches = linkintegrity_view.get_breaches([obj])
--                if breaches:
--                    raise LinkIntegrityNotificationException(
--                        'Linkintegrity-breaches: {0}'.format(breaches)
--                    )
--            # old: exception will be raised when there are breaches
-+        if check_linkintegrity or (
-+                not check_linkintegrity and NEW_LINKINTEGRITY):
-             obj.aq_parent.manage_delObjects([obj.getId()])
-         else:
--            if NEW_LINKINTEGRITY:
--                # new: deleting ignores linkintegrity-breaches
-+            # old: we have to explicitly ignore the exception
-+            try:
-                 obj.aq_parent.manage_delObjects([obj.getId()])
--            else:
--                # old: we have to explicitly ignore the exception
--                try:
--                    obj.aq_parent.manage_delObjects([obj.getId()])
--                except LinkIntegrityNotificationException:
--                    pass
-+            except LinkIntegrityNotificationException:
-+                pass
+diff --git a/README.rst b/README.rst
+index 50fd523..5f5aea5 100644
+--- a/README.rst
++++ b/README.rst
+@@ -62,7 +62,7 @@ Next we have to create an adapter that will add this field::
+     from zope.interface import implements
+     from archetypes.schemaextender.interfaces import ISchemaExtender
+     from Products.Archetypes.public import BooleanWidget
+-    from Products.ATContentTypes.interface import IATDocument
++    from Products.ATContentTypes.interfaces import IATDocument
  
-     else:
--        if check_linkintegrity:
--            if NEW_LINKINTEGRITY:
--                # new: check for unresolved breaches for all objects
--                breaches = linkintegrity_view.get_breaches(objects)
--                if breaches:
--                    raise LinkIntegrityNotificationException(
--                        'Linkintegrity-breaches: {0}'.format(breaches)
--                    )
--                # there are no breaches so we need to skip the check
--                for obj in objects:
--                    delete(obj=obj, check_linkintegrity=False)
--            else:
--                # old the check will be done by manage_delObjects
--                for obj in objects:
--                    delete(obj=obj, check_linkintegrity=True)
--
--        else:
--            for obj in objects:
--                delete(obj=obj, check_linkintegrity=False)
-+        check = False
-+        if check_linkintegrity and not NEW_LINKINTEGRITY:
-+            check = True
-+        for obj in objects:
-+            delete(obj=obj, check_linkintegrity=check)
+     class PageExtender(object):
+         adapts(IATDocument)
+@@ -166,7 +166,7 @@ Below is an example of ``extender.py`` which adds new field on *Dates* edit tab:
+         from zope.interface import implements
  
+         from Products.Archetypes.public import BooleanWidget
+-        from Products.ATContentTypes.interface import IATDocument
++        from Products.ATContentTypes.interfaces import IATDocument
+         from Products.Archetypes import public as atapi
+         from Products.Archetypes.interfaces import IBaseContent
  
- @required_parameters('obj')
-@@ -358,6 +340,37 @@ def get_state(obj=None, default=_marker):
-     return workflow.getInfoFor(ob=obj, name='review_state')
- 
- 
-+# work backwards from our end state
-+def _find_path(maps, path, current_state, start_state):
-+    paths = []
-+    # current_state could not be on maps if it only has outgoing
-+    # transitions. i.e an initial state you are not able to return to.
-+    if current_state not in maps:
-+        return
-+    for new_transition, from_states in maps[current_state]:
-+        next_path = _copy(path)
-+        if new_transition in path:
-+            # Don't go in a circle
-+            continue
-+
-+        next_path.insert(0, new_transition)
-+        if start_state in from_states:
-+            paths.append(next_path)
-+            continue
-+
-+        for state in from_states:
-+            recursive_paths = _find_path(
-+                maps,
-+                next_path,
-+                state,
-+                start_state,
-+            )
-+            if recursive_paths:
-+                paths.append(recursive_paths)
-+
-+    return len(paths) and min(paths, key=len) or None
-+
-+
- def _wf_transitions_for(workflow, from_state, to_state):
-     """Get a list of transition IDs required to transition
-     from ``from_state`` to ``to_state``.
-@@ -390,37 +403,38 @@ def _wf_transitions_for(workflow, from_state, to_state):
-         # impossible to reach via this workflow
-         return None
- 
--    # work backwards from our end state
--    def find_path(maps, path, current_state, start_state):
--        paths = []
--        # current_state could not be on maps if it only has outgoing
--        # transitions. i.e an initial state you are not able to return to.
--        if current_state not in maps:
-+    return _find_path(transition_maps, [], to_state, from_state)
-+
-+
-+def _transition_to(obj, workflow, to_state, **kwargs):
-+    # move from the current state to the given state
-+    # via any route we can find
-+    for wf in workflow.getWorkflowsFor(obj):
-+        status = workflow.getStatusOf(wf.getId(), obj)
-+        if not status or not status.get('review_state'):
-+            continue
-+        if status['review_state'] == to_state:
-             return
--        for new_transition, from_states in maps[current_state]:
--            next_path = _copy(path)
--            if new_transition in path:
--                # Don't go in a circle
--                continue
--
--            next_path.insert(0, new_transition)
--            if start_state in from_states:
--                paths.append(next_path)
--                continue
--
--            for state in from_states:
--                recursive_paths = find_path(
--                    maps,
--                    next_path,
--                    state,
--                    start_state,
--                )
--                if recursive_paths:
--                    paths.append(recursive_paths)
- 
--        return len(paths) and min(paths, key=len) or None
-+        transitions = _wf_transitions_for(
-+            wf,
-+            status['review_state'],
-+            to_state,
-+        )
-+        if not transitions:
-+            continue
-+
-+        for transition in transitions:
-+            try:
-+                workflow.doActionFor(obj, transition, **kwargs)
-+            except WorkflowException:
-+                # take into account automatic transitions.
-+                # If the transitions list that are being iterated over
-+                # have automatic transitions they need to be skipped
-+                if get_state(obj) == to_state:
-+                    break
- 
--    return find_path(transition_maps, [], to_state, from_state)
-+        break
- 
- 
- @required_parameters('obj')
-@@ -460,35 +474,7 @@ def transition(obj=None, transition=None, to_state=None, **kwargs):
-                 '{1}'.format(transition, '\n'.join(sorted(transitions)))
-             )
-     else:
--        # move from the current state to the given state
--        # via any route we can find
--        for wf in workflow.getWorkflowsFor(obj):
--            status = workflow.getStatusOf(wf.getId(), obj)
--            if not status or not status.get('review_state'):
--                continue
--            if status['review_state'] == to_state:
--                return
--
--            transitions = _wf_transitions_for(
--                wf,
--                status['review_state'],
--                to_state,
--            )
--            if not transitions:
--                continue
--
--            for transition in transitions:
--                try:
--                    workflow.doActionFor(obj, transition, **kwargs)
--                except WorkflowException:
--                    # take into account automatic transitions.
--                    # If the transitions list that are being iterated over
--                    # have automatic transitions they need to be skipped
--                    if get_state(obj) == to_state:
--                        break
--
--            break
--
-+        _transition_to(obj, workflow, to_state, **kwargs)
-         if workflow.getInfoFor(obj, 'review_state') != to_state:
-             raise InvalidParameterError(
-                 'Could not find workflow to set state to {0} on {1}'.format(
 
 
