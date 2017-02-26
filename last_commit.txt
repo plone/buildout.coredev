@@ -1,86 +1,428 @@
-Repository: Products.CMFPlone
+Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2017-02-25T11:26:53-08:00
+Date: 2017-02-25T11:38:38-08:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/7a15f055435c81a18b3cdcf2ba5e5629eed6aed7
+Commit: https://github.com/plone/plone.dexterity/commit/7640ff0e5b45b68fa2aee5b14e86ab5fd1481ff3
 
-call processQueue in CatalogTool.search too
+make sure fields get set by add form even if they match their (current) default
 
 Files changed:
-M Products/CMFPlone/CatalogTool.py
+M CHANGES.rst
+M plone/dexterity/browser/add.py
+M plone/dexterity/tests/test_views.py
 
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index 5c9c79d..d51cf69 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -435,7 +435,9 @@ def searchResults(self, REQUEST=None, **kw):
-         # effectiveRange checking entirely even for those without portal
-         # wide AccessInactivePortalContent permission.
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 12b338e..0a09556 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -15,7 +15,11 @@ New features:
  
-+        # Make sure any pending index tasks have been processed
-         processQueue()
+ Bug fixes:
+ 
+-- *add item here*
++- Make sure that all fields are initialized to their default value
++  when items are added via the add form. This is important in the case
++  of fields with a defaultFactory that can change with time
++  (such as defaulting to the current date).
++  [davisagli]
+ 
+ 
+ 2.5.0 (2017-02-12)
+diff --git a/plone/dexterity/browser/add.py b/plone/dexterity/browser/add.py
+index 20e2fc7..5f6e9bf 100644
+--- a/plone/dexterity/browser/add.py
++++ b/plone/dexterity/browser/add.py
+@@ -14,8 +14,12 @@
+ from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form import button
+ from z3c.form import form
++from z3c.form.interfaces import IDataManager
++from z3c.form.interfaces import NOT_CHANGED
++from z3c.form.util import changedField
+ from zope.component import createObject
+ from zope.component import getUtility
++from zope.component import getMultiAdapter
+ from zope.event import notify
+ from zope.publisher.browser import BrowserPage
+ 
+@@ -67,9 +71,9 @@ def create(self, data):
+         if IAcquirer.providedBy(content):
+             content = content.__of__(container)
+ 
+-        form.applyChanges(self, content, data)
++        _applyChanges(self, content, data, force=True)
+         for group in self.groups:
+-            form.applyChanges(group, content, data)
++            _applyChanges(group, content, data, force=True)
+ 
+         return aq_base(content)
+ 
+@@ -167,3 +171,26 @@ def __init__(self, context, request, ti):
+         if self.form_instance is not None \
+            and not getattr(self.form_instance, 'portal_type', None):
+             self.form_instance.portal_type = ti.getId()
 +
-         kw = kw.copy()
-         show_inactive = kw.get('show_inactive', False)
-         if isinstance(REQUEST, dict) and not show_inactive:
-@@ -453,8 +455,11 @@ def searchResults(self, REQUEST=None, **kw):
- 
-     def search(self, *args, **kw):
-         # Wrap search() the same way that searchResults() is
--        query = {}
- 
-+        # Make sure any pending index tasks have been processed
-+        processQueue()
 +
-+        query = {}
-         if args:
-             query = args[0]
-         elif 'query_request' in kw:
++def _applyChanges(form, content, data, force=False):
++    # This is copied from z3c.form, but modified to add
++    # an option to always set values even if already set.
++    changes = {}
++    for name, field in form.fields.items():
++        # If the field is not in the data, then go on to the next one
++        try:
++            newValue = data[name]
++        except KeyError:
++            continue
++        # If the value is NOT_CHANGED, ignore it, since the widget/converter
++        # sent a strong message not to do so.
++        if newValue is NOT_CHANGED:
++            continue
++        if force or changedField(field.field, newValue, context=content):
++            # Only update the data, if it is different
++            dm = getMultiAdapter((content, field.field), IDataManager)
++            dm.set(newValue)
++            # Record the change using information required later
++            changes.setdefault(dm.field.interface, []).append(name)
++    return changes
+diff --git a/plone/dexterity/tests/test_views.py b/plone/dexterity/tests/test_views.py
+index 2f1984e..723bacd 100644
+--- a/plone/dexterity/tests/test_views.py
++++ b/plone/dexterity/tests/test_views.py
+@@ -21,10 +21,13 @@
+ from plone.dexterity.schema import SCHEMA_CACHE
+ from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form.action import Actions
++from z3c.form.datamanager import AttributeField
++from z3c.form.field import Fields
+ from z3c.form.field import FieldWidgets
+ from z3c.form.interfaces import IActions
+ from z3c.form.interfaces import IWidgets
+ from zope.component import adapter
++from zope.component import provideAdapter
+ from zope.container.interfaces import INameChooser
+ from zope.interface import Interface
+ from zope.interface import alsoProvides
+@@ -32,6 +35,7 @@
+ from zope.interface import provider
+ from zope.publisher.browser import TestRequest as TestRequestBase
+ from .case import MockTestCase
++from zope import schema
+ 
+ 
+ class TestRequest(TestRequestBase):
+@@ -105,16 +109,22 @@ def test_form_create(self):
+         form = DefaultAddForm(context, request)
+         form.portal_type = u"testtype"
+ 
++        class ISchema(Interface):
++            foo = schema.TextLine()
++        form.fields = Fields(ISchema)
++
+         # createObject and applyChanges
+ 
+         obj_dummy = Item(id="dummy")
++        alsoProvides(obj_dummy, ISchema)
+         data_dummy = {u"foo": u"bar"}
+ 
+         from zope.component import createObject
+         self.patch_global(createObject, return_value=obj_dummy)
+ 
+-        from z3c.form.form import applyChanges
+-        self.patch_global(applyChanges)
++        provideAdapter(AttributeField)
++
++        self.replay()
+ 
+         self.assertEqual(obj_dummy, form.create(data_dummy))
+         self.assertEqual("testtype", obj_dummy.portal_type)
 
 
-Repository: Products.CMFPlone
+Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2017-02-25T12:09:03-08:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/3a90800c0b9778175515d10b57275b4a1e65064a
+Date: 2017-02-25T12:42:09-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.dexterity/commit/7ccf31564eae130fdb3ba12cee711c3f57795bdc
 
-Merge pull request #1954 from plone/davisagli-catalog-queue-fix
-
-call processQueue in CatalogTool.search too
+fix test and un-skip tests on Zope 4
 
 Files changed:
-M Products/CMFPlone/CatalogTool.py
+M plone/dexterity/tests/test_schema.py
+M plone/dexterity/tests/test_utils.py
+M plone/dexterity/tests/test_views.py
 
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index 5c9c79d..d51cf69 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -435,7 +435,9 @@ def searchResults(self, REQUEST=None, **kw):
-         # effectiveRange checking entirely even for those without portal
-         # wide AccessInactivePortalContent permission.
+diff --git a/plone/dexterity/tests/test_schema.py b/plone/dexterity/tests/test_schema.py
+index 20715ae..c3ff822 100644
+--- a/plone/dexterity/tests/test_schema.py
++++ b/plone/dexterity/tests/test_schema.py
+@@ -1,6 +1,5 @@
+ # -*- coding: utf-8 -*-
+ from mock import Mock
+-from pkg_resources import get_distribution
+ from plone.dexterity import schema
+ from plone.dexterity.fti import DexterityFTI
+ from plone.dexterity.interfaces import IContentType
+@@ -14,13 +13,9 @@
+ from zope.interface.interface import InterfaceClass
+ from .case import MockTestCase
  
-+        # Make sure any pending index tasks have been processed
-         processQueue()
+-import unittest
+ import zope.schema
+ 
+ 
+-has_zope4 = get_distribution('Zope2').version.startswith('4')
+-
+-
+ class TestSchemaModuleFactory(MockTestCase):
+ 
+     def test_transient_schema(self):
+@@ -156,7 +151,6 @@ def test_portalTypeToSchemaName_with_schema_and_prefix(self):
+             schema.portalTypeToSchemaName('type one.two', '', 'prefix')
+         )
+ 
+-    @unittest.skipIf(has_zope4, 'Broken with zope4, see https://community.plone.org/t/problems-with-mocktestcase-in-plone-dexterity/1484')  # noqa
+     def test_portalTypeToSchemaName_looks_up_portal_for_prefix(self):
+         portal_mock = Mock()
+         portal_mock.getPhysicalPath = Mock(return_value=['', 'foo', 'portalid'])
+diff --git a/plone/dexterity/tests/test_utils.py b/plone/dexterity/tests/test_utils.py
+index 9ca7664..e876380 100644
+--- a/plone/dexterity/tests/test_utils.py
++++ b/plone/dexterity/tests/test_utils.py
+@@ -1,19 +1,12 @@
+ # -*- coding: utf-8 -*-
+ from mock import Mock
+-from pkg_resources import get_distribution
+ from plone.dexterity import utils
+ from plone.dexterity.fti import DexterityFTI
+ from .case import MockTestCase
+ 
+-import unittest
+-
+-
+-has_zope4 = get_distribution('Zope2').version.startswith('4')
+-
+ 
+ class TestUtils(MockTestCase):
+ 
+-    @unittest.skipIf(has_zope4, 'Broken with zope4, see https://community.plone.org/t/problems-with-mocktestcase-in-plone-dexterity/1484')  # noqa
+     def test_getAdditionalSchemata(self):
+         from plone.dexterity.interfaces import IDexterityFTI
+         from plone.behavior.interfaces import IBehavior
+diff --git a/plone/dexterity/tests/test_views.py b/plone/dexterity/tests/test_views.py
+index 723bacd..3bf6481 100644
+--- a/plone/dexterity/tests/test_views.py
++++ b/plone/dexterity/tests/test_views.py
+@@ -124,8 +124,6 @@ class ISchema(Interface):
+ 
+         provideAdapter(AttributeField)
+ 
+-        self.replay()
+-
+         self.assertEqual(obj_dummy, form.create(data_dummy))
+         self.assertEqual("testtype", obj_dummy.portal_type)
+ 
+
+
+Repository: plone.dexterity
+
+
+Branch: refs/heads/master
+Date: 2017-02-26T12:09:45-08:00
+Author: David Glick (davisagli) <david.glick@plone.org>
+Commit: https://github.com/plone/plone.dexterity/commit/5dd4e9d667efe919edeadd78e61c96b3079af99f
+
+Merge pull request #67 from plone/davisagli-initialize-defaults
+
+make sure default values get stored by add form
+
+Files changed:
+M CHANGES.rst
+M plone/dexterity/browser/add.py
+M plone/dexterity/tests/test_schema.py
+M plone/dexterity/tests/test_utils.py
+M plone/dexterity/tests/test_views.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 12b338e..0a09556 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -15,7 +15,11 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Make sure that all fields are initialized to their default value
++  when items are added via the add form. This is important in the case
++  of fields with a defaultFactory that can change with time
++  (such as defaulting to the current date).
++  [davisagli]
+ 
+ 
+ 2.5.0 (2017-02-12)
+diff --git a/plone/dexterity/browser/add.py b/plone/dexterity/browser/add.py
+index 20e2fc7..5f6e9bf 100644
+--- a/plone/dexterity/browser/add.py
++++ b/plone/dexterity/browser/add.py
+@@ -14,8 +14,12 @@
+ from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form import button
+ from z3c.form import form
++from z3c.form.interfaces import IDataManager
++from z3c.form.interfaces import NOT_CHANGED
++from z3c.form.util import changedField
+ from zope.component import createObject
+ from zope.component import getUtility
++from zope.component import getMultiAdapter
+ from zope.event import notify
+ from zope.publisher.browser import BrowserPage
+ 
+@@ -67,9 +71,9 @@ def create(self, data):
+         if IAcquirer.providedBy(content):
+             content = content.__of__(container)
+ 
+-        form.applyChanges(self, content, data)
++        _applyChanges(self, content, data, force=True)
+         for group in self.groups:
+-            form.applyChanges(group, content, data)
++            _applyChanges(group, content, data, force=True)
+ 
+         return aq_base(content)
+ 
+@@ -167,3 +171,26 @@ def __init__(self, context, request, ti):
+         if self.form_instance is not None \
+            and not getattr(self.form_instance, 'portal_type', None):
+             self.form_instance.portal_type = ti.getId()
 +
-         kw = kw.copy()
-         show_inactive = kw.get('show_inactive', False)
-         if isinstance(REQUEST, dict) and not show_inactive:
-@@ -453,8 +455,11 @@ def searchResults(self, REQUEST=None, **kw):
- 
-     def search(self, *args, **kw):
-         # Wrap search() the same way that searchResults() is
--        query = {}
- 
-+        # Make sure any pending index tasks have been processed
-+        processQueue()
 +
-+        query = {}
-         if args:
-             query = args[0]
-         elif 'query_request' in kw:
++def _applyChanges(form, content, data, force=False):
++    # This is copied from z3c.form, but modified to add
++    # an option to always set values even if already set.
++    changes = {}
++    for name, field in form.fields.items():
++        # If the field is not in the data, then go on to the next one
++        try:
++            newValue = data[name]
++        except KeyError:
++            continue
++        # If the value is NOT_CHANGED, ignore it, since the widget/converter
++        # sent a strong message not to do so.
++        if newValue is NOT_CHANGED:
++            continue
++        if force or changedField(field.field, newValue, context=content):
++            # Only update the data, if it is different
++            dm = getMultiAdapter((content, field.field), IDataManager)
++            dm.set(newValue)
++            # Record the change using information required later
++            changes.setdefault(dm.field.interface, []).append(name)
++    return changes
+diff --git a/plone/dexterity/tests/test_schema.py b/plone/dexterity/tests/test_schema.py
+index 20715ae..c3ff822 100644
+--- a/plone/dexterity/tests/test_schema.py
++++ b/plone/dexterity/tests/test_schema.py
+@@ -1,6 +1,5 @@
+ # -*- coding: utf-8 -*-
+ from mock import Mock
+-from pkg_resources import get_distribution
+ from plone.dexterity import schema
+ from plone.dexterity.fti import DexterityFTI
+ from plone.dexterity.interfaces import IContentType
+@@ -14,13 +13,9 @@
+ from zope.interface.interface import InterfaceClass
+ from .case import MockTestCase
+ 
+-import unittest
+ import zope.schema
+ 
+ 
+-has_zope4 = get_distribution('Zope2').version.startswith('4')
+-
+-
+ class TestSchemaModuleFactory(MockTestCase):
+ 
+     def test_transient_schema(self):
+@@ -156,7 +151,6 @@ def test_portalTypeToSchemaName_with_schema_and_prefix(self):
+             schema.portalTypeToSchemaName('type one.two', '', 'prefix')
+         )
+ 
+-    @unittest.skipIf(has_zope4, 'Broken with zope4, see https://community.plone.org/t/problems-with-mocktestcase-in-plone-dexterity/1484')  # noqa
+     def test_portalTypeToSchemaName_looks_up_portal_for_prefix(self):
+         portal_mock = Mock()
+         portal_mock.getPhysicalPath = Mock(return_value=['', 'foo', 'portalid'])
+diff --git a/plone/dexterity/tests/test_utils.py b/plone/dexterity/tests/test_utils.py
+index 9ca7664..e876380 100644
+--- a/plone/dexterity/tests/test_utils.py
++++ b/plone/dexterity/tests/test_utils.py
+@@ -1,19 +1,12 @@
+ # -*- coding: utf-8 -*-
+ from mock import Mock
+-from pkg_resources import get_distribution
+ from plone.dexterity import utils
+ from plone.dexterity.fti import DexterityFTI
+ from .case import MockTestCase
+ 
+-import unittest
+-
+-
+-has_zope4 = get_distribution('Zope2').version.startswith('4')
+-
+ 
+ class TestUtils(MockTestCase):
+ 
+-    @unittest.skipIf(has_zope4, 'Broken with zope4, see https://community.plone.org/t/problems-with-mocktestcase-in-plone-dexterity/1484')  # noqa
+     def test_getAdditionalSchemata(self):
+         from plone.dexterity.interfaces import IDexterityFTI
+         from plone.behavior.interfaces import IBehavior
+diff --git a/plone/dexterity/tests/test_views.py b/plone/dexterity/tests/test_views.py
+index 2f1984e..3bf6481 100644
+--- a/plone/dexterity/tests/test_views.py
++++ b/plone/dexterity/tests/test_views.py
+@@ -21,10 +21,13 @@
+ from plone.dexterity.schema import SCHEMA_CACHE
+ from plone.z3cform.interfaces import IDeferSecurityCheck
+ from z3c.form.action import Actions
++from z3c.form.datamanager import AttributeField
++from z3c.form.field import Fields
+ from z3c.form.field import FieldWidgets
+ from z3c.form.interfaces import IActions
+ from z3c.form.interfaces import IWidgets
+ from zope.component import adapter
++from zope.component import provideAdapter
+ from zope.container.interfaces import INameChooser
+ from zope.interface import Interface
+ from zope.interface import alsoProvides
+@@ -32,6 +35,7 @@
+ from zope.interface import provider
+ from zope.publisher.browser import TestRequest as TestRequestBase
+ from .case import MockTestCase
++from zope import schema
+ 
+ 
+ class TestRequest(TestRequestBase):
+@@ -105,16 +109,20 @@ def test_form_create(self):
+         form = DefaultAddForm(context, request)
+         form.portal_type = u"testtype"
+ 
++        class ISchema(Interface):
++            foo = schema.TextLine()
++        form.fields = Fields(ISchema)
++
+         # createObject and applyChanges
+ 
+         obj_dummy = Item(id="dummy")
++        alsoProvides(obj_dummy, ISchema)
+         data_dummy = {u"foo": u"bar"}
+ 
+         from zope.component import createObject
+         self.patch_global(createObject, return_value=obj_dummy)
+ 
+-        from z3c.form.form import applyChanges
+-        self.patch_global(applyChanges)
++        provideAdapter(AttributeField)
+ 
+         self.assertEqual(obj_dummy, form.create(data_dummy))
+         self.assertEqual("testtype", obj_dummy.portal_type)
 
 
