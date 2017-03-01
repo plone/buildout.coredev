@@ -1,43 +1,524 @@
-Repository: plone.app.upgrade
+Repository: plone.app.vocabularies
 
 
 Branch: refs/heads/master
-Date: 2017-02-28T14:39:42+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/cdeb419ba68327a0ed07757d1ec71a5996e4c9b2
+Date: 2017-03-01T09:26:07+01:00
+Author: Sean Upton (seanupton) <sdupton@gmail.com>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/dcfa9f0d44915f895bfa2adbd2c54751f5e8907a
 
-Fix registration of upgrade-step to Plone 5.1a1
+Fix #1794 by use of permissive vocabulary type for numeric-indexed weekday and month vocabularies to avoid breaking GenericSetup import.
+
+Ref: https://github.com/plone/Products.CMFPlone/issues/1794
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/v51/configure.zcml
+M plone/app/vocabularies/__init__.py
+M plone/app/vocabularies/datetimerelated.py
+M plone/app/vocabularies/interfaces.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 376b6c5..439d35c 100644
+index 9e70fa3..f0060a8 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -18,6 +18,9 @@ Bug fixes:
-   Part of PLIP 1343: https://github.com/plone/Products.CMFPlone/issues/1343
-   [gforcada]
+@@ -14,7 +14,9 @@ New features:
  
-+- Fix registration of upgrade-step to Plone 5.1a1
-+  [pbauer]
+ Bug fixes:
+ 
+-- *add item here*
++- #1794: use permissive vocabulary type for numeric-indexed weekday and
++  month vocabularies to avoid breaking GenericSetup import.
++  [seanupton]
+ 
+ 
+ 4.0.1 (2017-01-12)
+diff --git a/plone/app/vocabularies/__init__.py b/plone/app/vocabularies/__init__.py
+index dab0dd5..4bc8cd9 100644
+--- a/plone/app/vocabularies/__init__.py
++++ b/plone/app/vocabularies/__init__.py
+@@ -1,7 +1,9 @@
+ # -*- coding: utf-8 -*-
+ from plone.app.vocabularies.interfaces import ISlicableVocabulary
++from plone.app.vocabularies.interfaces import IPermissiveVocabulary
+ from zope.interface import directlyProvides
+ from zope.interface import implementer
++from zope.schema.vocabulary import SimpleVocabulary, SimpleTerm
+ 
+ 
+ @implementer(ISlicableVocabulary)
+@@ -32,3 +34,28 @@ def __getitem__(self, start, stop=None):
+ 
+     def __len__(self):
+         return len(self._terms)
 +
- 2.0.0 (2017-02-20)
++
++@implementer(IPermissiveVocabulary)
++class PermissiveVocabulary(SimpleVocabulary):
++    """
++    Permissive vocabulary for cases of integer-keyed choices or cases
++    where vocabulary may mutate later in a transaction to include a
++    newly inserted value.
++    """
++
++    def __contains__(self, value):
++        return True
++
++    def getTermByToken(self, token):
++        """
++        this works around z3c.form.widget.SequenceWidget.extract()
++        pseudo-validation (which is broken for a permissive vocabulary).
++        """
++        try:
++            v = super(PermissiveVocabulary, self).getTermByToken(token)
++        except LookupError:
++            # fallback using dummy term, assumes token==value
++            return SimpleTerm(token)
++        return v
++
+diff --git a/plone/app/vocabularies/datetimerelated.py b/plone/app/vocabularies/datetimerelated.py
+index db3b42a..5951238 100644
+--- a/plone/app/vocabularies/datetimerelated.py
++++ b/plone/app/vocabularies/datetimerelated.py
+@@ -1,4 +1,5 @@
+ # -*- coding: utf-8 -*-
++from plone.app.vocabularies import PermissiveVocabulary
+ from plone.registry.interfaces import IRegistry
+ from zope.component import getUtility
+ from zope.i18nmessageid import MessageFactory
+@@ -66,66 +67,126 @@ def AvailableTimezonesFactory(context, query=None):
+ def WeekdaysFactory(context):
+     """Vocabulary for Weekdays - full name
+ 
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
++    Usage:
++    ------
+ 
+-      >>> name = 'plone.app.vocabularies.Weekdays'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++    Get vocabulary for all seven days:
+ 
+-      >>> len(util(context))
+-      7
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
+ 
+-      >>> util(context).by_token['0'].title
+-      u'weekday_mon'
++        >>> name = 'plone.app.vocabularies.Weekdays'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
++
++        >>> len(util(context))
++        7
++
++    Containment is unenforced, as numeric tokens are used, a permissive
++    vocabulary type is in use (to make GenericSetup profile
++    import happy):
++
++        >>> assert '1' in util(context)
++        >>> assert 1 in util(context)
++
++    Term values are all integers:
++
++        >>> assert all(map(lambda t: type(t.value) is int, util(context)))
++
++    Term titles are i18n labels:
++
++        >>> util(context).by_token['0'].title
++        u'weekday_mon'
+     """
+     items = []
+     for idx in range(len(WEEKDAY_PREFIXES)):
+         msgstr = PLMF('weekday_{0}'.format(WEEKDAY_PREFIXES[idx]))
+         items.append(SimpleTerm(idx, str(idx), msgstr))
+-    return SimpleVocabulary(items)
++    return PermissiveVocabulary(items)
+ 
+ 
+ @provider(IVocabularyFactory)
+ def WeekdaysAbbrFactory(context):
+     """Vocabulary for Weekdays - abbreviated (3 char)
+ 
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
++    Usage:
++    ------
++
++    Get vocabulary for all seven days:
++
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
+ 
+-      >>> name = 'plone.app.vocabularies.WeekdaysAbbr'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++        >>> name = 'plone.app.vocabularies.WeekdaysAbbr'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
+ 
+-      >>> len(util(context))
+-      7
++        >>> len(util(context))
++        7
++
++    Containment is unenforced, as numeric tokens are used, a permissive
++    vocabulary type is in use (to make GenericSetup profile
++    import happy):
++
++        >>> assert '1' in util(context)
++        >>> assert 1 in util(context)
++
++    Term values are all integers:
++
++        >>> assert all(map(lambda t: type(t.value) is int, util(context)))
++
++    Term titles are i18n labels:
++
++        >>> util(context).by_token['0'].title
++        u'weekday_mon_abbr'
+     """
+     items = []
+     for idx in range(len(WEEKDAY_PREFIXES)):
+         msgstr = PLMF('weekday_{0}_abbr'.format(WEEKDAY_PREFIXES[idx]))
+         items.append(SimpleTerm(idx, str(idx), msgstr))
+-    return SimpleVocabulary(items)
++    return PermissiveVocabulary(items)
+ 
+ 
+ @provider(IVocabularyFactory)
+ def WeekdaysShortFactory(context):
+     """Vocabulary for Weekdays - Short (2 char)
+ 
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
++    Usage:
++    ------
++
++    Get vocabulary for all seven days:
++
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
+ 
+-      >>> name = 'plone.app.vocabularies.WeekdaysShort'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++        >>> name = 'plone.app.vocabularies.WeekdaysShort'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
+ 
+-      >>> len(util(context))
+-      7
++        >>> len(util(context))
++        7
++
++    Containment is unenforced, as numeric tokens are used, a permissive
++    vocabulary type is in use (to make GenericSetup profile
++    import happy):
++
++        >>> assert '1' in util(context)
++        >>> assert 1 in util(context)
++
++    Term values are all integers:
++
++        >>> assert all(map(lambda t: type(t.value) is int, util(context)))
++
++    Term titles are i18n labels:
++
++        >>> util(context).by_token['0'].title
++        u'weekday_mon_short'
+     """
+     items = []
+     for idx in range(len(WEEKDAY_PREFIXES)):
+         msgstr = PLMF('weekday_{0}_short'.format(WEEKDAY_PREFIXES[idx]))
+         items.append(SimpleTerm(idx, str(idx), msgstr))
+-    return SimpleVocabulary(items)
++    return PermissiveVocabulary(items)
+ 
+ 
+ MONTH_PREFIXES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+@@ -136,39 +197,65 @@ def WeekdaysShortFactory(context):
+ def MonthFactory(context):
+     """Vocabulary for Month. Full name
+ 
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
++    Usage:
++
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
++
++        >>> name = 'plone.app.vocabularies.Month'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
+ 
+-      >>> name = 'plone.app.vocabularies.Month'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++        >>> len(util(context))
++        12
+ 
+-      >>> len(util(context))
+-      12
++    Containment is unenforced, as numeric tokens are used, a permissive
++    vocabulary type is in use (to make GenericSetup profile
++    import happy):
++
++        >>> assert '1' in util(context)
++        >>> assert 1 in util(context)
++
++    Term values are all integers:
++
++        >>> assert all(map(lambda t: type(t.value) is int, util(context)))
+     """
+     items = []
+     for idx in range(len(MONTH_PREFIXES)):
+         msgstr = PLMF('month_{0}'.format(MONTH_PREFIXES[idx]))
+         items.append(SimpleTerm(idx, str(idx), msgstr))
+-    return SimpleVocabulary(items)
++    return PermissiveVocabulary(items)
+ 
+ 
+ @provider(IVocabularyFactory)
+ def MonthAbbrFactory(context):
+     """Vocabulary for Month. Abbreviated Name (3 char)
+ 
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
++    Usage:
++
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
++
++        >>> name = 'plone.app.vocabularies.MonthAbbr'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
++
++        >>> len(util(context))
++        12
++
++    Containment is unenforced, as numeric tokens are used, a permissive
++    vocabulary type is in use (to make GenericSetup profile
++    import happy):
++
++        >>> assert '1' in util(context)
++        >>> assert 1 in util(context)
+ 
+-      >>> name = 'plone.app.vocabularies.MonthAbbr'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++    Term values are all integers:
+ 
+-      >>> len(util(context))
+-      12
++        >>> assert all(map(lambda t: type(t.value) is int, util(context)))
+     """
+     items = []
+     for idx in range(len(MONTH_PREFIXES)):
+         msgstr = PLMF('month_{0}_abbr'.format(MONTH_PREFIXES[idx]))
+         items.append(SimpleTerm(idx, str(idx), msgstr))
+-    return SimpleVocabulary(items)
++    return PermissiveVocabulary(items)
+diff --git a/plone/app/vocabularies/interfaces.py b/plone/app/vocabularies/interfaces.py
+index 509788f..3f5b603 100644
+--- a/plone/app/vocabularies/interfaces.py
++++ b/plone/app/vocabularies/interfaces.py
+@@ -43,3 +43,16 @@ class ISlicableVocabulary(IVocabularyTokenized):
+ 
+     def __getitem__(start, stop):
+         """ return a slice of the results"""
++
++
++class IPermissiveVocabulary(IVocabularyTokenized):
++    """Vocabulary with permissive validation of containment"""
++
++    def __contains__(self, value):
++        """
++        Always returns true, for any value; useful for cases where
++        validation of containment creates practical problems (e.g.
++        vocabulary about to be mutated with insertion of a value not
++        yet within).
++        """
++
+
+
+Repository: plone.app.vocabularies
+
+
+Branch: refs/heads/master
+Date: 2017-03-01T09:26:07+01:00
+Author: Sean Upton (seanupton) <sdupton@gmail.com>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/2b770310b8d71d3d36cf7d29a8226a1b457464c3
+
+Fix #1268 use permissive vocabulary type for ReallyUserFriendlyTypes, to avoid insertion of new types in plone.displayed_types (registry) from breaking GenericSetup profiles in add-ons.
+
+Ref:
+https://github.com/plone/Products.CMFPlone/issues/1268#issuecomment-282826666
+
+Files changed:
+M CHANGES.rst
+M plone/app/vocabularies/types.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index f0060a8..508c494 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -18,6 +18,11 @@ Bug fixes:
+   month vocabularies to avoid breaking GenericSetup import.
+   [seanupton]
+ 
++- #1268: use permissive vocabulary type for ReallyUserFriendlyTypes,
++  to avoid insertion of new types in plone.displayed_types (registry)
++  from breaking GenericSetup profiles in add-ons.
++  [seanupton]
++
+ 
+ 4.0.1 (2017-01-12)
  ------------------
+diff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py
+index 14f890c..2cca30e 100644
+--- a/plone/app/vocabularies/types.py
++++ b/plone/app/vocabularies/types.py
+@@ -1,5 +1,6 @@
+ # -*- coding: utf-8 -*-
+ from Acquisition import aq_get
++from plone.app.vocabularies import PermissiveVocabulary
+ from Products.CMFCore.utils import getToolByName
+ from zope.i18n import translate
+ from zope.interface import implementer
+@@ -263,29 +264,36 @@ def __call__(self, context):
+ class ReallyUserFriendlyTypesVocabulary(object):
+     """Vocabulary factory for really user friendly portal types.
  
-diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
-index 44b8b09..1dfc1c3 100644
---- a/plone/app/upgrade/v51/configure.zcml
-+++ b/plone/app/upgrade/v51/configure.zcml
-@@ -7,7 +7,7 @@
-     <include file="profiles.zcml" />
+-      >>> from zope.component import queryUtility
+-      >>> from plone.app.vocabularies.tests.base import create_context
+-      >>> from plone.app.vocabularies.tests.base import DummyType
+-      >>> from plone.app.vocabularies.tests.base import DummyTypeTool
++    Usage:
  
-     <gs:upgradeSteps
--        source="5015"
-+        source="5099"
-         destination="5101"
-         profile="Products.CMFPlone:plone">
+-      >>> name = 'plone.app.vocabularies.ReallyUserFriendlyTypes'
+-      >>> util = queryUtility(IVocabularyFactory, name)
+-      >>> context = create_context()
++        >>> from zope.component import queryUtility
++        >>> from plone.app.vocabularies.tests.base import create_context
++        >>> from plone.app.vocabularies.tests.base import DummyType
++        >>> from plone.app.vocabularies.tests.base import DummyTypeTool
+ 
+-      >>> tool = DummyTypeTool()
+-      >>> tool['ATBooleanCriterion'] = DummyType('Boolean Criterion')
+-      >>> context.portal_types = tool
++        >>> name = 'plone.app.vocabularies.ReallyUserFriendlyTypes'
++        >>> util = queryUtility(IVocabularyFactory, name)
++        >>> context = create_context()
+ 
+-      >>> types = util(context)
+-      >>> types
+-      <zope.schema.vocabulary.SimpleVocabulary object at ...>
++        >>> tool = DummyTypeTool()
++        >>> tool['ATBooleanCriterion'] = DummyType('Boolean Criterion')
++        >>> context.portal_types = tool
+ 
+-      >>> len(types.by_token)
+-      2
++        >>> types = util(context)
++        >>> types
++        <plone.app.vocabularies.PermissiveVocabulary object at ...>
+ 
+-      >>> doc = types.by_token['Document']
+-      >>> doc.title, doc.token, doc.value
+-      (u'Page', 'Document', 'Document')
++        >>> len(types.by_token)
++        2
++
++    Containment is unenforced, to make GenericSetup import validation
++    handle validation triggered by Choice.fromUnicode() on insertion:
++
++        >>> assert 'arbitrary_value' in util(context)
++
++        >>> doc = types.by_token['Document']
++        >>> doc.title, doc.token, doc.value
++        (u'Page', 'Document', 'Document')
+     """
+ 
+     def __call__(self, context):
+@@ -302,6 +310,6 @@ def __call__(self, context):
+         ]
+         items.sort()
+         items = [SimpleTerm(i[1], i[1], i[0]) for i in items]
+-        return SimpleVocabulary(items)
++        return PermissiveVocabulary(items)
+ 
+ ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()
+
+
+Repository: plone.app.vocabularies
+
+
+Branch: refs/heads/master
+Date: 2017-03-01T09:26:07+01:00
+Author: Sean Upton (seanupton) <sdupton@gmail.com>
+Commit: https://github.com/plone/plone.app.vocabularies/commit/37535b9297c0db9cc2d07f59c95d8eb672cb9fae
+
+Minor changes to permissive vocabulary, code/changlelog style per review
+input from @frisi and @jensens
+
+Files changed:
+M CHANGES.rst
+M plone/app/vocabularies/__init__.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 508c494..1ff0b6f 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,13 +14,15 @@ New features:
+ 
+ Bug fixes:
+ 
+-- #1794: use permissive vocabulary type for numeric-indexed weekday and
+-  month vocabularies to avoid breaking GenericSetup import.
++- plone/Products.CMFPlone#1794: use permissive vocabulary type
++  for numeric-indexed weekday and month vocabularies
++  to avoid breaking GenericSetup import.
+   [seanupton]
+ 
+-- #1268: use permissive vocabulary type for ReallyUserFriendlyTypes,
+-  to avoid insertion of new types in plone.displayed_types (registry)
+-  from breaking GenericSetup profiles in add-ons.
++- plone/Products.CMFPlone#1268: use permissive vocabulary type
++  for ReallyUserFriendlyTypes, to avoid insertion of new types 
++  in plone.displayed_types (registry) from breaking GenericSetup
++  profiles in add-ons.
+   [seanupton]
+ 
+ 
+diff --git a/plone/app/vocabularies/__init__.py b/plone/app/vocabularies/__init__.py
+index 4bc8cd9..daeaa98 100644
+--- a/plone/app/vocabularies/__init__.py
++++ b/plone/app/vocabularies/__init__.py
+@@ -3,7 +3,15 @@
+ from plone.app.vocabularies.interfaces import IPermissiveVocabulary
+ from zope.interface import directlyProvides
+ from zope.interface import implementer
+-from zope.schema.vocabulary import SimpleVocabulary, SimpleTerm
++from zope.schema.vocabulary import SimpleTerm
++from zope.schema.vocabulary import SimpleVocabulary
++
++import urllib
++
++
++_token_parse_py3 = getattr(urllib, 'parse', None)
++_token_parse_py27 = lambda token: urllib.unquote_plus(token).decode('utf8')
++parse = _token_parse_py3.unquote if _token_parse_py3 else _token_parse_py27
+ 
+ 
+ @implementer(ISlicableVocabulary)
+@@ -56,6 +64,6 @@ def getTermByToken(self, token):
+             v = super(PermissiveVocabulary, self).getTermByToken(token)
+         except LookupError:
+             # fallback using dummy term, assumes token==value
+-            return SimpleTerm(token)
++            return SimpleTerm(token, title=parse(token))
+         return v
  
 
 
