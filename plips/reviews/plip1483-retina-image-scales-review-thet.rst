@@ -57,7 +57,7 @@ Review steps
 
 - Looked at rendered output + source.
 
-- Did the same with "Retine mode" disabled.
+- Did the same with "Retina mode" disabled.
 
 
 Here are some Screenshots from my test:
@@ -77,9 +77,10 @@ This PLIP with enabled retina mode gives a significant improvement for images on
 
 The images do look amazing and a lot crispier than normal.
 
-The individual scaled images (2x, 3x) have a rather bad quality, though.
-This is due to their low quality setting, which ensures small download sizes.
-I'm absolutly OK with the qulity settings, but the resulting images are not suitable for downloading.
+The individual scaled images (2x, 3x) have a rather bad quality.
+That's because of their low quality setting, which ensures small download sizes.
+This is not an issue, because on Hi-Res displays, the browser scaled down the larger image and the result looks very good.
+I'm absolutely OK with the quality settings, but the resulting images are not suitable for downloading.
 This is not an issue, as there should a separate download link anyways, if images should be offered for downloading.
 
 
@@ -96,11 +97,11 @@ Code Review
   - This presumes, that a view can also be called on a brain object (not sure, if brains can be traversed like normal objects and views called like that?).
   - Caching the results for brains on portal root should still be possible.
 
-- The already merged mockup changes are already compiled into the plone bundle and available on CMFPlone master.
+- The already merged ``mockup`` changes are already compiled into the ``plone`` bundle and available on CMFPlone master.
 
 - The ``plone.js`` bundle resource is a pragmatic place to put the ``@@image-controlpanel`` JavaScript code into, and it works.
   But IMO this is not the right place.
-  Rather than there, this should go wether into a plain JavaScript file and added to the ``plone-legacy`` bundle resources or made a pattern out of it.
+  Rather than there, this should go whether into a plain JavaScript file and added to the ``plone-legacy`` bundle resources or made a pattern out of it.
 
 - TinyMCE Image handling is missing - but this is not a blocker and can be delivered later.
 
