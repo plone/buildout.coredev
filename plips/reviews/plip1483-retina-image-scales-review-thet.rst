@@ -105,6 +105,14 @@ Code Review
 
 - TinyMCE Image handling is missing - but this is not a blocker and can be delivered later.
 
+- The ``tag`` method of ``plone.namedfile.scaling.ImageScale`` is already quite flexible, insofar that it accepts keyword arguments, which are then rendered as attributes (does not work for rendering arguments with a dash in it, e.g. ``data-src`` (lazyloading libraries use that...), because that wouldn't be a valid python identifier.).
+  ``plone.namedfile.scaling.ImageScale`` isn't registered as a real browser view but instantiated as a class by consumers in the same module.
+  In fact, I'm asking myself why it derives from ``BrowserView`` at all.
+  But if we would register ``plone.namedfile.scaling.ImageScale`` as an browser view or a genric adapter, we would be able to override the registration by a more specific one.
+  This would allow us to overwrite the ``tag`` method and return something else than the ``<img>`` tag, e.g. a ``<picture>`` tag with ``<source>`` tags as children, allowing us to create responsive plus retina image scales.
+  This is not a blocker for this PLIP, though, as supporting ``<picture>`` tags was explicitly excluded from the scope.
+  I just want to raise awarenes on this issue.
+
 
 Documentation
 +++++++++++++
