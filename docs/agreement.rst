@@ -39,7 +39,7 @@ We do ask that before requesting core access you familiarize yourself a little w
 Once you have familiarized yourself with the community and you are excited to contribute to the core:
 
 * Sign the contributor agreement at https://plone.org/foundation/contributors-agreement/agreement.pdf,
-  then either snail mail it to the address provided or scan and email it to assignments@plone.org.
+  then either snail mail it to the address provided or scan and email it to agreements@plone.org.
   This offers both copyright protection and ensures that the Plone Foundation is able to exercise some control over the codebase,
   ensuring it is not appropriated for someone's unethical purposes.
   For questions about why the agreement is required,
