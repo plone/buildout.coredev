@@ -1,184 +1,841 @@
-Repository: plone.app.upgrade
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2017-03-10T22:44:41+01:00
+Date: 2017-02-16T00:09:05+01:00
 Author: Diederik Veeze (didrix) <d.veeze@zestsoftware.nl>
-Commit: https://github.com/plone/plone.app.upgrade/commit/0cd02360ba3d21b42abc597bf482133a2a68797a
+Commit: https://github.com/plone/plone.namedfile/commit/28abed5283ddc77bc7d7c1215539fe889e1b7a0a
 
-Add image scaling options to image handling controlpanel when migrating to 5.1b3.
+Add retina image scales using srcset attribute.  PLIP 1483.
+
+cached tag() function for search
+
+Fix tests to use png instead of jpeg
 
 Files changed:
-A plone/app/upgrade/v51/profiles/to_beta3/registry.xml
 M CHANGES.rst
-M plone/app/upgrade/v51/configure.zcml
-M plone/app/upgrade/v51/profiles.zcml
+M plone/namedfile/scaling.py
+M plone/namedfile/scaling.zcml
+M plone/namedfile/tests/test_scaling.py
+M plone/namedfile/utils/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 803ff6d..6f9d70c 100644
+index d748c36..03c2635 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ Breaking changes:
+@@ -10,7 +10,8 @@ Breaking changes:
  
  New features:
  
 -- *add item here*
-+- Add image scaling options to image handling controlpanel
-+  when migrating to 5.1b3.
++- Add retina image scales using srcset attribute.
 +  [didrix]
  
  Bug fixes:
  
-diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
-index 1dfc1c3..d6c018a 100644
---- a/plone/app/upgrade/v51/configure.zcml
-+++ b/plone/app/upgrade/v51/configure.zcml
-@@ -107,4 +107,19 @@ was moved from the plone bundle to plone-logged-in in CMPlone 5.1a2.
+diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
+index 514d9a2..4137a65 100644
+--- a/plone/namedfile/scaling.py
++++ b/plone/namedfile/scaling.py
+@@ -2,9 +2,11 @@
+ from AccessControl.ZopeGuards import guarded_getattr
+ from Acquisition import aq_base
+ from DateTime import DateTime
++from plone.memoize import ram
+ from plone.namedfile.file import FILECHUNK_CLASSES
+ from plone.namedfile.interfaces import IAvailableSizes
+ from plone.namedfile.interfaces import IStableImageScale
++from plone.namedfile.utils import getRetinaScales
+ from plone.namedfile.utils import set_headers
+ from plone.namedfile.utils import stream_data
+ from plone.protect.interfaces import IDisableCSRFProtection
+@@ -15,6 +17,7 @@
+ from plone.scale.storage import AnnotationStorage
+ from Products.Five import BrowserView
+ from xml.sax.saxutils import quoteattr
++from zExceptions import Unauthorized
+ from ZODB.POSException import ConflictError
+ from zope.component import queryUtility
+ from zope.deprecation import deprecate
+@@ -57,10 +60,23 @@ def __init__(self, context, request, **info):
+             name = info['fieldname']
+         self.__name__ = u'{0}.{1}'.format(name, extension)
+         self.url = u'{0}/@@images/{1}'.format(url, self.__name__)
++        self.srcset = info.get('srcset', [])
  
-     </gs:upgradeSteps>
+     def absolute_url(self):
+         return self.url
  
-+    <gs:upgradeSteps
-+        source="5105"
-+        destination="5106"
-+        profile="Products.CMFPlone:plone">
++    def srcset_attribute(self):
++        srcset_attr = []
++        extension = self.data.contentType.split('/')[-1].lower()
++        for scale in self.srcset:
++            srcset_attr.append(u'{0}/@@images/{1}.{2} {3}x'.format(
++                self.context.absolute_url(),
++                scale['uid'],
++                extension,
++                scale['scale']))
++        srcset_attr = ', '.join(srcset_attr)
++        return srcset_attr
 +
-+        <gs:upgradeDepends
-+            title="Run to51beta3 upgrade profile."
-+            description="
-+Add image scaling options to image handling control panel.
-+            "
-+            import_profile="plone.app.upgrade.v51:to51beta3"
-+            />
+     def tag(self, height=_marker, width=_marker, alt=_marker,
+             css_class=None, title=_marker, **kwargs):
+         """Create a tag including scale
+@@ -83,6 +99,11 @@ def tag(self, height=_marker, width=_marker, alt=_marker,
+             ('width', width),
+             ('class', css_class),
+         ]
 +
-+    </gs:upgradeSteps>
++        srcset_attr = self.srcset_attribute()
++        if srcset_attr:
++            values.append(('srcset', srcset_attr))
 +
- </configure>
-diff --git a/plone/app/upgrade/v51/profiles.zcml b/plone/app/upgrade/v51/profiles.zcml
-index d731936..2508ade 100644
---- a/plone/app/upgrade/v51/profiles.zcml
-+++ b/plone/app/upgrade/v51/profiles.zcml
-@@ -30,4 +30,15 @@
-       provides="Products.GenericSetup.interfaces.EXTENSION"
-       />
+         values.extend(kwargs.items())
  
-+  <!-- Note: to51beta2 does not exist, because no profile changes were needed. -->
+         parts = ['<img']
+@@ -342,7 +363,14 @@ def available_sizes(self, value):
+ 
+     def getImageSize(self, fieldname=None):
+         if fieldname is not None:
+-            value = self.guarded_orig_image(fieldname)
++            try:
++                value = self.guarded_orig_image(fieldname)
++            except Unauthorized:
++                # This is a corner case that can be seen in some tests,
++                # at least plone.app.caching and plone.formwidget.namedfile.
++                # When it is *really* unauthorized to get this image,
++                # it will go wrong somewhere else.
++                value = None
+             if value is None:
+                 return (0, 0)
+             return value.getImageSize()
+@@ -352,6 +380,9 @@ def getImageSize(self, fieldname=None):
+     def guarded_orig_image(self, fieldname):
+         return guarded_getattr(self.context, fieldname, None)
+ 
++    def getRetinaScales(self):
++        return getRetinaScales()
 +
-+  <genericsetup:registerProfile
-+      name="to51beta3"
-+      title="Upgrade profile for Plone 5.1beta2 to Plone 5.1beta3"
-+      description=""
-+      directory="profiles/to_beta1"
-+      for="Products.CMFPlone.interfaces.IMigratingPloneSiteRoot"
-+      provides="Products.GenericSetup.interfaces.EXTENSION"
-+      />
+     def modified(self):
+         """Provide a callable to return the modification time of content
+         items, so stored image scales can be invalidated.
+@@ -398,6 +429,28 @@ def scale(
+         )
+         if info is None:
+             return  # 404
 +
- </configure>
-diff --git a/plone/app/upgrade/v51/profiles/to_beta3/registry.xml b/plone/app/upgrade/v51/profiles/to_beta3/registry.xml
-new file mode 100644
-index 0000000..84b8e07
---- /dev/null
-+++ b/plone/app/upgrade/v51/profiles/to_beta3/registry.xml
-@@ -0,0 +1,8 @@
-+<?xml version="1.0"?>
-+<registry>
++        (orig_width, orig_height) = self.getImageSize(fieldname)
++        srcset = []
++        for retinaScale in self.getRetinaScales():
++            # Don't create retina scales larger than the source image.
++            if orig_height and orig_height < height * retinaScale['scale']:
++                continue
++            if orig_width and orig_width < width * retinaScale['scale']:
++                continue
++            parameters['quality'] = retinaScale['quality']
++            scale_src = storage.scale(
++                fieldname=fieldname,
++                height=height * retinaScale['scale'],
++                width=width * retinaScale['scale'],
++                direction=direction,
++                **parameters
++            )
++            scale_src['scale'] = retinaScale['scale']
++            if scale_src is not None:
++                srcset.append(scale_src)
++        info['srcset'] = srcset
 +
-+  <!-- Add image scaling options to image handling controlpanel. -->
-+  <records interface="Products.CMFPlone.interfaces.IImagingSchema"
-+           prefix="plone" />
+         info['fieldname'] = fieldname
+         scale_view = ImageScale(self.context, self.request, **info)
+         return scale_view
+@@ -413,3 +466,18 @@ def tag(
+     ):
+         scale = self.scale(fieldname, scale, height, width, direction)
+         return scale.tag(**kwargs) if scale else None
 +
-+</registry>
++
++class NavigationRootScaling(ImageScaling):
++    def _scale_cachekey(method, self, brain, fieldname, **kwargs):
++        return (brain.UID, brain.modified, fieldname, kwargs)
++
++    @ram.cache(_scale_cachekey)
++    def tag(self,
++            brain,
++            fieldname,
++            **kwargs):
++        obj = brain.getObject()
++        images = obj.restrictedTraverse('@@images')
++        tag = images.tag(fieldname, **kwargs)
++        return tag
+diff --git a/plone/namedfile/scaling.zcml b/plone/namedfile/scaling.zcml
+index 07b4099..326b4c0 100644
+--- a/plone/namedfile/scaling.zcml
++++ b/plone/namedfile/scaling.zcml
+@@ -9,6 +9,12 @@
+       name="images"
+       permission="zope2.View"
+   />
++  <browser:page
++      class=".scaling.NavigationRootScaling"
++      for="plone.app.layout.navigation.interfaces.INavigationRoot"
++      name="image_scale"
++      permission="zope2.View"
++  />
+   <adapter
+       factory=".scaling.DefaultImageScalingFactory"
+       for="*"
+diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py
+index 5ed7fec..3e1da92 100644
+--- a/plone/namedfile/tests/test_scaling.py
++++ b/plone/namedfile/tests/test_scaling.py
+@@ -78,12 +78,28 @@ def testCreateScale(self):
+         self.assertEqual(foo.height, 80)
+         assertImage(self, foo.data.data, 'PNG', (80, 80))
+ 
++    def testCreateRetinaScale(self):
++        self.scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        foo = self.scaling.scale('image', width=100, height=80)
++        self.assertTrue(foo.srcset)
++        self.assertEqual(foo.srcset[0]['mimetype'], 'image/png')
++        self.assertEqual(foo.srcset[0]['height'], 160)
++        self.assertEqual(foo.srcset[0]['width'], 160)
++        assertImage(self, foo.srcset[0]['data'].data, 'PNG', (160, 160))
++
+     def testCreateScaleWithoutData(self):
+         item = DummyContent()
+         scaling = ImageScaling(item, None)
+         foo = scaling.scale('image', width=100, height=80)
+         self.assertEqual(foo, None)
+ 
++    def testCreateRetinaScaleWithoutData(self):
++        item = DummyContent()
++        scaling = ImageScaling(item, None)
++        scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        foo = scaling.scale('image', width=100, height=80)
++        self.assertFalse(hasattr(foo, 'srcset'))
++
+     def testGetScaleByName(self):
+         self.scaling.available_sizes = {'foo': (60, 60)}
+         foo = self.scaling.scale('image', scale='foo')
+@@ -107,6 +123,29 @@ def testGetScaleByName(self):
+         groups = re.match(expected, tag).groups()
+         self.assertTrue(groups, tag)
+ 
++    def testGetRetinaScaleByName(self):
++        self.scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        self.scaling.available_sizes = {'foo': (60, 60)}
++        foo = self.scaling.scale('image', scale='foo')
++        self.assertTrue(foo.srcset)
++        self.assertEqual(foo.srcset[0]['mimetype'], 'image/png')
++        self.assertEqual(foo.srcset[0]['width'], 120)
++        self.assertEqual(foo.srcset[0]['height'], 120)
++        assertImage(self, foo.srcset[0]['data'].data, 'PNG', (120, 120))
++
++        tag = foo.tag()
++        base = self.item.absolute_url()
++        expected = (
++            r'<img src="{0}'.format(base) +
++            r'/@@images/([-0-9a-f]{36})'
++            r'.(jpeg|gif|png)" '
++            r'alt="foo" title="foo" height="(\d+)" width="(\d+)" '
++            r'srcset="http://nohost/item/@@images/([-0-9a-f]{36})'
++            r'.(jpeg|gif|png)'
++            r' 2x" />')
++        groups = re.match(expected, tag).groups()
++        self.assertTrue(groups, tag)
++
+     def testGetUnknownScale(self):
+         foo = self.scaling.scale('image', scale='foo?')
+         self.assertEqual(foo, None)
+@@ -204,7 +243,7 @@ def testScaledJpegImageQuality(self):
+         """
+         data = getFile('image.jpg').read()
+         item = DummyContent()
+-        item.image = NamedImage(data, 'image/jpeg', u'image.jpg')
++        item.image = NamedImage(data, 'image/png', u'image.jpg')
+         scaling = ImageScaling(item, None)
+ 
+         # scale an image, record its size
+@@ -221,6 +260,16 @@ def testScaledJpegImageQuality(self):
+         # first one should be bigger
+         self.assertTrue(size_foo > size_bar)
+ 
++    def testOversizedRetinaScale(self):
++        orig_size = max(self.scaling.getImageSize('image'))
++        scale_size = orig_size / 2
++        self.scaling.getRetinaScales = lambda: [
++            {'scale': 2, 'quality': 66},
++            {'scale': 3, 'quality': 66}]
++        foo = self.scaling.scale('image', width=scale_size, height=scale_size)
++        self.assertEqual(len(foo.srcset), 1)
++        self.assertEqual(foo.srcset[0]['scale'], 2)
++
+ 
+ class ImageTraverseTests(unittest.TestCase):
+ 
+diff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py
+index 3c1d71f..222b740 100644
+--- a/plone/namedfile/utils/__init__.py
++++ b/plone/namedfile/utils/__init__.py
+@@ -5,7 +5,10 @@
+ from plone.namedfile.utils.jpeg_utils import process_jpeg
+ from plone.namedfile.utils.png_utils import process_png
+ from plone.namedfile.utils.tiff_utils import process_tiff
++from plone.registry.interfaces import IRegistry
++from Products.CMFPlone.interfaces.controlpanel import IImagingSchema
+ from StringIO import StringIO
++from zope.component import queryUtility
+ 
+ import mimetypes
+ import os.path
+@@ -244,3 +247,27 @@ def rotate_image(image_data, method=None, REQUEST=None):
+     img.save(output_image_data, format=fmt, exif=exif_bytes)
+     width, height = img.size
+     return output_image_data.getvalue(), width, height, exif_data
++
++
++def getRetinaScales():
++    registry = queryUtility(IRegistry)
++    if not registry:
++        return []
++    settings = registry.forInterface(
++        IImagingSchema, prefix='plone', check=False)
++    if settings.retina_scales == '2x':
++        return [{
++            'scale': 2,
++            'quality': settings.quality_2x,
++        }]
++    if settings.retina_scales == '3x':
++        return [
++            {
++                'scale': 2,
++                'quality': settings.quality_2x,
++            },
++            {
++                'scale': 3,
++                'quality': settings.quality_3x,
++            }]
++    return []
 
 
-Repository: plone.app.upgrade
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2017-03-21T22:15:57+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/9e280884e3875d7b6986d352988855818502cfaa
+Date: 2017-02-16T00:29:20+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.namedfile/commit/ccb6d5f92f986a1f56b9ab518d70926bd82e1809
 
-Merge pull request #76 from plone/plip-1483-retina-image-scales
+Made ImageScaling.scale less complex.
 
-Add image scaling options to image handling controlpanel
+code analysis complained about it due to the changes for plip 1483.
+Solved this by splitting out calculate_srcset.
 
 Files changed:
-A plone/app/upgrade/v51/profiles/to_beta3/registry.xml
+M plone/namedfile/scaling.py
+
+diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
+index 4137a65..4d4dec6 100644
+--- a/plone/namedfile/scaling.py
++++ b/plone/namedfile/scaling.py
+@@ -430,8 +430,33 @@ def scale(
+         if info is None:
+             return  # 404
+ 
+-        (orig_width, orig_height) = self.getImageSize(fieldname)
++        info['srcset'] = self.calculate_srcset(
++            fieldname=fieldname,
++            height=height,
++            width=width,
++            direction=direction,
++            scale=scale,
++            storage=storage,
++            **parameters
++        )
++        info['fieldname'] = fieldname
++        scale_view = ImageScale(self.context, self.request, **info)
++        return scale_view
++
++    def calculate_srcset(
++        self,
++        fieldname=None,
++        scale=None,
++        height=None,
++        width=None,
++        direction='thumbnail',
++        storage=None,
++        **parameters
++    ):
+         srcset = []
++        if storage is None:
++            return srcset
++        (orig_width, orig_height) = self.getImageSize(fieldname)
+         for retinaScale in self.getRetinaScales():
+             # Don't create retina scales larger than the source image.
+             if orig_height and orig_height < height * retinaScale['scale']:
+@@ -449,11 +474,7 @@ def scale(
+             scale_src['scale'] = retinaScale['scale']
+             if scale_src is not None:
+                 srcset.append(scale_src)
+-        info['srcset'] = srcset
+-
+-        info['fieldname'] = fieldname
+-        scale_view = ImageScale(self.context, self.request, **info)
+-        return scale_view
++        return srcset
+ 
+     def tag(
+         self,
+
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/master
+Date: 2017-02-16T02:05:47+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.namedfile/commit/75d258cb100b2169abba12dccb22859fe3516287
+
+Allow access to scale and tag from restricted code.
+
+Files changed:
+M plone/namedfile/scaling.zcml
+
+diff --git a/plone/namedfile/scaling.zcml b/plone/namedfile/scaling.zcml
+index 326b4c0..bf76834 100644
+--- a/plone/namedfile/scaling.zcml
++++ b/plone/namedfile/scaling.zcml
+@@ -3,13 +3,14 @@
+     xmlns:browser="http://namespaces.zope.org/browser">
+   <include package="zope.annotation" />
+   <browser:page
+-      allowed_attributes="scale"
++      allowed_attributes="scale tag"
+       class=".scaling.ImageScaling"
+       for=".interfaces.IImageScaleTraversable"
+       name="images"
+       permission="zope2.View"
+   />
+   <browser:page
++      allowed_attributes="scale tag"
+       class=".scaling.NavigationRootScaling"
+       for="plone.app.layout.navigation.interfaces.INavigationRoot"
+       name="image_scale"
+
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/master
+Date: 2017-03-21T22:10:25+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/36fd9abda73941a5c75f56d5f1f7acec30fe9ecd
+
+bump version after feature added
+
+Files changed:
 M CHANGES.rst
-M plone/app/upgrade/v51/configure.zcml
-M plone/app/upgrade/v51/profiles.zcml
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 803ff6d..6f9d70c 100644
+index 03c2635..ee0fa86 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ Breaking changes:
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
+ 
+-4.1.3 (unreleased)
++4.2.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+diff --git a/setup.py b/setup.py
+index c24edfb..7a459ac 100644
+--- a/setup.py
++++ b/setup.py
+@@ -4,7 +4,7 @@
+ import os
+ 
+ 
+-version = '4.1.3.dev0'
++version = '4.2.0.dev0'
+ description = 'File types and fields for images, files and blob files with ' \
+               'filenames'
+ long_description = ('\n\n'.join([
+
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/master
+Date: 2017-03-21T22:16:03+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/9688c104dbf9fa162ec2bc6abdbf1a54dfbedc91
+
+Merge pull request #25 from plone/plip-1483-retina-image-scales
+
+Plip 1483 retina image scales
+
+Files changed:
+M CHANGES.rst
+M plone/namedfile/scaling.py
+M plone/namedfile/scaling.zcml
+M plone/namedfile/tests/test_scaling.py
+M plone/namedfile/utils/__init__.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index d748c36..ee0fa86 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -1,7 +1,7 @@
+ Changelog
+ =========
+ 
+-4.1.3 (unreleased)
++4.2.0 (unreleased)
+ ------------------
+ 
+ Breaking changes:
+@@ -10,7 +10,8 @@ Breaking changes:
  
  New features:
  
 -- *add item here*
-+- Add image scaling options to image handling controlpanel
-+  when migrating to 5.1b3.
++- Add retina image scales using srcset attribute.
 +  [didrix]
  
  Bug fixes:
  
-diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
-index 1dfc1c3..d6c018a 100644
---- a/plone/app/upgrade/v51/configure.zcml
-+++ b/plone/app/upgrade/v51/configure.zcml
-@@ -107,4 +107,19 @@ was moved from the plone bundle to plone-logged-in in CMPlone 5.1a2.
+diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
+index 514d9a2..4d4dec6 100644
+--- a/plone/namedfile/scaling.py
++++ b/plone/namedfile/scaling.py
+@@ -2,9 +2,11 @@
+ from AccessControl.ZopeGuards import guarded_getattr
+ from Acquisition import aq_base
+ from DateTime import DateTime
++from plone.memoize import ram
+ from plone.namedfile.file import FILECHUNK_CLASSES
+ from plone.namedfile.interfaces import IAvailableSizes
+ from plone.namedfile.interfaces import IStableImageScale
++from plone.namedfile.utils import getRetinaScales
+ from plone.namedfile.utils import set_headers
+ from plone.namedfile.utils import stream_data
+ from plone.protect.interfaces import IDisableCSRFProtection
+@@ -15,6 +17,7 @@
+ from plone.scale.storage import AnnotationStorage
+ from Products.Five import BrowserView
+ from xml.sax.saxutils import quoteattr
++from zExceptions import Unauthorized
+ from ZODB.POSException import ConflictError
+ from zope.component import queryUtility
+ from zope.deprecation import deprecate
+@@ -57,10 +60,23 @@ def __init__(self, context, request, **info):
+             name = info['fieldname']
+         self.__name__ = u'{0}.{1}'.format(name, extension)
+         self.url = u'{0}/@@images/{1}'.format(url, self.__name__)
++        self.srcset = info.get('srcset', [])
  
-     </gs:upgradeSteps>
+     def absolute_url(self):
+         return self.url
  
-+    <gs:upgradeSteps
-+        source="5105"
-+        destination="5106"
-+        profile="Products.CMFPlone:plone">
++    def srcset_attribute(self):
++        srcset_attr = []
++        extension = self.data.contentType.split('/')[-1].lower()
++        for scale in self.srcset:
++            srcset_attr.append(u'{0}/@@images/{1}.{2} {3}x'.format(
++                self.context.absolute_url(),
++                scale['uid'],
++                extension,
++                scale['scale']))
++        srcset_attr = ', '.join(srcset_attr)
++        return srcset_attr
 +
-+        <gs:upgradeDepends
-+            title="Run to51beta3 upgrade profile."
-+            description="
-+Add image scaling options to image handling control panel.
-+            "
-+            import_profile="plone.app.upgrade.v51:to51beta3"
-+            />
+     def tag(self, height=_marker, width=_marker, alt=_marker,
+             css_class=None, title=_marker, **kwargs):
+         """Create a tag including scale
+@@ -83,6 +99,11 @@ def tag(self, height=_marker, width=_marker, alt=_marker,
+             ('width', width),
+             ('class', css_class),
+         ]
 +
-+    </gs:upgradeSteps>
++        srcset_attr = self.srcset_attribute()
++        if srcset_attr:
++            values.append(('srcset', srcset_attr))
 +
- </configure>
-diff --git a/plone/app/upgrade/v51/profiles.zcml b/plone/app/upgrade/v51/profiles.zcml
-index d731936..2508ade 100644
---- a/plone/app/upgrade/v51/profiles.zcml
-+++ b/plone/app/upgrade/v51/profiles.zcml
-@@ -30,4 +30,15 @@
-       provides="Products.GenericSetup.interfaces.EXTENSION"
-       />
+         values.extend(kwargs.items())
  
-+  <!-- Note: to51beta2 does not exist, because no profile changes were needed. -->
+         parts = ['<img']
+@@ -342,7 +363,14 @@ def available_sizes(self, value):
+ 
+     def getImageSize(self, fieldname=None):
+         if fieldname is not None:
+-            value = self.guarded_orig_image(fieldname)
++            try:
++                value = self.guarded_orig_image(fieldname)
++            except Unauthorized:
++                # This is a corner case that can be seen in some tests,
++                # at least plone.app.caching and plone.formwidget.namedfile.
++                # When it is *really* unauthorized to get this image,
++                # it will go wrong somewhere else.
++                value = None
+             if value is None:
+                 return (0, 0)
+             return value.getImageSize()
+@@ -352,6 +380,9 @@ def getImageSize(self, fieldname=None):
+     def guarded_orig_image(self, fieldname):
+         return guarded_getattr(self.context, fieldname, None)
+ 
++    def getRetinaScales(self):
++        return getRetinaScales()
 +
-+  <genericsetup:registerProfile
-+      name="to51beta3"
-+      title="Upgrade profile for Plone 5.1beta2 to Plone 5.1beta3"
-+      description=""
-+      directory="profiles/to_beta1"
-+      for="Products.CMFPlone.interfaces.IMigratingPloneSiteRoot"
-+      provides="Products.GenericSetup.interfaces.EXTENSION"
-+      />
+     def modified(self):
+         """Provide a callable to return the modification time of content
+         items, so stored image scales can be invalidated.
+@@ -398,10 +429,53 @@ def scale(
+         )
+         if info is None:
+             return  # 404
 +
- </configure>
-diff --git a/plone/app/upgrade/v51/profiles/to_beta3/registry.xml b/plone/app/upgrade/v51/profiles/to_beta3/registry.xml
-new file mode 100644
-index 0000000..84b8e07
---- /dev/null
-+++ b/plone/app/upgrade/v51/profiles/to_beta3/registry.xml
-@@ -0,0 +1,8 @@
-+<?xml version="1.0"?>
-+<registry>
++        info['srcset'] = self.calculate_srcset(
++            fieldname=fieldname,
++            height=height,
++            width=width,
++            direction=direction,
++            scale=scale,
++            storage=storage,
++            **parameters
++        )
+         info['fieldname'] = fieldname
+         scale_view = ImageScale(self.context, self.request, **info)
+         return scale_view
+ 
++    def calculate_srcset(
++        self,
++        fieldname=None,
++        scale=None,
++        height=None,
++        width=None,
++        direction='thumbnail',
++        storage=None,
++        **parameters
++    ):
++        srcset = []
++        if storage is None:
++            return srcset
++        (orig_width, orig_height) = self.getImageSize(fieldname)
++        for retinaScale in self.getRetinaScales():
++            # Don't create retina scales larger than the source image.
++            if orig_height and orig_height < height * retinaScale['scale']:
++                continue
++            if orig_width and orig_width < width * retinaScale['scale']:
++                continue
++            parameters['quality'] = retinaScale['quality']
++            scale_src = storage.scale(
++                fieldname=fieldname,
++                height=height * retinaScale['scale'],
++                width=width * retinaScale['scale'],
++                direction=direction,
++                **parameters
++            )
++            scale_src['scale'] = retinaScale['scale']
++            if scale_src is not None:
++                srcset.append(scale_src)
++        return srcset
 +
-+  <!-- Add image scaling options to image handling controlpanel. -->
-+  <records interface="Products.CMFPlone.interfaces.IImagingSchema"
-+           prefix="plone" />
+     def tag(
+         self,
+         fieldname=None,
+@@ -413,3 +487,18 @@ def tag(
+     ):
+         scale = self.scale(fieldname, scale, height, width, direction)
+         return scale.tag(**kwargs) if scale else None
 +
-+</registry>
++
++class NavigationRootScaling(ImageScaling):
++    def _scale_cachekey(method, self, brain, fieldname, **kwargs):
++        return (brain.UID, brain.modified, fieldname, kwargs)
++
++    @ram.cache(_scale_cachekey)
++    def tag(self,
++            brain,
++            fieldname,
++            **kwargs):
++        obj = brain.getObject()
++        images = obj.restrictedTraverse('@@images')
++        tag = images.tag(fieldname, **kwargs)
++        return tag
+diff --git a/plone/namedfile/scaling.zcml b/plone/namedfile/scaling.zcml
+index 07b4099..bf76834 100644
+--- a/plone/namedfile/scaling.zcml
++++ b/plone/namedfile/scaling.zcml
+@@ -3,12 +3,19 @@
+     xmlns:browser="http://namespaces.zope.org/browser">
+   <include package="zope.annotation" />
+   <browser:page
+-      allowed_attributes="scale"
++      allowed_attributes="scale tag"
+       class=".scaling.ImageScaling"
+       for=".interfaces.IImageScaleTraversable"
+       name="images"
+       permission="zope2.View"
+   />
++  <browser:page
++      allowed_attributes="scale tag"
++      class=".scaling.NavigationRootScaling"
++      for="plone.app.layout.navigation.interfaces.INavigationRoot"
++      name="image_scale"
++      permission="zope2.View"
++  />
+   <adapter
+       factory=".scaling.DefaultImageScalingFactory"
+       for="*"
+diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py
+index 5ed7fec..3e1da92 100644
+--- a/plone/namedfile/tests/test_scaling.py
++++ b/plone/namedfile/tests/test_scaling.py
+@@ -78,12 +78,28 @@ def testCreateScale(self):
+         self.assertEqual(foo.height, 80)
+         assertImage(self, foo.data.data, 'PNG', (80, 80))
+ 
++    def testCreateRetinaScale(self):
++        self.scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        foo = self.scaling.scale('image', width=100, height=80)
++        self.assertTrue(foo.srcset)
++        self.assertEqual(foo.srcset[0]['mimetype'], 'image/png')
++        self.assertEqual(foo.srcset[0]['height'], 160)
++        self.assertEqual(foo.srcset[0]['width'], 160)
++        assertImage(self, foo.srcset[0]['data'].data, 'PNG', (160, 160))
++
+     def testCreateScaleWithoutData(self):
+         item = DummyContent()
+         scaling = ImageScaling(item, None)
+         foo = scaling.scale('image', width=100, height=80)
+         self.assertEqual(foo, None)
+ 
++    def testCreateRetinaScaleWithoutData(self):
++        item = DummyContent()
++        scaling = ImageScaling(item, None)
++        scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        foo = scaling.scale('image', width=100, height=80)
++        self.assertFalse(hasattr(foo, 'srcset'))
++
+     def testGetScaleByName(self):
+         self.scaling.available_sizes = {'foo': (60, 60)}
+         foo = self.scaling.scale('image', scale='foo')
+@@ -107,6 +123,29 @@ def testGetScaleByName(self):
+         groups = re.match(expected, tag).groups()
+         self.assertTrue(groups, tag)
+ 
++    def testGetRetinaScaleByName(self):
++        self.scaling.getRetinaScales = lambda: [{'scale': 2, 'quality': 66}]
++        self.scaling.available_sizes = {'foo': (60, 60)}
++        foo = self.scaling.scale('image', scale='foo')
++        self.assertTrue(foo.srcset)
++        self.assertEqual(foo.srcset[0]['mimetype'], 'image/png')
++        self.assertEqual(foo.srcset[0]['width'], 120)
++        self.assertEqual(foo.srcset[0]['height'], 120)
++        assertImage(self, foo.srcset[0]['data'].data, 'PNG', (120, 120))
++
++        tag = foo.tag()
++        base = self.item.absolute_url()
++        expected = (
++            r'<img src="{0}'.format(base) +
++            r'/@@images/([-0-9a-f]{36})'
++            r'.(jpeg|gif|png)" '
++            r'alt="foo" title="foo" height="(\d+)" width="(\d+)" '
++            r'srcset="http://nohost/item/@@images/([-0-9a-f]{36})'
++            r'.(jpeg|gif|png)'
++            r' 2x" />')
++        groups = re.match(expected, tag).groups()
++        self.assertTrue(groups, tag)
++
+     def testGetUnknownScale(self):
+         foo = self.scaling.scale('image', scale='foo?')
+         self.assertEqual(foo, None)
+@@ -204,7 +243,7 @@ def testScaledJpegImageQuality(self):
+         """
+         data = getFile('image.jpg').read()
+         item = DummyContent()
+-        item.image = NamedImage(data, 'image/jpeg', u'image.jpg')
++        item.image = NamedImage(data, 'image/png', u'image.jpg')
+         scaling = ImageScaling(item, None)
+ 
+         # scale an image, record its size
+@@ -221,6 +260,16 @@ def testScaledJpegImageQuality(self):
+         # first one should be bigger
+         self.assertTrue(size_foo > size_bar)
+ 
++    def testOversizedRetinaScale(self):
++        orig_size = max(self.scaling.getImageSize('image'))
++        scale_size = orig_size / 2
++        self.scaling.getRetinaScales = lambda: [
++            {'scale': 2, 'quality': 66},
++            {'scale': 3, 'quality': 66}]
++        foo = self.scaling.scale('image', width=scale_size, height=scale_size)
++        self.assertEqual(len(foo.srcset), 1)
++        self.assertEqual(foo.srcset[0]['scale'], 2)
++
+ 
+ class ImageTraverseTests(unittest.TestCase):
+ 
+diff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py
+index 3c1d71f..222b740 100644
+--- a/plone/namedfile/utils/__init__.py
++++ b/plone/namedfile/utils/__init__.py
+@@ -5,7 +5,10 @@
+ from plone.namedfile.utils.jpeg_utils import process_jpeg
+ from plone.namedfile.utils.png_utils import process_png
+ from plone.namedfile.utils.tiff_utils import process_tiff
++from plone.registry.interfaces import IRegistry
++from Products.CMFPlone.interfaces.controlpanel import IImagingSchema
+ from StringIO import StringIO
++from zope.component import queryUtility
+ 
+ import mimetypes
+ import os.path
+@@ -244,3 +247,27 @@ def rotate_image(image_data, method=None, REQUEST=None):
+     img.save(output_image_data, format=fmt, exif=exif_bytes)
+     width, height = img.size
+     return output_image_data.getvalue(), width, height, exif_data
++
++
++def getRetinaScales():
++    registry = queryUtility(IRegistry)
++    if not registry:
++        return []
++    settings = registry.forInterface(
++        IImagingSchema, prefix='plone', check=False)
++    if settings.retina_scales == '2x':
++        return [{
++            'scale': 2,
++            'quality': settings.quality_2x,
++        }]
++    if settings.retina_scales == '3x':
++        return [
++            {
++                'scale': 2,
++                'quality': settings.quality_2x,
++            },
++            {
++                'scale': 3,
++                'quality': settings.quality_3x,
++            }]
++    return []
+diff --git a/setup.py b/setup.py
+index c24edfb..7a459ac 100644
+--- a/setup.py
++++ b/setup.py
+@@ -4,7 +4,7 @@
+ import os
+ 
+ 
+-version = '4.1.3.dev0'
++version = '4.2.0.dev0'
+ description = 'File types and fields for images, files and blob files with ' \
+               'filenames'
+ long_description = ('\n\n'.join([
 
 
