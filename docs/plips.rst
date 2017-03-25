@@ -106,8 +106,7 @@ If you need help at any point in this process,
 please contact a member of the framework team personally or ask for help on the `Framework Team mailing list`_.
 
 A PLIP is just a GitHub issue on Products.CMFPlone with a special template and a specific tag.
-To get started, open a new issue by using the `issuetemplate web service <http://issuetemplate.com/#/plone/Products.CMFPlone/PLIP>`_.
-You have to login with your GitHub account to use the issuetemplate service.
+To get started, open a new issue, the issue will be prefilled with headings and comments for a bug or a PLIP, remove the bug part.
 Fill in all applicable fields.
 After submitting, select the tag "03 type: feature (plip)" for the issues.
 
@@ -279,4 +278,3 @@ If all went as planned the next Plone release will carry on with your PLIP in it
 You'll be expected to help out with that feature after it's been released (within reason).
 
 .. _Framework Team mailing list: https://lists.plone.org/mailman/listinfo/plone-framework-team
-
