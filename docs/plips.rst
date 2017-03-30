@@ -52,7 +52,7 @@ All about PLIPS
 
 **I’m still nervous. Can I get involved other ways at first?**
     If you want to feel the process and how it works, help us review PLIPs as the implementations finish up.
-    Ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the GitHub issue page for Products.CMFPlone for `issues tagged with "03 type: feature (plip)" <https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature%20%28plip%29>`_.
+    Ask one of the Framework Team members what PLIPs are available for review or check the status of PLIPs at the `GitHub issues`_ page for `Products.CMFPlone`_ for `issues tagged with "03 type: feature (plip)" <https://github.com/plone/Products.CMFPlone/labels/03%20type%3A%20feature%20%28plip%29>`_.
     For reference to old PLIPs see the `deprecated Trac tracker <https://dev.plone.org/report/24>`_.
     Make sure to let us know you intend to review the PLIP by joining the `Framework Team mailing list`_ and sending a quick email.
     Then, follow the simple instructions for :doc:`reviewing a PLIP <plipreview>`.
@@ -105,10 +105,10 @@ everyone should go through the PLIP process.
 If you need help at any point in this process,
 please contact a member of the framework team personally or ask for help on the `Framework Team mailing list`_.
 
-A PLIP is just a GitHub issue on Products.CMFPlone with a special template and a specific tag.
+A PLIP is a `GitHub issue`_ on `Products.CMFPlone`_ with a special template and a specific tag.
 To get started, open a new issue, the issue will be prefilled with headings and comments for a bug or a PLIP, remove the bug part.
 Fill in all applicable fields.
-After submitting, select the tag "03 type: feature (plip)" for the issues.
+After submitting, select the tag "``03 type: feature (plip)``" for the issues.
 
 When writing a PLIP, be as specific and to-the-point as you can.
 Remember your audience - to get support for your proposal, people will have to be able to read it!
@@ -278,3 +278,6 @@ If all went as planned the next Plone release will carry on with your PLIP in it
 You'll be expected to help out with that feature after it's been released (within reason).
 
 .. _Framework Team mailing list: https://lists.plone.org/mailman/listinfo/plone-framework-team
+.. _GitHub issues: https://github.com/plone/Products.CMFPlone/issues
+.. _GitHub issue: https://github.com/plone/Products.CMFPlone/issues/new
+.. _Products.CMFPlone: https://github.com/Plone/Products.CMFPlone
