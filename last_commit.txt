@@ -2,59 +2,364 @@ Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2017-04-05T17:00:06+02:00
+Date: 2017-04-05T17:07:12+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/339f7bcbba828a31d1a3db3c6d6b39466f9ee5fc
+Commit: https://github.com/plone/plone.app.upgrade/commit/b97989b13e7321148e8f234115faa19cc4b354fe
 
-Added null_upgrade_step for versions 5018 and 5107.
+Fixed title and description of plone.resource.maxage.
+
+This had the title and description from shared maxage, due to a wrong reference.
+See https://github.com/plone/Products.CMFPlone/issues/1989
+
+This is run when upgrading to Plone 5.0.8 and 5.1b4.
 
 Files changed:
+M CHANGES.rst
 M plone/app/upgrade/v50/configure.zcml
+M plone/app/upgrade/v50/final.py
+M plone/app/upgrade/v50/tests.py
 M plone/app/upgrade/v51/configure.zcml
 
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 84b2eec..38ef4a8 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,11 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Fixed title and description of plone.resource.maxage.
++  This had the title and description from shared maxage,
++  due to a wrong reference.
++  See https://github.com/plone/Products.CMFPlone/issues/1989
++  [maurits]
+ 
+ 
+ 2.0.2 (2017-04-03)
 diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
-index af8efe0..eee2f28 100644
+index eee2f28..31ad537 100644
 --- a/plone/app/upgrade/v50/configure.zcml
 +++ b/plone/app/upgrade/v50/configure.zcml
-@@ -340,4 +340,17 @@
+@@ -345,11 +345,10 @@
+         destination="5018"
+         profile="Products.CMFPlone:plone">
+ 
+-        <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
+-            />
++      <gs:upgradeStep
++          title="Fix double shared maxage"
++          handler=".final.fix_double_smaxage"
++          />
  
      </gs:upgradeSteps>
  
-+    <gs:upgradeSteps
-+        source="5017"
-+        destination="5018"
-+        profile="Products.CMFPlone:plone">
+diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
+index 82a3152..57a6478 100644
+--- a/plone/app/upgrade/v50/final.py
++++ b/plone/app/upgrade/v50/final.py
+@@ -101,3 +101,32 @@ def to503(context):
+ def to507(context):
+     """5.0.6 -> 5.0.7"""
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to507')
 +
-+        <gs:upgradeStep
-+            title="Miscellaneous"
-+            description=""
-+            handler="..utils.null_upgrade_step"
-+            />
 +
-+    </gs:upgradeSteps>
++def fix_double_smaxage(context):
++    """Fix caching definition.
 +
- </configure>
++    plone.resource.maxage has title and description from shared maxage.
++    See https://github.com/plone/Products.CMFPlone/issues/1989
++    """
++    from plone.registry.interfaces import IPersistentField
++    from plone.registry.record import Record
++    from plone.registry import field
++    from plone.registry import FieldRef
++    from zope.component import queryAdapter
++    registry = getUtility(IRegistry)
++    # If these three registry records are not defined,
++    # we do no fix.
++    maxage = 'plone.app.caching.strongCaching.plone.resource.maxage'
++    def_maxage = 'plone.app.caching.strongCaching.maxage'
++    def_smaxage = 'plone.app.caching.strongCaching.smaxage'
++    for name in (maxage, def_maxage, def_smaxage):
++        if name not in registry:
++            return
++    if registry.records[maxage].field.recordName != def_smaxage:
++        # no fix needed
++        return
++    field_ref = FieldRef(def_maxage, registry.records[def_maxage].field)
++    old_value = registry[maxage]
++    registry.records[maxage] = Record(field_ref, old_value)
++    logger.info('Fixed {} to refer to {}.'.format(maxage, def_maxage))
+diff --git a/plone/app/upgrade/v50/tests.py b/plone/app/upgrade/v50/tests.py
+index 9fa64b4..f66f456 100644
+--- a/plone/app/upgrade/v50/tests.py
++++ b/plone/app/upgrade/v50/tests.py
+@@ -126,6 +126,59 @@ def testBarcelonetaThemeIsInstalled(self):
+         )
+ 
+ 
++class VariousTest(MigrationTest):
++
++    def test_fix_double_smaxage(self):
++        from plone.registry.interfaces import IRegistry
++        from plone.registry.record import Record
++        from plone.registry import field
++        from plone.registry import FieldRef
++        from plone.app.upgrade.v50.final import fix_double_smaxage
++        # Run the upgrade before plone.app.caching is installed,
++        # to check that it does not harm.
++        portal_setup = self.layer['portal'].portal_setup
++        fix_double_smaxage(portal_setup)
++        registry = getUtility(IRegistry)
++        maxage = 'plone.app.caching.strongCaching.plone.resource.maxage'
++        def_maxage = 'plone.app.caching.strongCaching.maxage'
++        def_smaxage = 'plone.app.caching.strongCaching.smaxage'
++        # Install default caching profile.
++        portal_setup.runAllImportStepsFromProfile(
++            'plone.app.caching:default'
++        )
++        self.assertTrue(def_maxage in registry)
++        self.assertTrue(def_smaxage in registry)
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        # Install the with-caching-proxy settings.
++        portal_setup.runAllImportStepsFromProfile(
++            'plone.app.caching:with-caching-proxy'
++        )
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++
++        # Old situation had maxage referencing the s-maxage definition:
++        field_ref = FieldRef(def_smaxage, registry.records[def_smaxage].field)
++        registry.records[maxage] = Record(field_ref, 999)
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_smaxage)
++        self.assertEqual(registry[maxage], 999)
++        self.assertIn('shared', registry.records[maxage].field.title.lower())
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        # Test that this fixes the reference and keeps the value.
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_maxage)
++        self.assertEqual(registry[maxage], 999)
++        self.assertNotIn(
++            'shared', registry.records[maxage].field.title.lower())
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_maxage)
++        self.assertEqual(registry[maxage], 999)
++
++
+ def test_suite():
+     # Skip these tests on Plone 4
+     from unittest import TestSuite, makeSuite
+@@ -135,4 +188,5 @@ def test_suite():
+         suite = TestSuite()
+         suite.addTest(makeSuite(PASUpgradeTest))
+         suite.addTest(makeSuite(TestFunctionalMigrations))
++        suite.addTest(makeSuite(VariousTest))
+         return suite
 diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
-index f714645..d667511 100644
+index d667511..52f420c 100644
 --- a/plone/app/upgrade/v51/configure.zcml
 +++ b/plone/app/upgrade/v51/configure.zcml
-@@ -128,4 +128,17 @@ Add image scaling options to image handling control panel.
+@@ -134,9 +134,8 @@ Add image scaling options to image handling control panel.
+         profile="Products.CMFPlone:plone">
+ 
+         <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
++            title="Fix double shared maxage"
++            handler="..v50.final.fix_double_smaxage"
+             />
+ 
+     </gs:upgradeSteps>
+
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2017-04-05T23:26:46+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.upgrade/commit/a4a277be21ad88cbbb74333508f5a719ec170302
+
+Merge pull request #108 from plone/fix-caching-s-maxage-master
+
+Fixed title and description of plone.resource.maxage.
+
+Files changed:
+M CHANGES.rst
+M plone/app/upgrade/v50/configure.zcml
+M plone/app/upgrade/v50/final.py
+M plone/app/upgrade/v50/tests.py
+M plone/app/upgrade/v51/configure.zcml
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 84b2eec..38ef4a8 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,11 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Fixed title and description of plone.resource.maxage.
++  This had the title and description from shared maxage,
++  due to a wrong reference.
++  See https://github.com/plone/Products.CMFPlone/issues/1989
++  [maurits]
+ 
+ 
+ 2.0.2 (2017-04-03)
+diff --git a/plone/app/upgrade/v50/configure.zcml b/plone/app/upgrade/v50/configure.zcml
+index eee2f28..31ad537 100644
+--- a/plone/app/upgrade/v50/configure.zcml
++++ b/plone/app/upgrade/v50/configure.zcml
+@@ -345,11 +345,10 @@
+         destination="5018"
+         profile="Products.CMFPlone:plone">
+ 
+-        <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
+-            />
++      <gs:upgradeStep
++          title="Fix double shared maxage"
++          handler=".final.fix_double_smaxage"
++          />
  
      </gs:upgradeSteps>
  
-+    <gs:upgradeSteps
-+        source="5106"
-+        destination="5107"
-+        profile="Products.CMFPlone:plone">
+diff --git a/plone/app/upgrade/v50/final.py b/plone/app/upgrade/v50/final.py
+index 82a3152..57a6478 100644
+--- a/plone/app/upgrade/v50/final.py
++++ b/plone/app/upgrade/v50/final.py
+@@ -101,3 +101,32 @@ def to503(context):
+ def to507(context):
+     """5.0.6 -> 5.0.7"""
+     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to507')
 +
-+        <gs:upgradeStep
-+            title="Miscellaneous"
-+            description=""
-+            handler="..utils.null_upgrade_step"
-+            />
 +
-+    </gs:upgradeSteps>
++def fix_double_smaxage(context):
++    """Fix caching definition.
 +
- </configure>
++    plone.resource.maxage has title and description from shared maxage.
++    See https://github.com/plone/Products.CMFPlone/issues/1989
++    """
++    from plone.registry.interfaces import IPersistentField
++    from plone.registry.record import Record
++    from plone.registry import field
++    from plone.registry import FieldRef
++    from zope.component import queryAdapter
++    registry = getUtility(IRegistry)
++    # If these three registry records are not defined,
++    # we do no fix.
++    maxage = 'plone.app.caching.strongCaching.plone.resource.maxage'
++    def_maxage = 'plone.app.caching.strongCaching.maxage'
++    def_smaxage = 'plone.app.caching.strongCaching.smaxage'
++    for name in (maxage, def_maxage, def_smaxage):
++        if name not in registry:
++            return
++    if registry.records[maxage].field.recordName != def_smaxage:
++        # no fix needed
++        return
++    field_ref = FieldRef(def_maxage, registry.records[def_maxage].field)
++    old_value = registry[maxage]
++    registry.records[maxage] = Record(field_ref, old_value)
++    logger.info('Fixed {} to refer to {}.'.format(maxage, def_maxage))
+diff --git a/plone/app/upgrade/v50/tests.py b/plone/app/upgrade/v50/tests.py
+index 9fa64b4..f66f456 100644
+--- a/plone/app/upgrade/v50/tests.py
++++ b/plone/app/upgrade/v50/tests.py
+@@ -126,6 +126,59 @@ def testBarcelonetaThemeIsInstalled(self):
+         )
+ 
+ 
++class VariousTest(MigrationTest):
++
++    def test_fix_double_smaxage(self):
++        from plone.registry.interfaces import IRegistry
++        from plone.registry.record import Record
++        from plone.registry import field
++        from plone.registry import FieldRef
++        from plone.app.upgrade.v50.final import fix_double_smaxage
++        # Run the upgrade before plone.app.caching is installed,
++        # to check that it does not harm.
++        portal_setup = self.layer['portal'].portal_setup
++        fix_double_smaxage(portal_setup)
++        registry = getUtility(IRegistry)
++        maxage = 'plone.app.caching.strongCaching.plone.resource.maxage'
++        def_maxage = 'plone.app.caching.strongCaching.maxage'
++        def_smaxage = 'plone.app.caching.strongCaching.smaxage'
++        # Install default caching profile.
++        portal_setup.runAllImportStepsFromProfile(
++            'plone.app.caching:default'
++        )
++        self.assertTrue(def_maxage in registry)
++        self.assertTrue(def_smaxage in registry)
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        # Install the with-caching-proxy settings.
++        portal_setup.runAllImportStepsFromProfile(
++            'plone.app.caching:with-caching-proxy'
++        )
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++
++        # Old situation had maxage referencing the s-maxage definition:
++        field_ref = FieldRef(def_smaxage, registry.records[def_smaxage].field)
++        registry.records[maxage] = Record(field_ref, 999)
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_smaxage)
++        self.assertEqual(registry[maxage], 999)
++        self.assertIn('shared', registry.records[maxage].field.title.lower())
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        # Test that this fixes the reference and keeps the value.
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_maxage)
++        self.assertEqual(registry[maxage], 999)
++        self.assertNotIn(
++            'shared', registry.records[maxage].field.title.lower())
++        # Run upgrade.
++        fix_double_smaxage(portal_setup)
++        self.assertEqual(
++            registry.records[maxage].field.recordName, def_maxage)
++        self.assertEqual(registry[maxage], 999)
++
++
+ def test_suite():
+     # Skip these tests on Plone 4
+     from unittest import TestSuite, makeSuite
+@@ -135,4 +188,5 @@ def test_suite():
+         suite = TestSuite()
+         suite.addTest(makeSuite(PASUpgradeTest))
+         suite.addTest(makeSuite(TestFunctionalMigrations))
++        suite.addTest(makeSuite(VariousTest))
+         return suite
+diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
+index d667511..52f420c 100644
+--- a/plone/app/upgrade/v51/configure.zcml
++++ b/plone/app/upgrade/v51/configure.zcml
+@@ -134,9 +134,8 @@ Add image scaling options to image handling control panel.
+         profile="Products.CMFPlone:plone">
+ 
+         <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
++            title="Fix double shared maxage"
++            handler="..v50.final.fix_double_smaxage"
+             />
+ 
+     </gs:upgradeSteps>
 
 
