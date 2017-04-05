@@ -1,315 +1,336 @@
-Repository: plone.app.linkintegrity
+Repository: plone.app.contentlisting
 
 
 Branch: refs/heads/master
-Date: 2017-04-04T14:31:28+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/a02c009c86c320bc85fa7a6292fd792d1143321d
+Date: 2017-04-04T10:37:56+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/e0daaa866d5d39339bcf10b019423f7147223a6b
 
-check any reference in delete confirmation dialog
-Support for any ``zc.relation`` refercences being checked by ``delete_confirmation_info`` dialog, not only references linked in text.
+Remove hasattr
 
 Files changed:
-M CHANGES.rst
-M plone/app/linkintegrity/browser/info.py
-M plone/app/linkintegrity/tests/test_references.py
-M plone/app/linkintegrity/utils.py
+M plone/app/contentlisting/catalog.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 1c8c4fe..fe06784 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ Breaking changes:
+diff --git a/plone/app/contentlisting/catalog.py b/plone/app/contentlisting/catalog.py
+index e9ac53c..9f9a91c 100644
+--- a/plone/app/contentlisting/catalog.py
++++ b/plone/app/contentlisting/catalog.py
+@@ -39,12 +39,13 @@ def __getattr__(self, name):
  
- New features:
+         if name.startswith('_'):
+             raise AttributeError(name)
+-        if hasattr(aq_base(self._brain), name):
+-            return getattr(self._brain, name)
+-        elif hasattr(aq_base(self.getObject()), name):
+-            return getattr(aq_base(self.getObject()), name)
+-        else:
+-            raise AttributeError(name)
++        brain_name = getattr(aq_base(self._brain), name, None)
++        if brain_name is not None:
++            return brain_name
++        object_name = getattr(aq_base(self.getObject()), name, None)
++        if object_name is not None:
++            return object_name
++        raise AttributeError(name)
  
--- *add item here*
-+- Support for any ``zc.relation`` refercences being checked by ``delete_confirmation_info`` dialog,
-+  not only references linked in text.
-+  [thet]
- 
- Bug fixes:
- 
-diff --git a/plone/app/linkintegrity/browser/info.py b/plone/app/linkintegrity/browser/info.py
-index 8916041..f678957 100644
---- a/plone/app/linkintegrity/browser/info.py
-+++ b/plone/app/linkintegrity/browser/info.py
-@@ -146,7 +146,7 @@ def check_object(self, obj, excluded_path=None):
-         Breaches originating from excluded_path are ignored.
-         """
-         breaches = {}
--        direct_links = getIncomingLinks(obj)
-+        direct_links = getIncomingLinks(obj, from_attribute=None)
-         has_breaches = False
-         for direct_link in direct_links:
-             source_path = direct_link.from_path
-diff --git a/plone/app/linkintegrity/tests/test_references.py b/plone/app/linkintegrity/tests/test_references.py
-index 7299d70..3967dfc 100644
---- a/plone/app/linkintegrity/tests/test_references.py
-+++ b/plone/app/linkintegrity/tests/test_references.py
-@@ -3,13 +3,18 @@
- from plone.app.linkintegrity.parser import extractLinks
- from plone.app.linkintegrity.tests.base import ATBaseTestCase
- from plone.app.linkintegrity.tests.base import DXBaseTestCase
--from plone.app.linkintegrity.utils import hasIncomingLinks
--from plone.app.linkintegrity.utils import hasOutgoingLinks
- from plone.app.linkintegrity.utils import getIncomingLinks
- from plone.app.linkintegrity.utils import getOutgoingLinks
-+from plone.app.linkintegrity.utils import hasIncomingLinks
-+from plone.app.linkintegrity.utils import hasOutgoingLinks
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.app.testing import TEST_USER_NAME
-+from z3c.relationfield import RelationValue
-+from z3c.relationfield.event import _setRelation
-+from zc.relation.interfaces import ICatalog
-+from zope.component import getUtility
-+from zope.intid.interfaces import IIntIds
- from zope.lifecycleevent import modified
- 
- 
-@@ -164,6 +169,30 @@ def test_reference_orthogonality(self):
-         # And again the related item reference remains in place:
-         self.assertEqual(self._get_related_items(doc), [img, ])
- 
-+    def test_delete_confirmation_for_any_reference(self):
-+        """Test, if delete confirmation shows also a warning if items are
-+        deleted, which are referenced by other items via a reference field.
-+        """
-+        img1 = self.portal['image1']
-+        doc1 = self.portal['doc1']
-+
-+        intids_tool = getUtility(IIntIds)
-+        to_id = intids_tool.getId(img1)
-+        rel = RelationValue(to_id)
-+        _setRelation(doc1, 'related_image', rel)
-+
-+        # Test, if relation is present in the relation catalog
-+        catalog = getUtility(ICatalog)
-+        rels = list(catalog.findRelations({'to_id':  to_id}))
-+        self.assertEqual(len(rels), 1)
-+
-+        # Test, if delete_confirmation_info shows also other relations than
-+        # ``isReferencing``.
-+        info = img1.restrictedTraverse('@@delete_confirmation_info')
-+        breaches = info.get_breaches()
-+        self.assertEqual(len(breaches), 1)
-+        self.assertEqual(len(info.get_breaches()[0]['sources']), 1)
-+
- 
- class ReferenceGenerationDXTestCase(DXBaseTestCase, ReferenceGenerationTestCase):
-     """Reference generation testcase for dx content types"""
-diff --git a/plone/app/linkintegrity/utils.py b/plone/app/linkintegrity/utils.py
-index 3456918..0721d29 100644
---- a/plone/app/linkintegrity/utils.py
-+++ b/plone/app/linkintegrity/utils.py
-@@ -7,15 +7,20 @@
- from zope.intid.interfaces import IIntIds
- 
- 
--def getIncomingLinks(obj=None, intid=None):
-+def getIncomingLinks(
-+    obj=None,
-+    intid=None,
-+    from_attribute=referencedRelationship
-+):
-     """Return a generator of incoming relations created using
-     plone.app.linkintegrity (Links in Richtext-Fields).
-     """
-     catalog = getUtility(ICatalog)
-     intid = intid if intid is not None else getUtility(IIntIds).getId(obj)
--    return catalog.findRelations({
--        'to_id': intid,
--        'from_attribute': referencedRelationship})
-+    query = {'to_id': intid}
-+    if from_attribute:
-+        query['from_attribute'] = from_attribute
-+    return catalog.findRelations(query)
- 
- 
- def hasIncomingLinks(obj=None, intid=None):
-@@ -29,15 +34,20 @@ def hasIncomingLinks(obj=None, intid=None):
-     return False
- 
- 
--def getOutgoingLinks(obj=None, intid=None):
-+def getOutgoingLinks(
-+    obj=None,
-+    intid=None,
-+    from_attribute=referencedRelationship
-+):
-     """Return a generator of outgoing relations created using
-     plone.app.linkintegrity (Links in Richtext-Fields).
-     """
-     catalog = getUtility(ICatalog)
-     intid = intid if intid is not None else getUtility(IIntIds).getId(obj)
--    return catalog.findRelations({
--        'from_id': intid,
--        'from_attribute': referencedRelationship})
-+    query = {'from_id': intid}
-+    if from_attribute:
-+        query['from_attribute'] = from_attribute
-+    return catalog.findRelations(query)
- 
- 
- def hasOutgoingLinks(obj=None, intid=None):
+     def getDataOrigin(self):
+         # The origin of the data for the object.
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.app.contentlisting
 
 
 Branch: refs/heads/master
-Date: 2017-04-04T23:25:39+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/36f777c70af108d730818522b776c084d6b3a797
+Date: 2017-04-04T11:00:52+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/be8ac0a43073b55ddaae47689e4f51a3dc8e7797
 
-Merge pull request #52 from plone/thet-anyreference
+Fix E305 2 blank lines after class or function definition
 
-check any reference in delete confirmation dialog
+Files changed:
+M plone/app/contentlisting/tests/base.py
+
+diff --git a/plone/app/contentlisting/tests/base.py b/plone/app/contentlisting/tests/base.py
+index bc2e41b..be4e326 100644
+--- a/plone/app/contentlisting/tests/base.py
++++ b/plone/app/contentlisting/tests/base.py
+@@ -21,6 +21,7 @@ def setUpZope(self, app, configurationContext):
+         xmlconfig.file('configure.zcml',
+                        plone.app.contentlisting, context=configurationContext)
+ 
++
+ CONTENTLISTING_FIXTURE = ContentListingLayer()
+ 
+ 
+@@ -40,6 +41,7 @@ def setUpPloneSite(self, portal):
+         portal.news.invokeFactory('News Item', 'news1')
+         setRoles(portal, TEST_USER_ID, ['Member'])
+ 
++
+ CONTENTLISTING_INTEGRATION_FIXTURE = ContentListingIntegrationLayer()
+ CONTENTLISTING_INTEGRATION_TESTING = IntegrationTesting(
+     bases=(CONTENTLISTING_INTEGRATION_FIXTURE, ),
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-04T11:06:14+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/138b0146e23441ca6710a4ae5697a491f263d106
+
+Fix D001 use self.loadZCML
+
+Files changed:
+M plone/app/contentlisting/tests/base.py
+
+diff --git a/plone/app/contentlisting/tests/base.py b/plone/app/contentlisting/tests/base.py
+index be4e326..0fa6c82 100644
+--- a/plone/app/contentlisting/tests/base.py
++++ b/plone/app/contentlisting/tests/base.py
+@@ -15,11 +15,9 @@ class ContentListingLayer(PloneSandboxLayer):
+ 
+     def setUpZope(self, app, configurationContext):
+         import plone.app.layout
++        self.loadZCML(package=plone.app.layout)
+         import plone.app.contentlisting
+-        xmlconfig.file('configure.zcml',
+-                       plone.app.layout, context=configurationContext)
+-        xmlconfig.file('configure.zcml',
+-                       plone.app.contentlisting, context=configurationContext)
++        self.loadZCML(package=plone.app.contentlisting)
+ 
+ 
+ CONTENTLISTING_FIXTURE = ContentListingLayer()
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-04T11:08:26+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/8ebf3ce623bb10d9e459d00610f5aa734702ded7
+
+Fix F401 remove unused import
+
+Files changed:
+M plone/app/contentlisting/tests/base.py
+
+diff --git a/plone/app/contentlisting/tests/base.py b/plone/app/contentlisting/tests/base.py
+index 0fa6c82..35ae724 100644
+--- a/plone/app/contentlisting/tests/base.py
++++ b/plone/app/contentlisting/tests/base.py
+@@ -6,7 +6,6 @@
+ from plone.app.testing import setRoles
+ from plone.app.testing import TEST_USER_ID
+ from Products.CMFCore.utils import getToolByName
+-from zope.configuration import xmlconfig
+ 
+ 
+ class ContentListingLayer(PloneSandboxLayer):
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-04T11:22:11+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/672a5a395e388100965aac457be638b6e635b8fc
+
+Update changelog.
 
 Files changed:
 M CHANGES.rst
-M plone/app/linkintegrity/browser/info.py
-M plone/app/linkintegrity/tests/test_references.py
-M plone/app/linkintegrity/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 1c8c4fe..fe06784 100644
+index 53dd1a4..5cace04 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,9 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Support for any ``zc.relation`` refercences being checked by ``delete_confirmation_info`` dialog,
-+  not only references linked in text.
-+  [thet]
+@@ -14,7 +14,8 @@ New features:
  
  Bug fixes:
  
-diff --git a/plone/app/linkintegrity/browser/info.py b/plone/app/linkintegrity/browser/info.py
-index 8916041..f678957 100644
---- a/plone/app/linkintegrity/browser/info.py
-+++ b/plone/app/linkintegrity/browser/info.py
-@@ -146,7 +146,7 @@ def check_object(self, obj, excluded_path=None):
-         Breaches originating from excluded_path are ignored.
-         """
-         breaches = {}
--        direct_links = getIncomingLinks(obj)
-+        direct_links = getIncomingLinks(obj, from_attribute=None)
-         has_breaches = False
-         for direct_link in direct_links:
-             source_path = direct_link.from_path
-diff --git a/plone/app/linkintegrity/tests/test_references.py b/plone/app/linkintegrity/tests/test_references.py
-index 7299d70..3967dfc 100644
---- a/plone/app/linkintegrity/tests/test_references.py
-+++ b/plone/app/linkintegrity/tests/test_references.py
-@@ -3,13 +3,18 @@
- from plone.app.linkintegrity.parser import extractLinks
- from plone.app.linkintegrity.tests.base import ATBaseTestCase
- from plone.app.linkintegrity.tests.base import DXBaseTestCase
--from plone.app.linkintegrity.utils import hasIncomingLinks
--from plone.app.linkintegrity.utils import hasOutgoingLinks
- from plone.app.linkintegrity.utils import getIncomingLinks
- from plone.app.linkintegrity.utils import getOutgoingLinks
-+from plone.app.linkintegrity.utils import hasIncomingLinks
-+from plone.app.linkintegrity.utils import hasOutgoingLinks
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.app.testing import TEST_USER_NAME
-+from z3c.relationfield import RelationValue
-+from z3c.relationfield.event import _setRelation
-+from zc.relation.interfaces import ICatalog
-+from zope.component import getUtility
-+from zope.intid.interfaces import IIntIds
- from zope.lifecycleevent import modified
+-- *add item here*
++- Remove hasattr.
++  [ivanteoh]
  
  
-@@ -164,6 +169,30 @@ def test_reference_orthogonality(self):
-         # And again the related item reference remains in place:
-         self.assertEqual(self._get_related_items(doc), [img, ])
+ 1.2.8 (2016-11-19)
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-05T08:48:35+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/4f61c7e71335949397c7ecea12e175e63c681814
+
+Use marker object instead of None
+
+Files changed:
+M plone/app/contentlisting/catalog.py
+
+diff --git a/plone/app/contentlisting/catalog.py b/plone/app/contentlisting/catalog.py
+index 9f9a91c..d6b6c51 100644
+--- a/plone/app/contentlisting/catalog.py
++++ b/plone/app/contentlisting/catalog.py
+@@ -10,6 +10,8 @@
+ from zope.component import queryUtility
+ from zope.interface import implementer
  
-+    def test_delete_confirmation_for_any_reference(self):
-+        """Test, if delete confirmation shows also a warning if items are
-+        deleted, which are referenced by other items via a reference field.
-+        """
-+        img1 = self.portal['image1']
-+        doc1 = self.portal['doc1']
-+
-+        intids_tool = getUtility(IIntIds)
-+        to_id = intids_tool.getId(img1)
-+        rel = RelationValue(to_id)
-+        _setRelation(doc1, 'related_image', rel)
-+
-+        # Test, if relation is present in the relation catalog
-+        catalog = getUtility(ICatalog)
-+        rels = list(catalog.findRelations({'to_id':  to_id}))
-+        self.assertEqual(len(rels), 1)
-+
-+        # Test, if delete_confirmation_info shows also other relations than
-+        # ``isReferencing``.
-+        info = img1.restrictedTraverse('@@delete_confirmation_info')
-+        breaches = info.get_breaches()
-+        self.assertEqual(len(breaches), 1)
-+        self.assertEqual(len(info.get_breaches()[0]['sources']), 1)
++missing = object()
 +
  
- class ReferenceGenerationDXTestCase(DXBaseTestCase, ReferenceGenerationTestCase):
-     """Reference generation testcase for dx content types"""
-diff --git a/plone/app/linkintegrity/utils.py b/plone/app/linkintegrity/utils.py
-index 3456918..0721d29 100644
---- a/plone/app/linkintegrity/utils.py
-+++ b/plone/app/linkintegrity/utils.py
-@@ -7,15 +7,20 @@
- from zope.intid.interfaces import IIntIds
+ @implementer(IContentListingObject)
+ class CatalogContentListingObject(BaseContentListingObject):
+@@ -39,11 +41,11 @@ def __getattr__(self, name):
+ 
+         if name.startswith('_'):
+             raise AttributeError(name)
+-        brain_name = getattr(aq_base(self._brain), name, None)
+-        if brain_name is not None:
++        brain_name = getattr(aq_base(self._brain), name, missing)
++        if brain_name is not missing:
+             return brain_name
+-        object_name = getattr(aq_base(self.getObject()), name, None)
+-        if object_name is not None:
++        object_name = getattr(aq_base(self.getObject()), name, missing)
++        if object_name is not missing:
+             return object_name
+         raise AttributeError(name)
+ 
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-05T10:57:29+08:00
+Author: Ivan Teoh (ivanteoh) <ivan.teoh@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/e14e72ae82e7e246c0e264f9e92335ad57b01453
+
+Fix I003
+
+Files changed:
+M plone/app/contentlisting/catalog.py
+
+diff --git a/plone/app/contentlisting/catalog.py b/plone/app/contentlisting/catalog.py
+index d6b6c51..c233a73 100644
+--- a/plone/app/contentlisting/catalog.py
++++ b/plone/app/contentlisting/catalog.py
+@@ -10,6 +10,7 @@
+ from zope.component import queryUtility
+ from zope.interface import implementer
+ 
++
+ missing = object()
  
  
--def getIncomingLinks(obj=None, intid=None):
-+def getIncomingLinks(
-+    obj=None,
-+    intid=None,
-+    from_attribute=referencedRelationship
-+):
-     """Return a generator of incoming relations created using
-     plone.app.linkintegrity (Links in Richtext-Fields).
-     """
-     catalog = getUtility(ICatalog)
-     intid = intid if intid is not None else getUtility(IIntIds).getId(obj)
--    return catalog.findRelations({
--        'to_id': intid,
--        'from_attribute': referencedRelationship})
-+    query = {'to_id': intid}
-+    if from_attribute:
-+        query['from_attribute'] = from_attribute
-+    return catalog.findRelations(query)
+
+
+Repository: plone.app.contentlisting
+
+
+Branch: refs/heads/master
+Date: 2017-04-05T08:14:57+02:00
+Author: Malthe Borch (malthe) <mborch@gmail.com>
+Commit: https://github.com/plone/plone.app.contentlisting/commit/5743a1058bdb4aea0b7e633841cf088159df426e
+
+Merge pull request #21 from plone/remove-hasattr
+
+Remove hasattr
+
+Files changed:
+M CHANGES.rst
+M plone/app/contentlisting/catalog.py
+M plone/app/contentlisting/tests/base.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 53dd1a4..5cace04 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Remove hasattr.
++  [ivanteoh]
  
  
- def hasIncomingLinks(obj=None, intid=None):
-@@ -29,15 +34,20 @@ def hasIncomingLinks(obj=None, intid=None):
-     return False
+ 1.2.8 (2016-11-19)
+diff --git a/plone/app/contentlisting/catalog.py b/plone/app/contentlisting/catalog.py
+index e9ac53c..c233a73 100644
+--- a/plone/app/contentlisting/catalog.py
++++ b/plone/app/contentlisting/catalog.py
+@@ -11,6 +11,9 @@
+ from zope.interface import implementer
  
  
--def getOutgoingLinks(obj=None, intid=None):
-+def getOutgoingLinks(
-+    obj=None,
-+    intid=None,
-+    from_attribute=referencedRelationship
-+):
-     """Return a generator of outgoing relations created using
-     plone.app.linkintegrity (Links in Richtext-Fields).
-     """
-     catalog = getUtility(ICatalog)
-     intid = intid if intid is not None else getUtility(IIntIds).getId(obj)
--    return catalog.findRelations({
--        'from_id': intid,
--        'from_attribute': referencedRelationship})
-+    query = {'from_id': intid}
-+    if from_attribute:
-+        query['from_attribute'] = from_attribute
-+    return catalog.findRelations(query)
++missing = object()
++
++
+ @implementer(IContentListingObject)
+ class CatalogContentListingObject(BaseContentListingObject):
+     """A Catalog-results based content object representation.
+@@ -39,12 +42,13 @@ def __getattr__(self, name):
+ 
+         if name.startswith('_'):
+             raise AttributeError(name)
+-        if hasattr(aq_base(self._brain), name):
+-            return getattr(self._brain, name)
+-        elif hasattr(aq_base(self.getObject()), name):
+-            return getattr(aq_base(self.getObject()), name)
+-        else:
+-            raise AttributeError(name)
++        brain_name = getattr(aq_base(self._brain), name, missing)
++        if brain_name is not missing:
++            return brain_name
++        object_name = getattr(aq_base(self.getObject()), name, missing)
++        if object_name is not missing:
++            return object_name
++        raise AttributeError(name)
+ 
+     def getDataOrigin(self):
+         # The origin of the data for the object.
+diff --git a/plone/app/contentlisting/tests/base.py b/plone/app/contentlisting/tests/base.py
+index bc2e41b..35ae724 100644
+--- a/plone/app/contentlisting/tests/base.py
++++ b/plone/app/contentlisting/tests/base.py
+@@ -6,7 +6,6 @@
+ from plone.app.testing import setRoles
+ from plone.app.testing import TEST_USER_ID
+ from Products.CMFCore.utils import getToolByName
+-from zope.configuration import xmlconfig
  
  
- def hasOutgoingLinks(obj=None, intid=None):
+ class ContentListingLayer(PloneSandboxLayer):
+@@ -15,11 +14,10 @@ class ContentListingLayer(PloneSandboxLayer):
+ 
+     def setUpZope(self, app, configurationContext):
+         import plone.app.layout
++        self.loadZCML(package=plone.app.layout)
+         import plone.app.contentlisting
+-        xmlconfig.file('configure.zcml',
+-                       plone.app.layout, context=configurationContext)
+-        xmlconfig.file('configure.zcml',
+-                       plone.app.contentlisting, context=configurationContext)
++        self.loadZCML(package=plone.app.contentlisting)
++
+ 
+ CONTENTLISTING_FIXTURE = ContentListingLayer()
+ 
+@@ -40,6 +38,7 @@ def setUpPloneSite(self, portal):
+         portal.news.invokeFactory('News Item', 'news1')
+         setRoles(portal, TEST_USER_ID, ['Member'])
+ 
++
+ CONTENTLISTING_INTEGRATION_FIXTURE = ContentListingIntegrationLayer()
+ CONTENTLISTING_INTEGRATION_TESTING = IntegrationTesting(
+     bases=(CONTENTLISTING_INTEGRATION_FIXTURE, ),
 
 
