@@ -1,132 +1,207 @@
-Repository: plone.app.linkintegrity
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2017-04-05T13:55:39+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/9c22071273fe3f8839de35746375cdf8acd42f74
+Date: 2017-04-06T11:14:22+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/a0a4e197b9861ddafe21a95896072a1a6d881a62
 
-update docs for feature of searching breaches for any relation
+Fixed ImportError when `Products.ATContentTypes` is not available.
+
+This happens when you only have the `Products.CMFPlone` egg and not the `Plone` egg.
+See https://community.plone.org/t/plone-5-1b3-soft-released/3936/5
+Traceback was:
+
+  File "/home/vagrant/Eggs/plone.app.upgrade-2.0.2-py2.7.egg/plone/app/upgrade/__init__.py", line 111, in &lt;module&gt;
+      from Products.ATContentTypes.tool import metadata
+   zope.configuration.xmlconfig.ZopeXMLConfigurationError: File "/home/vagrant/www.fhnw.ch/parts/instance1v/etc/site.zcml", line 12.2-12.39
+     ZopeXMLConfigurationError: File "/home/vagrant/Eggs/Products.CMFPlone-5.1b3-py2.7.egg/Products/CMFPlone/meta.zcml", line 47.4-51.10
+     ImportError: No module named ATContentTypes.tool
+
+I fixed that with the already available atcontenttypes_bbb module.
+
+Then the next traceback surfaced:
+
+    ZopeXMLConfigurationError: File "/Users/maurits/community/plone-coredev/5.1/src/plone.app.upgrade/plone/app/upgrade/v40/configure.zcml", line 172.8-176.14
+    ConfigurationError: ('Invalid value for', 'handler', "ImportError: Couldn't import Products.CMFDefault.upgrade.to22, No module named upgrade.to22")
+
+This is because my fix turned Products.CMFDefault into an aliased module,
+which caused the conditionally registered upgrade step to be loaded, causing an error.
+I fixed this by making a wrapper around the original CMFDefault upgrade step.
+
+Note that this will only be called when someone upgrades from a Plone 4.0 alpha release to Plone 5, which seems unlikely.
 
 Files changed:
-M README.rst
+M CHANGES.rst
+M plone/app/upgrade/__init__.py
+M plone/app/upgrade/v40/alphas.py
+M plone/app/upgrade/v40/configure.zcml
 
-diff --git a/README.rst b/README.rst
-index 9aeb5f6..fb5017d 100644
---- a/README.rst
-+++ b/README.rst
-@@ -16,10 +16,17 @@ deleting items in the view `folder_contents` via Actions / Delete).
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 38ef4a8..83b00cd 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,6 +14,10 @@ New features:
  
- Whenever an object that is referred to by another one via an `<a>` or `<img>`
- tag is going to be deleted, a confirmation form is presented to the user.
-+The same applies to content referenced via a relation field and indexed in the
-+``zc.relation`` catalog, like via the related items behavior.
- They can then decide to indeed delete the object, breaching link
- integrity of the site or first edit the objects that link to the item in
- question.
+ Bug fixes:
  
-+For relations set in a textfield, the ``isRelated`` reference is used.
-+For these references, plone.app.linkintegrity also handles modifications, if a content related via ``isRelated`` is modified.
-+For all other related content, other mechanisms handle updates.
-+One such handler can be found in ``plone.app.relationfield``.
++- Fixed ImportError when ``Products.ATContentTypes`` is not available.
++  This happens when you only have the ``Products.CMFPlone`` egg
++  and not the ``Plone`` egg.  [maurits]
 +
- Changes in 3.0
- --------------
+ - Fixed title and description of plone.resource.maxage.
+   This had the title and description from shared maxage,
+   due to a wrong reference.
+diff --git a/plone/app/upgrade/__init__.py b/plone/app/upgrade/__init__.py
+index 2ac8522..7f87a09 100644
+--- a/plone/app/upgrade/__init__.py
++++ b/plone/app/upgrade/__init__.py
+@@ -108,8 +108,14 @@ def getNonInstallableProducts(self):
+     import Products.CMFDefault.MetadataTool
+     Products.CMFDefault.MetadataTool  # pyflakes
+ except ImportError:
+-    from Products.ATContentTypes.tool import metadata
+-    sys.modules['Products.CMFDefault.MetadataTool'] = metadata
++    try:
++        pkg_resources.get_distribution('Products.ATContentTypes')
++    except:
++        from plone.app.upgrade import atcontentypes_bbb
++        alias_module('Products.CMFDefault.MetadataTool', atcontentypes_bbb)
++    else:
++        from Products.ATContentTypes.tool import metadata
++        sys.modules['Products.CMFDefault.MetadataTool'] = metadata
  
-@@ -85,16 +92,20 @@ To check items for links in html-fields you can use the methods in
+ try:
+     import Products.CMFDefault.SyndicationInfo
+diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
+index 5a6a9e4..c1aee55 100644
+--- a/plone/app/upgrade/v40/alphas.py
++++ b/plone/app/upgrade/v40/alphas.py
+@@ -599,3 +599,19 @@ def installNewModifiers(context):
+     if modifiers is not None:
+         install(modifiers)
+         logger.info('Added new CMFEditions modifiers.')
++
++
++def run_upgrade_dcmi_metadata(tool):
++    """Run the upgrade_dcmi_metadata step from CMFDefault.
++
++    This is only run if CMFDefault is 'installed' (importable).
++    But in Plone 5 it may still be there as aliased module,
++    missing the upgrade module.  So we have a small wrapper around it,
++    to avoid an ImportError on startup.
++    """
++    try:
++        from Products.CMFDefault.upgrade.to22 import upgrade_dcmi_metadata
++    except ImportError:
++        logger.info('Original CMFDefault DCMI upgrade step not available.')
++        return
++    upgrade_dcmi_metadata(tool)
+diff --git a/plone/app/upgrade/v40/configure.zcml b/plone/app/upgrade/v40/configure.zcml
+index 714d9da..3c8539e 100644
+--- a/plone/app/upgrade/v40/configure.zcml
++++ b/plone/app/upgrade/v40/configure.zcml
+@@ -172,7 +172,7 @@
+         <genericsetup:upgradeStep
+             zcml:condition="installed Products.CMFDefault"
+             title="Upgrade DCMI metadata storage in portal_metadata"
+-            handler="Products.CMFDefault.upgrade.to22.upgrade_dcmi_metadata"
++            handler=".alphas.run_upgrade_dcmi_metadata"
+             />
  
- 
- ``utils.hasIncomingLinks(obj)``
--    Test if an object is linked to by other objects
-+    Test if an object is linked to by other objects.
- 
- ``utils.hasOutgoingLinks(obj)``
--    Test if an object links to other objects
-+    Test if an object links to other objects.
- 
--``utils.getIncomingLinks(obj)``
--    Return a generator of incoming relations
-+``utils.getIncomingLinks(obj, from_attribute)``
-+    Return a generator of incoming relations.
-+    ``from_attribute`` is optional and defaults to ``plone.app.linkintegrity.handlers.referencedRelationship``.
-+    Is set to None, all references pointing to the object are searched.
- 
--``utils.getOutgoingLinks(obj)``
--    Return a generator of outgoing relations
-+``utils.getOutgoingLinks(obj, from_attribute)``
-+    Return a generator of outgoing relations.
-+    ``from_attribute`` is optional and defaults to ``plone.app.linkintegrity.handlers.referencedRelationship``.
-+    Is set to None, all references pointing from the object are searched.
- 
- ``utils.linkintegrity_enabled()``
--    Test if linkintegrity-feature is enables for users
-+    Test if linkintegrity-feature is enables for users.
+         <genericsetup:upgradeStep
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2017-04-06T11:18:56+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/322c659cd2ca80564ec18c354742918d23559da7
+Date: 2017-04-06T18:06:44+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.upgrade/commit/2b08e22289a8a1bed3984918b0928105973cb841
 
-Merge pull request #53 from plone/thet-anyreference-docs
+Merge pull request #109 from plone/fix-importerrors-atcontenttypes-cmfdefault
 
-update docs for feature of searching breaches for any relation
+Fixed ImportError when `Products.ATContentTypes` is not available.
 
 Files changed:
-M README.rst
+M CHANGES.rst
+M plone/app/upgrade/__init__.py
+M plone/app/upgrade/v40/alphas.py
+M plone/app/upgrade/v40/configure.zcml
 
-diff --git a/README.rst b/README.rst
-index 9aeb5f6..fb5017d 100644
---- a/README.rst
-+++ b/README.rst
-@@ -16,10 +16,17 @@ deleting items in the view `folder_contents` via Actions / Delete).
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 38ef4a8..83b00cd 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,6 +14,10 @@ New features:
  
- Whenever an object that is referred to by another one via an `<a>` or `<img>`
- tag is going to be deleted, a confirmation form is presented to the user.
-+The same applies to content referenced via a relation field and indexed in the
-+``zc.relation`` catalog, like via the related items behavior.
- They can then decide to indeed delete the object, breaching link
- integrity of the site or first edit the objects that link to the item in
- question.
+ Bug fixes:
  
-+For relations set in a textfield, the ``isRelated`` reference is used.
-+For these references, plone.app.linkintegrity also handles modifications, if a content related via ``isRelated`` is modified.
-+For all other related content, other mechanisms handle updates.
-+One such handler can be found in ``plone.app.relationfield``.
++- Fixed ImportError when ``Products.ATContentTypes`` is not available.
++  This happens when you only have the ``Products.CMFPlone`` egg
++  and not the ``Plone`` egg.  [maurits]
 +
- Changes in 3.0
- --------------
+ - Fixed title and description of plone.resource.maxage.
+   This had the title and description from shared maxage,
+   due to a wrong reference.
+diff --git a/plone/app/upgrade/__init__.py b/plone/app/upgrade/__init__.py
+index 2ac8522..7f87a09 100644
+--- a/plone/app/upgrade/__init__.py
++++ b/plone/app/upgrade/__init__.py
+@@ -108,8 +108,14 @@ def getNonInstallableProducts(self):
+     import Products.CMFDefault.MetadataTool
+     Products.CMFDefault.MetadataTool  # pyflakes
+ except ImportError:
+-    from Products.ATContentTypes.tool import metadata
+-    sys.modules['Products.CMFDefault.MetadataTool'] = metadata
++    try:
++        pkg_resources.get_distribution('Products.ATContentTypes')
++    except:
++        from plone.app.upgrade import atcontentypes_bbb
++        alias_module('Products.CMFDefault.MetadataTool', atcontentypes_bbb)
++    else:
++        from Products.ATContentTypes.tool import metadata
++        sys.modules['Products.CMFDefault.MetadataTool'] = metadata
  
-@@ -85,16 +92,20 @@ To check items for links in html-fields you can use the methods in
+ try:
+     import Products.CMFDefault.SyndicationInfo
+diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
+index 5a6a9e4..c1aee55 100644
+--- a/plone/app/upgrade/v40/alphas.py
++++ b/plone/app/upgrade/v40/alphas.py
+@@ -599,3 +599,19 @@ def installNewModifiers(context):
+     if modifiers is not None:
+         install(modifiers)
+         logger.info('Added new CMFEditions modifiers.')
++
++
++def run_upgrade_dcmi_metadata(tool):
++    """Run the upgrade_dcmi_metadata step from CMFDefault.
++
++    This is only run if CMFDefault is 'installed' (importable).
++    But in Plone 5 it may still be there as aliased module,
++    missing the upgrade module.  So we have a small wrapper around it,
++    to avoid an ImportError on startup.
++    """
++    try:
++        from Products.CMFDefault.upgrade.to22 import upgrade_dcmi_metadata
++    except ImportError:
++        logger.info('Original CMFDefault DCMI upgrade step not available.')
++        return
++    upgrade_dcmi_metadata(tool)
+diff --git a/plone/app/upgrade/v40/configure.zcml b/plone/app/upgrade/v40/configure.zcml
+index 714d9da..3c8539e 100644
+--- a/plone/app/upgrade/v40/configure.zcml
++++ b/plone/app/upgrade/v40/configure.zcml
+@@ -172,7 +172,7 @@
+         <genericsetup:upgradeStep
+             zcml:condition="installed Products.CMFDefault"
+             title="Upgrade DCMI metadata storage in portal_metadata"
+-            handler="Products.CMFDefault.upgrade.to22.upgrade_dcmi_metadata"
++            handler=".alphas.run_upgrade_dcmi_metadata"
+             />
  
- 
- ``utils.hasIncomingLinks(obj)``
--    Test if an object is linked to by other objects
-+    Test if an object is linked to by other objects.
- 
- ``utils.hasOutgoingLinks(obj)``
--    Test if an object links to other objects
-+    Test if an object links to other objects.
- 
--``utils.getIncomingLinks(obj)``
--    Return a generator of incoming relations
-+``utils.getIncomingLinks(obj, from_attribute)``
-+    Return a generator of incoming relations.
-+    ``from_attribute`` is optional and defaults to ``plone.app.linkintegrity.handlers.referencedRelationship``.
-+    Is set to None, all references pointing to the object are searched.
- 
--``utils.getOutgoingLinks(obj)``
--    Return a generator of outgoing relations
-+``utils.getOutgoingLinks(obj, from_attribute)``
-+    Return a generator of outgoing relations.
-+    ``from_attribute`` is optional and defaults to ``plone.app.linkintegrity.handlers.referencedRelationship``.
-+    Is set to None, all references pointing from the object are searched.
- 
- ``utils.linkintegrity_enabled()``
--    Test if linkintegrity-feature is enables for users
-+    Test if linkintegrity-feature is enables for users.
+         <genericsetup:upgradeStep
 
 
