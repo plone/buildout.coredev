@@ -1,110 +1,370 @@
-Repository: plone.app.vocabularies
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2017-03-31T13:25:43+02:00
-Author: root (fgrcon) <franz@fgrcon.net>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/ff8cd53dd26f2c6a63b35fccf4ab0bbf9c9c5f99
+Date: 2017-04-10T11:44:00+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.content/commit/060f08324bc8774b41e3f661c669e6f930ee391e
 
-return empty vocabulary when no imagescales defined
+Fix issue where some folder actions failed when path above had private level
+
+Files changed:
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/tests/test_contents.py
+
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 73e95bc..574d14b 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -88,8 +88,9 @@ def __call__(self):
+         context = aq_inner(self.context)
+         selection = self.get_selection()
+ 
+-        self.dest = self.site.restrictedTraverse(
+-            str(self.request.form['folder'].lstrip('/')))
++        parts = str(self.request.form['folder'].lstrip('/')).split('/')
++        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
++        self.dest = parent.restrictedTraverse(parts[-1])
+ 
+         self.catalog = getToolByName(context, 'portal_catalog')
+         self.mtool = getToolByName(self.context, 'portal_membership')
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 54776b0..120b102 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -35,8 +35,9 @@ def __call__(self):
+         self.protect()
+         self.errors = []
+ 
+-        self.dest = self.site.restrictedTraverse(
+-            str(self.request.form['folder'].lstrip('/')))
++        parts = str(self.request.form['folder'].lstrip('/')).split('/')
++        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
++        self.dest = parent.restrictedTraverse(parts[-1])
+ 
+         try:
+             self.dest.manage_pasteObjects(self.request['__cp'])
+diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
+index 8ad496d..3cd65a3 100644
+--- a/plone/app/content/tests/test_contents.py
++++ b/plone/app/content/tests/test_contents.py
+@@ -1,9 +1,11 @@
+ # -*- coding: utf-8 -*-
+ from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ from plone.app.testing import login
++from plone.app.testing import logout
+ from plone.app.testing import setRoles
+ from plone.app.testing import TEST_USER_ID
+ from plone.app.testing import TEST_USER_NAME
++from plone.app.testing import SITE_OWNER_NAME
+ from plone.dexterity.fti import DexterityFTI
+ 
+ import json
+@@ -11,6 +13,59 @@
+ import unittest
+ 
+ 
++class ContentsDeleteTests(unittest.TestCase):
++    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++
++        # TYPE 1
++        type1_fti = DexterityFTI('type1')
++        type1_fti.klass = 'plone.dexterity.content.Container'
++        type1_fti.filter_content_types = True
++        type1_fti.allowed_content_types = ['type1']
++        type1_fti.behaviors = (
++            'Products.CMFPlone.interfaces.constrains.ISelectableConstrainTypes',  # noqa
++            'plone.app.dexterity.behaviors.metadata.IBasic'
++        )
++        self.portal.portal_types._setObject('type1', type1_fti)
++        self.type1_fti = type1_fti
++
++        login(self.portal, TEST_USER_NAME)
++        setRoles(self.portal, TEST_USER_ID, ['Manager'])
++
++    @mock.patch('plone.app.content.browser.contents.ContentsBaseAction.protect', lambda x: True)  # noqa
++    def test_delete_success_with_private_anchestor(self):
++        """Delete content item from a folder with private anchestor
++        """
++        # Create test content /it1/it2/it3
++        self.portal.invokeFactory('type1', id='it1', title='Item 1')
++        self.portal.it1.invokeFactory('type1', id='it2', title='Item 2')
++        self.portal.it1.it2.invokeFactory('type1', id='it3', title='Item 3')
++        self.assertEqual(len(self.portal.it1.it2.contentIds()), 1)
++
++        # Block user access to it1m but leave access to its children
++        self.portal.it1.__ac_local_roles_block__ = True
++        del self.portal.it1.__ac_local_roles__[TEST_USER_ID]
++        self.portal.it1.reindexObjectSecurity()
++        self.portal.it1.it2.reindexObjectSecurity()
++
++        # Remove test user global roles (leaving only local owner roles on it2)
++        setRoles(self.portal, TEST_USER_ID, [])
++
++        # Execute delete request
++        selection = [self.portal.it1.it2.it3.UID()]
++        self.request.form['folder'] = '/it1/it2'
++        self.request.form['selection'] = json.dumps(selection)
++        res = self.portal.it1.it2.restrictedTraverse('@@fc-delete')()
++
++        # Check for successful deletion
++        res = json.loads(res)
++        self.assertEqual(res['status'], 'success')
++        self.assertEqual(len(self.portal.it1.it2.contentIds()), 0)
++
++
+ class ContentsPasteTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+@@ -78,6 +133,34 @@ def test_paste_fail_constraint(self):
+         self.assertEqual(res['status'], 'warning')
+         self.assertEqual(len(self.portal.it1.contentIds()), 0)
+ 
++    @mock.patch('plone.app.content.browser.contents.ContentsBaseAction.protect', lambda x: True)  # noqa
++    def test_paste_success_with_private_anchestor(self):
++        """Copy content item and paste into a folder with private anchestor
++        """
++        # Create test content /it2/it3
++        self.portal.invokeFactory('type1', id='it2', title='Item 2')
++        self.portal.it2.invokeFactory('type1', id='it3', title='Item 3')
++        self.assertEqual(len(self.portal.it2.it3.contentIds()), 0)
++
++        # Block user access to it2, but leave access to its children
++        self.portal.it2.__ac_local_roles_block__ = True
++        del self.portal.it2.__ac_local_roles__[TEST_USER_ID]
++        self.portal.it2.reindexObjectSecurity()
++        self.portal.it2.it3.reindexObjectSecurity()
++
++        # Remove test user global roles (leaving only local owner roles on it2)
++        setRoles(self.portal, TEST_USER_ID, [])
++
++        # Execute paste
++        self.request['__cp'] = self.portal.manage_copyObjects(['it1'])
++        self.request.form['folder'] = '/it2/it3'
++        res = self.portal.it2.it3.restrictedTraverse('@@fc-paste')()
++
++        # Check for successful paste
++        res = json.loads(res)
++        self.assertEqual(res['status'], 'success')
++        self.assertEqual(len(self.portal.it2.it3.contentIds()), 1)
++
+ 
+ class AllowUploadViewTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2017-04-10T11:44:03+03:00
+Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
+Commit: https://github.com/plone/plone.app.content/commit/6a9d6b12298ec9db924772bab0b5db918abe6115
+
+Update changelog
 
 Files changed:
 M CHANGES.rst
-M plone/app/vocabularies/images.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 37380ff..47e77b8 100644
+index cfb933f..76b6d70 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -15,7 +15,10 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- return empty vocabulary when no imagescales defined
-+  [fgrcon]
++- Fix issue where some actions (copy, delete, paste) on contents view did not
++  work if there were any private (innaccessible for the current user) levels the
++  current path
++  [datakurre]
  
  
- 4.0.2 (2017-03-29)
-diff --git a/plone/app/vocabularies/images.py b/plone/app/vocabularies/images.py
-index 84ce72a..f2d75fb 100644
---- a/plone/app/vocabularies/images.py
-+++ b/plone/app/vocabularies/images.py
-@@ -15,11 +15,12 @@ def ScalesVocabulary(context):
-     """Obtains available scales from registry
-     """
-     terms = []
--    for scale, (width, height) in getAllowedSizes().iteritems():
--        translated = PMF(
--            'imagescale_{0:s}'.format(scale),
--            default='{0:s} ${{width}}x${{height}}'.format(scale),
--            mapping={'width': str(width), 'height': str(height)})
--        terms.append(SimpleTerm(scale, scale, translated))
--
-+    allowedSizes = getAllowedSizes()
-+    if allowedSizes is not None:
-+        for scale, (width, height) in getAllowedSizes().iteritems():
-+            translated = PMF(
-+                'imagescale_{0:s}'.format(scale),
-+                default='{0:s} ${{width}}x${{height}}'.format(scale),
-+                mapping={'width': str(width), 'height': str(height)})
-+            terms.append(SimpleTerm(scale, scale, translated))
-     return SimpleVocabulary(terms)
+ 3.4 (2017-04-01)
 
 
-Repository: plone.app.vocabularies
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2017-04-09T23:44:51+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/8814f3acc94176d9612315d1b11d9a458cfbd8d8
+Date: 2017-04-10T13:17:25+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.content/commit/ec3bbe1cf4cad734d83002f1bd72d18e9621fc04
 
-Merge pull request #47 from plone/plip1734thumbs
+Merge pull request #124 from plone/datakurre-restrictedTraverse
 
-	return empty vocabulary when no imagescales defined
+Fix issue where some folder actions failed when path above had privat levels
 
 Files changed:
 M CHANGES.rst
-M plone/app/vocabularies/images.py
+M plone/app/content/browser/contents/__init__.py
+M plone/app/content/browser/contents/paste.py
+M plone/app/content/tests/test_contents.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 37380ff..47e77b8 100644
+index cfb933f..76b6d70 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -15,7 +15,10 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- return empty vocabulary when no imagescales defined
-+  [fgrcon]
++- Fix issue where some actions (copy, delete, paste) on contents view did not
++  work if there were any private (innaccessible for the current user) levels the
++  current path
++  [datakurre]
  
  
- 4.0.2 (2017-03-29)
-diff --git a/plone/app/vocabularies/images.py b/plone/app/vocabularies/images.py
-index 84ce72a..f2d75fb 100644
---- a/plone/app/vocabularies/images.py
-+++ b/plone/app/vocabularies/images.py
-@@ -15,11 +15,12 @@ def ScalesVocabulary(context):
-     """Obtains available scales from registry
-     """
-     terms = []
--    for scale, (width, height) in getAllowedSizes().iteritems():
--        translated = PMF(
--            'imagescale_{0:s}'.format(scale),
--            default='{0:s} ${{width}}x${{height}}'.format(scale),
--            mapping={'width': str(width), 'height': str(height)})
--        terms.append(SimpleTerm(scale, scale, translated))
--
-+    allowedSizes = getAllowedSizes()
-+    if allowedSizes is not None:
-+        for scale, (width, height) in getAllowedSizes().iteritems():
-+            translated = PMF(
-+                'imagescale_{0:s}'.format(scale),
-+                default='{0:s} ${{width}}x${{height}}'.format(scale),
-+                mapping={'width': str(width), 'height': str(height)})
-+            terms.append(SimpleTerm(scale, scale, translated))
-     return SimpleVocabulary(terms)
+ 3.4 (2017-04-01)
+diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
+index 73e95bc..574d14b 100644
+--- a/plone/app/content/browser/contents/__init__.py
++++ b/plone/app/content/browser/contents/__init__.py
+@@ -88,8 +88,9 @@ def __call__(self):
+         context = aq_inner(self.context)
+         selection = self.get_selection()
+ 
+-        self.dest = self.site.restrictedTraverse(
+-            str(self.request.form['folder'].lstrip('/')))
++        parts = str(self.request.form['folder'].lstrip('/')).split('/')
++        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
++        self.dest = parent.restrictedTraverse(parts[-1])
+ 
+         self.catalog = getToolByName(context, 'portal_catalog')
+         self.mtool = getToolByName(self.context, 'portal_membership')
+diff --git a/plone/app/content/browser/contents/paste.py b/plone/app/content/browser/contents/paste.py
+index 54776b0..120b102 100644
+--- a/plone/app/content/browser/contents/paste.py
++++ b/plone/app/content/browser/contents/paste.py
+@@ -35,8 +35,9 @@ def __call__(self):
+         self.protect()
+         self.errors = []
+ 
+-        self.dest = self.site.restrictedTraverse(
+-            str(self.request.form['folder'].lstrip('/')))
++        parts = str(self.request.form['folder'].lstrip('/')).split('/')
++        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
++        self.dest = parent.restrictedTraverse(parts[-1])
+ 
+         try:
+             self.dest.manage_pasteObjects(self.request['__cp'])
+diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
+index 8ad496d..3cd65a3 100644
+--- a/plone/app/content/tests/test_contents.py
++++ b/plone/app/content/tests/test_contents.py
+@@ -1,9 +1,11 @@
+ # -*- coding: utf-8 -*-
+ from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ from plone.app.testing import login
++from plone.app.testing import logout
+ from plone.app.testing import setRoles
+ from plone.app.testing import TEST_USER_ID
+ from plone.app.testing import TEST_USER_NAME
++from plone.app.testing import SITE_OWNER_NAME
+ from plone.dexterity.fti import DexterityFTI
+ 
+ import json
+@@ -11,6 +13,59 @@
+ import unittest
+ 
+ 
++class ContentsDeleteTests(unittest.TestCase):
++    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
++
++    def setUp(self):
++        self.portal = self.layer['portal']
++        self.request = self.layer['request']
++
++        # TYPE 1
++        type1_fti = DexterityFTI('type1')
++        type1_fti.klass = 'plone.dexterity.content.Container'
++        type1_fti.filter_content_types = True
++        type1_fti.allowed_content_types = ['type1']
++        type1_fti.behaviors = (
++            'Products.CMFPlone.interfaces.constrains.ISelectableConstrainTypes',  # noqa
++            'plone.app.dexterity.behaviors.metadata.IBasic'
++        )
++        self.portal.portal_types._setObject('type1', type1_fti)
++        self.type1_fti = type1_fti
++
++        login(self.portal, TEST_USER_NAME)
++        setRoles(self.portal, TEST_USER_ID, ['Manager'])
++
++    @mock.patch('plone.app.content.browser.contents.ContentsBaseAction.protect', lambda x: True)  # noqa
++    def test_delete_success_with_private_anchestor(self):
++        """Delete content item from a folder with private anchestor
++        """
++        # Create test content /it1/it2/it3
++        self.portal.invokeFactory('type1', id='it1', title='Item 1')
++        self.portal.it1.invokeFactory('type1', id='it2', title='Item 2')
++        self.portal.it1.it2.invokeFactory('type1', id='it3', title='Item 3')
++        self.assertEqual(len(self.portal.it1.it2.contentIds()), 1)
++
++        # Block user access to it1m but leave access to its children
++        self.portal.it1.__ac_local_roles_block__ = True
++        del self.portal.it1.__ac_local_roles__[TEST_USER_ID]
++        self.portal.it1.reindexObjectSecurity()
++        self.portal.it1.it2.reindexObjectSecurity()
++
++        # Remove test user global roles (leaving only local owner roles on it2)
++        setRoles(self.portal, TEST_USER_ID, [])
++
++        # Execute delete request
++        selection = [self.portal.it1.it2.it3.UID()]
++        self.request.form['folder'] = '/it1/it2'
++        self.request.form['selection'] = json.dumps(selection)
++        res = self.portal.it1.it2.restrictedTraverse('@@fc-delete')()
++
++        # Check for successful deletion
++        res = json.loads(res)
++        self.assertEqual(res['status'], 'success')
++        self.assertEqual(len(self.portal.it1.it2.contentIds()), 0)
++
++
+ class ContentsPasteTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
+ 
+@@ -78,6 +133,34 @@ def test_paste_fail_constraint(self):
+         self.assertEqual(res['status'], 'warning')
+         self.assertEqual(len(self.portal.it1.contentIds()), 0)
+ 
++    @mock.patch('plone.app.content.browser.contents.ContentsBaseAction.protect', lambda x: True)  # noqa
++    def test_paste_success_with_private_anchestor(self):
++        """Copy content item and paste into a folder with private anchestor
++        """
++        # Create test content /it2/it3
++        self.portal.invokeFactory('type1', id='it2', title='Item 2')
++        self.portal.it2.invokeFactory('type1', id='it3', title='Item 3')
++        self.assertEqual(len(self.portal.it2.it3.contentIds()), 0)
++
++        # Block user access to it2, but leave access to its children
++        self.portal.it2.__ac_local_roles_block__ = True
++        del self.portal.it2.__ac_local_roles__[TEST_USER_ID]
++        self.portal.it2.reindexObjectSecurity()
++        self.portal.it2.it3.reindexObjectSecurity()
++
++        # Remove test user global roles (leaving only local owner roles on it2)
++        setRoles(self.portal, TEST_USER_ID, [])
++
++        # Execute paste
++        self.request['__cp'] = self.portal.manage_copyObjects(['it1'])
++        self.request.form['folder'] = '/it2/it3'
++        res = self.portal.it2.it3.restrictedTraverse('@@fc-paste')()
++
++        # Check for successful paste
++        res = json.loads(res)
++        self.assertEqual(res['status'], 'success')
++        self.assertEqual(len(self.portal.it2.it3.contentIds()), 1)
++
+ 
+ class AllowUploadViewTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
 
 
