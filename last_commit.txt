@@ -1,98 +1,382 @@
-Repository: plone.app.upgrade
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2017-04-10T12:59:59+02:00
-Author: Peter Holzer (agitator) <peter.holzer@agitator.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/2ab08baed1faed5adf6081d25d1c8741bc41b88b
-
-Do not convert/fail on None while update_social_media_fields
-
-Files changed:
-M CHANGES.rst
-M plone/app/upgrade/v51/betas.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 83b00cd..332dd59 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
- 
- Bug fixes:
- 
-+- Do not convert/fail on None while update_social_media_fields
-+  [agitator]
-+
- - Fixed ImportError when ``Products.ATContentTypes`` is not available.
-   This happens when you only have the ``Products.CMFPlone`` egg
-   and not the ``Plone`` egg.  [maurits]
-diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
-index d003ad1..4585b5e 100644
---- a/plone/app/upgrade/v51/betas.py
-+++ b/plone/app/upgrade/v51/betas.py
-@@ -127,7 +127,10 @@ def update_social_media_fields(context):
-     from Products.CMFPlone.interfaces.controlpanel import ISocialMediaSchema
-     registry = getUtility(IRegistry)
-     settings = registry.forInterface(ISocialMediaSchema, prefix='plone')
--    settings.twitter_username = str(settings.twitter_username)
--    settings.facebook_app_id = str(settings.facebook_app_id)
--    settings.facebook_username = str(settings.facebook_username)
-+    if settings.twitter_username:
-+        settings.twitter_username = str(settings.twitter_username)
-+    if settings.facebook_app_id:
-+        settings.facebook_app_id = str(settings.facebook_app_id)
-+    if settings.facebook_username:
-+        settings.facebook_username = str(settings.facebook_username)
-     logger.log(logging.INFO, 'Field types updated on social media schema')
-
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2017-04-10T14:22:12+02:00
+Date: 2017-04-10T23:49:02+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/a9d5ee3eebe6173d57b2a84503fe92cfcc0de167
+Commit: https://github.com/plone/plone.app.dexterity/commit/70ee89f73839f3bca3cc8b13c43fa6358049869a
 
-Merge pull request #113 from plone/do-not-converte-none
+Cleanup code of permissions.py (ZCA-decorator, reduce complexity)
 
-Do not convert/fail on None while update_social_media_fields
+Files changed:
+M plone/app/dexterity/permissions.py
+
+diff --git a/plone/app/dexterity/permissions.py b/plone/app/dexterity/permissions.py
+index dd8f36b..6edce63 100644
+--- a/plone/app/dexterity/permissions.py
++++ b/plone/app/dexterity/permissions.py
+@@ -10,7 +10,7 @@
+ from plone.supermodel.utils import mergedTaggedValueDict
+ from z3c.form.interfaces import IFieldWidget
+ from z3c.form.interfaces import IForm
+-from zope.component import adapts
++from zope.component import adapter
+ from zope.component import queryMultiAdapter
+ from zope.component import queryUtility
+ from zope.deprecation import deprecated
+@@ -24,11 +24,11 @@ class MockRequest(TestRequest):
+     pass
+ 
+ 
++@adapter(IDexterityContent)
+ @implementer(IFieldPermissionChecker)
+ class DXFieldPermissionChecker(object):
+     """
+     """
+-    adapts(IDexterityContent)
+ 
+     DEFAULT_PERMISSION = 'Modify portal content'
+ 
+@@ -39,55 +39,76 @@ def __init__(self, context):
+     def _get_schemata(self):
+         return iterSchemata(self.context)
+ 
++    def _validate_vocabulary_name(self, schema, field, vocabulary_name):
++        if not vocabulary_name:
++            return True
++        if (
++            vocabulary_name != getattr(field, 'vocabulary', None) and
++            vocabulary_name != getattr(field, 'vocabularyName', None)
++        ):
++            # Determine the widget to check for vocabulary there
++            widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
++            widget = widgets.get(field.getName())
++            if widget:
++                if isinstance(widget, basestring):
++                    widget = resolveDottedName(widget)
++                if widget:
++                    widget = widget(field, self._request)
++            else:
++                # default widget
++                widget = queryMultiAdapter(
++                    (field, self._request),
++                    IFieldWidget
++                )
++            if widget:
++                widget.update()
++            if getattr(widget, 'vocabulary', None) != vocabulary_name:
++                return False
++        return True
++
+     def validate(self, field_name, vocabulary_name=None):
+         context = self.context
+         checker = getSecurityManager().checkPermission
+         schemata = self._get_schemata()
+         for schema in schemata:
+-            if field_name in schema:
+-                # If a vocabulary name was specified and it does not
+-                # match the vocabulary name for the field or widget,
+-                # fail.
+-                field = schema[field_name]
+-                if vocabulary_name and (
+-                   vocabulary_name != getattr(field, 'vocabulary', None) and
+-                   vocabulary_name != getattr(field, 'vocabularyName', None)):
+-                    # Determine the widget to check for vocabulary there
+-                    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
+-                    widget = widgets.get(field_name)
+-                    if widget:
+-                        widget = (isinstance(widget, basestring) and
+-                                  resolveDottedName(widget) or widget)
+-                        widget = widget and widget(field, self._request)
+-                    else:
+-                        widget = queryMultiAdapter((field, self._request),
+-                                                   IFieldWidget)
+-                    if widget:
+-                        widget.update()
+-                    if getattr(widget, 'vocabulary', None) != vocabulary_name:
+-                        return False
+-                # Create mapping of all schema permissions
+-                permissions = mergedTaggedValueDict(schema,
+-                                                    WRITE_PERMISSIONS_KEY)
+-                permission_name = permissions.get(field_name, None)
+-                if permission_name is not None:
+-                    permission = queryUtility(IPermission,
+-                                              name=permission_name)
+-                    if permission:
+-                        return checker(permission.title, context)
+-
+-                # If the field is in the schema, but no permission is
+-                # specified, fall back to the default edit permission
+-                return checker(self.DEFAULT_PERMISSION, context)
++            if field_name not in schema:
++                continue
++            # If a vocabulary name was specified and it does not
++            # match the vocabulary name for the field or widget,
++            # fail.
++            field = schema[field_name]
++            if not self._validate_vocabulary_name(
++                schema,
++                field,
++                vocabulary_name
++            ):
++                return False
++            # Create mapping of all schema permissions
++            permissions = mergedTaggedValueDict(
++                schema,
++                WRITE_PERMISSIONS_KEY
++            )
++            permission_name = permissions.get(field_name, None)
++            if permission_name is not None:
++                # if we have explicit permissions, check them
++                permission = queryUtility(
++                    IPermission,
++                    name=permission_name
++                )
++                if permission:
++                    return checker(permission.title, context)
++
++            # If the field is in the schema, but no permission is
++            # specified, fall back to the default edit permission
++            return checker(self.DEFAULT_PERMISSION, context)
+         else:
+             raise AttributeError('No such field: {0}'.format(field_name))
+ 
+ 
++@adapter(IForm)
+ class GenericFormFieldPermissionChecker(DXFieldPermissionChecker):
+     """Permission checker for when we just have an add view"""
+ 
+-    adapts(IForm)
+-
+     def __init__(self, view):
+         if getattr(view, 'form_instance', None) is not None:
+             view = view.form_instance
+
+
+Repository: plone.app.dexterity
+
+
+Branch: refs/heads/master
+Date: 2017-04-10T23:59:52+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.dexterity/commit/5b9b914409a4bdf94370a07d87a5ff10d080370b
+
+use Add portal content as default permission for add forms.
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/v51/betas.py
+M plone/app/dexterity/permissions.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 83b00cd..332dd59 100644
+index 62ddfb5..8e5eb13 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,9 @@ New features:
+@@ -14,7 +14,14 @@ New features:
  
  Bug fixes:
  
-+- Do not convert/fail on None while update_social_media_fields
-+  [agitator]
+-- *add item here*
++- Cleanup code of ``permissions.py`` (ZCA-decorator, reduce complexity)
++  [jensens]
 +
- - Fixed ImportError when ``Products.ATContentTypes`` is not available.
-   This happens when you only have the ``Products.CMFPlone`` egg
-   and not the ``Plone`` egg.  [maurits]
-diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
-index d003ad1..4585b5e 100644
---- a/plone/app/upgrade/v51/betas.py
-+++ b/plone/app/upgrade/v51/betas.py
-@@ -127,7 +127,10 @@ def update_social_media_fields(context):
-     from Products.CMFPlone.interfaces.controlpanel import ISocialMediaSchema
-     registry = getUtility(IRegistry)
-     settings = registry.forInterface(ISocialMediaSchema, prefix='plone')
--    settings.twitter_username = str(settings.twitter_username)
--    settings.facebook_app_id = str(settings.facebook_app_id)
--    settings.facebook_username = str(settings.facebook_username)
-+    if settings.twitter_username:
-+        settings.twitter_username = str(settings.twitter_username)
-+    if settings.facebook_app_id:
-+        settings.facebook_app_id = str(settings.facebook_app_id)
-+    if settings.facebook_username:
-+        settings.facebook_username = str(settings.facebook_username)
-     logger.log(logging.INFO, 'Field types updated on social media schema')
++- Fix issue with field permissions check on add forms when the parent has no "Modify portal content" permission.
++  New: For add forms use the "Add portal content" permission as default field permission.
++  As great side effect vocabularies for i.e. AjaxSelectWidget from ``plone.app.content``,
++  which are using the check, are working on add forms in a context w/o "Modify portal content".
++  [jensens]
+ 
+ 
+ 2.4.1 (2017-03-26)
+diff --git a/plone/app/dexterity/permissions.py b/plone/app/dexterity/permissions.py
+index 6edce63..082befd 100644
+--- a/plone/app/dexterity/permissions.py
++++ b/plone/app/dexterity/permissions.py
+@@ -109,6 +109,8 @@ def validate(self, field_name, vocabulary_name=None):
+ class GenericFormFieldPermissionChecker(DXFieldPermissionChecker):
+     """Permission checker for when we just have an add view"""
+ 
++    DEFAULT_PERMISSION = 'Add portal content'
++
+     def __init__(self, view):
+         if getattr(view, 'form_instance', None) is not None:
+             view = view.form_instance
+
+
+Repository: plone.app.dexterity
+
+
+Branch: refs/heads/master
+Date: 2017-04-11T10:43:04+02:00
+Author: Robert Niederreiter (rnixx) <office@squarewave.at>
+Commit: https://github.com/plone/plone.app.dexterity/commit/ea2c6038b097efeb5d31edc33786b5a9aa9e68d9
+
+Merge pull request #241 from plone/jensens-fix-permission-check-for-add-forms
+
+Fix permission check for add forms
+
+Files changed:
+M CHANGES.rst
+M plone/app/dexterity/permissions.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 62ddfb5..8e5eb13 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,14 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Cleanup code of ``permissions.py`` (ZCA-decorator, reduce complexity)
++  [jensens]
++
++- Fix issue with field permissions check on add forms when the parent has no "Modify portal content" permission.
++  New: For add forms use the "Add portal content" permission as default field permission.
++  As great side effect vocabularies for i.e. AjaxSelectWidget from ``plone.app.content``,
++  which are using the check, are working on add forms in a context w/o "Modify portal content".
++  [jensens]
+ 
+ 
+ 2.4.1 (2017-03-26)
+diff --git a/plone/app/dexterity/permissions.py b/plone/app/dexterity/permissions.py
+index dd8f36b..082befd 100644
+--- a/plone/app/dexterity/permissions.py
++++ b/plone/app/dexterity/permissions.py
+@@ -10,7 +10,7 @@
+ from plone.supermodel.utils import mergedTaggedValueDict
+ from z3c.form.interfaces import IFieldWidget
+ from z3c.form.interfaces import IForm
+-from zope.component import adapts
++from zope.component import adapter
+ from zope.component import queryMultiAdapter
+ from zope.component import queryUtility
+ from zope.deprecation import deprecated
+@@ -24,11 +24,11 @@ class MockRequest(TestRequest):
+     pass
+ 
+ 
++@adapter(IDexterityContent)
+ @implementer(IFieldPermissionChecker)
+ class DXFieldPermissionChecker(object):
+     """
+     """
+-    adapts(IDexterityContent)
+ 
+     DEFAULT_PERMISSION = 'Modify portal content'
+ 
+@@ -39,54 +39,77 @@ def __init__(self, context):
+     def _get_schemata(self):
+         return iterSchemata(self.context)
+ 
++    def _validate_vocabulary_name(self, schema, field, vocabulary_name):
++        if not vocabulary_name:
++            return True
++        if (
++            vocabulary_name != getattr(field, 'vocabulary', None) and
++            vocabulary_name != getattr(field, 'vocabularyName', None)
++        ):
++            # Determine the widget to check for vocabulary there
++            widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
++            widget = widgets.get(field.getName())
++            if widget:
++                if isinstance(widget, basestring):
++                    widget = resolveDottedName(widget)
++                if widget:
++                    widget = widget(field, self._request)
++            else:
++                # default widget
++                widget = queryMultiAdapter(
++                    (field, self._request),
++                    IFieldWidget
++                )
++            if widget:
++                widget.update()
++            if getattr(widget, 'vocabulary', None) != vocabulary_name:
++                return False
++        return True
++
+     def validate(self, field_name, vocabulary_name=None):
+         context = self.context
+         checker = getSecurityManager().checkPermission
+         schemata = self._get_schemata()
+         for schema in schemata:
+-            if field_name in schema:
+-                # If a vocabulary name was specified and it does not
+-                # match the vocabulary name for the field or widget,
+-                # fail.
+-                field = schema[field_name]
+-                if vocabulary_name and (
+-                   vocabulary_name != getattr(field, 'vocabulary', None) and
+-                   vocabulary_name != getattr(field, 'vocabularyName', None)):
+-                    # Determine the widget to check for vocabulary there
+-                    widgets = mergedTaggedValueDict(schema, WIDGETS_KEY)
+-                    widget = widgets.get(field_name)
+-                    if widget:
+-                        widget = (isinstance(widget, basestring) and
+-                                  resolveDottedName(widget) or widget)
+-                        widget = widget and widget(field, self._request)
+-                    else:
+-                        widget = queryMultiAdapter((field, self._request),
+-                                                   IFieldWidget)
+-                    if widget:
+-                        widget.update()
+-                    if getattr(widget, 'vocabulary', None) != vocabulary_name:
+-                        return False
+-                # Create mapping of all schema permissions
+-                permissions = mergedTaggedValueDict(schema,
+-                                                    WRITE_PERMISSIONS_KEY)
+-                permission_name = permissions.get(field_name, None)
+-                if permission_name is not None:
+-                    permission = queryUtility(IPermission,
+-                                              name=permission_name)
+-                    if permission:
+-                        return checker(permission.title, context)
+-
+-                # If the field is in the schema, but no permission is
+-                # specified, fall back to the default edit permission
+-                return checker(self.DEFAULT_PERMISSION, context)
++            if field_name not in schema:
++                continue
++            # If a vocabulary name was specified and it does not
++            # match the vocabulary name for the field or widget,
++            # fail.
++            field = schema[field_name]
++            if not self._validate_vocabulary_name(
++                schema,
++                field,
++                vocabulary_name
++            ):
++                return False
++            # Create mapping of all schema permissions
++            permissions = mergedTaggedValueDict(
++                schema,
++                WRITE_PERMISSIONS_KEY
++            )
++            permission_name = permissions.get(field_name, None)
++            if permission_name is not None:
++                # if we have explicit permissions, check them
++                permission = queryUtility(
++                    IPermission,
++                    name=permission_name
++                )
++                if permission:
++                    return checker(permission.title, context)
++
++            # If the field is in the schema, but no permission is
++            # specified, fall back to the default edit permission
++            return checker(self.DEFAULT_PERMISSION, context)
+         else:
+             raise AttributeError('No such field: {0}'.format(field_name))
+ 
+ 
++@adapter(IForm)
+ class GenericFormFieldPermissionChecker(DXFieldPermissionChecker):
+     """Permission checker for when we just have an add view"""
+ 
+-    adapts(IForm)
++    DEFAULT_PERMISSION = 'Add portal content'
+ 
+     def __init__(self, view):
+         if getattr(view, 'form_instance', None) is not None:
 
 
