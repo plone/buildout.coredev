@@ -124,9 +124,7 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 7. Write an email to the translation team,
    asking them to do a plone.app.locales release.
 
-8. Ask Rok to make a plone.app.widgets release (TODO!)
-
-9. Create a pending release (directory) on dist.plone.org
+8. Create a pending release (directory) on dist.plone.org
 
   a) Copy all core packages there.
 
@@ -134,38 +132,37 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 
   c) Copy the versions.cfg file from coredev there.
 
-10. Write an email to the Plone developers list announcing a pending release.
 
-11. Inform the QA team about a new pending release.
+9. Write an email to the Plone developers list announcing a pending release.
 
-12. Update plone.app.locales version.
+10. Update plone.app.locales version.
 
-13. Make final release on dist.plone.org (remove "-pending")
-
-14. Update the "-latest" link on dist.plone.org
-
-15. Create a unified changelog
+11. Create a unified changelog
 
 ::
 
   bin/manage changelog
 
-16. Create new release on launchpad (https://launchpad.net/plone/)
+12. Make final release on dist.plone.org (remove "-pending")
 
-17. Create release page on http://plone.org/products/plone/releases
+13. Update the "-latest" link on dist.plone.org
 
-18. Send links to installers list
+14. Create new release on launchpad (https://launchpad.net/plone/)
+
+15. Create release page on http://plone.org/products/plone/releases
+
+16. Send links to installers list
     (plone-installers@lists.sourceforge.net <mailto:plone-installers@lists.sourceforge.net>)
 
-19. Wait for installers to be uploaded to Launchpad,
+17. Wait for installers to be uploaded to Launchpad,
     link on plone.org release page
 
-20. Mark release page as "final" (launchpad?)
+18. Publish release page on plone.org
 
-20. Update PloneSoftwareCenter pointer to the newest release, that it's linked from the homepage
+19. Update plone.org homepage links to point to new release
 
-21. Send out announcement to plone-announce
+20. Send out announcement to plone-announce
 
-22. Update #plone topic
+21. Update #plone topic
 
-23. Ask the security team to update the https://plone.org/security/hotfixes/ page in the configuration control panel.
+22. Ask the security team to update the https://plone.org/security/hotfixes/ page in the configuration control panel.
