@@ -71,12 +71,9 @@ Check latest Plone coredev job on jenkins.plone.org, it should be green, if it i
 
   git clone git@github.com:plone/buildout.coredev.git
   cd buildout.coredev
-  git checkout 5.0
+  git checkout 5.1
   python bootstrap.py
-  bin/buildout -c release.cfg
-
-Note that ``release.cfg`` installs ``plone.releaser`` which hooks into
-``zest.releaser`` and adds a ``bin/manage`` script.
+  bin/buildout -c buildout.cfg
 
 3. Check Packages for Updates
 
