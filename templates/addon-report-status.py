@@ -111,13 +111,18 @@ except UnknownObjectException:
     print(msg % (latest_commit, addon_name))
     sys.exit(0)
 
-status = u'success'
+status = u'Your add-on is compatible!'
 if not job_run_successfully:
-    status = u'error'
+    status = u'Unfortunately there seems to be some tests failing.'
 
-g_commit.create_status(
+header = 'Jenkins CI reporting about add-on compatibility.'
+footer = 'See the full report here: %s' % build_url
+comment = '%s - %s\n**%s**\n%s' % (
+    header,
+    job_name,
     status,
-    target_url=build_url,
-    description=u'Job finished with %s status' % status,
-    context='plone-ci/{0}'.format(job_name),
+    footer,
+)
+g_commit.create_comment(
+    body=comment
 )
