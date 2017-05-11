@@ -1,921 +1,229 @@
-Repository: plone.app.layout
+Repository: plone.app.contentrules
 
 
 Branch: refs/heads/master
-Date: 2017-05-10T14:05:20+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.layout/commit/39f69bff6f738dfc3698a83eb9921b69c079eadf
+Date: 2017-04-25T13:26:44+02:00
+Author: Malthe Borch (malthe) <mborch@gmail.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/932af67ca062b40730174b5d505764e0daeea095
 
-factor out toolbar classes
+Refactor
+
+Files changed:
+M plone/app/contentrules/actions/__init__.py
+
+diff --git a/plone/app/contentrules/actions/__init__.py b/plone/app/contentrules/actions/__init__.py
+index dbfedb5..6fb9699 100644
+--- a/plone/app/contentrules/actions/__init__.py
++++ b/plone/app/contentrules/actions/__init__.py
+@@ -16,17 +16,12 @@ class ContentWrapper(object):
+     """
+ 
+     def __init__(self, content):
+-        self.content = content
++        self.__dict__['content'] = content
+ 
+-    def __getattr__(self, name, default=None):
+-        if name == 'content':
+-            return self.__dict__['content']
+-        if name == 'target_folder':
+-            return self._get_target_folder()
+-        return getattr(self.__dict__['content'], name, default)
++    @property
++    def target_folder(self):
++        content = self.content
+ 
+-    def _get_target_folder(self):
+-        content = self.__dict__['content']
+         if content.target_folder and content.target_folder[0] == '/':
+             # need to convert to uuid
+             site = getSite()
+@@ -36,6 +31,9 @@ def _get_target_folder(self):
+             if target is not None:
+                 return IUUID(target, None)
+ 
++    def __getattr__(self, name, default=None):
++        return getattr(self.__dict__['content'], name, default)
++
+ 
+ class ActionAddForm(AddForm):
+     Type = None
+
+
+Repository: plone.app.contentrules
+
+
+Branch: refs/heads/master
+Date: 2017-04-25T13:28:33+02:00
+Author: Malthe Borch (malthe) <mborch@gmail.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/9676e1749b874444e6b2e5f750312433bb1f311e
+
+Content wrapper must proxy changes to content object
+
+Previously, setting an attribute on the content would simply
+add the entry to the content wrapper's own dictionary instead
+of proxying the change to the content object.
+
+This fixes action editing such that changes are persisted correctly.
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/globals/layout.py
+M plone/app/contentrules/actions/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 4d9079f..04f5bd7 100644
+index 97e6c38..aba4a18 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -19,6 +19,10 @@ Bug fixes:
-   see https://github.com/plone/Products.CMFPlone/issues/1734
-   [fgrcon]
+@@ -14,6 +14,10 @@ New features:
  
-+- Factor toolbar classes out to own method. 
-+  Includes minor cleanup.
-+  [jensens]
+ Bug fixes:
+ 
++- Fix action edit form. Previously, changes would not be persisted due
++  to a bug.
++  [malthe]
++
+ - Ensure error message is an unicode object
+   [mtrebron]
+ 
+diff --git a/plone/app/contentrules/actions/__init__.py b/plone/app/contentrules/actions/__init__.py
+index 6fb9699..9089cfe 100644
+--- a/plone/app/contentrules/actions/__init__.py
++++ b/plone/app/contentrules/actions/__init__.py
+@@ -34,6 +34,9 @@ def target_folder(self):
+     def __getattr__(self, name, default=None):
+         return getattr(self.__dict__['content'], name, default)
+ 
++    def __setattr__(self, name, value):
++        setattr(self.__dict__['content'], name, value)
 +
  
- 2.6.5 (2017-03-29)
- ------------------
-diff --git a/plone/app/layout/globals/layout.py b/plone/app/layout/globals/layout.py
-index 25e13c1..3a73418 100644
---- a/plone/app/layout/globals/layout.py
-+++ b/plone/app/layout/globals/layout.py
-@@ -25,6 +25,13 @@
- import json
- 
- 
-+TEMPLATE_CLASSES = (
-+    ViewPageTemplateFile,
-+    ZopeViewPageTemplateFile,
-+    ViewMixinForTemplates
-+)
-+
-+
- @implementer(ILayoutPolicy)
- class LayoutPolicy(BrowserView):
-     """A view that gives access to various layout related functions.
-@@ -116,9 +123,12 @@ def thumb_visible(self):
-             return True
-         else:
-             return False
--    @deprecate('deprecated since Plone 4, ContentIcons are rendered \
--    as Fonts now see \
--    https://docs.plone.org/develop/addons/index.html#upgrading-to-plone-5-1.')
-+
-+    @deprecate(
-+        'deprecated since Plone 4, ContentIcons are rendered as Fonts now see'
-+        'https://docs.plone.org/develop/addons/index.html'
-+        '#upgrading-to-plone-5-1.'
-+    )
-     def getIcon(self, item):
-         """Returns an object which implements the IContentIcon interface and
-         provides the informations necessary to render an icon. The item
-@@ -133,6 +143,47 @@ def getIcon(self, item):
-             icon = getMultiAdapter((context, self.request, item), IContentIcon)
-         return icon
- 
-+    def _toolbar_classes(self):
-+        """current toolbar controlling classes
-+        """
-+        toolbar_classes = []
-+        membership = getToolByName(self.context, "portal_membership")
-+        if membership.isAnonymousUser():
-+            return toolbar_classes
-+        registry = getUtility(IRegistry)
-+        site_settings = registry.forInterface(
-+            ISiteSchema,
-+            prefix='plone',
-+            check=False
-+        )
-+        try:
-+            left = site_settings.toolbar_position == 'side'
-+        except KeyError:
-+            left = True
-+        if left:
-+            toolbar_classes.append('plone-toolbar-left')
-+        else:
-+            toolbar_classes.append('plone-toolbar-top')
-+        try:
-+            toolbar_state = {}
-+            toolbar_state_cookie = self.request.cookies.get('plone-toolbar')
-+            if toolbar_state_cookie:
-+                toolbar_state = json.loads(toolbar_state_cookie)
-+            if toolbar_state.get('expanded', True):
-+                toolbar_classes.append('plone-toolbar-expanded')
-+                if left:
-+                    toolbar_classes.append('plone-toolbar-left-expanded')
-+                else:
-+                    toolbar_classes.append('plone-toolbar-top-expanded')
-+            else:
-+                if left:
-+                    toolbar_classes.append('plone-toolbar-left-default')
-+                else:
-+                    toolbar_classes.append('plone-toolbar-top-default')
-+        except Exception:
-+            pass
-+        return toolbar_classes
-+
-     def bodyClass(self, template, view):
-         """
-         Returns the CSS class to be used on the body tag.
-@@ -160,21 +211,18 @@ def bodyClass(self, template, view):
-         - plone-toolbar-top-default: top toolbar is not expanded
-         - pat-markspeciallinks: mark special links is set
-         """
--        context = self.context
-         portal_state = getMultiAdapter(
--            (context, self.request),
-+            (self.context, self.request),
-             name=u'plone_portal_state'
-         )
-         normalizer = queryUtility(IIDNormalizer)
-         registry = getUtility(IRegistry)
- 
--        body_classes = []
-+        body_classes = self._toolbar_classes()
- 
-         # template class (required)
-         template_name = ''
--        if isinstance(template, ViewPageTemplateFile) or \
--           isinstance(template, ZopeViewPageTemplateFile) or \
--           isinstance(template, ViewMixinForTemplates):
-+        if isinstance(template, TEMPLATE_CLASSES):
-             # Browser view
-             template_name = view.__name__
-         elif template is not None:
-@@ -187,7 +235,7 @@ def bodyClass(self, template, view):
-             body_classes.append('template-%s' % template_name)
- 
-         # portal type class (optional)
--        portal_type = normalizer.normalize(context.portal_type)
-+        portal_type = normalizer.normalize(self.context.portal_type)
-         if portal_type:
-             body_classes.append("portaltype-%s" % portal_type)
- 
-@@ -195,14 +243,16 @@ def bodyClass(self, template, view):
-         navroot = portal_state.navigation_root()
-         body_classes.append("site-%s" % navroot.getId())
- 
--        contentPath = context.getPhysicalPath()[
-+        contentPath = self.context.getPhysicalPath()[
-             len(navroot.getPhysicalPath()):]
-         if contentPath:
-             body_classes.append("section-%s" % contentPath[0])
-             # skip first section since we already have that...
-             if len(contentPath) > 1:
-                 depth = registry.get(
--                    'plone.app.layout.globals.bodyClass.depth', 4)
-+                    'plone.app.layout.globals.bodyClass.depth',
-+                    4
-+                )
-                 if depth > 1:
-                     classes = ['subsection-%s' % contentPath[1]]
-                     for section in contentPath[2:depth]:
-@@ -234,54 +284,25 @@ def bodyClass(self, template, view):
-             body_classes.append('viewpermission-' + permission)
- 
-         # class for user roles
--        membership = getToolByName(context, "portal_membership")
-+        membership = getToolByName(self.context, "portal_membership")
-         if membership.isAnonymousUser():
-             body_classes.append('userrole-anonymous')
-         else:
-             user = membership.getAuthenticatedMember()
-             for role in user.getRolesInContext(self.context):
-                 body_classes.append(
--                    'userrole-' + role.lower().replace(' ', '-'))
--
--            # toolbar classes
--            site_settings = registry.forInterface(
--                ISiteSchema, prefix='plone', check=False
--            )
--            try:
--                left = site_settings.toolbar_position == 'side'
--            except KeyError:
--                left = True
--            if left:
--                body_classes.append('plone-toolbar-left')
--            else:
--                body_classes.append('plone-toolbar-top')
--            try:
--                toolbar_state = self.request.cookies.get('plone-toolbar')
--                if toolbar_state:
--                    toolbar_state = json.loads(toolbar_state)
--                else:
--                    toolbar_state = {'expanded': True}
--                if toolbar_state.get('expanded', True):
--                    body_classes.append('plone-toolbar-expanded')
--                    if left:
--                        body_classes.append('plone-toolbar-left-expanded')
--                    else:
--                        body_classes.append('plone-toolbar-top-expanded')
--                else:
--                    if left:
--                        body_classes.append('plone-toolbar-left-default')
--                    else:
--                        body_classes.append('plone-toolbar-top-default')
--            except:
--                pass
-+                    'userrole-' + role.lower().replace(' ', '-')
-+                )
- 
-         # class for markspeciallinks pattern
-         link_settings = registry.forInterface(
--            ILinkSchema, prefix="plone", check=False
-+            ILinkSchema,
-+            prefix="plone",
-+            check=False
-         )
-         msl = link_settings.mark_special_links
-         elonw = link_settings.external_links_open_new_window
-         if msl or elonw:
-             body_classes.append('pat-markspeciallinks')
- 
--        return ' '.join(body_classes)
-+        return ' '.join(sorted(body_classes))
+ class ActionAddForm(AddForm):
+     Type = None
 
 
-Repository: plone.app.layout
+Repository: plone.app.contentrules
 
 
 Branch: refs/heads/master
-Date: 2017-05-10T14:09:05+02:00
+Date: 2017-05-08T09:29:54+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.layout/commit/f4af1938faf6ceee1a84cb3aa5fa225f8a33a3ca
+Commit: https://github.com/plone/plone.app.contentrules/commit/c7304706b6bf8b25c37eec3d436d093f468658dd
 
-Make condition wether to show or hide toolbar viewletmanager a method of its class.
+Merge branch 'master' into fix-action-edit-form
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/viewlets/toolbar.pt
-M plone/app/layout/viewlets/toolbar.py
 M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 04f5bd7..1920608 100644
+index aba4a18..761544b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -1,7 +1,7 @@
  Changelog
  =========
  
--2.6.6 (unreleased)
-+2.7.0 (unreleased)
- ------------------
+-4.0.15 (unreleased)
++4.0.16 (unreleased)
+ -------------------
  
  Breaking changes:
-@@ -13,6 +13,9 @@ New features:
- - Do not render social metadata if you are a logged user.
-   [bsuttor]
+@@ -18,6 +18,12 @@ Bug fixes:
+   to a bug.
+   [malthe]
  
-+- Make condition wether to show or hide toolbar viewletmanager a method of its class.
-+  [jensens]
 +
- Bug fixes:
- 
- - Deprecating getIcon() in @@plone_layout
-diff --git a/plone/app/layout/viewlets/toolbar.pt b/plone/app/layout/viewlets/toolbar.pt
-index 7dd8a68..fd6d996 100644
---- a/plone/app/layout/viewlets/toolbar.pt
-+++ b/plone/app/layout/viewlets/toolbar.pt
-@@ -1,7 +1,7 @@
- <section id="edit-bar" role="toolbar"
-          tal:define="portal_state view/portal_state;
-                      personal_bar python: view.get_personal_bar()"
--         tal:condition="not: portal_state/anonymous"
-+         tal:condition="view/show"
-          i18n:domain="plone">
-   <div id="edit-zone" role="toolbar" class="pat-toolbar">
-     <div class="plone-toolbar-container">
-diff --git a/plone/app/layout/viewlets/toolbar.py b/plone/app/layout/viewlets/toolbar.py
-index 8634bd2..a012d10 100644
---- a/plone/app/layout/viewlets/toolbar.py
-+++ b/plone/app/layout/viewlets/toolbar.py
-@@ -18,6 +18,9 @@ def base_render(self):
-     def render(self):
-         return self.custom_template()
- 
-+    def show(self):
-+        return not self.portal_state.anonymous()
++4.0.15 (2017-05-06)
++-------------------
 +
-     @property
-     @memoize
-     def portal_state(self):
++Bug fixes:
++
+ - Ensure error message is an unicode object
+   [mtrebron]
+ 
 diff --git a/setup.py b/setup.py
-index ec40e87..7d1798c 100644
+index 6cb70b9..9ee5d21 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -1,6 +1,6 @@
+@@ -1,7 +1,7 @@
+ # -*- coding: utf-8 -*-
  from setuptools import setup, find_packages
  
--version = '2.6.6.dev0'
-+version = '2.7.0.dev0'
+-version = '4.0.15.dev0'
++version = '4.0.16.dev0'
  
- long_description = \
-     open("README.rst").read() + "\n" + open("CHANGES.rst").read()
+ setup(
+     name='plone.app.contentrules',
 
 
-Repository: plone.app.layout
+Repository: plone.app.contentrules
 
 
 Branch: refs/heads/master
-Date: 2017-05-10T15:27:54+02:00
+Date: 2017-05-11T23:45:25+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.layout/commit/fbd86283259cccbec736664fbaafe3f16b021ad6
+Commit: https://github.com/plone/plone.app.contentrules/commit/e261b03b7fe0e8f17b7044dea23742f1549ded79
 
-add a context state wether to show or hide the toolbar and use it
+Merge pull request #31 from plone/fix-action-edit-form
 
-Files changed:
-M CHANGES.rst
-M plone/app/layout/globals/context.py
-M plone/app/layout/globals/interfaces.py
-M plone/app/layout/globals/layout.py
-M plone/app/layout/viewlets/toolbar.pt
-M plone/app/layout/viewlets/toolbar.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 1920608..dde2e5a 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -13,7 +13,9 @@ New features:
- - Do not render social metadata if you are a logged user.
-   [bsuttor]
- 
--- Make condition wether to show or hide toolbar viewletmanager a method of its class.
-+- Add method ``is_toolbar_visible`` to context state.
-+  It uses a whitelist and defaults to authenticated users.
-+  Use new method it in toolbar viewlet manager and layout body classes.
-   [jensens]
- 
- Bug fixes:
-@@ -22,7 +24,7 @@ Bug fixes:
-   see https://github.com/plone/Products.CMFPlone/issues/1734
-   [fgrcon]
- 
--- Factor toolbar classes out to own method. 
-+- Factor toolbar classes out to own method.
-   Includes minor cleanup.
-   [jensens]
- 
-diff --git a/plone/app/layout/globals/context.py b/plone/app/layout/globals/context.py
-index cd865de..6b45b97 100644
---- a/plone/app/layout/globals/context.py
-+++ b/plone/app/layout/globals/context.py
-@@ -22,6 +22,7 @@
- 
- BLACKLISTED_PROVIDERS = ('portal_workflow', )
- BLACKLISTED_CATEGORIES = ('folder_buttons', 'object_buttons', )
-+WHITELISTED_TOOLBAR_ROLES = set(('Authenticated', ))
- 
- 
- @implementer(IContextState)
-@@ -201,7 +202,7 @@ def is_portal_root(self):
- 
-     @memoize
-     def is_editable(self):
--        tool = getToolByName(self.context, "portal_membership")
-+        tool = getToolByName(self.context, 'portal_membership')
-         return bool(tool.checkPermission(
-             'Modify portal content',
-             aq_inner(self.context)
-@@ -222,6 +223,13 @@ def is_locked(self):
-             return lockable and context.wl_isLocked()
- 
-     @memoize
-+    def is_toolbar_visible(self):
-+        portal_membership = getToolByName(self.context, 'portal_membership')
-+        user = portal_membership.getAuthenticatedMember()
-+        roles = set(user.getRolesInContext(self.context))
-+        return bool(roles & WHITELISTED_TOOLBAR_ROLES)
-+
-+    @memoize
-     def actions(self, category=None, max=-1):
-         context = aq_inner(self.context)
-         atool = getToolByName(context, "portal_actions")
-diff --git a/plone/app/layout/globals/interfaces.py b/plone/app/layout/globals/interfaces.py
-index bd72e53..1c7f6e9 100644
---- a/plone/app/layout/globals/interfaces.py
-+++ b/plone/app/layout/globals/interfaces.py
-@@ -68,7 +68,8 @@ def icons_visible():
- 
-     def getIcon(item):
-         """
--        deprecated for Plone > 5.0 see https://github.com/plone/Products.CMFPlone/issues/1151
-+        deprecated for Plone > 5.0 see
-+        https://github.com/plone/Products.CMFPlone/issues/1151
-         Returns an object which implements the IContentIcon interface and
-         provides the informations necessary to render an icon. The item
-         parameter needs to be adaptable to IContentIcon. Icons can be disabled
-@@ -260,6 +261,10 @@ def is_locked():
-         """Whether or not the current object is locked
-         """
- 
-+    def is_toolbar_visible():
-+        """Wether toolbar is visible or not in the actual context
-+        """
-+
-     def actions(category):
-         """The filtered actions in the context. You can restrict the actions
-         to just one category.
-@@ -283,6 +288,7 @@ class IPatternsSettingsRenderer(Interface):
-     DEPRECATED
-     """
- 
-+
- IPatternsSettingsRenderer = deprecated(
-     IPatternsSettingsRenderer,
-     'This interface was deprecated because it was pointless.'
-diff --git a/plone/app/layout/globals/layout.py b/plone/app/layout/globals/layout.py
-index 3a73418..88cc15a 100644
---- a/plone/app/layout/globals/layout.py
-+++ b/plone/app/layout/globals/layout.py
-@@ -36,6 +36,13 @@
- class LayoutPolicy(BrowserView):
-     """A view that gives access to various layout related functions.
-     """
-+    @property
-+    @memoize
-+    def _context_state(self):
-+        return getMultiAdapter(
-+            (self.context, self.request),
-+            name='plone_context_state'
-+        )
- 
-     def mark_view(self, view):
-         """Adds a marker interface to the view if it is "the" view for the
-@@ -43,11 +50,10 @@ def mark_view(self, view):
-         """
-         if not view:
-             return
--
--        context_state = getMultiAdapter(
--            (self.context, self.request), name=u'plone_context_state')
--
--        if context_state.is_view_template() and not IViewView.providedBy(view):
-+        if (
-+            self._context_state.is_view_template() and
-+            not IViewView.providedBy(view)
-+        ):
-             alsoProvides(view, IViewView)
- 
-     def hide_columns(self, column_left, column_right):
-@@ -146,10 +152,10 @@ def getIcon(self, item):
-     def _toolbar_classes(self):
-         """current toolbar controlling classes
-         """
-+        if not self._context_state.is_toolbar_visible():
-+            return []
-+
-         toolbar_classes = []
--        membership = getToolByName(self.context, "portal_membership")
--        if membership.isAnonymousUser():
--            return toolbar_classes
-         registry = getUtility(IRegistry)
-         site_settings = registry.forInterface(
-             ISiteSchema,
-diff --git a/plone/app/layout/viewlets/toolbar.pt b/plone/app/layout/viewlets/toolbar.pt
-index fd6d996..5e6a6c5 100644
---- a/plone/app/layout/viewlets/toolbar.pt
-+++ b/plone/app/layout/viewlets/toolbar.pt
-@@ -1,7 +1,7 @@
- <section id="edit-bar" role="toolbar"
--         tal:define="portal_state view/portal_state;
-+         tal:define="context_state view/context_state;
-                      personal_bar python: view.get_personal_bar()"
--         tal:condition="view/show"
-+         tal:condition="context_state/is_toolbar_visible"
-          i18n:domain="plone">
-   <div id="edit-zone" role="toolbar" class="pat-toolbar">
-     <div class="plone-toolbar-container">
-diff --git a/plone/app/layout/viewlets/toolbar.py b/plone/app/layout/viewlets/toolbar.py
-index a012d10..f2e5bcf 100644
---- a/plone/app/layout/viewlets/toolbar.py
-+++ b/plone/app/layout/viewlets/toolbar.py
-@@ -18,8 +18,13 @@ def base_render(self):
-     def render(self):
-         return self.custom_template()
- 
--    def show(self):
--        return not self.portal_state.anonymous()
-+    @property
-+    @memoize
-+    def context_state(self):
-+        return getMultiAdapter(
-+            (self.context, self.request),
-+            name='plone_context_state'
-+        )
- 
-     @property
-     @memoize
-@@ -31,7 +36,10 @@ def portal_state(self):
- 
-     def get_personal_bar(self):
-         viewlet = PersonalBarViewlet(
--            self.context, self.request, self.__parent__, self)
-+            self.context,
-+            self.request,
-+            self.__parent__, self
-+        )
-         viewlet.update()
-         return viewlet
- 
-
-
-Repository: plone.app.layout
-
-
-Branch: refs/heads/master
-Date: 2017-05-11T12:13:51+02:00
-Author: agitator (agitator) <agitator@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.layout/commit/51d9386f85133ff1b4279e5b91d8df637554ef25
-
-Merge pull request #122 from plone/toolbar-showhide
-
-Toolbar showhide
+Fix action edit form
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/globals/context.py
-M plone/app/layout/globals/interfaces.py
-M plone/app/layout/globals/layout.py
-M plone/app/layout/viewlets/toolbar.pt
-M plone/app/layout/viewlets/toolbar.py
-M setup.py
+M plone/app/contentrules/actions/__init__.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 4d9079f..dde2e5a 100644
+index c4e1587..761544b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -1,7 +1,7 @@
- Changelog
- =========
+@@ -14,7 +14,9 @@ New features:
  
--2.6.6 (unreleased)
-+2.7.0 (unreleased)
- ------------------
- 
- Breaking changes:
-@@ -13,12 +13,21 @@ New features:
- - Do not render social metadata if you are a logged user.
-   [bsuttor]
- 
-+- Add method ``is_toolbar_visible`` to context state.
-+  It uses a whitelist and defaults to authenticated users.
-+  Use new method it in toolbar viewlet manager and layout body classes.
-+  [jensens]
-+
  Bug fixes:
  
- - Deprecating getIcon() in @@plone_layout
-   see https://github.com/plone/Products.CMFPlone/issues/1734
-   [fgrcon]
- 
-+- Factor toolbar classes out to own method.
-+  Includes minor cleanup.
-+  [jensens]
-+
- 
- 2.6.5 (2017-03-29)
- ------------------
-diff --git a/plone/app/layout/globals/context.py b/plone/app/layout/globals/context.py
-index cd865de..6b45b97 100644
---- a/plone/app/layout/globals/context.py
-+++ b/plone/app/layout/globals/context.py
-@@ -22,6 +22,7 @@
- 
- BLACKLISTED_PROVIDERS = ('portal_workflow', )
- BLACKLISTED_CATEGORIES = ('folder_buttons', 'object_buttons', )
-+WHITELISTED_TOOLBAR_ROLES = set(('Authenticated', ))
+-- *add item here*
++- Fix action edit form. Previously, changes would not be persisted due
++  to a bug.
++  [malthe]
  
  
- @implementer(IContextState)
-@@ -201,7 +202,7 @@ def is_portal_root(self):
- 
-     @memoize
-     def is_editable(self):
--        tool = getToolByName(self.context, "portal_membership")
-+        tool = getToolByName(self.context, 'portal_membership')
-         return bool(tool.checkPermission(
-             'Modify portal content',
-             aq_inner(self.context)
-@@ -222,6 +223,13 @@ def is_locked(self):
-             return lockable and context.wl_isLocked()
- 
-     @memoize
-+    def is_toolbar_visible(self):
-+        portal_membership = getToolByName(self.context, 'portal_membership')
-+        user = portal_membership.getAuthenticatedMember()
-+        roles = set(user.getRolesInContext(self.context))
-+        return bool(roles & WHITELISTED_TOOLBAR_ROLES)
-+
-+    @memoize
-     def actions(self, category=None, max=-1):
-         context = aq_inner(self.context)
-         atool = getToolByName(context, "portal_actions")
-diff --git a/plone/app/layout/globals/interfaces.py b/plone/app/layout/globals/interfaces.py
-index bd72e53..1c7f6e9 100644
---- a/plone/app/layout/globals/interfaces.py
-+++ b/plone/app/layout/globals/interfaces.py
-@@ -68,7 +68,8 @@ def icons_visible():
- 
-     def getIcon(item):
-         """
--        deprecated for Plone > 5.0 see https://github.com/plone/Products.CMFPlone/issues/1151
-+        deprecated for Plone > 5.0 see
-+        https://github.com/plone/Products.CMFPlone/issues/1151
-         Returns an object which implements the IContentIcon interface and
-         provides the informations necessary to render an icon. The item
-         parameter needs to be adaptable to IContentIcon. Icons can be disabled
-@@ -260,6 +261,10 @@ def is_locked():
-         """Whether or not the current object is locked
-         """
- 
-+    def is_toolbar_visible():
-+        """Wether toolbar is visible or not in the actual context
-+        """
-+
-     def actions(category):
-         """The filtered actions in the context. You can restrict the actions
-         to just one category.
-@@ -283,6 +288,7 @@ class IPatternsSettingsRenderer(Interface):
-     DEPRECATED
+ 4.0.15 (2017-05-06)
+diff --git a/plone/app/contentrules/actions/__init__.py b/plone/app/contentrules/actions/__init__.py
+index dbfedb5..9089cfe 100644
+--- a/plone/app/contentrules/actions/__init__.py
++++ b/plone/app/contentrules/actions/__init__.py
+@@ -16,17 +16,12 @@ class ContentWrapper(object):
      """
  
-+
- IPatternsSettingsRenderer = deprecated(
-     IPatternsSettingsRenderer,
-     'This interface was deprecated because it was pointless.'
-diff --git a/plone/app/layout/globals/layout.py b/plone/app/layout/globals/layout.py
-index 25e13c1..88cc15a 100644
---- a/plone/app/layout/globals/layout.py
-+++ b/plone/app/layout/globals/layout.py
-@@ -25,10 +25,24 @@
- import json
+     def __init__(self, content):
+-        self.content = content
++        self.__dict__['content'] = content
  
- 
-+TEMPLATE_CLASSES = (
-+    ViewPageTemplateFile,
-+    ZopeViewPageTemplateFile,
-+    ViewMixinForTemplates
-+)
-+
-+
- @implementer(ILayoutPolicy)
- class LayoutPolicy(BrowserView):
-     """A view that gives access to various layout related functions.
-     """
+-    def __getattr__(self, name, default=None):
+-        if name == 'content':
+-            return self.__dict__['content']
+-        if name == 'target_folder':
+-            return self._get_target_folder()
+-        return getattr(self.__dict__['content'], name, default)
 +    @property
-+    @memoize
-+    def _context_state(self):
-+        return getMultiAdapter(
-+            (self.context, self.request),
-+            name='plone_context_state'
-+        )
++    def target_folder(self):
++        content = self.content
  
-     def mark_view(self, view):
-         """Adds a marker interface to the view if it is "the" view for the
-@@ -36,11 +50,10 @@ def mark_view(self, view):
-         """
-         if not view:
-             return
--
--        context_state = getMultiAdapter(
--            (self.context, self.request), name=u'plone_context_state')
--
--        if context_state.is_view_template() and not IViewView.providedBy(view):
-+        if (
-+            self._context_state.is_view_template() and
-+            not IViewView.providedBy(view)
-+        ):
-             alsoProvides(view, IViewView)
+-    def _get_target_folder(self):
+-        content = self.__dict__['content']
+         if content.target_folder and content.target_folder[0] == '/':
+             # need to convert to uuid
+             site = getSite()
+@@ -36,6 +31,12 @@ def _get_target_folder(self):
+             if target is not None:
+                 return IUUID(target, None)
  
-     def hide_columns(self, column_left, column_right):
-@@ -116,9 +129,12 @@ def thumb_visible(self):
-             return True
-         else:
-             return False
--    @deprecate('deprecated since Plone 4, ContentIcons are rendered \
--    as Fonts now see \
--    https://docs.plone.org/develop/addons/index.html#upgrading-to-plone-5-1.')
++    def __getattr__(self, name, default=None):
++        return getattr(self.__dict__['content'], name, default)
 +
-+    @deprecate(
-+        'deprecated since Plone 4, ContentIcons are rendered as Fonts now see'
-+        'https://docs.plone.org/develop/addons/index.html'
-+        '#upgrading-to-plone-5-1.'
-+    )
-     def getIcon(self, item):
-         """Returns an object which implements the IContentIcon interface and
-         provides the informations necessary to render an icon. The item
-@@ -133,6 +149,47 @@ def getIcon(self, item):
-             icon = getMultiAdapter((context, self.request, item), IContentIcon)
-         return icon
- 
-+    def _toolbar_classes(self):
-+        """current toolbar controlling classes
-+        """
-+        if not self._context_state.is_toolbar_visible():
-+            return []
++    def __setattr__(self, name, value):
++        setattr(self.__dict__['content'], name, value)
 +
-+        toolbar_classes = []
-+        registry = getUtility(IRegistry)
-+        site_settings = registry.forInterface(
-+            ISiteSchema,
-+            prefix='plone',
-+            check=False
-+        )
-+        try:
-+            left = site_settings.toolbar_position == 'side'
-+        except KeyError:
-+            left = True
-+        if left:
-+            toolbar_classes.append('plone-toolbar-left')
-+        else:
-+            toolbar_classes.append('plone-toolbar-top')
-+        try:
-+            toolbar_state = {}
-+            toolbar_state_cookie = self.request.cookies.get('plone-toolbar')
-+            if toolbar_state_cookie:
-+                toolbar_state = json.loads(toolbar_state_cookie)
-+            if toolbar_state.get('expanded', True):
-+                toolbar_classes.append('plone-toolbar-expanded')
-+                if left:
-+                    toolbar_classes.append('plone-toolbar-left-expanded')
-+                else:
-+                    toolbar_classes.append('plone-toolbar-top-expanded')
-+            else:
-+                if left:
-+                    toolbar_classes.append('plone-toolbar-left-default')
-+                else:
-+                    toolbar_classes.append('plone-toolbar-top-default')
-+        except Exception:
-+            pass
-+        return toolbar_classes
-+
-     def bodyClass(self, template, view):
-         """
-         Returns the CSS class to be used on the body tag.
-@@ -160,21 +217,18 @@ def bodyClass(self, template, view):
-         - plone-toolbar-top-default: top toolbar is not expanded
-         - pat-markspeciallinks: mark special links is set
-         """
--        context = self.context
-         portal_state = getMultiAdapter(
--            (context, self.request),
-+            (self.context, self.request),
-             name=u'plone_portal_state'
-         )
-         normalizer = queryUtility(IIDNormalizer)
-         registry = getUtility(IRegistry)
  
--        body_classes = []
-+        body_classes = self._toolbar_classes()
- 
-         # template class (required)
-         template_name = ''
--        if isinstance(template, ViewPageTemplateFile) or \
--           isinstance(template, ZopeViewPageTemplateFile) or \
--           isinstance(template, ViewMixinForTemplates):
-+        if isinstance(template, TEMPLATE_CLASSES):
-             # Browser view
-             template_name = view.__name__
-         elif template is not None:
-@@ -187,7 +241,7 @@ def bodyClass(self, template, view):
-             body_classes.append('template-%s' % template_name)
- 
-         # portal type class (optional)
--        portal_type = normalizer.normalize(context.portal_type)
-+        portal_type = normalizer.normalize(self.context.portal_type)
-         if portal_type:
-             body_classes.append("portaltype-%s" % portal_type)
- 
-@@ -195,14 +249,16 @@ def bodyClass(self, template, view):
-         navroot = portal_state.navigation_root()
-         body_classes.append("site-%s" % navroot.getId())
- 
--        contentPath = context.getPhysicalPath()[
-+        contentPath = self.context.getPhysicalPath()[
-             len(navroot.getPhysicalPath()):]
-         if contentPath:
-             body_classes.append("section-%s" % contentPath[0])
-             # skip first section since we already have that...
-             if len(contentPath) > 1:
-                 depth = registry.get(
--                    'plone.app.layout.globals.bodyClass.depth', 4)
-+                    'plone.app.layout.globals.bodyClass.depth',
-+                    4
-+                )
-                 if depth > 1:
-                     classes = ['subsection-%s' % contentPath[1]]
-                     for section in contentPath[2:depth]:
-@@ -234,54 +290,25 @@ def bodyClass(self, template, view):
-             body_classes.append('viewpermission-' + permission)
- 
-         # class for user roles
--        membership = getToolByName(context, "portal_membership")
-+        membership = getToolByName(self.context, "portal_membership")
-         if membership.isAnonymousUser():
-             body_classes.append('userrole-anonymous')
-         else:
-             user = membership.getAuthenticatedMember()
-             for role in user.getRolesInContext(self.context):
-                 body_classes.append(
--                    'userrole-' + role.lower().replace(' ', '-'))
--
--            # toolbar classes
--            site_settings = registry.forInterface(
--                ISiteSchema, prefix='plone', check=False
--            )
--            try:
--                left = site_settings.toolbar_position == 'side'
--            except KeyError:
--                left = True
--            if left:
--                body_classes.append('plone-toolbar-left')
--            else:
--                body_classes.append('plone-toolbar-top')
--            try:
--                toolbar_state = self.request.cookies.get('plone-toolbar')
--                if toolbar_state:
--                    toolbar_state = json.loads(toolbar_state)
--                else:
--                    toolbar_state = {'expanded': True}
--                if toolbar_state.get('expanded', True):
--                    body_classes.append('plone-toolbar-expanded')
--                    if left:
--                        body_classes.append('plone-toolbar-left-expanded')
--                    else:
--                        body_classes.append('plone-toolbar-top-expanded')
--                else:
--                    if left:
--                        body_classes.append('plone-toolbar-left-default')
--                    else:
--                        body_classes.append('plone-toolbar-top-default')
--            except:
--                pass
-+                    'userrole-' + role.lower().replace(' ', '-')
-+                )
- 
-         # class for markspeciallinks pattern
-         link_settings = registry.forInterface(
--            ILinkSchema, prefix="plone", check=False
-+            ILinkSchema,
-+            prefix="plone",
-+            check=False
-         )
-         msl = link_settings.mark_special_links
-         elonw = link_settings.external_links_open_new_window
-         if msl or elonw:
-             body_classes.append('pat-markspeciallinks')
- 
--        return ' '.join(body_classes)
-+        return ' '.join(sorted(body_classes))
-diff --git a/plone/app/layout/viewlets/toolbar.pt b/plone/app/layout/viewlets/toolbar.pt
-index 7dd8a68..5e6a6c5 100644
---- a/plone/app/layout/viewlets/toolbar.pt
-+++ b/plone/app/layout/viewlets/toolbar.pt
-@@ -1,7 +1,7 @@
- <section id="edit-bar" role="toolbar"
--         tal:define="portal_state view/portal_state;
-+         tal:define="context_state view/context_state;
-                      personal_bar python: view.get_personal_bar()"
--         tal:condition="not: portal_state/anonymous"
-+         tal:condition="context_state/is_toolbar_visible"
-          i18n:domain="plone">
-   <div id="edit-zone" role="toolbar" class="pat-toolbar">
-     <div class="plone-toolbar-container">
-diff --git a/plone/app/layout/viewlets/toolbar.py b/plone/app/layout/viewlets/toolbar.py
-index 8634bd2..f2e5bcf 100644
---- a/plone/app/layout/viewlets/toolbar.py
-+++ b/plone/app/layout/viewlets/toolbar.py
-@@ -20,6 +20,14 @@ def render(self):
- 
-     @property
-     @memoize
-+    def context_state(self):
-+        return getMultiAdapter(
-+            (self.context, self.request),
-+            name='plone_context_state'
-+        )
-+
-+    @property
-+    @memoize
-     def portal_state(self):
-         return getMultiAdapter(
-             (self.context, self.request),
-@@ -28,7 +36,10 @@ def portal_state(self):
- 
-     def get_personal_bar(self):
-         viewlet = PersonalBarViewlet(
--            self.context, self.request, self.__parent__, self)
-+            self.context,
-+            self.request,
-+            self.__parent__, self
-+        )
-         viewlet.update()
-         return viewlet
- 
-diff --git a/setup.py b/setup.py
-index ec40e87..7d1798c 100644
---- a/setup.py
-+++ b/setup.py
-@@ -1,6 +1,6 @@
- from setuptools import setup, find_packages
- 
--version = '2.6.6.dev0'
-+version = '2.7.0.dev0'
- 
- long_description = \
-     open("README.rst").read() + "\n" + open("CHANGES.rst").read()
+ class ActionAddForm(AddForm):
+     Type = None
 
 
