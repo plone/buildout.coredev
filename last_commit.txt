@@ -1,788 +1,88 @@
-Repository: plone.app.content
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2017-06-23T00:28:45+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.content/commit/c8475a4e5f340691fd0be3edcf7f2b77f28b0029
+Date: 2017-06-26T18:11:34+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.namedfile/commit/ef80ca0865b00942d39bb803bb3403bb13af3f18
 
-@@fc-properties: Apply recursively + set language
-- Folder contents properties: Add settings to change the content language.
-- Folder contents properties: Add a recursion feature to apply all changes recursively.
+different caching keys for different domains
 
 Files changed:
 M CHANGES.rst
-M plone/app/content/browser/contents/__init__.py
-M plone/app/content/browser/contents/properties.py
-M plone/app/content/browser/contents/templates/properties.pt
-M plone/app/content/tests/test_contents.py
+M plone/namedfile/scaling.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 4527344..c8b78fe 100644
+index be4f708..1854889 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -11,6 +11,12 @@ Breaking changes:
- 
- New features:
- 
-+- Folder contents properties: Add settings to change the content language.
-+  [thet]
-+
-+- Folder contents properties: Add a recursion feature to apply all changes recursively.
-+  [thet]
-+
- - Make thumb_scale in folder contents listing adjustable/supressable (uses site control panel settings: thumb_scale_tables ...).
-   Clean up deprecated icon related code.
-   Replace paperclip icon with mime type icons.
-diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
-index 4055ac8..988a9de 100644
---- a/plone/app/content/browser/contents/__init__.py
-+++ b/plone/app/content/browser/contents/__init__.py
-@@ -90,9 +90,10 @@ def __call__(self):
-         context = aq_inner(self.context)
-         selection = self.get_selection()
- 
--        parts = str(self.request.form['folder'].lstrip('/')).split('/')
--        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
--        self.dest = parent.restrictedTraverse(parts[-1])
-+        parts = str(self.request.form.get('folder', '').lstrip('/')).split('/')
-+        if parts:
-+            parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
-+            self.dest = parent.restrictedTraverse(parts[-1])
- 
-         self.catalog = getToolByName(context, 'portal_catalog')
-         self.mtool = getToolByName(self.context, 'portal_membership')
-diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
-index ce5d9a3..b986c16 100644
---- a/plone/app/content/browser/contents/properties.py
-+++ b/plone/app/content/browser/contents/properties.py
-@@ -2,12 +2,17 @@
- from DateTime import DateTime
- from plone.app.content.browser.contents import ContentsBaseAction
- from plone.app.content.interfaces import IStructureAction
-+from plone.app.dexterity.behaviors.metadata import ICategorization
- from plone.dexterity.interfaces import IDexterityContent
-+from Products.CMFCore.interfaces._content import IFolderish
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from zope.component import getUtility
- from zope.component.hooks import getSite
- from zope.i18n import translate
- from zope.interface import implementer
-+from zope.schema.interfaces import IVocabularyFactory
- 
- 
- @implementer(IStructureAction)
-@@ -32,7 +37,8 @@ def get_options(self):
-                 'template': self.template(
-                     vocabulary_url='%splone.app.vocabularies.Users' % (
-                         base_vocabulary)
--                )
-+                ),
-+                'dataUrl': self.context.absolute_url() + '/@@fc-properties',
-             }
-         }
- 
-@@ -43,6 +49,30 @@ class PropertiesActionView(ContentsBaseAction):
-     required_obj_permission = 'Modify portal content'
- 
-     def __call__(self):
-+
-+        if self.request.form.get('render') == 'yes':
-+            lang_factory = getUtility(
-+                IVocabularyFactory,
-+                'plone.app.vocabularies.SupportedContentLanguages'
-+            )
-+            lang_vocabulary = lang_factory(self.context)
-+            languages = [
-+                {
-+                    'title': term.title,
-+                    'value': term.value
-+                }
-+                for term in lang_vocabulary
-+            ]
-+            return self.json({
-+                'languages': [{
-+                    'title': translate(
-+                        _('label_no_change', default='No change')
-+                    ),
-+                    'value': ''
-+                }] + languages
-+            })
-+
-+        self.putils = getToolByName(self.context, 'plone_utils')
-         self.effectiveDate = self.request.form.get('effectiveDate')
-         self.expirationDate = self.request.form.get('expirationDate')
-         self.copyright = self.request.form.get('copyright')
-@@ -55,6 +85,8 @@ def __call__(self):
-         if self.creators:
-             self.creators = self.creators.split(',')
-         self.exclude = self.request.form.get('exclude-from-nav')
-+        self.language = self.request.form.get('language')
-+        self.recurse = self.request.form.get('recurse', 'no') == 'yes'
-         return super(PropertiesActionView, self).__call__()
- 
-     def dx_action(self, obj):
-@@ -71,7 +103,19 @@ def dx_action(self, obj):
-         if self.exclude and hasattr(obj, 'exclude_from_nav'):
-             obj.exclude_from_nav = self.exclude == 'yes'
- 
--    def action(self, obj):
-+        behavior_categorization = ICategorization(obj)
-+        if self.language and behavior_categorization:
-+            behavior_categorization.language = self.language
-+
-+    def action(self, obj, bypass_recurse=False):
-+
-+        if self.putils.isDefaultPage(obj):
-+            self.action(obj.aq_parent, bypass_recurse=True)
-+        recurse = self.recurse and not bypass_recurse
-+        if recurse and IFolderish.providedBy(obj):
-+            for sub in obj.values():
-+                self.action(sub)
-+
-         if IDexterityContent.providedBy(obj):
-             self.dx_action(obj)
-         else:
-@@ -105,4 +149,10 @@ def action(self, obj):
-                     obj.setExcludeFromNav(self.exclude == 'yes')
-                 except AttributeError:
-                     pass
-+            if self.language:
-+                try:
-+                    obj.setLanguage(self.language)
-+                except AttributeError:
-+                    pass
-+
-         obj.reindexObject()
-diff --git a/plone/app/content/browser/contents/templates/properties.pt b/plone/app/content/browser/contents/templates/properties.pt
-index 0b22b04..09c86ef 100644
---- a/plone/app/content/browser/contents/templates/properties.pt
-+++ b/plone/app/content/browser/contents/templates/properties.pt
-@@ -1,16 +1,20 @@
- <div i18n:domain="plone">
-+
-   <div class="form-group">
-     <label i18n:translate="publiciation_date">Publication Date</label>
-     <input class="form-control pat-pickadate" name="effectiveDate" />
-   </div>
-+
-   <div class="form-group">
-     <label i18n:translate="expiration_date">Expiration Date</label>
-     <input class="form-control pat-pickadate" name="expirationDate" />
-   </div>
-+
-   <div class="form-group">
-     <label i18n:translate="copyright">Copyright</label>
-     <textarea class="form-control" name="copyright"></textarea>
-   </div>
-+
-   <label i18n:translate="creators">Creators</label>
-   <div class="form-group">
-     <input name="creators" style="width: 300px"
-@@ -18,6 +22,7 @@
-            data-pat-select2="multiple: true;
-                              vocabularyUrl: ${python: options['vocabulary_url']}"/>
-   </div>
-+
-   <label i18n:translate="contributors">Contributors</label>
-   <div class="form-group">
-     <input name="contributors" style="width: 300px"
-@@ -25,6 +30,7 @@
-            data-pat-select2="multiple: true;
-                              vocabularyUrl: ${python: options['vocabulary_url']}"/>
-   </div>
-+
-   <label i18n:translate="exclude_from_nav">Exclude from navigation</label>
-   <div class="radio">
-     <label>
-@@ -38,4 +44,24 @@
-       <span i18n:translate="no">No</span>
-     </label>
-   </div>
-+
-+  <% if (data.languages) { %>
-+    <label i18n:translate="label_language">Language</label>
-+    <select class="form-control" name="language">
-+      <% _.each(data.languages, function (lang) { %>
-+        <option value="<%= lang.value %>"><%= lang.title %></option>
-+      <% }); %>
-+    </select>
-+  <% } %>
-+
-+  <div class="checkbox">
-+    <label>
-+      <input type="checkbox" name="recurse" value="yes" />
-+      <span i18n:translate="label_include_contained_objects">Include contained items</span>
-+    </label>
-+    <p class="help-block" i18n:translate="help_include_contained_objects">
-+    If checked, this will attempt to modify the status of all content in any selected folders and their subfolders.
-+    </p>
-+  </div>
-+
- </div>
-diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
-index b715619..c69c145 100644
---- a/plone/app/content/tests/test_contents.py
-+++ b/plone/app/content/tests/test_contents.py
-@@ -7,6 +7,11 @@
- from plone.app.testing import TEST_USER_ID
- from plone.app.testing import TEST_USER_NAME
- from plone.dexterity.fti import DexterityFTI
-+from plone.protect.authenticator import createToken
-+from plone.registry.interfaces import IRegistry
-+from plone.uuid.interfaces import IUUID
-+from zope.component import getMultiAdapter
-+from zope.component import getUtility
- 
- import json
- import mock
-@@ -372,3 +377,99 @@ def test_allow_upload(self):
-         self.assertEqual(allow_upload['allowUpload'], True)
-         self.assertEqual(allow_upload['allowImages'], False)
-         self.assertEqual(allow_upload['allowFiles'], True)
-+
-+
-+class FCPropertiesTests(unittest.TestCase):
-+    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.request = self.layer['request']
-+        # Disable plone.protect for these tests
-+        self.request.environ['REQUEST_METHOD'] = 'POST'
-+        self.request.form['_authenticator'] = createToken()
-+        login(self.portal, TEST_USER_NAME)
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+
-+        # set available languages
-+        registry = getUtility(IRegistry)
-+        registry['plone.available_languages'] = ['en', 'de']
-+
-+        self.portal.invokeFactory('Folder', 'main1')
-+        self.portal.main1.invokeFactory('Folder', 'sub1')
-+        self.portal.main1.sub1.invokeFactory('Folder', 'subsub1')
-+        self.portal.main1.invokeFactory('Document', 'sub2')
-+        self.portal.invokeFactory('Document', 'main2')
-+
-+        self.setup_initial()
-+
-+    def setup_initial(self):
-+        # Initial Settings
-+        self.portal.main1.exclude_from_nav = True
-+        self.portal.main1.sub1.exclude_from_nav = True
-+        self.portal.main1.sub1.subsub1.exclude_from_nav = True
-+        self.portal.main1.sub2.exclude_from_nav = True
-+        self.portal.main2.exclude_from_nav = True
-+
-+        self.portal.main1.language = 'en'
-+        self.portal.main1.sub1.language = 'en'
-+        self.portal.main1.sub1.subsub1.language = 'en'
-+        self.portal.main1.sub2.language = 'en'
-+        self.portal.main2.language = 'en'
-+
-+    def test_fc_properties__changes__no_recurse(self):
-+        """Test changing properties without recursion.
-+        """
-+        req = self.request
-+        req.form['language'] = 'de'
-+        req.form['exclude-from-nav'] = 'no'
-+        req.form['selection'] = '["{0}", "{1}"]'.format(
-+            IUUID(self.portal.main1),
-+            IUUID(self.portal.main2)
-+        )
-+
-+        view = getMultiAdapter((self.portal, req), name=u'fc-properties')
-+
-+        # Call the view and execute the actions
-+        view()
-+
-+        self.assertEqual(self.portal.main1.language, 'de')
-+        self.assertEqual(self.portal.main2.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.language, 'en')
-+        self.assertEqual(self.portal.main1.sub1.subsub1.language, 'en')
-+        self.assertEqual(self.portal.main1.sub2.language, 'en')
-+
-+        self.assertEqual(self.portal.main1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main2.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.exclude_from_nav, True)
-+        self.assertEqual(self.portal.main1.sub1.subsub1.exclude_from_nav, True)
-+        self.assertEqual(self.portal.main1.sub2.exclude_from_nav, True)
-+
-+    def test_fc_properties__changes__with_recurse(self):
-+        """Test changing properties without recursion.
-+        """
-+        req = self.request
-+        req.form['language'] = 'de'
-+        req.form['exclude-from-nav'] = 'no'
-+        req.form['recurse'] = 'yes'
-+        req.form['selection'] = '["{0}", "{1}"]'.format(
-+            IUUID(self.portal.main1),
-+            IUUID(self.portal.main2)
-+        )
-+
-+        view = getMultiAdapter((self.portal, req), name=u'fc-properties')
-+
-+        # Call the view and execute the actions
-+        view()
-+
-+        self.assertEqual(self.portal.main1.language, 'de')
-+        self.assertEqual(self.portal.main2.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.subsub1.language, 'de')
-+        self.assertEqual(self.portal.main1.sub2.language, 'de')
-+
-+        self.assertEqual(self.portal.main1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main2.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.subsub1.exclude_from_nav, False)  # noqa
-+        self.assertEqual(self.portal.main1.sub2.exclude_from_nav, False)
-
-
-Repository: plone.app.content
-
-
-Branch: refs/heads/master
-Date: 2017-06-27T10:42:57+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.content/commit/59885ac08bbdb6f5df3bdef6d3896f790a91b830
-
-Merge branch 'master' into thet-fcprops
-
-Files changed:
-M CHANGES.rst
-M plone/app/content/utils.py
-M setup.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index c8b78fe..fe23997 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -2,7 +2,7 @@ Changelog
- =========
- 
- 
--3.4.2 (unreleased)
-+3.4.3 (unreleased)
- ------------------
- 
- Breaking changes:
-@@ -17,6 +17,16 @@ New features:
- - Folder contents properties: Add a recursion feature to apply all changes recursively.
+@@ -17,6 +17,9 @@ Bug fixes:
+ - Dont't break DefaultImageScalingFactory, if for any reason the fieldname isn't available on the context.
    [thet]
  
-+Bug fixes:
++- Different caching keys for different domains
++  [mamico]
 +
-+- *add item here*
-+
-+
-+3.4.2 (2017-06-26)
-+------------------
-+
-+New features:
-+
- - Make thumb_scale in folder contents listing adjustable/supressable (uses site control panel settings: thumb_scale_tables ...).
-   Clean up deprecated icon related code.
-   Replace paperclip icon with mime type icons.
-@@ -25,7 +35,9 @@ New features:
  
- Bug fixes:
+ 4.2.1 (2017-05-30)
+ ------------------
+diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
+index 18c2423..53891ec 100644
+--- a/plone/namedfile/scaling.py
++++ b/plone/namedfile/scaling.py
+@@ -492,7 +492,7 @@ def tag(
  
--- *add item here*
-+- Use simplejson because it's ahead of stdlib and supports more types
-+  fixes https://github.com/plone/plone.app.content/issues/134
-+  [agitator]
+ class NavigationRootScaling(ImageScaling):
+     def _scale_cachekey(method, self, brain, fieldname, **kwargs):
+-        return (brain.UID, brain.modified, fieldname, kwargs)
++        return (self.context.absolute_url(), brain.UID, brain.modified, fieldname, kwargs)
  
- 
- 3.4.1 (2017-05-16)
-diff --git a/plone/app/content/utils.py b/plone/app/content/utils.py
-index 45d3237..b6e9794 100644
---- a/plone/app/content/utils.py
-+++ b/plone/app/content/utils.py
-@@ -3,7 +3,8 @@
- 
- import Missing
- import datetime
--import json
-+# use simplejson because it's ahead of stdlib and supports more types
-+import simplejson
- 
- 
- def custom_json_handler(obj):
-@@ -20,8 +21,8 @@ def custom_json_handler(obj):
- 
- 
- def json_dumps(data):
--    return json.dumps(data, default=custom_json_handler)
-+    return simplejson.dumps(data, default=custom_json_handler)
- 
- 
- # can eventually provide custom handling here if we want
--json_loads = json.loads
-+json_loads = simplejson.loads
-diff --git a/setup.py b/setup.py
-index 349986b..ea14e94 100644
---- a/setup.py
-+++ b/setup.py
-@@ -2,7 +2,7 @@
- from setuptools import find_packages
- from setuptools import setup
- 
--version = '3.4.2.dev0'
-+version = '3.4.3.dev0'
- 
- setup(
-     name='plone.app.content',
-@@ -47,6 +47,7 @@
-         'Products.CMFDynamicViewFTI',  # required for cmf.ModifyViewTemplate
-         'Products.CMFPlone',
-         'setuptools',
-+        'simplejson',
-         'zope.component',
-         'zope.container',
-         'zope.deferredimport',
+     @ram.cache(_scale_cachekey)
+     def tag(self,
 
 
-Repository: plone.app.content
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2017-06-27T10:43:05+02:00
+Date: 2017-06-27T14:03:18+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.content/commit/e5062004474bea41f9b25fadb592dbe4af6b4245
+Commit: https://github.com/plone/plone.namedfile/commit/640c265223e613405244fd7bec205d9a4cc29366
 
-Merge pull request #133 from plone/thet-fcprops
+Merge pull request #54 from mamico/absolute_url
 
-@@fc-properties: Apply recursively + set language
+different caching keys for different domains
 
 Files changed:
 M CHANGES.rst
-M plone/app/content/browser/contents/__init__.py
-M plone/app/content/browser/contents/properties.py
-M plone/app/content/browser/contents/templates/properties.pt
-M plone/app/content/tests/test_contents.py
+M plone/namedfile/scaling.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 6903c04..fe23997 100644
+index be4f708..1854889 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -11,7 +11,11 @@ Breaking changes:
+@@ -17,6 +17,9 @@ Bug fixes:
+ - Dont't break DefaultImageScalingFactory, if for any reason the fieldname isn't available on the context.
+   [thet]
  
- New features:
++- Different caching keys for different domains
++  [mamico]
++
  
--- *add item here*
-+- Folder contents properties: Add settings to change the content language.
-+  [thet]
-+
-+- Folder contents properties: Add a recursion feature to apply all changes recursively.
-+  [thet]
+ 4.2.1 (2017-05-30)
+ ------------------
+diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py
+index 18c2423..53891ec 100644
+--- a/plone/namedfile/scaling.py
++++ b/plone/namedfile/scaling.py
+@@ -492,7 +492,7 @@ def tag(
  
- Bug fixes:
+ class NavigationRootScaling(ImageScaling):
+     def _scale_cachekey(method, self, brain, fieldname, **kwargs):
+-        return (brain.UID, brain.modified, fieldname, kwargs)
++        return (self.context.absolute_url(), brain.UID, brain.modified, fieldname, kwargs)
  
-diff --git a/plone/app/content/browser/contents/__init__.py b/plone/app/content/browser/contents/__init__.py
-index 4055ac8..988a9de 100644
---- a/plone/app/content/browser/contents/__init__.py
-+++ b/plone/app/content/browser/contents/__init__.py
-@@ -90,9 +90,10 @@ def __call__(self):
-         context = aq_inner(self.context)
-         selection = self.get_selection()
- 
--        parts = str(self.request.form['folder'].lstrip('/')).split('/')
--        parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
--        self.dest = parent.restrictedTraverse(parts[-1])
-+        parts = str(self.request.form.get('folder', '').lstrip('/')).split('/')
-+        if parts:
-+            parent = self.site.unrestrictedTraverse('/'.join(parts[:-1]))
-+            self.dest = parent.restrictedTraverse(parts[-1])
- 
-         self.catalog = getToolByName(context, 'portal_catalog')
-         self.mtool = getToolByName(self.context, 'portal_membership')
-diff --git a/plone/app/content/browser/contents/properties.py b/plone/app/content/browser/contents/properties.py
-index ce5d9a3..b986c16 100644
---- a/plone/app/content/browser/contents/properties.py
-+++ b/plone/app/content/browser/contents/properties.py
-@@ -2,12 +2,17 @@
- from DateTime import DateTime
- from plone.app.content.browser.contents import ContentsBaseAction
- from plone.app.content.interfaces import IStructureAction
-+from plone.app.dexterity.behaviors.metadata import ICategorization
- from plone.dexterity.interfaces import IDexterityContent
-+from Products.CMFCore.interfaces._content import IFolderish
-+from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from zope.component import getUtility
- from zope.component.hooks import getSite
- from zope.i18n import translate
- from zope.interface import implementer
-+from zope.schema.interfaces import IVocabularyFactory
- 
- 
- @implementer(IStructureAction)
-@@ -32,7 +37,8 @@ def get_options(self):
-                 'template': self.template(
-                     vocabulary_url='%splone.app.vocabularies.Users' % (
-                         base_vocabulary)
--                )
-+                ),
-+                'dataUrl': self.context.absolute_url() + '/@@fc-properties',
-             }
-         }
- 
-@@ -43,6 +49,30 @@ class PropertiesActionView(ContentsBaseAction):
-     required_obj_permission = 'Modify portal content'
- 
-     def __call__(self):
-+
-+        if self.request.form.get('render') == 'yes':
-+            lang_factory = getUtility(
-+                IVocabularyFactory,
-+                'plone.app.vocabularies.SupportedContentLanguages'
-+            )
-+            lang_vocabulary = lang_factory(self.context)
-+            languages = [
-+                {
-+                    'title': term.title,
-+                    'value': term.value
-+                }
-+                for term in lang_vocabulary
-+            ]
-+            return self.json({
-+                'languages': [{
-+                    'title': translate(
-+                        _('label_no_change', default='No change')
-+                    ),
-+                    'value': ''
-+                }] + languages
-+            })
-+
-+        self.putils = getToolByName(self.context, 'plone_utils')
-         self.effectiveDate = self.request.form.get('effectiveDate')
-         self.expirationDate = self.request.form.get('expirationDate')
-         self.copyright = self.request.form.get('copyright')
-@@ -55,6 +85,8 @@ def __call__(self):
-         if self.creators:
-             self.creators = self.creators.split(',')
-         self.exclude = self.request.form.get('exclude-from-nav')
-+        self.language = self.request.form.get('language')
-+        self.recurse = self.request.form.get('recurse', 'no') == 'yes'
-         return super(PropertiesActionView, self).__call__()
- 
-     def dx_action(self, obj):
-@@ -71,7 +103,19 @@ def dx_action(self, obj):
-         if self.exclude and hasattr(obj, 'exclude_from_nav'):
-             obj.exclude_from_nav = self.exclude == 'yes'
- 
--    def action(self, obj):
-+        behavior_categorization = ICategorization(obj)
-+        if self.language and behavior_categorization:
-+            behavior_categorization.language = self.language
-+
-+    def action(self, obj, bypass_recurse=False):
-+
-+        if self.putils.isDefaultPage(obj):
-+            self.action(obj.aq_parent, bypass_recurse=True)
-+        recurse = self.recurse and not bypass_recurse
-+        if recurse and IFolderish.providedBy(obj):
-+            for sub in obj.values():
-+                self.action(sub)
-+
-         if IDexterityContent.providedBy(obj):
-             self.dx_action(obj)
-         else:
-@@ -105,4 +149,10 @@ def action(self, obj):
-                     obj.setExcludeFromNav(self.exclude == 'yes')
-                 except AttributeError:
-                     pass
-+            if self.language:
-+                try:
-+                    obj.setLanguage(self.language)
-+                except AttributeError:
-+                    pass
-+
-         obj.reindexObject()
-diff --git a/plone/app/content/browser/contents/templates/properties.pt b/plone/app/content/browser/contents/templates/properties.pt
-index 0b22b04..09c86ef 100644
---- a/plone/app/content/browser/contents/templates/properties.pt
-+++ b/plone/app/content/browser/contents/templates/properties.pt
-@@ -1,16 +1,20 @@
- <div i18n:domain="plone">
-+
-   <div class="form-group">
-     <label i18n:translate="publiciation_date">Publication Date</label>
-     <input class="form-control pat-pickadate" name="effectiveDate" />
-   </div>
-+
-   <div class="form-group">
-     <label i18n:translate="expiration_date">Expiration Date</label>
-     <input class="form-control pat-pickadate" name="expirationDate" />
-   </div>
-+
-   <div class="form-group">
-     <label i18n:translate="copyright">Copyright</label>
-     <textarea class="form-control" name="copyright"></textarea>
-   </div>
-+
-   <label i18n:translate="creators">Creators</label>
-   <div class="form-group">
-     <input name="creators" style="width: 300px"
-@@ -18,6 +22,7 @@
-            data-pat-select2="multiple: true;
-                              vocabularyUrl: ${python: options['vocabulary_url']}"/>
-   </div>
-+
-   <label i18n:translate="contributors">Contributors</label>
-   <div class="form-group">
-     <input name="contributors" style="width: 300px"
-@@ -25,6 +30,7 @@
-            data-pat-select2="multiple: true;
-                              vocabularyUrl: ${python: options['vocabulary_url']}"/>
-   </div>
-+
-   <label i18n:translate="exclude_from_nav">Exclude from navigation</label>
-   <div class="radio">
-     <label>
-@@ -38,4 +44,24 @@
-       <span i18n:translate="no">No</span>
-     </label>
-   </div>
-+
-+  <% if (data.languages) { %>
-+    <label i18n:translate="label_language">Language</label>
-+    <select class="form-control" name="language">
-+      <% _.each(data.languages, function (lang) { %>
-+        <option value="<%= lang.value %>"><%= lang.title %></option>
-+      <% }); %>
-+    </select>
-+  <% } %>
-+
-+  <div class="checkbox">
-+    <label>
-+      <input type="checkbox" name="recurse" value="yes" />
-+      <span i18n:translate="label_include_contained_objects">Include contained items</span>
-+    </label>
-+    <p class="help-block" i18n:translate="help_include_contained_objects">
-+    If checked, this will attempt to modify the status of all content in any selected folders and their subfolders.
-+    </p>
-+  </div>
-+
- </div>
-diff --git a/plone/app/content/tests/test_contents.py b/plone/app/content/tests/test_contents.py
-index b715619..c69c145 100644
---- a/plone/app/content/tests/test_contents.py
-+++ b/plone/app/content/tests/test_contents.py
-@@ -7,6 +7,11 @@
- from plone.app.testing import TEST_USER_ID
- from plone.app.testing import TEST_USER_NAME
- from plone.dexterity.fti import DexterityFTI
-+from plone.protect.authenticator import createToken
-+from plone.registry.interfaces import IRegistry
-+from plone.uuid.interfaces import IUUID
-+from zope.component import getMultiAdapter
-+from zope.component import getUtility
- 
- import json
- import mock
-@@ -372,3 +377,99 @@ def test_allow_upload(self):
-         self.assertEqual(allow_upload['allowUpload'], True)
-         self.assertEqual(allow_upload['allowImages'], False)
-         self.assertEqual(allow_upload['allowFiles'], True)
-+
-+
-+class FCPropertiesTests(unittest.TestCase):
-+    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.request = self.layer['request']
-+        # Disable plone.protect for these tests
-+        self.request.environ['REQUEST_METHOD'] = 'POST'
-+        self.request.form['_authenticator'] = createToken()
-+        login(self.portal, TEST_USER_NAME)
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+
-+        # set available languages
-+        registry = getUtility(IRegistry)
-+        registry['plone.available_languages'] = ['en', 'de']
-+
-+        self.portal.invokeFactory('Folder', 'main1')
-+        self.portal.main1.invokeFactory('Folder', 'sub1')
-+        self.portal.main1.sub1.invokeFactory('Folder', 'subsub1')
-+        self.portal.main1.invokeFactory('Document', 'sub2')
-+        self.portal.invokeFactory('Document', 'main2')
-+
-+        self.setup_initial()
-+
-+    def setup_initial(self):
-+        # Initial Settings
-+        self.portal.main1.exclude_from_nav = True
-+        self.portal.main1.sub1.exclude_from_nav = True
-+        self.portal.main1.sub1.subsub1.exclude_from_nav = True
-+        self.portal.main1.sub2.exclude_from_nav = True
-+        self.portal.main2.exclude_from_nav = True
-+
-+        self.portal.main1.language = 'en'
-+        self.portal.main1.sub1.language = 'en'
-+        self.portal.main1.sub1.subsub1.language = 'en'
-+        self.portal.main1.sub2.language = 'en'
-+        self.portal.main2.language = 'en'
-+
-+    def test_fc_properties__changes__no_recurse(self):
-+        """Test changing properties without recursion.
-+        """
-+        req = self.request
-+        req.form['language'] = 'de'
-+        req.form['exclude-from-nav'] = 'no'
-+        req.form['selection'] = '["{0}", "{1}"]'.format(
-+            IUUID(self.portal.main1),
-+            IUUID(self.portal.main2)
-+        )
-+
-+        view = getMultiAdapter((self.portal, req), name=u'fc-properties')
-+
-+        # Call the view and execute the actions
-+        view()
-+
-+        self.assertEqual(self.portal.main1.language, 'de')
-+        self.assertEqual(self.portal.main2.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.language, 'en')
-+        self.assertEqual(self.portal.main1.sub1.subsub1.language, 'en')
-+        self.assertEqual(self.portal.main1.sub2.language, 'en')
-+
-+        self.assertEqual(self.portal.main1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main2.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.exclude_from_nav, True)
-+        self.assertEqual(self.portal.main1.sub1.subsub1.exclude_from_nav, True)
-+        self.assertEqual(self.portal.main1.sub2.exclude_from_nav, True)
-+
-+    def test_fc_properties__changes__with_recurse(self):
-+        """Test changing properties without recursion.
-+        """
-+        req = self.request
-+        req.form['language'] = 'de'
-+        req.form['exclude-from-nav'] = 'no'
-+        req.form['recurse'] = 'yes'
-+        req.form['selection'] = '["{0}", "{1}"]'.format(
-+            IUUID(self.portal.main1),
-+            IUUID(self.portal.main2)
-+        )
-+
-+        view = getMultiAdapter((self.portal, req), name=u'fc-properties')
-+
-+        # Call the view and execute the actions
-+        view()
-+
-+        self.assertEqual(self.portal.main1.language, 'de')
-+        self.assertEqual(self.portal.main2.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.language, 'de')
-+        self.assertEqual(self.portal.main1.sub1.subsub1.language, 'de')
-+        self.assertEqual(self.portal.main1.sub2.language, 'de')
-+
-+        self.assertEqual(self.portal.main1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main2.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.exclude_from_nav, False)
-+        self.assertEqual(self.portal.main1.sub1.subsub1.exclude_from_nav, False)  # noqa
-+        self.assertEqual(self.portal.main1.sub2.exclude_from_nav, False)
+     @ram.cache(_scale_cachekey)
+     def tag(self,
 
 
