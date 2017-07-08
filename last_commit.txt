@@ -1,116 +1,95 @@
-Repository: plone.app.upgrade
+Repository: plone.protect
 
 
 Branch: refs/heads/master
-Date: 2017-07-08T00:56:48+03:00
-Author: MrTango (MrTango) <md@derico.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/60d6c49ac1d7a4dae12f6b8f5eda7c594fc1060a
+Date: 2017-07-03T19:12:19+02:00
+Author: Jonas Baumann (jone) <jone@jone.ch>
+Commit: https://github.com/plone/plone.protect/commit/eccfe10734576f1043e55d19d8bfe4739aa3a5be
 
-finish upgrade step for safe_html setting to registry
+Fix logging to no longer write to stdout.
+
+The `print_stack()` function does actually print the stack (to stdout),
+not return it.
+What we want to do here is use `format_stack` so that we can include the
+stack in the message.
 
 Files changed:
-M plone/app/upgrade/v51/betas.py
-M plone/app/upgrade/v51/configure.zcml
-M plone/app/upgrade/v51/tests.py
+M CHANGES.rst
+M plone/protect/auto.py
 
-diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
-index 90e9453..59a516a 100644
---- a/plone/app/upgrade/v51/betas.py
-+++ b/plone/app/upgrade/v51/betas.py
-@@ -3,6 +3,7 @@
- from plone.app.upgrade.utils import loadMigrationProfile
- from plone.registry.interfaces import IRegistry
- from Products.CMFCore.utils import getToolByName
-+from Products.CMFPlone.interfaces import IFilterSchema
- from Products.CMFPlone.interfaces import ISearchSchema
- from zope.component import getUtility
- import logging
-@@ -178,3 +179,22 @@ def reindex_mime_type(context):
-         catalog.data[brain.getRID()] = tuple(record)
-         cnt += 1
-     logger.info('Reindexed `mime_type` for %s items' % str(cnt))
-+
-+
-+def move_safe_html_settings_to_registry(context):
-+    """ Move safe_html settings from portal_transforms to Plone registry.
-+    """
-+    registry = getUtility(IRegistry)
-+    settings = registry.forInterface(
-+        IFilterSchema, prefix="plone")
-+    pt = getToolByName(context, 'portal_transforms')
-+    disable_filtering = pt.safe_html._config.get('disable_transform')
-+    raw_valid_tags = pt.safe_html._config.get('valid_tags') or {}
-+    raw_nasty_tags = pt.safe_html._config.get('nasty_tags') or {}
-+    valid_tags = [
-+        tag.decode() for tag, enabled in raw_valid_tags.items() if enabled]
-+    nasty_tags = [
-+        tag.decode() for tag, enabled in raw_nasty_tags.items() if enabled]
-+    settings.disable_filtering = disable_filtering
-+    settings.valid_tags = sorted(valid_tags)
-+    settings.nasty_tags = sorted(nasty_tags)
-diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
-index 24dad71..1dd9db1 100644
---- a/plone/app/upgrade/v51/configure.zcml
-+++ b/plone/app/upgrade/v51/configure.zcml
-@@ -167,10 +167,10 @@ Add image scaling options to image handling control panel.
-             import_profile="plone.app.upgrade.v51:to51beta5"
-             />
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c7fd472..af2d932 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
  
--        <!--<gs:upgradeStep
-+        <gs:upgradeStep
-             title="Move safe_html settings from portal_transforms to Plone registry"
-             handler=".betas.move_safe_html_settings_to_registry"
--            />-->
-+            />
+ Bug fixes:
  
-     </gs:upgradeSteps>
- </configure>
-diff --git a/plone/app/upgrade/v51/tests.py b/plone/app/upgrade/v51/tests.py
-index 9f66344..0fad483 100644
---- a/plone/app/upgrade/v51/tests.py
-+++ b/plone/app/upgrade/v51/tests.py
-@@ -1,6 +1,9 @@
- # -*- coding: utf-8 -*-
- from plone.app.testing import PLONE_INTEGRATION_TESTING
-+from plone.app.upgrade.v50.testing import REAL_UPGRADE_FUNCTIONAL
- from zope.component import getUtility
-+from plone.registry.interfaces import IRegistry
-+from Products.CMFPlone.interfaces import IFilterSchema
- 
- import unittest
- 
-@@ -42,6 +45,24 @@ def test_migrate_less_variable_typo(self):
-         )
+-- *add item here*
++- Fix logging to no longer write traceback to stdout, but include it in the
++  logging message instead.
++  [jone]
  
  
-+class UpgradePortalTransforms51beta4to51beta5Test(unittest.TestCase):
-+    layer = PLONE_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.request = self.layer['request']
-+        self.pt = self.portal.portal_transforms
-+        registry = getUtility(IRegistry)
-+        self.settings = registry.forInterface(
-+            IFilterSchema, prefix="plone")
-+
-+    def test_migrate_safe_html_settings(self):
-+        from plone.app.upgrade.v51.betas import \
-+            move_safe_html_settings_to_registry
-+
-+        move_safe_html_settings_to_registry(self.portal)
-+
-+
- def test_suite():
-     # Skip these tests on Plone 4
-     if not PLONE_5:
-@@ -51,4 +72,7 @@ def test_suite():
-     suite.addTest(
-         unittest.makeSuite(UpgradeRegistry503to51alpha1Test)
-     )
-+    suite.addTest(
-+        unittest.makeSuite(UpgradePortalTransforms51beta4to51beta5Test)
-+    )
-     return suite
+ 3.0.24 (2017-07-03)
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 445aaaf..78e7f20 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -276,7 +276,7 @@ def _check(self):
+                     logger.info(
+                         '{0:s}\naborting transaction due to no CSRF '
+                         'protection on url {1:s}'.format(
+-                            traceback.print_stack(),
++                            '\n'.join(traceback.format_stack()),
+                             self.request.URL
+                         )
+                     )
+
+
+Repository: plone.protect
+
+
+Branch: refs/heads/master
+Date: 2017-07-08T19:30:38+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.protect/commit/05f78ca8993bc612d1e4669c60cd76a3a4ba317d
+
+Merge pull request #63 from plone/jone-fix-logging-message
+
+Fix logging to no longer write to stdout.
+
+Files changed:
+M CHANGES.rst
+M plone/protect/auto.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c7fd472..af2d932 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Fix logging to no longer write traceback to stdout, but include it in the
++  logging message instead.
++  [jone]
+ 
+ 
+ 3.0.24 (2017-07-03)
+diff --git a/plone/protect/auto.py b/plone/protect/auto.py
+index 445aaaf..78e7f20 100644
+--- a/plone/protect/auto.py
++++ b/plone/protect/auto.py
+@@ -276,7 +276,7 @@ def _check(self):
+                     logger.info(
+                         '{0:s}\naborting transaction due to no CSRF '
+                         'protection on url {1:s}'.format(
+-                            traceback.print_stack(),
++                            '\n'.join(traceback.format_stack()),
+                             self.request.URL
+                         )
+                     )
 
 
