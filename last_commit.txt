@@ -1,140 +1,353 @@
-Repository: plone.app.linkintegrity
+Repository: plone.app.textfield
 
 
 Branch: refs/heads/master
-Date: 2017-06-20T15:19:02+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/d6cbc67bff0e2fc7344899679266cd053a3ce29e
+Date: 2017-07-12T16:40:58+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.textfield/commit/443e6a7b40b540964ff48f6c16e9bf0db948b0e9
 
-Do not fail on invalid objects in referenec_catalog. Fixes #32 and #48
+Made sure the new simple textarea template is not used for rich text widgets.
+
+Only use it for simple textarea widgets.  Otherwise you see this in the display:
+``RichTextValue object. (Did you mean .raw or .output?)``.
+
+Fixes https://github.com/plone/plone.app.textfield/issues/22
 
 Files changed:
 M CHANGES.rst
-M plone/app/linkintegrity/upgrades.py
+M plone/app/textfield/tests.py
+M plone/app/textfield/widget.py
+M plone/app/textfield/widget.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e2cc5fa..2a0912a 100644
+index a498757..70ef350 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -14,7 +14,11 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- Do not fail on invalid objects in referenec_catalog. Fixes #32 and #48
-+  [pbauer]
++- Made sure the new simple textarea template is not used for rich text widgets,
++  but only for simple textarea widgets.  Otherwise you see this in the display:
++  ``RichTextValue object. (Did you mean .raw or .output?)``.
++  Fixes `issue 22 <https://github.com/plone/plone.app.textfield/issues/22>`_.
++  [maurits]
  
  
- 3.3.1 (2017-06-01)
-diff --git a/plone/app/linkintegrity/upgrades.py b/plone/app/linkintegrity/upgrades.py
-index 56d47bf..3bd44c5 100644
---- a/plone/app/linkintegrity/upgrades.py
-+++ b/plone/app/linkintegrity/upgrades.py
-@@ -17,6 +17,9 @@ def migrate_linkintegrity_relations(context):
-                 continue
-             source_obj = uuidToObject(brain.sourceUID)
-             target_obj = uuidToObject(brain.targetUID)
-+            if source_obj is None or target_obj is None:
-+                # reference_catalog my be inconsistent
-+                continue
-             # Delete old reference
-             reference_catalog.deleteReference(
-                 source_obj, target_obj, relationship=referencedRelationship)
-
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2017-06-22T18:04:40+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/8e65fa1117826c0b3f49ddf8087bef180e8b9240
-
-add log-message
-
-Files changed:
-M plone/app/linkintegrity/upgrades.py
-
-diff --git a/plone/app/linkintegrity/upgrades.py b/plone/app/linkintegrity/upgrades.py
-index 3bd44c5..0a93b8d 100644
---- a/plone/app/linkintegrity/upgrades.py
-+++ b/plone/app/linkintegrity/upgrades.py
-@@ -5,6 +5,9 @@
- from Products.CMFCore.utils import getToolByName
- from zope.lifecycleevent import modified
+ 1.2.8 (2017-02-05)
+diff --git a/plone/app/textfield/tests.py b/plone/app/textfield/tests.py
+index caff931..64e02bf 100644
+--- a/plone/app/textfield/tests.py
++++ b/plone/app/textfield/tests.py
+@@ -166,7 +166,7 @@ class Context(PortalContent):
+             u"<p>Sample <strong>text</strong></p>",
+             value.output.strip())
  
-+import logging
-+log = logging.getLogger(__name__)
+-    def testWidgetConverter(self):
++    def testRichTextWidgetConverter(self):
+         from zope.interface import Interface
+         from plone.app.textfield import RichText
+         from zope.publisher.browser import TestRequest
+@@ -190,8 +190,79 @@ class IWithText(Interface):
+         widget.update()
+ 
+         converter = RichTextConverter(IWithText['text'], widget)
 +
++        # Test with None input.
++        self.assertRaises(ValueError, converter.toFieldValue, None)
++        self.assertTrue(converter.toWidgetValue(None) is None)
++
++        # Test with string input.
++        self.assertRaises(ValueError, converter.toFieldValue, '')
++        self.assertRaises(ValueError, converter.toFieldValue, 'Foo')
++        self.assertRaises(ValueError, converter.toWidgetValue, '')
++        self.assertRaises(ValueError, converter.toWidgetValue, 'Foo')
++
++        # Test with unicode input.
++        self.assertTrue(converter.toFieldValue(u'') is _marker)
++        self.assertEqual(converter.toFieldValue(u'Foo').raw, u'Foo')
++        self.assertTrue(isinstance(converter.toFieldValue(u'Foo'), RichTextValue))
++        self.assertEqual(converter.toWidgetValue(u'').raw, u'')
++        self.assertEqual(converter.toWidgetValue(u'Foo').raw, u'Foo')
++
++        # Test with RichTextValue input.
++        self.assertTrue(converter.toFieldValue(RichTextValue(u'')) is _marker)
++        rich_text = RichTextValue(u'Foo')
++        self.assertEqual(converter.toFieldValue(rich_text), rich_text)
++        self.assertEqual(converter.toFieldValue(rich_text).raw, u'Foo')
++        self.assertEqual(converter.toWidgetValue(rich_text), rich_text)
++
++    def testRichTextAreaWidgetConverter(self):
++        from zope.interface import Interface
++        from plone.app.textfield import RichText
++        from zope.publisher.browser import TestRequest
++        from plone.app.textfield.value import RichTextValue
++        from plone.app.textfield.widget import RichTextWidget
++        from plone.app.textfield.widget import RichTextAreaConverter
++        from z3c.form.widget import FieldWidget
++
++        _marker = object()
++
++        class IWithText(Interface):
++
++            text = RichText(title=u"Text",
++                            default_mime_type='text/structured',
++                            output_mime_type='text/html',
++                            missing_value=_marker)
++
++        request = TestRequest()
++
++        widget = FieldWidget(IWithText['text'], RichTextWidget(request))
++        widget.update()
++
++        converter = RichTextAreaConverter(IWithText['text'], widget)
++
++        # Test with None input.
++        self.assertRaises(ValueError, converter.toFieldValue, None)
++        self.assertTrue(converter.toWidgetValue(None) is None)
++
++        # Test with string input.
++        self.assertTrue(converter.toFieldValue('') is _marker)
++        self.assertRaises(ValueError, converter.toFieldValue, 'Foo')
++        self.assertRaises(ValueError, converter.toWidgetValue, '')
++        self.assertRaises(ValueError, converter.toWidgetValue, 'Foo')
++
++        # Test with unicode input.
+         self.assertTrue(converter.toFieldValue(u'') is _marker)
++        self.assertEqual(converter.toFieldValue(u'Foo').raw, u'Foo')
++        self.assertTrue(isinstance(converter.toFieldValue(u'Foo'), RichTextValue))
++        self.assertEqual(converter.toWidgetValue(u''), u'')
++        self.assertEqual(converter.toWidgetValue(u'Foo'), u'Foo')
++
++        # Test with RichTextValue input.
+         self.assertTrue(converter.toFieldValue(RichTextValue(u'')) is _marker)
++        rich_text = RichTextValue(u'Foo')
++        self.assertEqual(converter.toFieldValue(rich_text), rich_text)
++        self.assertEqual(converter.toFieldValue(rich_text).raw, u'Foo')
++        self.assertEqual(converter.toWidgetValue(rich_text), u'Foo')
  
- def migrate_linkintegrity_relations(context):
-     """Migrate linkintegrity-relation from reference_catalog to zc.relation.
-@@ -18,7 +21,8 @@ def migrate_linkintegrity_relations(context):
-             source_obj = uuidToObject(brain.sourceUID)
-             target_obj = uuidToObject(brain.targetUID)
-             if source_obj is None or target_obj is None:
--                # reference_catalog my be inconsistent
-+                # reference_catalog may be inconsistent
-+                log.info('Cannot delete relation since the relation_catalog is inconsistent.')   # noqa: E501
-                 continue
-             # Delete old reference
-             reference_catalog.deleteReference(
+     def testWidgetAllowedTypesDefault(self):
+         from zope.interface import Interface, implementer
+diff --git a/plone/app/textfield/widget.py b/plone/app/textfield/widget.py
+index 35ffb17..b802c16 100644
+--- a/plone/app/textfield/widget.py
++++ b/plone/app/textfield/widget.py
+@@ -141,6 +141,10 @@ def toFieldValue(self, value):
+                 outputMimeType=self.field.output_mime_type,
+                 encoding='utf-8'
+             )
++        elif IRichTextValue.providedBy(value):
++            if value.raw == u'':
++                return self.field.missing_value
++            return value
+         raise ValueError(
+             'Can not convert {0:s} to an IRichTextValue'.format(repr(value))
+         )
+diff --git a/plone/app/textfield/widget.zcml b/plone/app/textfield/widget.zcml
+index 5603f24..a477660 100644
+--- a/plone/app/textfield/widget.zcml
++++ b/plone/app/textfield/widget.zcml
+@@ -52,12 +52,22 @@
+   <!--
+     register alternative template for ITextAreaWidget display in order to
+     render RichValue as structure
++    But then we must reregister the template for our IRichTextWidget
++    for the IPloneFormLayer, otherwise widget_textarea_display.pt
++    will be used for both, which gives wrong results.
+   -->
+-  <z3c:widgetTemplate
++  <configure zcml:condition="installed plone.app.z3cform">
++    <z3c:widgetTemplate
+       layer="plone.app.z3cform.interfaces.IPloneFormLayer"
+       mode="display"
+       template="widget_textarea_display.pt"
+       widget="z3c.form.interfaces.ITextAreaWidget"
+-      zcml:condition="installed plone.app.z3cform"
+-  />
++    />
++    <z3c:widgetTemplate
++      layer="plone.app.z3cform.interfaces.IPloneFormLayer"
++      mode="display"
++      template="widget_display.pt"
++      widget=".widget.IRichTextWidget"
++    />
++  </configure>
+ </configure>
 
 
-Repository: plone.app.linkintegrity
+Repository: plone.app.textfield
 
 
 Branch: refs/heads/master
-Date: 2017-07-17T10:46:05+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/fc6d90f7811913bbf804c03fce44ecb448d46e73
+Date: 2017-07-17T14:29:30+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.textfield/commit/3f17e7ed4d9949cae28a81a7e0e859de35405b00
 
-Merge pull request #56 from plone/allow_inconsistent_refcatalog
+Merge pull request #23 from plone/issue-22-wrong-widget
 
-Do not fail on invalid objects in referenec_catalog. Fixes #32 and #48
+Made sure the new textarea template is not used for rich text widgets
 
 Files changed:
 M CHANGES.rst
-M plone/app/linkintegrity/upgrades.py
+M plone/app/textfield/tests.py
+M plone/app/textfield/widget.py
+M plone/app/textfield/widget.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index e2cc5fa..2a0912a 100644
+index a498757..70ef350 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -14,7 +14,11 @@ New features:
  
  Bug fixes:
  
 -- *add item here*
-+- Do not fail on invalid objects in referenec_catalog. Fixes #32 and #48
-+  [pbauer]
++- Made sure the new simple textarea template is not used for rich text widgets,
++  but only for simple textarea widgets.  Otherwise you see this in the display:
++  ``RichTextValue object. (Did you mean .raw or .output?)``.
++  Fixes `issue 22 <https://github.com/plone/plone.app.textfield/issues/22>`_.
++  [maurits]
  
  
- 3.3.1 (2017-06-01)
-diff --git a/plone/app/linkintegrity/upgrades.py b/plone/app/linkintegrity/upgrades.py
-index 56d47bf..0a93b8d 100644
---- a/plone/app/linkintegrity/upgrades.py
-+++ b/plone/app/linkintegrity/upgrades.py
-@@ -5,6 +5,9 @@
- from Products.CMFCore.utils import getToolByName
- from zope.lifecycleevent import modified
+ 1.2.8 (2017-02-05)
+diff --git a/plone/app/textfield/tests.py b/plone/app/textfield/tests.py
+index caff931..64e02bf 100644
+--- a/plone/app/textfield/tests.py
++++ b/plone/app/textfield/tests.py
+@@ -166,7 +166,7 @@ class Context(PortalContent):
+             u"<p>Sample <strong>text</strong></p>",
+             value.output.strip())
  
-+import logging
-+log = logging.getLogger(__name__)
+-    def testWidgetConverter(self):
++    def testRichTextWidgetConverter(self):
+         from zope.interface import Interface
+         from plone.app.textfield import RichText
+         from zope.publisher.browser import TestRequest
+@@ -190,8 +190,79 @@ class IWithText(Interface):
+         widget.update()
+ 
+         converter = RichTextConverter(IWithText['text'], widget)
 +
++        # Test with None input.
++        self.assertRaises(ValueError, converter.toFieldValue, None)
++        self.assertTrue(converter.toWidgetValue(None) is None)
++
++        # Test with string input.
++        self.assertRaises(ValueError, converter.toFieldValue, '')
++        self.assertRaises(ValueError, converter.toFieldValue, 'Foo')
++        self.assertRaises(ValueError, converter.toWidgetValue, '')
++        self.assertRaises(ValueError, converter.toWidgetValue, 'Foo')
++
++        # Test with unicode input.
++        self.assertTrue(converter.toFieldValue(u'') is _marker)
++        self.assertEqual(converter.toFieldValue(u'Foo').raw, u'Foo')
++        self.assertTrue(isinstance(converter.toFieldValue(u'Foo'), RichTextValue))
++        self.assertEqual(converter.toWidgetValue(u'').raw, u'')
++        self.assertEqual(converter.toWidgetValue(u'Foo').raw, u'Foo')
++
++        # Test with RichTextValue input.
++        self.assertTrue(converter.toFieldValue(RichTextValue(u'')) is _marker)
++        rich_text = RichTextValue(u'Foo')
++        self.assertEqual(converter.toFieldValue(rich_text), rich_text)
++        self.assertEqual(converter.toFieldValue(rich_text).raw, u'Foo')
++        self.assertEqual(converter.toWidgetValue(rich_text), rich_text)
++
++    def testRichTextAreaWidgetConverter(self):
++        from zope.interface import Interface
++        from plone.app.textfield import RichText
++        from zope.publisher.browser import TestRequest
++        from plone.app.textfield.value import RichTextValue
++        from plone.app.textfield.widget import RichTextWidget
++        from plone.app.textfield.widget import RichTextAreaConverter
++        from z3c.form.widget import FieldWidget
++
++        _marker = object()
++
++        class IWithText(Interface):
++
++            text = RichText(title=u"Text",
++                            default_mime_type='text/structured',
++                            output_mime_type='text/html',
++                            missing_value=_marker)
++
++        request = TestRequest()
++
++        widget = FieldWidget(IWithText['text'], RichTextWidget(request))
++        widget.update()
++
++        converter = RichTextAreaConverter(IWithText['text'], widget)
++
++        # Test with None input.
++        self.assertRaises(ValueError, converter.toFieldValue, None)
++        self.assertTrue(converter.toWidgetValue(None) is None)
++
++        # Test with string input.
++        self.assertTrue(converter.toFieldValue('') is _marker)
++        self.assertRaises(ValueError, converter.toFieldValue, 'Foo')
++        self.assertRaises(ValueError, converter.toWidgetValue, '')
++        self.assertRaises(ValueError, converter.toWidgetValue, 'Foo')
++
++        # Test with unicode input.
+         self.assertTrue(converter.toFieldValue(u'') is _marker)
++        self.assertEqual(converter.toFieldValue(u'Foo').raw, u'Foo')
++        self.assertTrue(isinstance(converter.toFieldValue(u'Foo'), RichTextValue))
++        self.assertEqual(converter.toWidgetValue(u''), u'')
++        self.assertEqual(converter.toWidgetValue(u'Foo'), u'Foo')
++
++        # Test with RichTextValue input.
+         self.assertTrue(converter.toFieldValue(RichTextValue(u'')) is _marker)
++        rich_text = RichTextValue(u'Foo')
++        self.assertEqual(converter.toFieldValue(rich_text), rich_text)
++        self.assertEqual(converter.toFieldValue(rich_text).raw, u'Foo')
++        self.assertEqual(converter.toWidgetValue(rich_text), u'Foo')
  
- def migrate_linkintegrity_relations(context):
-     """Migrate linkintegrity-relation from reference_catalog to zc.relation.
-@@ -17,6 +20,10 @@ def migrate_linkintegrity_relations(context):
-                 continue
-             source_obj = uuidToObject(brain.sourceUID)
-             target_obj = uuidToObject(brain.targetUID)
-+            if source_obj is None or target_obj is None:
-+                # reference_catalog may be inconsistent
-+                log.info('Cannot delete relation since the relation_catalog is inconsistent.')   # noqa: E501
-+                continue
-             # Delete old reference
-             reference_catalog.deleteReference(
-                 source_obj, target_obj, relationship=referencedRelationship)
+     def testWidgetAllowedTypesDefault(self):
+         from zope.interface import Interface, implementer
+diff --git a/plone/app/textfield/widget.py b/plone/app/textfield/widget.py
+index 35ffb17..b802c16 100644
+--- a/plone/app/textfield/widget.py
++++ b/plone/app/textfield/widget.py
+@@ -141,6 +141,10 @@ def toFieldValue(self, value):
+                 outputMimeType=self.field.output_mime_type,
+                 encoding='utf-8'
+             )
++        elif IRichTextValue.providedBy(value):
++            if value.raw == u'':
++                return self.field.missing_value
++            return value
+         raise ValueError(
+             'Can not convert {0:s} to an IRichTextValue'.format(repr(value))
+         )
+diff --git a/plone/app/textfield/widget.zcml b/plone/app/textfield/widget.zcml
+index 5603f24..a477660 100644
+--- a/plone/app/textfield/widget.zcml
++++ b/plone/app/textfield/widget.zcml
+@@ -52,12 +52,22 @@
+   <!--
+     register alternative template for ITextAreaWidget display in order to
+     render RichValue as structure
++    But then we must reregister the template for our IRichTextWidget
++    for the IPloneFormLayer, otherwise widget_textarea_display.pt
++    will be used for both, which gives wrong results.
+   -->
+-  <z3c:widgetTemplate
++  <configure zcml:condition="installed plone.app.z3cform">
++    <z3c:widgetTemplate
+       layer="plone.app.z3cform.interfaces.IPloneFormLayer"
+       mode="display"
+       template="widget_textarea_display.pt"
+       widget="z3c.form.interfaces.ITextAreaWidget"
+-      zcml:condition="installed plone.app.z3cform"
+-  />
++    />
++    <z3c:widgetTemplate
++      layer="plone.app.z3cform.interfaces.IPloneFormLayer"
++      mode="display"
++      template="widget_display.pt"
++      widget=".widget.IRichTextWidget"
++    />
++  </configure>
+ </configure>
 
 
