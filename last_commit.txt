@@ -1,120 +1,113 @@
-Repository: plone.formwidget.querystring
+Repository: plone.app.multilingual
 
 
 Branch: refs/heads/master
-Date: 2017-08-09T16:25:47+02:00
-Author: Fred van Dijk (fredvd) <fredvd@gmail.com>
-Commit: https://github.com/plone/plone.formwidget.querystring/commit/955c4cad57b50679eadbe027ec2133d4c9667189
+Date: 2017-08-10T13:09:28+02:00
+Author: agitator (agitator) <agitator@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/ed9307392c83e3552bb9df5465fe069f7d005b9b
 
-fix calculation of the baseUrl in queryresults
-
-Files changed:
-M CHANGES.rst
-M plone/formwidget/querystring/querywidget.js
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 7cdc3ce..db7a6c9 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,8 +14,10 @@ New features:
- 
- Bug fixes:
- 
--- *add item here*
--
-+- Recent Plone 4.3 versions have a change in the base href calculation. Fix
-+  calculation of the baseUrl in updating the queryresults in the widgets if
-+  /edit is part of the base href.
-+  [fredvd, maurits]
- 
- 1.1.9 (2017-05-06)
- ------------------
-diff --git a/plone/formwidget/querystring/querywidget.js b/plone/formwidget/querystring/querywidget.js
-index 9656807..b2e50e6 100644
---- a/plone/formwidget/querystring/querywidget.js
-+++ b/plone/formwidget/querystring/querywidget.js
-@@ -201,13 +201,20 @@
- 
-     $.querywidget.updateSearch = function () {
-         var context_url = (function() {
--            var baseUrl, pieces;
-+            var baseUrl, pieces, index;
-             baseUrl = $('base').attr('href');
-             if (!baseUrl) {
-                 pieces = window.location.href.split('/');
-                 pieces.pop();
-                 baseUrl = pieces.join('/');
-             }
-+            index = baseUrl.lastIndexOf('/');
-+            if (index > -1 && baseUrl.lastIndexOf('edit') > index) {
-+                // The url is for an edit page, so we strip the last part,
-+                // otherwise we wrongly get /edit/@@querybuilder_html_results
-+                // 'edit' can be 'atct_edit' too.
-+                baseUrl = baseUrl.slice(0, index);
-+            }
-             return baseUrl;
-         })();
-         var query = context_url + "/@@querybuilder_html_results?";
-
-
-Repository: plone.formwidget.querystring
-
-
-Branch: refs/heads/master
-Date: 2017-08-09T17:09:53+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.formwidget.querystring/commit/f2eaf13cb98a6d43cff1e682a9a835e4b4e64f3c
-
-Merge pull request #18 from plone/fix_base_href
-
-fix calculation of the baseUrl in queryresults
+Language selector should only show translated languages if always_show_selector is set to false
 
 Files changed:
 M CHANGES.rst
-M plone/formwidget/querystring/querywidget.js
+M src/plone/app/multilingual/browser/selector.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7cdc3ce..db7a6c9 100644
+index 3af7d99f..ba335e08 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,8 +14,10 @@ New features:
+@@ -68,6 +68,9 @@ New features:
  
  Bug fixes:
  
--- *add item here*
--
-+- Recent Plone 4.3 versions have a change in the base href calculation. Fix
-+  calculation of the baseUrl in updating the queryresults in the widgets if
-+  /edit is part of the base href.
-+  [fredvd, maurits]
++- Language selector should only show translated languages if always_show_selector is set to false
++  [agitator]
++
+ - Add missing i18n:translate tags
+   [erral]
  
- 1.1.9 (2017-05-06)
- ------------------
-diff --git a/plone/formwidget/querystring/querywidget.js b/plone/formwidget/querystring/querywidget.js
-index 9656807..b2e50e6 100644
---- a/plone/formwidget/querystring/querywidget.js
-+++ b/plone/formwidget/querystring/querywidget.js
-@@ -201,13 +201,20 @@
+diff --git a/src/plone/app/multilingual/browser/selector.py b/src/plone/app/multilingual/browser/selector.py
+index e3236dab..f3bc236a 100644
+--- a/src/plone/app/multilingual/browser/selector.py
++++ b/src/plone/app/multilingual/browser/selector.py
+@@ -1,10 +1,14 @@
+ # -*- coding: utf-8 -*-
+-from ZTUtils import make_query
+ from plone.app.i18n.locales.browser.selector import LanguageSelector
++from plone.app.multilingual import logger
++from plone.app.multilingual.api import get_translation_manager
+ from plone.app.multilingual.interfaces import ITG
+ from plone.app.multilingual.interfaces import NOTG
++from plone.registry.interfaces import IRegistry
++from zope.component import getUtility
+ from zope.component import queryAdapter
+ from zope.component.hooks import getSite
++from ZTUtils import make_query
  
-     $.querywidget.updateSearch = function () {
-         var context_url = (function() {
--            var baseUrl, pieces;
-+            var baseUrl, pieces, index;
-             baseUrl = $('base').attr('href');
-             if (!baseUrl) {
-                 pieces = window.location.href.split('/');
-                 pieces.pop();
-                 baseUrl = pieces.join('/');
+ 
+ def addQuery(request, url, exclude=tuple(), **extras):
+@@ -72,14 +76,34 @@ class LanguageSelectorViewlet(LanguageSelector):
+ 
+     def languages(self):
+         languages_info = super(LanguageSelectorViewlet, self).languages()
++        registry = getUtility(IRegistry)
++        always_show_selector = registry['plone.always_show_selector']
+         results = []
++        translations = []
+         translation_group = queryAdapter(self.context, ITG)
++
+         if translation_group is None:
+             translation_group = NOTG
++
++        # there is no translation_manager on site root
++        # using try/except to prevent failing for now
++        try:
++            translation_manager = get_translation_manager(self.context)
++            translations = translation_manager.get_translated_languages()
++        except TypeError as e:
++            logger.debug(e)
++
+         for lang_info in languages_info:
++
++            if not (always_show_selector or
++                    lang_info['code'] in translations or
++                    translation_group == 'notg'
++                    ):
++                continue
++
+             # Avoid to modify the original language dict
+             data = lang_info.copy()
+-            data['translated'] = True
++            data['translated'] = lang_info['code'] in translations
+             query_extras = {
+                 'set_language': data['code'],
              }
-+            index = baseUrl.lastIndexOf('/');
-+            if (index > -1 && baseUrl.lastIndexOf('edit') > index) {
-+                // The url is for an edit page, so we strip the last part,
-+                // otherwise we wrongly get /edit/@@querybuilder_html_results
-+                // 'edit' can be 'atct_edit' too.
-+                baseUrl = baseUrl.slice(0, index);
-+            }
-             return baseUrl;
-         })();
-         var query = context_url + "/@@querybuilder_html_results?";
+@@ -87,12 +111,19 @@ def languages(self):
+             if post_path:
+                 query_extras['post_path'] = post_path
+             site = getSite()
+-            data['url'] = addQuery(self.request,
+-                                   site.absolute_url().rstrip("/") +
+-                                   "/@@multilingual-selector/%s/%s" % (
+-                                       translation_group,
+-                                       lang_info['code']
+-                                   ),
+-                                   **query_extras)
++            # if there is no translationgroup,
++            # we still want to switch language in the same context
++            if translation_group == 'notg':
++                data['url'] = self.context.absolute_url() + \
++                    '/?set_language=' + lang_info['code']
++            else:
++                data['url'] = addQuery(self.request,
++                                       site.absolute_url().rstrip("/") +
++                                       "/@@multilingual-selector/%s/%s" % (
++                                           translation_group,
++                                           lang_info['code']
++                                       ),
++                                       **query_extras)
+             results.append(data)
++
+         return results
 
 
