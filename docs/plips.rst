@@ -248,8 +248,8 @@ In file :file:`plips/plip-1234-widget-frobbing.cfg`::
      plone.app.someotherpackage
 
  [sources]
- plone.somepackage = git git://github.com/plone/plone.somepackage.git branch=plip-1234-widget-frobbing
- plone.app.someotherpackage = git git://github.com/plone/plone.app.somepackage.git branch=plip-1234-widget-frobbing
+ plone.somepackage = git https://github.com/plone/plone.somepackage.git branch=plip-1234-widget-frobbing
+ plone.app.someotherpackage = git https://github.com/plone/plone.app.somepackage.git branch=plip-1234-widget-frobbing
 
  [instance]
  eggs +=
