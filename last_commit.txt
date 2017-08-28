@@ -1,1933 +1,723 @@
-Repository: mockup
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2017-07-23T18:33:16Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/eb096c52616af9ad475ad5c9cda9273a4a0a6153
+Date: 2017-08-28T16:25:36+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/7144d44bcf4bf4118e769a846717c3c739bffe65
 
-Add contextual menu to theme files in the file tree
+Disable queuing of indexing-operations during migration to Dexterity to prevent catalog-errors.
 
 Files changed:
 M CHANGES.rst
-M mockup/js/bundles/filemanager.js
-M mockup/js/config.js
-M mockup/patterns/filemanager/pattern.js
-M mockup/patterns/filemanager/templates/app.xml
+M plone/app/contenttypes/migration/browser.py
+M plone/app/contenttypes/migration/migration.py
+M plone/app/contenttypes/migration/patches.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index a5f16fbb..1f449af1 100644
+index 691600b8..afc138a4 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -32,6 +32,21 @@ New features:
-   - Add Anchor (a) tag to the UI views.
-   - Upgrade JQTree to 1.4.1
-   - Enable Drag and Drop inside of the theme editor file tree.
-+ - Search for files and text within files and opening the file upon click.
-+  [b4oshany]
-+ - Add contextual menu to theme files in the file tree.
-+  [b4oshany]
-+ - Search for files and text within files and opening the file upon click.
-+  [b4oshany]
-+ - Added Bootstrap Dropdown menu to the UI views.
-+  [b4oshany]
-+ - Enable Drag and Drop inside of the theme editor file tree.
-+  [b4oshany]
-+ - Added Anchor (a) tag to the UI views.
-+  [b4oshany]
-+ - Upgrade JQTree to 1.4.1
-+  [b4oshany]
-+ - Enable Drag and Drop inside of the theme editor file tree.
-   [b4oshany]
+@@ -34,6 +34,9 @@ Bug fixes:
+   definitions for the content types that have extra field defined on top of the
+   behavior composition. Otherwise no translations can be picked up.
+   [fredvd]
++- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
++  during migration to Dexterity to prevent catalog-errors.
++  [pbauer]
  
-  - Make thumb scale in folder contents listing adjustable/supressable.
-diff --git a/mockup/js/bundles/filemanager.js b/mockup/js/bundles/filemanager.js
-index 84778497..39960793 100644
---- a/mockup/js/bundles/filemanager.js
-+++ b/mockup/js/bundles/filemanager.js
-@@ -1,6 +1,7 @@
- define([
-   'pat-registry',
-   'mockup-patterns-filemanager',
-+  'jqtree-contextmenu'
- ], function(registry) {
-   'use strict';
-   // initialize only if we are in top frame
-diff --git a/mockup/js/config.js b/mockup/js/config.js
-index 5775747a..db006c03 100644
---- a/mockup/js/config.js
-+++ b/mockup/js/config.js
-@@ -35,6 +35,7 @@
-       'dropzone': 'bower_components/dropzone/dist/dropzone-amd-module',
-       'expect': 'bower_components/expect/index',
-       'jqtree': 'bower_components/jqtree/tree.jquery',
-+      'jqtree-contextmenu': 'bower_components/cs-jqtree-contextmenu/src/jqTreeContextMenu',
-       'jquery': 'bower_components/jquery/dist/jquery',
-       'jquery.browser': 'bower_components/jquery.browser/dist/jquery.browser',
-       'jquery.cookie': 'bower_components/jquery.cookie/jquery.cookie',
-@@ -138,6 +139,7 @@
-       'bootstrap-transition': { exports: 'window.jQuery.support.transition', deps: ['jquery'] },
-       'expect': { exports: 'window.expect' },
-       'jqtree': { deps: ['jquery'] },
-+      'jqtree-contextmenu': { deps: ['jqtree'] },
-       'select2': { deps: ["jquery"] },
-       'jquery.cookie': { deps: ['jquery'] },
-       'jquery.event.drag': { deps: ['jquery'] },
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index d6a37f3c..8e613c7a 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -34,6 +34,7 @@ define([
-   'jquery',
-   'pat-base',
-   'underscore',
-+  'jqtree-contextmenu',
-   'mockup-patterns-tree',
-   'mockup-patterns-texteditor',
-   'text!mockup-patterns-filemanager-url/templates/app.xml',
-@@ -54,7 +55,7 @@ define([
-   'mockup-utils',
-   'text!mockup-ui-url/templates/popover.xml',
-   'text!mockup-ui-url/templates/dropdown.xml'
--], function($, Base, _, Tree, TextEditor, AppTemplate, Toolbar,
-+], function($, Base, _, ContextMenu, Tree, TextEditor, AppTemplate, Toolbar,
-   ButtonView, ButtonGroup, AnchorView, DropdownView,
-   AddNewView, NewFolderView, FindFileView, FindInFilesView, DeleteView,
-   CustomizeView, RenameView, UploadView, _t, utils) {
-@@ -346,6 +347,19 @@ define([
-         }
-       });
+ - Use original raw text and mimetype when indexing rich text.
+   This avoids a double transform (raw source to output mimetype to plain text).
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index 487fd9fc..662efb74 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -9,32 +9,24 @@
+ from plone.app.contenttypes.content import NewsItem
+ from plone.app.contenttypes.migration import dxmigration
+ from plone.app.contenttypes.migration import migration
+-from plone.app.contenttypes.migration.patches import patched_insertForwardIndexEntry  # noqa
+ from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+ from plone.app.contenttypes.migration.utils import isSchemaExtended
+ from plone.app.contenttypes.migration.utils import restore_references
+ from plone.app.contenttypes.migration.utils import store_references
+ from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
++from plone.app.contenttypes.migration.patches import patch_before_migration
++from plone.app.contenttypes.migration.patches import undo_patch_after_migration
+ from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.app.contenttypes.utils import DEFAULT_TYPES
+ from plone.browserlayer.interfaces import ILocalBrowserLayerType
+-from plone.dexterity.content import DexterityContent
+ from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
+-from plone.registry.interfaces import IRegistry
+ from plone.z3cform.layout import wrap_form
+ from pprint import pformat
+-from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
+-from Products.CMFCore.interfaces import IPropertiesTool
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+-from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
+-from Products.CMFPlone.interfaces import IEditingSchema
+-from Products.contentmigration.utils import patch
+-from Products.contentmigration.utils import undoPatch
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
+ from Products.statusmessages.interfaces import IStatusMessage
+ from z3c.form import button
+ from z3c.form import field
+@@ -43,7 +35,6 @@
+ from z3c.form.interfaces import HIDDEN_MODE
+ from zope import schema
+ from zope.component import getMultiAdapter
+-from zope.component import getUtility
+ from zope.component import queryUtility
+ from zope.interface import Interface
  
-+      // bind 'tree.contextmenu' event
-+      self.$tree.jqTreeContextMenu({
-+          menu: '#contextual-menu',
-+          onContextMenuItem: function(e, node, $el) {
-+            var action = $el.data("item");
-+            try {
-+              self.btns[action].el.click();
-+            } catch($err) {
-+              console.log("Command does not exist: " + action);
-+            }
-+          }
-+      });
+@@ -60,22 +51,12 @@
+ 
+ logger = logging.getLogger(__name__)
+ 
+-PATCH_NOTIFY = [
+-    DexterityContent,
+-    DefaultDublinCoreImpl,
+-    ExtensibleMetadata
+-]
+ 
+ # Average time to migrate one archetype object, in milliseconds.
+ # This very much depends on the size of the object and system-speed
+ ONE_OBJECT_MIGRATION_TIME = 500
+ 
+ 
+-def pass_fn(*args, **kwargs):
+-    """Empty function used for patching."""
+-    pass
+-
+-
+ class FixBaseClasses(BrowserView):
+ 
+     def __call__(self):
+@@ -168,33 +149,8 @@ def __call__(self,
+             store_references(portal)
+         catalog = portal.portal_catalog
+ 
+-        # switch linkintegrity temp off
+-        ptool = queryUtility(IPropertiesTool)
+-        site_props = getattr(ptool, 'site_properties', None)
+-        link_integrity_in_props = False
+-        if site_props and site_props.hasProperty(
+-                'enable_link_integrity_checks'):
+-            link_integrity_in_props = True
+-            link_integrity = site_props.getProperty(
+-                'enable_link_integrity_checks', False)
+-            site_props.manage_changeProperties(
+-                enable_link_integrity_checks=False)
+-        else:
+-            # Plone 5
+-            registry = getUtility(IRegistry)
+-            editing_settings = registry.forInterface(
+-                IEditingSchema, prefix='plone')
+-            link_integrity = editing_settings.enable_link_integrity_checks
+-            editing_settings.enable_link_integrity_checks = False
+-
+-        # switch of setModificationDate on changes
+-        self.patchNotifyModified()
+-
+-        # patch UUIDIndex
+-        patch(
+-            UUIDIndex,
+-            'insertForwardIndexEntry',
+-            patched_insertForwardIndexEntry)
++        # Patch various things that make migration harder
++        link_integrity, queue_indexing = patch_before_migration()
+ 
+         not_migrated = []
+         migrated_types = {}
+@@ -256,19 +212,8 @@ def __call__(self,
+         if migrate_references:
+             restore_references(portal)
+ 
+-        # switch linkintegrity back to what it was before migrating
+-        if link_integrity_in_props:
+-            site_props.manage_changeProperties(
+-                enable_link_integrity_checks=link_integrity
+-            )
+-        else:
+-            editing_settings.enable_link_integrity_checks = link_integrity
+-
+-        # switch on setModificationDate on changes
+-        self.resetNotifyModified()
+-
+-        # unpatch UUIDIndex
+-        undoPatch(UUIDIndex, 'insertForwardIndexEntry')
++        # Revert to the original state
++        undo_patch_after_migration(link_integrity, queue_indexing)
+ 
+         duration = str(timedelta(seconds=(datetime.now() - starttime).seconds))
+         if not_migrated:
+@@ -313,22 +258,6 @@ def stats(self):
+             results[classname] = results.get(classname, 0) + 1
+         return results
+ 
+-    def patchNotifyModified(self):
+-        """Patch notifyModified to prevent setModificationDate() on changes
+-
+-        notifyModified lives in several places and is also used on folders
+-        when their content changes.
+-        So when we migrate Documents before Folders the folders
+-        ModifiedDate gets changed.
+-        """
+-        for klass in PATCH_NOTIFY:
+-            patch(klass, 'notifyModified', pass_fn)
+-
+-    def resetNotifyModified(self):
+-        """reset notifyModified to old state"""
+-        for klass in PATCH_NOTIFY:
+-            undoPatch(klass, 'notifyModified')
+-
+ 
+ class IATCTMigratorForm(Interface):
+ 
+diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
+index ee8438b8..95729f99 100644
+--- a/plone/app/contenttypes/migration/migration.py
++++ b/plone/app/contenttypes/migration/migration.py
+@@ -17,6 +17,8 @@
+ from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
+ from plone.app.contenttypes.migration.field_migrators import migrate_richtextfield  # noqa
+ from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
++from plone.app.contenttypes.migration.patches import patch_before_migration
++from plone.app.contenttypes.migration.patches import undo_patch_after_migration
+ from plone.app.contenttypes.migration.utils import copy_contentrules
+ from plone.app.contenttypes.migration.utils import migrate_leadimage
+ from plone.app.contenttypes.migration.utils import migrate_portlets
+@@ -476,6 +478,9 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+     """
+     portal = getSite()
+ 
++    # Patch various things that make migration harder
++    link_integrity, queue_indexing = patch_before_migration()
 +
-       self.$tree.bind('tree.select', function(e) {
-         if (e.node === null) {
-           self.toggleButtons(false);
-diff --git a/mockup/patterns/filemanager/templates/app.xml b/mockup/patterns/filemanager/templates/app.xml
-index e5194500..6c335b68 100644
---- a/mockup/patterns/filemanager/templates/app.xml
-+++ b/mockup/patterns/filemanager/templates/app.xml
-@@ -17,3 +17,9 @@
-             </div>
-         </nav>
- </div>
-+<div id="contextual-menu" class="dropdown-menu">
-+    <li data-item="newfile"><a>New File</a></li>
-+    <li data-item="newfolder"><a>New Folder</a></li>
-+    <li data-item="rename"><a>Rename</a></li>
-+    <li data-item="delete"><a>Delete</a></li>
-+</div>
+     # if the type still exists get the src_meta_type from the portal_type
+     portal_types = getToolByName(portal, 'portal_types')
+     fti = portal_types.get(src_type, None)
+@@ -513,6 +518,7 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+                                     fields_mapping=fields_mapping,
+                                     is_folderish=is_folderish,
+                                     dry_run=dry_run)
++    walker_infos = None
+     if migrator:
+         migrator.src_meta_type = src_meta_type
+         migrator.dst_meta_type = ''
+@@ -534,4 +540,8 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+             logger.error(error.get('message'))
+         if dry_run:
+             transaction.abort()
+-        return walker_infos
++
++    # Revert to the original state
++    undo_patch_after_migration(link_integrity, queue_indexing)
++
++    return walker_infos
+diff --git a/plone/app/contenttypes/migration/patches.py b/plone/app/contenttypes/migration/patches.py
+index 7cc10636..24e32f60 100644
+--- a/plone/app/contenttypes/migration/patches.py
++++ b/plone/app/contenttypes/migration/patches.py
+@@ -2,7 +2,25 @@
+ """Patches used for migrations. These patches are applied before and removed
+ after running the migration.
+ """
++from plone.dexterity.content import DexterityContent
++from plone.registry.interfaces import IRegistry
++from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
++from Products.CMFCore.interfaces import IPropertiesTool
++from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
++from Products.CMFPlone.interfaces import IEditingSchema
++from Products.contentmigration.utils import patch
++from Products.contentmigration.utils import undoPatch
+ from Products.PluginIndexes.common.UnIndex import _marker
++from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
++from zope.component import getUtility
++from zope.component import queryUtility
++
++import os
++
++
++def pass_fn(*args, **kwargs):
++    """Empty function used for patching."""
++    pass
+ 
+ 
+ # Prevent UUID Error-Messages when migrating folders.
+@@ -18,3 +36,85 @@ def patched_insertForwardIndexEntry(self, entry, documentId):
+     if old_docid is _marker:
+         self._index[entry] = documentId
+         self._length.change(1)
++
++
++def patch_before_migration():
++    """Patch various things that make migration harder."""
++    # Switch linkintegrity off
++    ptool = queryUtility(IPropertiesTool)
++    site_props = getattr(ptool, 'site_properties', None)
++    if site_props and site_props.hasProperty(
++            'enable_link_integrity_checks'):
++        link_integrity = site_props.getProperty(
++            'enable_link_integrity_checks', False)
++        site_props.manage_changeProperties(
++            enable_link_integrity_checks=False)
++    else:
++        # Plone 5
++        registry = getUtility(IRegistry)
++        editing_settings = registry.forInterface(
++            IEditingSchema, prefix='plone')
++        link_integrity = editing_settings.enable_link_integrity_checks
++        editing_settings.enable_link_integrity_checks = False
++
++    # Patch notifyModified to prevent setModificationDate() on changes
++    # notifyModified lives in several places and is also used on folders
++    # when their content changes.
++    # So when we migrate Documents before Folders the folders
++    # ModifiedDate gets changed
++    PATCH_NOTIFY = [
++        DexterityContent,
++        DefaultDublinCoreImpl,
++        ExtensibleMetadata
++    ]
++    for klass in PATCH_NOTIFY:
++        patch(klass, 'notifyModified', pass_fn)
++
++    # Disable queueing of indexing/reindexing/unindexing
++    queue_indexing = os.environ.get('CATALOG_OPTIMIZATION_DISABLED', None)
++    os.environ['CATALOG_OPTIMIZATION_DISABLED'] = '1'
++
++    # Patch UUIDIndex
++    patch(
++        UUIDIndex,
++        'insertForwardIndexEntry',
++        patched_insertForwardIndexEntry)
++
++    return link_integrity, queue_indexing
++
++
++def undo_patch_after_migration(link_integrity=True, queue_indexing=None):
++    """Revert to the original state."""
++
++    # Switch linkintegrity back to what it was before migrating
++    ptool = queryUtility(IPropertiesTool)
++    site_props = getattr(ptool, 'site_properties', None)
++    if site_props and site_props.hasProperty(
++            'enable_link_integrity_checks'):
++        site_props.manage_changeProperties(
++            enable_link_integrity_checks=link_integrity
++        )
++    else:
++        # Plone 5
++        registry = getUtility(IRegistry)
++        editing_settings = registry.forInterface(
++            IEditingSchema, prefix='plone')
++        editing_settings.enable_link_integrity_checks = link_integrity
++
++    # Switch on setModificationDate on changes
++    PATCH_NOTIFY = [
++        DexterityContent,
++        DefaultDublinCoreImpl,
++        ExtensibleMetadata
++    ]
++    for klass in PATCH_NOTIFY:
++        undoPatch(klass, 'notifyModified')
++
++    # Reset queueing of indexing/reindexing/unindexing
++    if queue_indexing is not None:
++        os.environ['CATALOG_OPTIMIZATION_DISABLED'] = queue_indexing
++    else:
++        del os.environ['CATALOG_OPTIMIZATION_DISABLED']
++
++    # Unpatch UUIDIndex
++    undoPatch(UUIDIndex, 'insertForwardIndexEntry')
 
 
-Repository: mockup
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2017-07-23T18:33:16Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/83c7e24bfab0fc457e426e49c3f5cb225d43af2d
+Date: 2017-08-28T16:26:38+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/5ca9415d674293ca2288b2cc6d3259f8790108fb
 
-Added test for the contextual menu.
+fix changelog
 
 Files changed:
 M CHANGES.rst
-M mockup/patterns/filemanager/templates/app.xml
-M mockup/tests/pattern-filemanager-test.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 1f449af1..174807db 100644
+index afc138a4..2fe07a6d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -32,21 +32,7 @@ New features:
-   - Add Anchor (a) tag to the UI views.
-   - Upgrade JQTree to 1.4.1
-   - Enable Drag and Drop inside of the theme editor file tree.
-- - Search for files and text within files and opening the file upon click.
--  [b4oshany]
-- - Add contextual menu to theme files in the file tree.
--  [b4oshany]
-- - Search for files and text within files and opening the file upon click.
--  [b4oshany]
-- - Added Bootstrap Dropdown menu to the UI views.
--  [b4oshany]
-- - Enable Drag and Drop inside of the theme editor file tree.
--  [b4oshany]
-- - Added Anchor (a) tag to the UI views.
--  [b4oshany]
-- - Upgrade JQTree to 1.4.1
--  [b4oshany]
-- - Enable Drag and Drop inside of the theme editor file tree.
-+  - Add contextual menu to theme files in the file tree.
-   [b4oshany]
+@@ -14,7 +14,9 @@ New features:
  
-  - Make thumb scale in folder contents listing adjustable/supressable.
-diff --git a/mockup/patterns/filemanager/templates/app.xml b/mockup/patterns/filemanager/templates/app.xml
-index 6c335b68..280faaad 100644
---- a/mockup/patterns/filemanager/templates/app.xml
-+++ b/mockup/patterns/filemanager/templates/app.xml
-@@ -17,9 +17,9 @@
-             </div>
-         </nav>
- </div>
--<div id="contextual-menu" class="dropdown-menu">
-+<ul id="contextual-menu" class="dropdown-menu">
-     <li data-item="newfile"><a>New File</a></li>
-     <li data-item="newfolder"><a>New Folder</a></li>
-     <li data-item="rename"><a>Rename</a></li>
-     <li data-item="delete"><a>Delete</a></li>
--</div>
-+</ul>
-diff --git a/mockup/tests/pattern-filemanager-test.js b/mockup/tests/pattern-filemanager-test.js
-index 1789b425..8f3577d3 100644
---- a/mockup/tests/pattern-filemanager-test.js
-+++ b/mockup/tests/pattern-filemanager-test.js
-@@ -40,7 +40,8 @@ define([
-       registry.scan(this.$el);
-       this.clock.tick(1000);
-       expect(this.$el.find('.tree ul').length).to.be.equal(2);
-+      expect($('#contextual-menu li').length).to.be.equal(4);
-     });
-   });
+ Bug fixes:
  
--});
-\ No newline at end of file
-+});
+-- *add item here*
++- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
++  during migration to Dexterity to prevent catalog-errors.
++  [pbauer]
+ 
+ 
+ 1.4.2 (2017-08-27)
+@@ -34,9 +36,6 @@ Bug fixes:
+   definitions for the content types that have extra field defined on top of the
+   behavior composition. Otherwise no translations can be picked up.
+   [fredvd]
+-- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
+-  during migration to Dexterity to prevent catalog-errors.
+-  [pbauer]
+ 
+ - Use original raw text and mimetype when indexing rich text.
+   This avoids a double transform (raw source to output mimetype to plain text).
 
 
-Repository: mockup
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2017-07-23T18:33:16Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/22b4237d199e34e3ce66c475bb7ee3348d213061
+Date: 2017-08-28T18:07:47+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/1f4ec947c6c2b195712c432284e9ee6a68096475
 
-Improved the drag and drop feature.
+Merge pull request #423 from plone/patch_catalog_optimization
 
-Files changed:
-M mockup/patterns/filemanager/pattern.js
-M mockup/patterns/filemanager/templates/app.xml
-
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index 8e613c7a..f4e194ad 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -171,6 +171,13 @@ define([
-           tooltip: _t('Delete currently selected resource'),
-           icon: 'trash',
-           context: 'danger'
-+        }),
-+        "upload": new ButtonView({
-+            id: 'upload',
-+            title: _t('Upload'),
-+            tooltip: _t('Upload file to current directory'),
-+            icon: 'upload',
-+            context: 'default'
-         })
-       };
- 
-@@ -208,7 +215,7 @@ define([
-         id: 'find',
-         app: self,
-         disable: function() {}
--      })
-+      });
- 
-       self.views = [
-         newFolderView,
-@@ -229,13 +236,7 @@ define([
- 
-       if (self.options.uploadUrl && utils.featureSupport.dragAndDrop() && utils.featureSupport.fileApi()) {
-         var uploadView = new UploadView({
--          triggerView: new ButtonView({
--            id: 'upload',
--            title: _t('Upload'),
--            tooltip: _t('Upload file to current directory'),
--            icon: 'upload',
--            context: 'default'
--          }),
-+          triggerView: self.btns["upload"],
-           app: self,
-           callback: function(data) {
-             var path = self.uploadFolder + '/' + data.name;
-diff --git a/mockup/patterns/filemanager/templates/app.xml b/mockup/patterns/filemanager/templates/app.xml
-index 280faaad..519d6dad 100644
---- a/mockup/patterns/filemanager/templates/app.xml
-+++ b/mockup/patterns/filemanager/templates/app.xml
-@@ -22,4 +22,5 @@
-     <li data-item="newfolder"><a>New Folder</a></li>
-     <li data-item="rename"><a>Rename</a></li>
-     <li data-item="delete"><a>Delete</a></li>
-+    <li data-item="upload"><a>Upload Here</a></li>
- </ul>
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-23T18:33:16Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/3a414c24b69e0c4573591d421cb88e320a519aa0
-
-Closes #787, Dragging the same file back and forth gives error on file manager pattern
+Add patch of catalog optimization during migrations to DX
 
 Files changed:
-M bower.json
-M mockup/js/config.js
-M mockup/js/ui/templates/dropdown.xml
-M mockup/js/ui/views/anchor.js
-M mockup/patterns/filemanager/pattern.filemanager.less
-M mockup/patterns/filemanager/pattern.js
-M mockup/patterns/thememapper/pattern.js
-
-diff --git a/bower.json b/bower.json
-index 55232710..13cba75a 100644
---- a/bower.json
-+++ b/bower.json
-@@ -23,7 +23,9 @@
-     "requirejs-text": "2.0.15",
-     "select2": "3.5.4",
-     "selectivizr": "1.0.2",
--    "tinymce-builded": "4.5.6"
-+    "tinymce-builded": "4.5.6",
-+    "js-shortcuts": "^1.0.1"
-+    "cs-jqtree-contextmenu": "^0.1.0",
-   },
-   "devDependencies": {
-     "expect": "0.3.1",
-diff --git a/mockup/js/config.js b/mockup/js/config.js
-index db006c03..7c49ed42 100644
---- a/mockup/js/config.js
-+++ b/mockup/js/config.js
-@@ -46,6 +46,7 @@
-       'jquery.tools.dateinput': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.dateinput',
-       'jquery.tools.overlay': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.overlay',
-       'jquery.tmpl': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tmpl',
-+      'js-shortcuts': 'bower_components/js-shortcuts/js-shortcuts.js',
-       'translate': 'js/i18n-wrapper',
-       'marked': 'bower_components/marked/lib/marked',
-       'mockup-bundles-docs': 'js/bundles/docs',
-@@ -140,6 +141,7 @@
-       'expect': { exports: 'window.expect' },
-       'jqtree': { deps: ['jquery'] },
-       'jqtree-contextmenu': { deps: ['jqtree'] },
-+      'js-shortcuts': { deps: ['jquery'] },
-       'select2': { deps: ["jquery"] },
-       'jquery.cookie': { deps: ['jquery'] },
-       'jquery.event.drag': { deps: ['jquery'] },
-diff --git a/mockup/js/ui/templates/dropdown.xml b/mockup/js/ui/templates/dropdown.xml
-index 34c20d25..82c130e7 100644
---- a/mockup/js/ui/templates/dropdown.xml
-+++ b/mockup/js/ui/templates/dropdown.xml
-@@ -1,6 +1,6 @@
- 
- <a href="#" class="btn btn-default dropdown-toggle" type="button" id="dropdown-menu-" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
--  <span class="glyphicon glyphicon-search"></span>
-+  <span class="glyphicon glyphicon-<%= icon %>"></span>
-   <span class="dropdown-title">
- 
-   </span>
-diff --git a/mockup/js/ui/views/anchor.js b/mockup/js/ui/views/anchor.js
-index 9e0f8e4a..3d373ee2 100644
---- a/mockup/js/ui/views/anchor.js
-+++ b/mockup/js/ui/views/anchor.js
-@@ -11,12 +11,13 @@ define([
-     eventPrefix: 'button',
-     context: 'default',
-     idPrefix: 'alink-',
-+    shortcut: '',
-     attributes: {
-       'href': '#'
-     },
-     extraClasses: [],
-     tooltip: null,
--    template: '<% if (icon) { %><span class="glyphicon glyphicon-<%= icon %>"></span><% } %> <%= title %>',
-+    template: '<% if (icon) { %><span class="glyphicon glyphicon-<%= icon %>"></span><% } %> <%= title %> <span class="shortcut"><%= shortcut %></span>',
-     events: {
-       'click': 'handleClick'
-     },
-@@ -28,7 +29,7 @@ define([
-       BaseView.prototype.initialize.apply(this, [options]);
- 
-       this.on('render', function() {
--        this.$el.attr('title', this.options.title || '');
-+        this.$el.attr('title', this.options.tooltip || this.options.title || '');
-         this.$el.attr('aria-label', this.options.title || this.options.tooltip || '');
-         _.each(this.extraClasses, function(klass) {
-           this.$el.addClass(klass);
-@@ -42,7 +43,7 @@ define([
-       }
-     },
-     serializedModel: function() {
--      return _.extend({'icon': '', 'title': ''}, this.options);
-+      return _.extend({'icon': '', 'title': '', 'shortcut': ''}, this.options);
-     },
-     disable: function() {
-       this.$el.prop('disabled', true);
-diff --git a/mockup/patterns/filemanager/pattern.filemanager.less b/mockup/patterns/filemanager/pattern.filemanager.less
-index f2049f80..ed7c07a3 100644
---- a/mockup/patterns/filemanager/pattern.filemanager.less
-+++ b/mockup/patterns/filemanager/pattern.filemanager.less
-@@ -47,6 +47,15 @@
-         display: inline-block;
-         margin: 0 !important;
-         vertical-align: initial !important;
-+        
-+        span.shortcut {
-+            display: inline-block;
-+            float: right;
-+        }
-+
-+        ul.dropdown-menu.items.dropdown-content {
-+            min-width: 250px;
-+        }
-     }
-     .input-group:extend(.input-group all){}
-     .input-group-addon:extend(.input-group-addon all){}
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index f4e194ad..58fd9b47 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -53,12 +53,13 @@ define([
-   'mockup-patterns-filemanager-url/js/upload',
-   'translate',
-   'mockup-utils',
-+  'js-shortcuts',
-   'text!mockup-ui-url/templates/popover.xml',
-   'text!mockup-ui-url/templates/dropdown.xml'
- ], function($, Base, _, ContextMenu, Tree, TextEditor, AppTemplate, Toolbar,
-   ButtonView, ButtonGroup, AnchorView, DropdownView,
-   AddNewView, NewFolderView, FindFileView, FindInFilesView, DeleteView,
--  CustomizeView, RenameView, UploadView, _t, utils) {
-+  CustomizeView, RenameView, UploadView, _t, utils, jsShortcuts) {
-   'use strict';
- 
-   var FileManager = Base.extend({
-@@ -127,58 +128,56 @@ define([
-         id: 'save',
-         title: _t('Save'),
-         icon: 'floppy-disk',
--        context: 'primary'
-+        context: 'primary',
-+        shortcut: 'Ctrl-S'
-       });
-       self.btns = {
--        "newfolder": new ButtonView({
-+        "newfolder": new AnchorView({
-           id: 'newfolder',
-           title: _t('New folder'),
-           tooltip: _t('Add new folder to current directory'),
-           icon: 'folder-open',
--          context: 'default'
-+          context: 'default',
-+          shortcut: 'Alt-Shift-N'
-         }),
--        "newfile": new ButtonView({
-+        "newfile": new AnchorView({
-           id: 'addnew',
--          title: _t('Add new file'),
-+          title: _t('New file'),
-           tooltip: _t('Add new file to current folder'),
-           icon: 'file',
--          context: 'default'
-+          context: 'default',
-+          shortcut: 'Alt-N'
-         }),
-         "findfile": new AnchorView({
-           id: 'findfile',
-           title: _t('Find File'),
-           tooltip: _t('Find theme resource in plone'),
--          icon: 'file',
--          context: 'default'
-+          icon: 'search',
-+          context: 'default',
-+          shortcut: 'Ctrl-F'
-         }),
-         "findtextinfile": new AnchorView({
-           id: 'findinfiles',
-           title: _t('Find in Files'),
-           tooltip: _t('Find text within theme resource in plone'),
--          icon: 'file',
--          context: 'default'
-+          icon: 'search',
-+          context: 'default',
-+          shortcut: 'Ctrl-E'
-         }),
--        "rename": new ButtonView({
-+        "rename": new AnchorView({
-           id: 'rename',
-           title: _t('Rename'),
-           tooltip: _t('Rename currently selected resource'),
-           icon: 'random',
-           context: 'default'
-         }),
--        "delete": new ButtonView({
-+        "delete": new AnchorView({
-           id: 'delete',
-           title: _t('Delete'),
-           tooltip: _t('Delete currently selected resource'),
-           icon: 'trash',
-           context: 'danger'
-         }),
--        "upload": new ButtonView({
--            id: 'upload',
--            title: _t('Upload'),
--            tooltip: _t('Upload file to current directory'),
--            icon: 'upload',
--            context: 'default'
--        })
-       };
- 
-       var newFolderView = new NewFolderView({
-@@ -206,35 +205,71 @@ define([
-         app: self
-       });
- 
-+      var file_menu = new DropdownView({
-+        title: _t('File'),
-+        items: [
-+          addNewView.triggerView,
-+          newFolderView.triggerView
-+        ],
-+        id: 'file_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+
-+      var edit_menu = new DropdownView({
-+        title: _t('Edit'),
-+        items: [
-+          renameView.triggerView,
-+          deleteView.triggerView
-+        ],
-+        id: 'edit_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+
-       var find_menu = new DropdownView({
-         title: _t('Find'),
-         items: [
-           findFileView.triggerView,
-           findinFilesView.triggerView
-         ],
--        id: 'find',
-+        id: 'find_menu',
-+        icon: 'search',
-         app: self,
-         disable: function() {}
-       });
- 
--      self.views = [
--        newFolderView,
--        addNewView,
--        findFileView,
--        findinFilesView,
--        renameView,
--        deleteView
--      ];
-+      var views = {
-+        "file_menu": [
-+          newFolderView,
-+          addNewView
-+        ],
-+        "edit_menu": [
-+          renameView,
-+          deleteView,
-+        ],
-+        "find_menu": [
-+          findFileView,
-+          findinFilesView
-+        ],
-+      };
-       var mainButtons = [
-         self.saveBtn,
--        newFolderView.triggerView,
--        addNewView.triggerView,
-+        file_menu,
-+        edit_menu,
-         find_menu,
--        renameView.triggerView,
--        deleteView.triggerView
-       ];
- 
-       if (self.options.uploadUrl && utils.featureSupport.dragAndDrop() && utils.featureSupport.fileApi()) {
-+        self.btns["upload"] = new AnchorView({
-+            id: 'upload',
-+            title: _t('Upload Local Files...'),
-+            tooltip: _t('Upload file to current directory'),
-+            icon: 'upload',
-+            context: 'default'
-+        });
-         var uploadView = new UploadView({
-           triggerView: self.btns["upload"],
-           app: self,
-@@ -247,22 +282,28 @@ define([
- 
-           }
-         });
--        self.views.push(uploadView);
--        mainButtons.push(uploadView.triggerView);
-+        
-+        views.file_menu.push(uploadView);
-+        file_menu.items.push(uploadView.triggerView);
-       }
-       if (self.options.resourceSearchUrl) {
-+        self.btns["customize"] = new AnchorView({
-+          id: 'customize',
-+          title: _t('Add new override'),
-+          tooltip: _t('Find resource in plone to override'),
-+          context: 'default'
-+        });
-         var customizeView = new CustomizeView({
--          triggerView: new ButtonView({
--            id: 'customize',
--            title: _t('Add new override'),
--            tooltip: _t('Find resource in plone to override'),
--            context: 'default'
--          }),
-+          triggerView: self.btns["customize"],
-           app: self
-         });
--        self.views.push(customizeView);
--        mainButtons.push(customizeView.triggerView);
-+        views["edit_menu"].push(customizeView);
-+        edit_menu.items.push(customizeView.triggerView);
-       }
-+      console.log(mainButtons);
-+      console.log(views);
-+      self.views = [];
-+      self.views = self.views.concat(views.file_menu).concat(views.edit_menu).concat(views.find_menu);
- 
-       self.toolbar = new Toolbar({
-         items: [
-@@ -301,7 +342,29 @@ define([
-         self._save();
-       });
-       self.render();
-+      self.shortcuts();
-+      
-     },
-+    
-+    shortcuts: function(){
-+      var self = this;
-+      shortcut.add("Alt+N", function () {
-+        self.btns.newfile.$el.click();
-+      });
-+      shortcut.add("Alt+Shift+N", function () {
-+        self.btns.newfolder.$el.click();
-+      });
-+      shortcut.add("Ctrl+S", function () {
-+        self.saveBtn.$el.click();
-+      });
-+      shortcut.add("Ctrl+F", function () {
-+        self.btns.findfile.$el.click();
-+      });
-+      shortcut.add("Ctrl+E", function () {
-+        self.btns.findtextinfile.$el.click();
-+      });
-+    },
-+    
-     $: function(selector) {
-       return this.$el.find(selector);
-     },
-@@ -372,8 +435,9 @@ define([
- 
-       self.$tree.bind('tree.move', function(event) {
-         
-+        var target_node = event.move_info.target_node;
-         var srcpath = event.move_info.moved_node.path;
--        var newpath = event.move_info.target_node.path;
-+        var newpath = target_node.path;
-         if (event.move_info.position !== "inside" ){
-           newpath = newpath.substring(newpath.indexOf('/'), newpath.lastIndexOf('/'));
-         }
-@@ -386,6 +450,9 @@ define([
-           dataType: 'json',
-           success: function(data) {
-             console.log(data);
-+            self.$tree.tree('reload', function() {
-+              self.$tree.tree('selectNode', target_node);
-+            });
-             var jdata = JSON.parse(data);
-             if(jdata.error != ''){
-               alert(jdata.error);
-diff --git a/mockup/patterns/thememapper/pattern.js b/mockup/patterns/thememapper/pattern.js
-index b8c21767..ef016f7b 100644
---- a/mockup/patterns/thememapper/pattern.js
-+++ b/mockup/patterns/thememapper/pattern.js
-@@ -39,8 +39,12 @@ define([
-   'mockup-patterns-thememapper-url/js/cacheview',
-   'mockup-ui-url/views/button',
-   'mockup-ui-url/views/buttongroup',
-+  'mockup-ui-url/views/anchor',
-+  'mockup-ui-url/views/dropdown',
-   'mockup-utils'
--], function($, Base, _, _t, InspectorTemplate, FileManager, RuleBuilder, RuleBuilderView, LessBuilderView, CacheView, ButtonView, ButtonGroup, utils) {
-+], function($, Base, _, _t, InspectorTemplate, FileManager, RuleBuilder, RuleBuilderView,
-+            LessBuilderView, CacheView, ButtonView, ButtonGroup,
-+            AnchorView, DropdownView, utils) {
-   'use strict';
- 
-   var inspectorTemplate = _.template(InspectorTemplate);
-@@ -317,6 +321,8 @@ define([
-       self.fileManager = new FileManager(self.$fileManager, self.options.filemanagerConfig);
-       self.fileManager.setUploadUrl();
- 
-+      self.btns = {};
-+      self.menus = {};
-       self.setupButtons();
- 
-       self.ruleBuilder = new RuleBuilder(self, self.ruleBuilderCallback);
-@@ -337,7 +343,7 @@ define([
-         ruleBuilder: self.ruleBuilder,
-         url: self.options.unthemedUrl,
-       });
--      self.buildLessButton.disable();
-+      self.btns.buildLessButton.disable();
- 
-       if(!self.options.editable) {
-         if(self.fileManager.toolbar) {
-@@ -382,10 +388,10 @@ define([
-       var self = this;
- 
-       if(node.fileType === 'less'){
--        self.buildLessButton.enable();
-+        self.btns.buildLessButton.enable();
-       }
-       else {
--        self.buildLessButton.disable();
-+        self.btns.buildLessButton.disable();
-       }
- 
-       if (node.path !== '') {
-@@ -469,8 +475,8 @@ define([
-       var $parent = self.$mockupInspector.parent();
-       $parent.slideDown();
-       self.hidden = false;
--      self.showInspectorsButton.options.title = 'Hide inspectors';
--      self.showInspectorsButton.applyTemplate();
-+      self.btns.showInspectorsButton.options.title = 'Hide inspectors';
-+      self.btns.showInspectorsButton.applyTemplate();
-       $('html, body').animate({
-         scrollTop: $parent.offset().top - 50
-       }, 500);
-@@ -480,41 +486,41 @@ define([
-       var $parent = self.$mockupInspector.parent();
-       $parent.slideUp();
-       self.hidden = true;
--      self.showInspectorsButton.options.title = 'Show inspectors';
--      self.showInspectorsButton.applyTemplate();
-+      self.btns.showInspectorsButton.options.title = 'Show inspectors';
-+      self.btns.showInspectorsButton.applyTemplate();
-     },
-     setupButtons: function(){
-       var self = this;
--      self.showInspectorsButton = new ButtonView({
-+      self.btns.showInspectorsButton = new ButtonView({
-         id: 'showinspectors',
-         title: _t('Show inspectors'),
-         icon: 'search',
-         tooltip: _t('Show inspector panels'),
-         context: 'default'
-       });
--      self.showInspectorsButton.on('button:click', function(){
-+      self.btns.showInspectorsButton.on('button:click', function(){
-         if (self.hidden) {
-           self.showInspectors();
-         } else {
-           self.hideInspectors();
-         }
-       });
--
--      self.buildRuleButton = new ButtonView({
-+      
-+      self.btns.buildRuleButton = new AnchorView({
-         id: 'buildrule',
-         title: _t('Build rule'),
-         icon: 'wrench',
-         tooltip: _t('rule building wizard'),
-         context: 'default'
-       });
--      self.fullscreenButton = new ButtonView({
-+      self.btns.fullscreenButton = new ButtonView({
-         id: 'fullscreenEditor',
-         title: _t('Fullscreen'),
-         icon: 'fullscreen',
-         tooltip: _t('view the editor in fullscreen'),
-         context: 'default'
-       });
--      self.fullscreenButton.on('button:click', function() {
-+      self.btns.fullscreenButton.on('button:click', function() {
-         var btn = $('<a href="#">'+
-             '<span class="btn btn-danger closeeditor">' + _t('Close Fullscreen') + '</span>'+
-             '</a>').prependTo($('.tree'));
-@@ -536,62 +542,75 @@ define([
-       self.previewThemeButton.on('button:click', function(){
-         window.open(self.options.previewUrl);
-       });
--      self.buildLessButton = new ButtonView({
-+      self.btns.buildLessButton = new AnchorView({
-         id: 'buildless',
-         title: _t('Build CSS'),
-         icon: 'cog',
-         tooltip: _t('Compile LESS file'),
-         context: 'default'
-       });
--      self.refreshButton = new ButtonView({
-+      self.btns.refreshButton = new ButtonView({
-         id: 'refreshButton ',
-         title: _t('Refresh'),
-         icon: 'refresh',
-         tooltip: _t('Reload the current file'),
-         context: 'default'
-       });
--      self.refreshButton.on('button:click', function() {
-+      self.btns.refreshButton.on('button:click', function() {
-         self.fileManager.refreshFile();
-       });
--      self.cacheButton = new ButtonView({
-+      self.btns.cacheButton = new ButtonView({
-         id: 'cachebutton',
-         title: _t('Clear cache'),
-         icon: 'floppy-remove',
-         tooltip: _t('Clear site\'s theme cache'),
-         context: 'default'
-       });
--      self.helpButton = new ButtonView({
-+      self.btns.helpButton = new ButtonView({
-         id: 'helpbutton',
-         title: _t('Help'),
-         icon: 'question-sign',
-         tooltip: _t('Show help'),
-         context: 'default'
-       });
--      self.helpButton.on('button:click', function(){
-+      self.btns.helpButton.on('button:click', function(){
-         window.open(self.options.helpUrl);
-       });
-       self.rulebuilderView = new RuleBuilderView({
--        triggerView: self.buildRuleButton,
-+        triggerView: self.btns.buildRuleButton,
-         app: self
-       });
-       self.cacheView = new CacheView({
--        triggerView: self.cacheButton,
-+        triggerView: self.btns.cacheButton,
-         app: self
-       });
-       self.lessbuilderView = new LessBuilderView({
--        triggerView: self.buildLessButton,
-+        triggerView: self.btns.buildLessButton,
-         app: self
-       });
-+      
-+
-+      self.menus.tools = new DropdownView({
-+        title: _t('Tools'),
-+        items: [
-+          self.btns.buildRuleButton,
-+          self.btns.buildLessButton,
-+        ],
-+        id: 'file_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+      
-       self.buttonGroup = new ButtonGroup({
-         items: [
--          self.showInspectorsButton,
--          self.buildRuleButton,
-+          self.menus.tools,
-+          self.btns.showInspectorsButton,
-           self.previewThemeButton,
--          self.fullscreenButton,
--          self.buildLessButton,
--          self.refreshButton,
--          self.cacheButton,
--          self.helpButton
-+          self.btns.fullscreenButton,
-+          self.btns.refreshButton,
-+          self.btns.cacheButton,
-+          self.btns.helpButton
-         ],
-         id: 'mapper'
-       });
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-24T14:52:18Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/ab00c0f3241c4b225dde289880198feff6b13eec
-
-Updated the bower.json file.
-
-Files changed:
-M bower.json
-
-diff --git a/bower.json b/bower.json
-index 13cba75a..4ffe8a64 100644
---- a/bower.json
-+++ b/bower.json
-@@ -24,8 +24,8 @@
-     "select2": "3.5.4",
-     "selectivizr": "1.0.2",
-     "tinymce-builded": "4.5.6",
--    "js-shortcuts": "^1.0.1"
--    "cs-jqtree-contextmenu": "^0.1.0",
-+    "js-shortcuts": "^1.0.1",
-+    "cs-jqtree-contextmenu": "^0.1.0"
-   },
-   "devDependencies": {
-     "expect": "0.3.1",
-@@ -38,4 +38,4 @@
-     "select2": "3.5.4",
-     "moment": "2.10.6"
-   }
--}
-+}
-\ No newline at end of file
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-24T16:11:04Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/019011f16fd5eee975467cd694edb940c41e5049
-
-Updated the config file.
-
-Files changed:
-M mockup/js/config.js
-
-diff --git a/mockup/js/config.js b/mockup/js/config.js
-index 7c49ed42..bd11b50a 100644
---- a/mockup/js/config.js
-+++ b/mockup/js/config.js
-@@ -46,7 +46,7 @@
-       'jquery.tools.dateinput': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.dateinput',
-       'jquery.tools.overlay': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.overlay',
-       'jquery.tmpl': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tmpl',
--      'js-shortcuts': 'bower_components/js-shortcuts/js-shortcuts.js',
-+      'js-shortcuts': 'bower_components/js-shortcuts/js-shortcuts',
-       'translate': 'js/i18n-wrapper',
-       'marked': 'bower_components/marked/lib/marked',
-       'mockup-bundles-docs': 'js/bundles/docs',
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-26T23:51:35+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/63afd7a50aaa406d01c75568838796bd274f3c1b
-
-Update filemanager pattern tests
-
-Files changed:
-M mockup/tests/pattern-filemanager-test.js
-
-diff --git a/mockup/tests/pattern-filemanager-test.js b/mockup/tests/pattern-filemanager-test.js
-index 8f3577d3..ee5d3ded 100644
---- a/mockup/tests/pattern-filemanager-test.js
-+++ b/mockup/tests/pattern-filemanager-test.js
-@@ -40,7 +40,8 @@ define([
-       registry.scan(this.$el);
-       this.clock.tick(1000);
-       expect(this.$el.find('.tree ul').length).to.be.equal(2);
--      expect($('#contextual-menu li').length).to.be.equal(4);
-+      // New File, New Folder, Rename, Delete, Upload Here
-+      expect($('#contextual-menu li').length).to.be.equal(5);
-     });
-   });
- 
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-26T23:53:20+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/b034d1b18e7fed57d3be43fe07d98d53f788caf3
-
-Remove debug console.log
-
-Files changed:
-M mockup/patterns/filemanager/pattern.js
-
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index 58fd9b47..b1c335ae 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -300,8 +300,6 @@ define([
-         views["edit_menu"].push(customizeView);
-         edit_menu.items.push(customizeView.triggerView);
-       }
--      console.log(mainButtons);
--      console.log(views);
-       self.views = [];
-       self.views = self.views.concat(views.file_menu).concat(views.edit_menu).concat(views.find_menu);
- 
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-26T23:58:05+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/57d0f25bb911c4a5acc85a9371d1dd68282b7ea1
-
-Enable travis
-
-Files changed:
-M .travis.yml
-
-diff --git a/.travis.yml b/.travis.yml
-index ee0cc148..6a9f34fb 100644
---- a/.travis.yml
-+++ b/.travis.yml
-@@ -37,6 +37,6 @@ matrix:
-     - env: BROWSERS="SL_IPhone"
-     - env: BROWSERS="SL_IPad"
-     - env: BROWSERS="SL_Android"
--branches:
--  only:
--    - master
-+#branches:
-+#  only:
-+#    - master
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-07-28T22:22:26+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/e97b6146cad7a4962585074a60e10e567cca030b
-
-Fix thememapper test to adapt Build rule and Build css buttons being moved under dropdown
-
-Files changed:
-M mockup/tests/pattern-thememapper-test.js
-
-diff --git a/mockup/tests/pattern-thememapper-test.js b/mockup/tests/pattern-thememapper-test.js
-index 78576912..f7362f7c 100644
---- a/mockup/tests/pattern-thememapper-test.js
-+++ b/mockup/tests/pattern-thememapper-test.js
-@@ -39,7 +39,9 @@ define([
-       expect($('.pat-filemanager', this.$el).length > 0).to.be.equal(true);
-       expect($('#btngroup-mapper', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-showinspectors', this.$el).length > 0).to.be.equal(true);
--      expect($('#btn-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('#dropdown-menu-', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildless', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-previewtheme', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-fullscreenEditor', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-helpbutton', this.$el).length > 0).to.be.equal(true);
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-08-01T11:24:47-05:00
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/f4439c184daf1b9baea52b4c650c96055c6e42b2
-
-Merge pull request #791 from plone/datakurre-contextual-menu
-
-Fix tests for context-menu branch
-
-Files changed:
-M .travis.yml
-M mockup/patterns/filemanager/pattern.js
-M mockup/tests/pattern-filemanager-test.js
-M mockup/tests/pattern-thememapper-test.js
-
-diff --git a/.travis.yml b/.travis.yml
-index ee0cc148..6a9f34fb 100644
---- a/.travis.yml
-+++ b/.travis.yml
-@@ -37,6 +37,6 @@ matrix:
-     - env: BROWSERS="SL_IPhone"
-     - env: BROWSERS="SL_IPad"
-     - env: BROWSERS="SL_Android"
--branches:
--  only:
--    - master
-+#branches:
-+#  only:
-+#    - master
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index 58fd9b47..b1c335ae 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -300,8 +300,6 @@ define([
-         views["edit_menu"].push(customizeView);
-         edit_menu.items.push(customizeView.triggerView);
-       }
--      console.log(mainButtons);
--      console.log(views);
-       self.views = [];
-       self.views = self.views.concat(views.file_menu).concat(views.edit_menu).concat(views.find_menu);
- 
-diff --git a/mockup/tests/pattern-filemanager-test.js b/mockup/tests/pattern-filemanager-test.js
-index 8f3577d3..ee5d3ded 100644
---- a/mockup/tests/pattern-filemanager-test.js
-+++ b/mockup/tests/pattern-filemanager-test.js
-@@ -40,7 +40,8 @@ define([
-       registry.scan(this.$el);
-       this.clock.tick(1000);
-       expect(this.$el.find('.tree ul').length).to.be.equal(2);
--      expect($('#contextual-menu li').length).to.be.equal(4);
-+      // New File, New Folder, Rename, Delete, Upload Here
-+      expect($('#contextual-menu li').length).to.be.equal(5);
-     });
-   });
- 
-diff --git a/mockup/tests/pattern-thememapper-test.js b/mockup/tests/pattern-thememapper-test.js
-index 78576912..f7362f7c 100644
---- a/mockup/tests/pattern-thememapper-test.js
-+++ b/mockup/tests/pattern-thememapper-test.js
-@@ -39,7 +39,9 @@ define([
-       expect($('.pat-filemanager', this.$el).length > 0).to.be.equal(true);
-       expect($('#btngroup-mapper', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-showinspectors', this.$el).length > 0).to.be.equal(true);
--      expect($('#btn-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('#dropdown-menu-', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildless', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-previewtheme', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-fullscreenEditor', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-helpbutton', this.$el).length > 0).to.be.equal(true);
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-08-01T16:38:38Z
-Author: Oshane Bailey (b4oshany) <b4.oshany@gmail.com>
-Commit: https://github.com/plone/mockup/commit/8eba6889f03d6a018515c0594d7cd0d355b1c1ba
-
-Fix grammar.
-
-Files changed:
-M mockup/patterns/filemanager/js/findinfiles.js
-
-diff --git a/mockup/patterns/filemanager/js/findinfiles.js b/mockup/patterns/filemanager/js/findinfiles.js
-index 32b4dd80..51ea104e 100644
---- a/mockup/patterns/filemanager/js/findinfiles.js
-+++ b/mockup/patterns/filemanager/js/findinfiles.js
-@@ -17,7 +17,7 @@ define([
-       closeOnEsc: false,
-       closeOnClick: false
-     },
--    title: _.template('<%= _t("File in File") %>'),
-+    title: _.template('<%= _t("Find in File") %>'),
-     content: _.template(
-       '<form>' +
-         '<div class="input-group">' +
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-08-28T00:09:40+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/9549638ed0a93835a2c26c13a5f6b37b1c20ae92
-
-Remove forgotten console.log
-
-Files changed:
-M mockup/patterns/filemanager/pattern.js
-
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index b1c335ae..57aa0691 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -447,7 +447,6 @@ define([
-           },
-           dataType: 'json',
-           success: function(data) {
--            console.log(data);
-             self.$tree.tree('reload', function() {
-               self.$tree.tree('selectNode', target_node);
-             });
-
-
-Repository: mockup
-
-
-Branch: refs/heads/master
-Date: 2017-08-28T10:44:09+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/mockup/commit/50838746bf4839a8cdbc2bbbebf9412ee1e4c29b
-
-Merge pull request #784 from plone/contextual-menu
-
-Contextual menu
-
-Files changed:
-M .travis.yml
 M CHANGES.rst
-M bower.json
-M mockup/js/bundles/filemanager.js
-M mockup/js/config.js
-M mockup/js/ui/templates/dropdown.xml
-M mockup/js/ui/views/anchor.js
-M mockup/patterns/filemanager/js/findinfiles.js
-M mockup/patterns/filemanager/pattern.filemanager.less
-M mockup/patterns/filemanager/pattern.js
-M mockup/patterns/filemanager/templates/app.xml
-M mockup/patterns/thememapper/pattern.js
-M mockup/tests/pattern-filemanager-test.js
-M mockup/tests/pattern-thememapper-test.js
+M plone/app/contenttypes/migration/browser.py
+M plone/app/contenttypes/migration/migration.py
+M plone/app/contenttypes/migration/patches.py
 
-diff --git a/.travis.yml b/.travis.yml
-index ee0cc148..6a9f34fb 100644
---- a/.travis.yml
-+++ b/.travis.yml
-@@ -37,6 +37,6 @@ matrix:
-     - env: BROWSERS="SL_IPhone"
-     - env: BROWSERS="SL_IPad"
-     - env: BROWSERS="SL_Android"
--branches:
--  only:
--    - master
-+#branches:
-+#  only:
-+#    - master
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 91c2742b..7b238da3 100644
+index 691600b8..2fe07a6d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -42,6 +42,7 @@ New features:
-   - Add Anchor (a) tag to the UI views.
-   - Upgrade JQTree to 1.4.1
-   - Enable Drag and Drop inside of the theme editor file tree.
-+  - Add contextual menu to theme files in the file tree.
-   [b4oshany]
+@@ -14,7 +14,9 @@ New features:
  
-  - Make thumb scale in folder contents listing adjustable/supressable.
-diff --git a/bower.json b/bower.json
-index 55232710..4ffe8a64 100644
---- a/bower.json
-+++ b/bower.json
-@@ -23,7 +23,9 @@
-     "requirejs-text": "2.0.15",
-     "select2": "3.5.4",
-     "selectivizr": "1.0.2",
--    "tinymce-builded": "4.5.6"
-+    "tinymce-builded": "4.5.6",
-+    "js-shortcuts": "^1.0.1",
-+    "cs-jqtree-contextmenu": "^0.1.0"
-   },
-   "devDependencies": {
-     "expect": "0.3.1",
-@@ -36,4 +38,4 @@
-     "select2": "3.5.4",
-     "moment": "2.10.6"
-   }
--}
-+}
-\ No newline at end of file
-diff --git a/mockup/js/bundles/filemanager.js b/mockup/js/bundles/filemanager.js
-index 84778497..39960793 100644
---- a/mockup/js/bundles/filemanager.js
-+++ b/mockup/js/bundles/filemanager.js
-@@ -1,6 +1,7 @@
- define([
-   'pat-registry',
-   'mockup-patterns-filemanager',
-+  'jqtree-contextmenu'
- ], function(registry) {
-   'use strict';
-   // initialize only if we are in top frame
-diff --git a/mockup/js/config.js b/mockup/js/config.js
-index 5775747a..bd11b50a 100644
---- a/mockup/js/config.js
-+++ b/mockup/js/config.js
-@@ -35,6 +35,7 @@
-       'dropzone': 'bower_components/dropzone/dist/dropzone-amd-module',
-       'expect': 'bower_components/expect/index',
-       'jqtree': 'bower_components/jqtree/tree.jquery',
-+      'jqtree-contextmenu': 'bower_components/cs-jqtree-contextmenu/src/jqTreeContextMenu',
-       'jquery': 'bower_components/jquery/dist/jquery',
-       'jquery.browser': 'bower_components/jquery.browser/dist/jquery.browser',
-       'jquery.cookie': 'bower_components/jquery.cookie/jquery.cookie',
-@@ -45,6 +46,7 @@
-       'jquery.tools.dateinput': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.dateinput',
-       'jquery.tools.overlay': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tools.overlay',
-       'jquery.tmpl': 'bower_components/jquery.recurrenceinput.js/lib/jquery.tmpl',
-+      'js-shortcuts': 'bower_components/js-shortcuts/js-shortcuts',
-       'translate': 'js/i18n-wrapper',
-       'marked': 'bower_components/marked/lib/marked',
-       'mockup-bundles-docs': 'js/bundles/docs',
-@@ -138,6 +140,8 @@
-       'bootstrap-transition': { exports: 'window.jQuery.support.transition', deps: ['jquery'] },
-       'expect': { exports: 'window.expect' },
-       'jqtree': { deps: ['jquery'] },
-+      'jqtree-contextmenu': { deps: ['jqtree'] },
-+      'js-shortcuts': { deps: ['jquery'] },
-       'select2': { deps: ["jquery"] },
-       'jquery.cookie': { deps: ['jquery'] },
-       'jquery.event.drag': { deps: ['jquery'] },
-diff --git a/mockup/js/ui/templates/dropdown.xml b/mockup/js/ui/templates/dropdown.xml
-index 34c20d25..82c130e7 100644
---- a/mockup/js/ui/templates/dropdown.xml
-+++ b/mockup/js/ui/templates/dropdown.xml
-@@ -1,6 +1,6 @@
+ Bug fixes:
  
- <a href="#" class="btn btn-default dropdown-toggle" type="button" id="dropdown-menu-" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
--  <span class="glyphicon glyphicon-search"></span>
-+  <span class="glyphicon glyphicon-<%= icon %>"></span>
-   <span class="dropdown-title">
+-- *add item here*
++- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
++  during migration to Dexterity to prevent catalog-errors.
++  [pbauer]
  
-   </span>
-diff --git a/mockup/js/ui/views/anchor.js b/mockup/js/ui/views/anchor.js
-index 9e0f8e4a..3d373ee2 100644
---- a/mockup/js/ui/views/anchor.js
-+++ b/mockup/js/ui/views/anchor.js
-@@ -11,12 +11,13 @@ define([
-     eventPrefix: 'button',
-     context: 'default',
-     idPrefix: 'alink-',
-+    shortcut: '',
-     attributes: {
-       'href': '#'
-     },
-     extraClasses: [],
-     tooltip: null,
--    template: '<% if (icon) { %><span class="glyphicon glyphicon-<%= icon %>"></span><% } %> <%= title %>',
-+    template: '<% if (icon) { %><span class="glyphicon glyphicon-<%= icon %>"></span><% } %> <%= title %> <span class="shortcut"><%= shortcut %></span>',
-     events: {
-       'click': 'handleClick'
-     },
-@@ -28,7 +29,7 @@ define([
-       BaseView.prototype.initialize.apply(this, [options]);
  
-       this.on('render', function() {
--        this.$el.attr('title', this.options.title || '');
-+        this.$el.attr('title', this.options.tooltip || this.options.title || '');
-         this.$el.attr('aria-label', this.options.title || this.options.tooltip || '');
-         _.each(this.extraClasses, function(klass) {
-           this.$el.addClass(klass);
-@@ -42,7 +43,7 @@ define([
-       }
-     },
-     serializedModel: function() {
--      return _.extend({'icon': '', 'title': ''}, this.options);
-+      return _.extend({'icon': '', 'title': '', 'shortcut': ''}, this.options);
-     },
-     disable: function() {
-       this.$el.prop('disabled', true);
-diff --git a/mockup/patterns/filemanager/js/findinfiles.js b/mockup/patterns/filemanager/js/findinfiles.js
-index 32b4dd80..51ea104e 100644
---- a/mockup/patterns/filemanager/js/findinfiles.js
-+++ b/mockup/patterns/filemanager/js/findinfiles.js
-@@ -17,7 +17,7 @@ define([
-       closeOnEsc: false,
-       closeOnClick: false
-     },
--    title: _.template('<%= _t("File in File") %>'),
-+    title: _.template('<%= _t("Find in File") %>'),
-     content: _.template(
-       '<form>' +
-         '<div class="input-group">' +
-diff --git a/mockup/patterns/filemanager/pattern.filemanager.less b/mockup/patterns/filemanager/pattern.filemanager.less
-index f2049f80..ed7c07a3 100644
---- a/mockup/patterns/filemanager/pattern.filemanager.less
-+++ b/mockup/patterns/filemanager/pattern.filemanager.less
-@@ -47,6 +47,15 @@
-         display: inline-block;
-         margin: 0 !important;
-         vertical-align: initial !important;
-+        
-+        span.shortcut {
-+            display: inline-block;
-+            float: right;
-+        }
-+
-+        ul.dropdown-menu.items.dropdown-content {
-+            min-width: 250px;
-+        }
-     }
-     .input-group:extend(.input-group all){}
-     .input-group-addon:extend(.input-group-addon all){}
-diff --git a/mockup/patterns/filemanager/pattern.js b/mockup/patterns/filemanager/pattern.js
-index d6a37f3c..57aa0691 100644
---- a/mockup/patterns/filemanager/pattern.js
-+++ b/mockup/patterns/filemanager/pattern.js
-@@ -34,6 +34,7 @@ define([
-   'jquery',
-   'pat-base',
-   'underscore',
-+  'jqtree-contextmenu',
-   'mockup-patterns-tree',
-   'mockup-patterns-texteditor',
-   'text!mockup-patterns-filemanager-url/templates/app.xml',
-@@ -52,12 +53,13 @@ define([
-   'mockup-patterns-filemanager-url/js/upload',
-   'translate',
-   'mockup-utils',
-+  'js-shortcuts',
-   'text!mockup-ui-url/templates/popover.xml',
-   'text!mockup-ui-url/templates/dropdown.xml'
--], function($, Base, _, Tree, TextEditor, AppTemplate, Toolbar,
-+], function($, Base, _, ContextMenu, Tree, TextEditor, AppTemplate, Toolbar,
-   ButtonView, ButtonGroup, AnchorView, DropdownView,
-   AddNewView, NewFolderView, FindFileView, FindInFilesView, DeleteView,
--  CustomizeView, RenameView, UploadView, _t, utils) {
-+  CustomizeView, RenameView, UploadView, _t, utils, jsShortcuts) {
-   'use strict';
+ 1.4.2 (2017-08-27)
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index 487fd9fc..662efb74 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -9,32 +9,24 @@
+ from plone.app.contenttypes.content import NewsItem
+ from plone.app.contenttypes.migration import dxmigration
+ from plone.app.contenttypes.migration import migration
+-from plone.app.contenttypes.migration.patches import patched_insertForwardIndexEntry  # noqa
+ from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+ from plone.app.contenttypes.migration.utils import isSchemaExtended
+ from plone.app.contenttypes.migration.utils import restore_references
+ from plone.app.contenttypes.migration.utils import store_references
+ from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
++from plone.app.contenttypes.migration.patches import patch_before_migration
++from plone.app.contenttypes.migration.patches import undo_patch_after_migration
+ from plone.app.contenttypes.upgrades import use_new_view_names
+ from plone.app.contenttypes.utils import DEFAULT_TYPES
+ from plone.browserlayer.interfaces import ILocalBrowserLayerType
+-from plone.dexterity.content import DexterityContent
+ from plone.dexterity.interfaces import IDexterityContent
+ from plone.dexterity.interfaces import IDexterityFTI
+-from plone.registry.interfaces import IRegistry
+ from plone.z3cform.layout import wrap_form
+ from pprint import pformat
+-from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
+-from Products.CMFCore.interfaces import IPropertiesTool
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
+-from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
+-from Products.CMFPlone.interfaces import IEditingSchema
+-from Products.contentmigration.utils import patch
+-from Products.contentmigration.utils import undoPatch
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+-from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
+ from Products.statusmessages.interfaces import IStatusMessage
+ from z3c.form import button
+ from z3c.form import field
+@@ -43,7 +35,6 @@
+ from z3c.form.interfaces import HIDDEN_MODE
+ from zope import schema
+ from zope.component import getMultiAdapter
+-from zope.component import getUtility
+ from zope.component import queryUtility
+ from zope.interface import Interface
  
-   var FileManager = Base.extend({
-@@ -126,51 +128,56 @@ define([
-         id: 'save',
-         title: _t('Save'),
-         icon: 'floppy-disk',
--        context: 'primary'
-+        context: 'primary',
-+        shortcut: 'Ctrl-S'
-       });
-       self.btns = {
--        "newfolder": new ButtonView({
-+        "newfolder": new AnchorView({
-           id: 'newfolder',
-           title: _t('New folder'),
-           tooltip: _t('Add new folder to current directory'),
-           icon: 'folder-open',
--          context: 'default'
-+          context: 'default',
-+          shortcut: 'Alt-Shift-N'
-         }),
--        "newfile": new ButtonView({
-+        "newfile": new AnchorView({
-           id: 'addnew',
--          title: _t('Add new file'),
-+          title: _t('New file'),
-           tooltip: _t('Add new file to current folder'),
-           icon: 'file',
--          context: 'default'
-+          context: 'default',
-+          shortcut: 'Alt-N'
-         }),
-         "findfile": new AnchorView({
-           id: 'findfile',
-           title: _t('Find File'),
-           tooltip: _t('Find theme resource in plone'),
--          icon: 'file',
--          context: 'default'
-+          icon: 'search',
-+          context: 'default',
-+          shortcut: 'Ctrl-F'
-         }),
-         "findtextinfile": new AnchorView({
-           id: 'findinfiles',
-           title: _t('Find in Files'),
-           tooltip: _t('Find text within theme resource in plone'),
--          icon: 'file',
--          context: 'default'
-+          icon: 'search',
-+          context: 'default',
-+          shortcut: 'Ctrl-E'
-         }),
--        "rename": new ButtonView({
-+        "rename": new AnchorView({
-           id: 'rename',
-           title: _t('Rename'),
-           tooltip: _t('Rename currently selected resource'),
-           icon: 'random',
-           context: 'default'
-         }),
--        "delete": new ButtonView({
-+        "delete": new AnchorView({
-           id: 'delete',
-           title: _t('Delete'),
-           tooltip: _t('Delete currently selected resource'),
-           icon: 'trash',
-           context: 'danger'
--        })
-+        }),
-       };
+@@ -60,22 +51,12 @@
  
-       var newFolderView = new NewFolderView({
-@@ -198,43 +205,73 @@ define([
-         app: self
-       });
+ logger = logging.getLogger(__name__)
  
-+      var file_menu = new DropdownView({
-+        title: _t('File'),
-+        items: [
-+          addNewView.triggerView,
-+          newFolderView.triggerView
-+        ],
-+        id: 'file_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+
-+      var edit_menu = new DropdownView({
-+        title: _t('Edit'),
-+        items: [
-+          renameView.triggerView,
-+          deleteView.triggerView
-+        ],
-+        id: 'edit_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+
-       var find_menu = new DropdownView({
-         title: _t('Find'),
-         items: [
-           findFileView.triggerView,
-           findinFilesView.triggerView
-         ],
--        id: 'find',
-+        id: 'find_menu',
-+        icon: 'search',
-         app: self,
-         disable: function() {}
--      })
+-PATCH_NOTIFY = [
+-    DexterityContent,
+-    DefaultDublinCoreImpl,
+-    ExtensibleMetadata
+-]
+ 
+ # Average time to migrate one archetype object, in milliseconds.
+ # This very much depends on the size of the object and system-speed
+ ONE_OBJECT_MIGRATION_TIME = 500
+ 
+ 
+-def pass_fn(*args, **kwargs):
+-    """Empty function used for patching."""
+-    pass
 -
--      self.views = [
--        newFolderView,
--        addNewView,
--        findFileView,
--        findinFilesView,
--        renameView,
--        deleteView
--      ];
-+      });
-+
-+      var views = {
-+        "file_menu": [
-+          newFolderView,
-+          addNewView
-+        ],
-+        "edit_menu": [
-+          renameView,
-+          deleteView,
-+        ],
-+        "find_menu": [
-+          findFileView,
-+          findinFilesView
-+        ],
-+      };
-       var mainButtons = [
-         self.saveBtn,
--        newFolderView.triggerView,
--        addNewView.triggerView,
-+        file_menu,
-+        edit_menu,
-         find_menu,
--        renameView.triggerView,
--        deleteView.triggerView
-       ];
- 
-       if (self.options.uploadUrl && utils.featureSupport.dragAndDrop() && utils.featureSupport.fileApi()) {
--        var uploadView = new UploadView({
--          triggerView: new ButtonView({
-+        self.btns["upload"] = new AnchorView({
-             id: 'upload',
--            title: _t('Upload'),
-+            title: _t('Upload Local Files...'),
-             tooltip: _t('Upload file to current directory'),
-             icon: 'upload',
-             context: 'default'
--          }),
-+        });
-+        var uploadView = new UploadView({
-+          triggerView: self.btns["upload"],
-           app: self,
-           callback: function(data) {
-             var path = self.uploadFolder + '/' + data.name;
-@@ -245,22 +282,26 @@ define([
- 
-           }
-         });
--        self.views.push(uploadView);
--        mainButtons.push(uploadView.triggerView);
-+        
-+        views.file_menu.push(uploadView);
-+        file_menu.items.push(uploadView.triggerView);
-       }
-       if (self.options.resourceSearchUrl) {
-+        self.btns["customize"] = new AnchorView({
-+          id: 'customize',
-+          title: _t('Add new override'),
-+          tooltip: _t('Find resource in plone to override'),
-+          context: 'default'
-+        });
-         var customizeView = new CustomizeView({
--          triggerView: new ButtonView({
--            id: 'customize',
--            title: _t('Add new override'),
--            tooltip: _t('Find resource in plone to override'),
--            context: 'default'
--          }),
-+          triggerView: self.btns["customize"],
-           app: self
-         });
--        self.views.push(customizeView);
--        mainButtons.push(customizeView.triggerView);
-+        views["edit_menu"].push(customizeView);
-+        edit_menu.items.push(customizeView.triggerView);
-       }
-+      self.views = [];
-+      self.views = self.views.concat(views.file_menu).concat(views.edit_menu).concat(views.find_menu);
- 
-       self.toolbar = new Toolbar({
-         items: [
-@@ -299,7 +340,29 @@ define([
-         self._save();
-       });
-       self.render();
-+      self.shortcuts();
-+      
-+    },
-+    
-+    shortcuts: function(){
-+      var self = this;
-+      shortcut.add("Alt+N", function () {
-+        self.btns.newfile.$el.click();
-+      });
-+      shortcut.add("Alt+Shift+N", function () {
-+        self.btns.newfolder.$el.click();
-+      });
-+      shortcut.add("Ctrl+S", function () {
-+        self.saveBtn.$el.click();
-+      });
-+      shortcut.add("Ctrl+F", function () {
-+        self.btns.findfile.$el.click();
-+      });
-+      shortcut.add("Ctrl+E", function () {
-+        self.btns.findtextinfile.$el.click();
-+      });
-     },
-+    
-     $: function(selector) {
-       return this.$el.find(selector);
-     },
-@@ -346,6 +409,19 @@ define([
-         }
-       });
- 
-+      // bind 'tree.contextmenu' event
-+      self.$tree.jqTreeContextMenu({
-+          menu: '#contextual-menu',
-+          onContextMenuItem: function(e, node, $el) {
-+            var action = $el.data("item");
-+            try {
-+              self.btns[action].el.click();
-+            } catch($err) {
-+              console.log("Command does not exist: " + action);
-+            }
-+          }
-+      });
-+
-       self.$tree.bind('tree.select', function(e) {
-         if (e.node === null) {
-           self.toggleButtons(false);
-@@ -357,8 +433,9 @@ define([
- 
-       self.$tree.bind('tree.move', function(event) {
-         
-+        var target_node = event.move_info.target_node;
-         var srcpath = event.move_info.moved_node.path;
--        var newpath = event.move_info.target_node.path;
-+        var newpath = target_node.path;
-         if (event.move_info.position !== "inside" ){
-           newpath = newpath.substring(newpath.indexOf('/'), newpath.lastIndexOf('/'));
-         }
-@@ -370,7 +447,9 @@ define([
-           },
-           dataType: 'json',
-           success: function(data) {
--            console.log(data);
-+            self.$tree.tree('reload', function() {
-+              self.$tree.tree('selectNode', target_node);
-+            });
-             var jdata = JSON.parse(data);
-             if(jdata.error != ''){
-               alert(jdata.error);
-diff --git a/mockup/patterns/filemanager/templates/app.xml b/mockup/patterns/filemanager/templates/app.xml
-index e5194500..519d6dad 100644
---- a/mockup/patterns/filemanager/templates/app.xml
-+++ b/mockup/patterns/filemanager/templates/app.xml
-@@ -17,3 +17,10 @@
-             </div>
-         </nav>
- </div>
-+<ul id="contextual-menu" class="dropdown-menu">
-+    <li data-item="newfile"><a>New File</a></li>
-+    <li data-item="newfolder"><a>New Folder</a></li>
-+    <li data-item="rename"><a>Rename</a></li>
-+    <li data-item="delete"><a>Delete</a></li>
-+    <li data-item="upload"><a>Upload Here</a></li>
-+</ul>
-diff --git a/mockup/patterns/thememapper/pattern.js b/mockup/patterns/thememapper/pattern.js
-index b8c21767..ef016f7b 100644
---- a/mockup/patterns/thememapper/pattern.js
-+++ b/mockup/patterns/thememapper/pattern.js
-@@ -39,8 +39,12 @@ define([
-   'mockup-patterns-thememapper-url/js/cacheview',
-   'mockup-ui-url/views/button',
-   'mockup-ui-url/views/buttongroup',
-+  'mockup-ui-url/views/anchor',
-+  'mockup-ui-url/views/dropdown',
-   'mockup-utils'
--], function($, Base, _, _t, InspectorTemplate, FileManager, RuleBuilder, RuleBuilderView, LessBuilderView, CacheView, ButtonView, ButtonGroup, utils) {
-+], function($, Base, _, _t, InspectorTemplate, FileManager, RuleBuilder, RuleBuilderView,
-+            LessBuilderView, CacheView, ButtonView, ButtonGroup,
-+            AnchorView, DropdownView, utils) {
-   'use strict';
- 
-   var inspectorTemplate = _.template(InspectorTemplate);
-@@ -317,6 +321,8 @@ define([
-       self.fileManager = new FileManager(self.$fileManager, self.options.filemanagerConfig);
-       self.fileManager.setUploadUrl();
- 
-+      self.btns = {};
-+      self.menus = {};
-       self.setupButtons();
- 
-       self.ruleBuilder = new RuleBuilder(self, self.ruleBuilderCallback);
-@@ -337,7 +343,7 @@ define([
-         ruleBuilder: self.ruleBuilder,
-         url: self.options.unthemedUrl,
-       });
--      self.buildLessButton.disable();
-+      self.btns.buildLessButton.disable();
- 
-       if(!self.options.editable) {
-         if(self.fileManager.toolbar) {
-@@ -382,10 +388,10 @@ define([
-       var self = this;
- 
-       if(node.fileType === 'less'){
--        self.buildLessButton.enable();
-+        self.btns.buildLessButton.enable();
-       }
-       else {
--        self.buildLessButton.disable();
-+        self.btns.buildLessButton.disable();
-       }
- 
-       if (node.path !== '') {
-@@ -469,8 +475,8 @@ define([
-       var $parent = self.$mockupInspector.parent();
-       $parent.slideDown();
-       self.hidden = false;
--      self.showInspectorsButton.options.title = 'Hide inspectors';
--      self.showInspectorsButton.applyTemplate();
-+      self.btns.showInspectorsButton.options.title = 'Hide inspectors';
-+      self.btns.showInspectorsButton.applyTemplate();
-       $('html, body').animate({
-         scrollTop: $parent.offset().top - 50
-       }, 500);
-@@ -480,41 +486,41 @@ define([
-       var $parent = self.$mockupInspector.parent();
-       $parent.slideUp();
-       self.hidden = true;
--      self.showInspectorsButton.options.title = 'Show inspectors';
--      self.showInspectorsButton.applyTemplate();
-+      self.btns.showInspectorsButton.options.title = 'Show inspectors';
-+      self.btns.showInspectorsButton.applyTemplate();
-     },
-     setupButtons: function(){
-       var self = this;
--      self.showInspectorsButton = new ButtonView({
-+      self.btns.showInspectorsButton = new ButtonView({
-         id: 'showinspectors',
-         title: _t('Show inspectors'),
-         icon: 'search',
-         tooltip: _t('Show inspector panels'),
-         context: 'default'
-       });
--      self.showInspectorsButton.on('button:click', function(){
-+      self.btns.showInspectorsButton.on('button:click', function(){
-         if (self.hidden) {
-           self.showInspectors();
-         } else {
-           self.hideInspectors();
-         }
-       });
 -
--      self.buildRuleButton = new ButtonView({
-+      
-+      self.btns.buildRuleButton = new AnchorView({
-         id: 'buildrule',
-         title: _t('Build rule'),
-         icon: 'wrench',
-         tooltip: _t('rule building wizard'),
-         context: 'default'
-       });
--      self.fullscreenButton = new ButtonView({
-+      self.btns.fullscreenButton = new ButtonView({
-         id: 'fullscreenEditor',
-         title: _t('Fullscreen'),
-         icon: 'fullscreen',
-         tooltip: _t('view the editor in fullscreen'),
-         context: 'default'
-       });
--      self.fullscreenButton.on('button:click', function() {
-+      self.btns.fullscreenButton.on('button:click', function() {
-         var btn = $('<a href="#">'+
-             '<span class="btn btn-danger closeeditor">' + _t('Close Fullscreen') + '</span>'+
-             '</a>').prependTo($('.tree'));
-@@ -536,62 +542,75 @@ define([
-       self.previewThemeButton.on('button:click', function(){
-         window.open(self.options.previewUrl);
-       });
--      self.buildLessButton = new ButtonView({
-+      self.btns.buildLessButton = new AnchorView({
-         id: 'buildless',
-         title: _t('Build CSS'),
-         icon: 'cog',
-         tooltip: _t('Compile LESS file'),
-         context: 'default'
-       });
--      self.refreshButton = new ButtonView({
-+      self.btns.refreshButton = new ButtonView({
-         id: 'refreshButton ',
-         title: _t('Refresh'),
-         icon: 'refresh',
-         tooltip: _t('Reload the current file'),
-         context: 'default'
-       });
--      self.refreshButton.on('button:click', function() {
-+      self.btns.refreshButton.on('button:click', function() {
-         self.fileManager.refreshFile();
-       });
--      self.cacheButton = new ButtonView({
-+      self.btns.cacheButton = new ButtonView({
-         id: 'cachebutton',
-         title: _t('Clear cache'),
-         icon: 'floppy-remove',
-         tooltip: _t('Clear site\'s theme cache'),
-         context: 'default'
-       });
--      self.helpButton = new ButtonView({
-+      self.btns.helpButton = new ButtonView({
-         id: 'helpbutton',
-         title: _t('Help'),
-         icon: 'question-sign',
-         tooltip: _t('Show help'),
-         context: 'default'
-       });
--      self.helpButton.on('button:click', function(){
-+      self.btns.helpButton.on('button:click', function(){
-         window.open(self.options.helpUrl);
-       });
-       self.rulebuilderView = new RuleBuilderView({
--        triggerView: self.buildRuleButton,
-+        triggerView: self.btns.buildRuleButton,
-         app: self
-       });
-       self.cacheView = new CacheView({
--        triggerView: self.cacheButton,
-+        triggerView: self.btns.cacheButton,
-         app: self
-       });
-       self.lessbuilderView = new LessBuilderView({
--        triggerView: self.buildLessButton,
-+        triggerView: self.btns.buildLessButton,
-         app: self
-       });
-+      
-+
-+      self.menus.tools = new DropdownView({
-+        title: _t('Tools'),
-+        items: [
-+          self.btns.buildRuleButton,
-+          self.btns.buildLessButton,
-+        ],
-+        id: 'file_menu',
-+        app: self,
-+        icon: 'file',
-+        disable: function() {}
-+      });
-+      
-       self.buttonGroup = new ButtonGroup({
-         items: [
--          self.showInspectorsButton,
--          self.buildRuleButton,
-+          self.menus.tools,
-+          self.btns.showInspectorsButton,
-           self.previewThemeButton,
--          self.fullscreenButton,
--          self.buildLessButton,
--          self.refreshButton,
--          self.cacheButton,
--          self.helpButton
-+          self.btns.fullscreenButton,
-+          self.btns.refreshButton,
-+          self.btns.cacheButton,
-+          self.btns.helpButton
-         ],
-         id: 'mapper'
-       });
-diff --git a/mockup/tests/pattern-filemanager-test.js b/mockup/tests/pattern-filemanager-test.js
-index 1789b425..ee5d3ded 100644
---- a/mockup/tests/pattern-filemanager-test.js
-+++ b/mockup/tests/pattern-filemanager-test.js
-@@ -40,7 +40,9 @@ define([
-       registry.scan(this.$el);
-       this.clock.tick(1000);
-       expect(this.$el.find('.tree ul').length).to.be.equal(2);
-+      // New File, New Folder, Rename, Delete, Upload Here
-+      expect($('#contextual-menu li').length).to.be.equal(5);
-     });
-   });
+ class FixBaseClasses(BrowserView):
  
--});
-\ No newline at end of file
-+});
-diff --git a/mockup/tests/pattern-thememapper-test.js b/mockup/tests/pattern-thememapper-test.js
-index 78576912..f7362f7c 100644
---- a/mockup/tests/pattern-thememapper-test.js
-+++ b/mockup/tests/pattern-thememapper-test.js
-@@ -39,7 +39,9 @@ define([
-       expect($('.pat-filemanager', this.$el).length > 0).to.be.equal(true);
-       expect($('#btngroup-mapper', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-showinspectors', this.$el).length > 0).to.be.equal(true);
--      expect($('#btn-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('#dropdown-menu-', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildrule', this.$el).length > 0).to.be.equal(true);
-+      expect($('.btn-group-dropdown #alink-buildless', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-previewtheme', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-fullscreenEditor', this.$el).length > 0).to.be.equal(true);
-       expect($('#btn-helpbutton', this.$el).length > 0).to.be.equal(true);
+     def __call__(self):
+@@ -168,33 +149,8 @@ def __call__(self,
+             store_references(portal)
+         catalog = portal.portal_catalog
+ 
+-        # switch linkintegrity temp off
+-        ptool = queryUtility(IPropertiesTool)
+-        site_props = getattr(ptool, 'site_properties', None)
+-        link_integrity_in_props = False
+-        if site_props and site_props.hasProperty(
+-                'enable_link_integrity_checks'):
+-            link_integrity_in_props = True
+-            link_integrity = site_props.getProperty(
+-                'enable_link_integrity_checks', False)
+-            site_props.manage_changeProperties(
+-                enable_link_integrity_checks=False)
+-        else:
+-            # Plone 5
+-            registry = getUtility(IRegistry)
+-            editing_settings = registry.forInterface(
+-                IEditingSchema, prefix='plone')
+-            link_integrity = editing_settings.enable_link_integrity_checks
+-            editing_settings.enable_link_integrity_checks = False
+-
+-        # switch of setModificationDate on changes
+-        self.patchNotifyModified()
+-
+-        # patch UUIDIndex
+-        patch(
+-            UUIDIndex,
+-            'insertForwardIndexEntry',
+-            patched_insertForwardIndexEntry)
++        # Patch various things that make migration harder
++        link_integrity, queue_indexing = patch_before_migration()
+ 
+         not_migrated = []
+         migrated_types = {}
+@@ -256,19 +212,8 @@ def __call__(self,
+         if migrate_references:
+             restore_references(portal)
+ 
+-        # switch linkintegrity back to what it was before migrating
+-        if link_integrity_in_props:
+-            site_props.manage_changeProperties(
+-                enable_link_integrity_checks=link_integrity
+-            )
+-        else:
+-            editing_settings.enable_link_integrity_checks = link_integrity
+-
+-        # switch on setModificationDate on changes
+-        self.resetNotifyModified()
+-
+-        # unpatch UUIDIndex
+-        undoPatch(UUIDIndex, 'insertForwardIndexEntry')
++        # Revert to the original state
++        undo_patch_after_migration(link_integrity, queue_indexing)
+ 
+         duration = str(timedelta(seconds=(datetime.now() - starttime).seconds))
+         if not_migrated:
+@@ -313,22 +258,6 @@ def stats(self):
+             results[classname] = results.get(classname, 0) + 1
+         return results
+ 
+-    def patchNotifyModified(self):
+-        """Patch notifyModified to prevent setModificationDate() on changes
+-
+-        notifyModified lives in several places and is also used on folders
+-        when their content changes.
+-        So when we migrate Documents before Folders the folders
+-        ModifiedDate gets changed.
+-        """
+-        for klass in PATCH_NOTIFY:
+-            patch(klass, 'notifyModified', pass_fn)
+-
+-    def resetNotifyModified(self):
+-        """reset notifyModified to old state"""
+-        for klass in PATCH_NOTIFY:
+-            undoPatch(klass, 'notifyModified')
+-
+ 
+ class IATCTMigratorForm(Interface):
+ 
+diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
+index ee8438b8..95729f99 100644
+--- a/plone/app/contenttypes/migration/migration.py
++++ b/plone/app/contenttypes/migration/migration.py
+@@ -17,6 +17,8 @@
+ from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
+ from plone.app.contenttypes.migration.field_migrators import migrate_richtextfield  # noqa
+ from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
++from plone.app.contenttypes.migration.patches import patch_before_migration
++from plone.app.contenttypes.migration.patches import undo_patch_after_migration
+ from plone.app.contenttypes.migration.utils import copy_contentrules
+ from plone.app.contenttypes.migration.utils import migrate_leadimage
+ from plone.app.contenttypes.migration.utils import migrate_portlets
+@@ -476,6 +478,9 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+     """
+     portal = getSite()
+ 
++    # Patch various things that make migration harder
++    link_integrity, queue_indexing = patch_before_migration()
++
+     # if the type still exists get the src_meta_type from the portal_type
+     portal_types = getToolByName(portal, 'portal_types')
+     fti = portal_types.get(src_type, None)
+@@ -513,6 +518,7 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+                                     fields_mapping=fields_mapping,
+                                     is_folderish=is_folderish,
+                                     dry_run=dry_run)
++    walker_infos = None
+     if migrator:
+         migrator.src_meta_type = src_meta_type
+         migrator.dst_meta_type = ''
+@@ -534,4 +540,8 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
+             logger.error(error.get('message'))
+         if dry_run:
+             transaction.abort()
+-        return walker_infos
++
++    # Revert to the original state
++    undo_patch_after_migration(link_integrity, queue_indexing)
++
++    return walker_infos
+diff --git a/plone/app/contenttypes/migration/patches.py b/plone/app/contenttypes/migration/patches.py
+index 7cc10636..24e32f60 100644
+--- a/plone/app/contenttypes/migration/patches.py
++++ b/plone/app/contenttypes/migration/patches.py
+@@ -2,7 +2,25 @@
+ """Patches used for migrations. These patches are applied before and removed
+ after running the migration.
+ """
++from plone.dexterity.content import DexterityContent
++from plone.registry.interfaces import IRegistry
++from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
++from Products.CMFCore.interfaces import IPropertiesTool
++from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
++from Products.CMFPlone.interfaces import IEditingSchema
++from Products.contentmigration.utils import patch
++from Products.contentmigration.utils import undoPatch
+ from Products.PluginIndexes.common.UnIndex import _marker
++from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
++from zope.component import getUtility
++from zope.component import queryUtility
++
++import os
++
++
++def pass_fn(*args, **kwargs):
++    """Empty function used for patching."""
++    pass
+ 
+ 
+ # Prevent UUID Error-Messages when migrating folders.
+@@ -18,3 +36,85 @@ def patched_insertForwardIndexEntry(self, entry, documentId):
+     if old_docid is _marker:
+         self._index[entry] = documentId
+         self._length.change(1)
++
++
++def patch_before_migration():
++    """Patch various things that make migration harder."""
++    # Switch linkintegrity off
++    ptool = queryUtility(IPropertiesTool)
++    site_props = getattr(ptool, 'site_properties', None)
++    if site_props and site_props.hasProperty(
++            'enable_link_integrity_checks'):
++        link_integrity = site_props.getProperty(
++            'enable_link_integrity_checks', False)
++        site_props.manage_changeProperties(
++            enable_link_integrity_checks=False)
++    else:
++        # Plone 5
++        registry = getUtility(IRegistry)
++        editing_settings = registry.forInterface(
++            IEditingSchema, prefix='plone')
++        link_integrity = editing_settings.enable_link_integrity_checks
++        editing_settings.enable_link_integrity_checks = False
++
++    # Patch notifyModified to prevent setModificationDate() on changes
++    # notifyModified lives in several places and is also used on folders
++    # when their content changes.
++    # So when we migrate Documents before Folders the folders
++    # ModifiedDate gets changed
++    PATCH_NOTIFY = [
++        DexterityContent,
++        DefaultDublinCoreImpl,
++        ExtensibleMetadata
++    ]
++    for klass in PATCH_NOTIFY:
++        patch(klass, 'notifyModified', pass_fn)
++
++    # Disable queueing of indexing/reindexing/unindexing
++    queue_indexing = os.environ.get('CATALOG_OPTIMIZATION_DISABLED', None)
++    os.environ['CATALOG_OPTIMIZATION_DISABLED'] = '1'
++
++    # Patch UUIDIndex
++    patch(
++        UUIDIndex,
++        'insertForwardIndexEntry',
++        patched_insertForwardIndexEntry)
++
++    return link_integrity, queue_indexing
++
++
++def undo_patch_after_migration(link_integrity=True, queue_indexing=None):
++    """Revert to the original state."""
++
++    # Switch linkintegrity back to what it was before migrating
++    ptool = queryUtility(IPropertiesTool)
++    site_props = getattr(ptool, 'site_properties', None)
++    if site_props and site_props.hasProperty(
++            'enable_link_integrity_checks'):
++        site_props.manage_changeProperties(
++            enable_link_integrity_checks=link_integrity
++        )
++    else:
++        # Plone 5
++        registry = getUtility(IRegistry)
++        editing_settings = registry.forInterface(
++            IEditingSchema, prefix='plone')
++        editing_settings.enable_link_integrity_checks = link_integrity
++
++    # Switch on setModificationDate on changes
++    PATCH_NOTIFY = [
++        DexterityContent,
++        DefaultDublinCoreImpl,
++        ExtensibleMetadata
++    ]
++    for klass in PATCH_NOTIFY:
++        undoPatch(klass, 'notifyModified')
++
++    # Reset queueing of indexing/reindexing/unindexing
++    if queue_indexing is not None:
++        os.environ['CATALOG_OPTIMIZATION_DISABLED'] = queue_indexing
++    else:
++        del os.environ['CATALOG_OPTIMIZATION_DISABLED']
++
++    # Unpatch UUIDIndex
++    undoPatch(UUIDIndex, 'insertForwardIndexEntry')
 
 
