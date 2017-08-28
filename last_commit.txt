@@ -1,358 +1,21 @@
-Repository: plone.app.contenttypes
+Repository: plone.schemaeditor
 
 
 Branch: refs/heads/master
-Date: 2017-08-28T16:25:36+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/7144d44bcf4bf4118e769a846717c3c739bffe65
+Date: 2017-08-27T23:29:58+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.schemaeditor/commit/9b6648522084045adb16b84df7c227da08293d29
 
-Disable queuing of indexing-operations during migration to Dexterity to prevent catalog-errors.
-
-Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/migration/browser.py
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/migration/patches.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 691600b8..afc138a4 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -34,6 +34,9 @@ Bug fixes:
-   definitions for the content types that have extra field defined on top of the
-   behavior composition. Otherwise no translations can be picked up.
-   [fredvd]
-+- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
-+  during migration to Dexterity to prevent catalog-errors.
-+  [pbauer]
- 
- - Use original raw text and mimetype when indexing rich text.
-   This avoids a double transform (raw source to output mimetype to plain text).
-diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
-index 487fd9fc..662efb74 100644
---- a/plone/app/contenttypes/migration/browser.py
-+++ b/plone/app/contenttypes/migration/browser.py
-@@ -9,32 +9,24 @@
- from plone.app.contenttypes.content import NewsItem
- from plone.app.contenttypes.migration import dxmigration
- from plone.app.contenttypes.migration import migration
--from plone.app.contenttypes.migration.patches import patched_insertForwardIndexEntry  # noqa
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.migration.utils import isSchemaExtended
- from plone.app.contenttypes.migration.utils import restore_references
- from plone.app.contenttypes.migration.utils import store_references
- from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
-+from plone.app.contenttypes.migration.patches import patch_before_migration
-+from plone.app.contenttypes.migration.patches import undo_patch_after_migration
- from plone.app.contenttypes.upgrades import use_new_view_names
- from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.browserlayer.interfaces import ILocalBrowserLayerType
--from plone.dexterity.content import DexterityContent
- from plone.dexterity.interfaces import IDexterityContent
- from plone.dexterity.interfaces import IDexterityFTI
--from plone.registry.interfaces import IRegistry
- from plone.z3cform.layout import wrap_form
- from pprint import pformat
--from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
--from Products.CMFCore.interfaces import IPropertiesTool
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
--from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
--from Products.CMFPlone.interfaces import IEditingSchema
--from Products.contentmigration.utils import patch
--from Products.contentmigration.utils import undoPatch
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
--from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
- from Products.statusmessages.interfaces import IStatusMessage
- from z3c.form import button
- from z3c.form import field
-@@ -43,7 +35,6 @@
- from z3c.form.interfaces import HIDDEN_MODE
- from zope import schema
- from zope.component import getMultiAdapter
--from zope.component import getUtility
- from zope.component import queryUtility
- from zope.interface import Interface
- 
-@@ -60,22 +51,12 @@
- 
- logger = logging.getLogger(__name__)
- 
--PATCH_NOTIFY = [
--    DexterityContent,
--    DefaultDublinCoreImpl,
--    ExtensibleMetadata
--]
- 
- # Average time to migrate one archetype object, in milliseconds.
- # This very much depends on the size of the object and system-speed
- ONE_OBJECT_MIGRATION_TIME = 500
- 
- 
--def pass_fn(*args, **kwargs):
--    """Empty function used for patching."""
--    pass
--
--
- class FixBaseClasses(BrowserView):
- 
-     def __call__(self):
-@@ -168,33 +149,8 @@ def __call__(self,
-             store_references(portal)
-         catalog = portal.portal_catalog
- 
--        # switch linkintegrity temp off
--        ptool = queryUtility(IPropertiesTool)
--        site_props = getattr(ptool, 'site_properties', None)
--        link_integrity_in_props = False
--        if site_props and site_props.hasProperty(
--                'enable_link_integrity_checks'):
--            link_integrity_in_props = True
--            link_integrity = site_props.getProperty(
--                'enable_link_integrity_checks', False)
--            site_props.manage_changeProperties(
--                enable_link_integrity_checks=False)
--        else:
--            # Plone 5
--            registry = getUtility(IRegistry)
--            editing_settings = registry.forInterface(
--                IEditingSchema, prefix='plone')
--            link_integrity = editing_settings.enable_link_integrity_checks
--            editing_settings.enable_link_integrity_checks = False
--
--        # switch of setModificationDate on changes
--        self.patchNotifyModified()
--
--        # patch UUIDIndex
--        patch(
--            UUIDIndex,
--            'insertForwardIndexEntry',
--            patched_insertForwardIndexEntry)
-+        # Patch various things that make migration harder
-+        link_integrity, queue_indexing = patch_before_migration()
- 
-         not_migrated = []
-         migrated_types = {}
-@@ -256,19 +212,8 @@ def __call__(self,
-         if migrate_references:
-             restore_references(portal)
- 
--        # switch linkintegrity back to what it was before migrating
--        if link_integrity_in_props:
--            site_props.manage_changeProperties(
--                enable_link_integrity_checks=link_integrity
--            )
--        else:
--            editing_settings.enable_link_integrity_checks = link_integrity
--
--        # switch on setModificationDate on changes
--        self.resetNotifyModified()
--
--        # unpatch UUIDIndex
--        undoPatch(UUIDIndex, 'insertForwardIndexEntry')
-+        # Revert to the original state
-+        undo_patch_after_migration(link_integrity, queue_indexing)
- 
-         duration = str(timedelta(seconds=(datetime.now() - starttime).seconds))
-         if not_migrated:
-@@ -313,22 +258,6 @@ def stats(self):
-             results[classname] = results.get(classname, 0) + 1
-         return results
- 
--    def patchNotifyModified(self):
--        """Patch notifyModified to prevent setModificationDate() on changes
--
--        notifyModified lives in several places and is also used on folders
--        when their content changes.
--        So when we migrate Documents before Folders the folders
--        ModifiedDate gets changed.
--        """
--        for klass in PATCH_NOTIFY:
--            patch(klass, 'notifyModified', pass_fn)
--
--    def resetNotifyModified(self):
--        """reset notifyModified to old state"""
--        for klass in PATCH_NOTIFY:
--            undoPatch(klass, 'notifyModified')
--
- 
- class IATCTMigratorForm(Interface):
- 
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index ee8438b8..95729f99 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -17,6 +17,8 @@
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
- from plone.app.contenttypes.migration.field_migrators import migrate_richtextfield  # noqa
- from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
-+from plone.app.contenttypes.migration.patches import patch_before_migration
-+from plone.app.contenttypes.migration.patches import undo_patch_after_migration
- from plone.app.contenttypes.migration.utils import copy_contentrules
- from plone.app.contenttypes.migration.utils import migrate_leadimage
- from plone.app.contenttypes.migration.utils import migrate_portlets
-@@ -476,6 +478,9 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-     """
-     portal = getSite()
- 
-+    # Patch various things that make migration harder
-+    link_integrity, queue_indexing = patch_before_migration()
-+
-     # if the type still exists get the src_meta_type from the portal_type
-     portal_types = getToolByName(portal, 'portal_types')
-     fti = portal_types.get(src_type, None)
-@@ -513,6 +518,7 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-                                     fields_mapping=fields_mapping,
-                                     is_folderish=is_folderish,
-                                     dry_run=dry_run)
-+    walker_infos = None
-     if migrator:
-         migrator.src_meta_type = src_meta_type
-         migrator.dst_meta_type = ''
-@@ -534,4 +540,8 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-             logger.error(error.get('message'))
-         if dry_run:
-             transaction.abort()
--        return walker_infos
-+
-+    # Revert to the original state
-+    undo_patch_after_migration(link_integrity, queue_indexing)
-+
-+    return walker_infos
-diff --git a/plone/app/contenttypes/migration/patches.py b/plone/app/contenttypes/migration/patches.py
-index 7cc10636..24e32f60 100644
---- a/plone/app/contenttypes/migration/patches.py
-+++ b/plone/app/contenttypes/migration/patches.py
-@@ -2,7 +2,25 @@
- """Patches used for migrations. These patches are applied before and removed
- after running the migration.
- """
-+from plone.dexterity.content import DexterityContent
-+from plone.registry.interfaces import IRegistry
-+from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
-+from Products.CMFCore.interfaces import IPropertiesTool
-+from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
-+from Products.CMFPlone.interfaces import IEditingSchema
-+from Products.contentmigration.utils import patch
-+from Products.contentmigration.utils import undoPatch
- from Products.PluginIndexes.common.UnIndex import _marker
-+from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
-+from zope.component import getUtility
-+from zope.component import queryUtility
-+
-+import os
-+
-+
-+def pass_fn(*args, **kwargs):
-+    """Empty function used for patching."""
-+    pass
- 
- 
- # Prevent UUID Error-Messages when migrating folders.
-@@ -18,3 +36,85 @@ def patched_insertForwardIndexEntry(self, entry, documentId):
-     if old_docid is _marker:
-         self._index[entry] = documentId
-         self._length.change(1)
-+
-+
-+def patch_before_migration():
-+    """Patch various things that make migration harder."""
-+    # Switch linkintegrity off
-+    ptool = queryUtility(IPropertiesTool)
-+    site_props = getattr(ptool, 'site_properties', None)
-+    if site_props and site_props.hasProperty(
-+            'enable_link_integrity_checks'):
-+        link_integrity = site_props.getProperty(
-+            'enable_link_integrity_checks', False)
-+        site_props.manage_changeProperties(
-+            enable_link_integrity_checks=False)
-+    else:
-+        # Plone 5
-+        registry = getUtility(IRegistry)
-+        editing_settings = registry.forInterface(
-+            IEditingSchema, prefix='plone')
-+        link_integrity = editing_settings.enable_link_integrity_checks
-+        editing_settings.enable_link_integrity_checks = False
-+
-+    # Patch notifyModified to prevent setModificationDate() on changes
-+    # notifyModified lives in several places and is also used on folders
-+    # when their content changes.
-+    # So when we migrate Documents before Folders the folders
-+    # ModifiedDate gets changed
-+    PATCH_NOTIFY = [
-+        DexterityContent,
-+        DefaultDublinCoreImpl,
-+        ExtensibleMetadata
-+    ]
-+    for klass in PATCH_NOTIFY:
-+        patch(klass, 'notifyModified', pass_fn)
-+
-+    # Disable queueing of indexing/reindexing/unindexing
-+    queue_indexing = os.environ.get('CATALOG_OPTIMIZATION_DISABLED', None)
-+    os.environ['CATALOG_OPTIMIZATION_DISABLED'] = '1'
-+
-+    # Patch UUIDIndex
-+    patch(
-+        UUIDIndex,
-+        'insertForwardIndexEntry',
-+        patched_insertForwardIndexEntry)
-+
-+    return link_integrity, queue_indexing
-+
-+
-+def undo_patch_after_migration(link_integrity=True, queue_indexing=None):
-+    """Revert to the original state."""
-+
-+    # Switch linkintegrity back to what it was before migrating
-+    ptool = queryUtility(IPropertiesTool)
-+    site_props = getattr(ptool, 'site_properties', None)
-+    if site_props and site_props.hasProperty(
-+            'enable_link_integrity_checks'):
-+        site_props.manage_changeProperties(
-+            enable_link_integrity_checks=link_integrity
-+        )
-+    else:
-+        # Plone 5
-+        registry = getUtility(IRegistry)
-+        editing_settings = registry.forInterface(
-+            IEditingSchema, prefix='plone')
-+        editing_settings.enable_link_integrity_checks = link_integrity
-+
-+    # Switch on setModificationDate on changes
-+    PATCH_NOTIFY = [
-+        DexterityContent,
-+        DefaultDublinCoreImpl,
-+        ExtensibleMetadata
-+    ]
-+    for klass in PATCH_NOTIFY:
-+        undoPatch(klass, 'notifyModified')
-+
-+    # Reset queueing of indexing/reindexing/unindexing
-+    if queue_indexing is not None:
-+        os.environ['CATALOG_OPTIMIZATION_DISABLED'] = queue_indexing
-+    else:
-+        del os.environ['CATALOG_OPTIMIZATION_DISABLED']
-+
-+    # Unpatch UUIDIndex
-+    undoPatch(UUIDIndex, 'insertForwardIndexEntry')
-
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/master
-Date: 2017-08-28T16:26:38+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/5ca9415d674293ca2288b2cc6d3259f8790108fb
-
-fix changelog
+Field reorderable, missing delete confirmation
+Fix fields not being reorderable and missing their delete confirmation until a fieldset was added.
+Fixes #81, #82.
 
 Files changed:
 M CHANGES.rst
+M plone/schemaeditor/browser/schema/schemaeditor.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index afc138a4..2fe07a6d 100644
+index c392f44..a80219b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,7 +14,9 @@ New features:
@@ -360,44 +23,63 @@ index afc138a4..2fe07a6d 100644
  Bug fixes:
  
 -- *add item here*
-+- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
-+  during migration to Dexterity to prevent catalog-errors.
-+  [pbauer]
++- Fix fields not being reorderable and missing their delete confirmation until a fieldset was added.
++  Fixes https://github.com/collective/collective.easyform/issues/81 and https://github.com/collective/collective.easyform/issues/82
++  [thet]
  
  
- 1.4.2 (2017-08-27)
-@@ -34,9 +36,6 @@ Bug fixes:
-   definitions for the content types that have extra field defined on top of the
-   behavior composition. Otherwise no translations can be picked up.
-   [fredvd]
--- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
--  during migration to Dexterity to prevent catalog-errors.
--  [pbauer]
+ 2.0.17 (2017-05-23)
+diff --git a/plone/schemaeditor/browser/schema/schemaeditor.js b/plone/schemaeditor/browser/schema/schemaeditor.js
+index ae8b72e..af9955f 100644
+--- a/plone/schemaeditor/browser/schema/schemaeditor.js
++++ b/plone/schemaeditor/browser/schema/schemaeditor.js
+@@ -275,14 +275,19 @@ require(['jquery'], function($) {
  
- - Use original raw text and mimetype when indexing rich text.
-   This avoids a double transform (raw source to output mimetype to plain text).
+     $(document).ready(function() {
+ 
+-        // Initialize only after autotoc has been initialized
+-        if ($('#form .autotoc-nav > a').length) {
+-            // pat-autotoc already initialized, script probably run after
+-            // mockup initialization.
+-            init_schemaeditor();
++        if ($('#form fieldset').length >= 2) {
++            // If multiple fieldsets, release after autotoc has been initialized
++            if ($('#form .autotoc-nav > a').length) {
++                // pat-autotoc already initialized, script probably run after
++                // mockup initialization.
++                init_schemaeditor();
++            } else {
++                // Otherwise, wait until autotoc is ready.
++                $(window).on('init.autotoc.patterns', init_schemaeditor);
++            }
+         } else {
+-            // Otherwise, wait until autotoc is ready.
+-            $(window).on('init.autotoc.patterns', init_schemaeditor);
++            // If only one fieldset, initialize immediately
++            init_schemaeditor();
+         }
+ 
+     });
 
 
-Repository: plone.app.contenttypes
+Repository: plone.schemaeditor
 
 
 Branch: refs/heads/master
-Date: 2017-08-28T18:07:47+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/1f4ec947c6c2b195712c432284e9ee6a68096475
+Date: 2017-08-28T21:11:10+02:00
+Author: Tom Gross (tomgross) <itconsense@gmail.com>
+Commit: https://github.com/plone/plone.schemaeditor/commit/56ab8245601e9e1c1f8f30e40c94de19426f8810
 
-Merge pull request #423 from plone/patch_catalog_optimization
+Merge pull request #56 from plone/thet-fixes
 
-Add patch of catalog optimization during migrations to DX
+Field reorderable, missing delete confirmation
 
 Files changed:
 M CHANGES.rst
-M plone/app/contenttypes/migration/browser.py
-M plone/app/contenttypes/migration/migration.py
-M plone/app/contenttypes/migration/patches.py
+M plone/schemaeditor/browser/schema/schemaeditor.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 691600b8..2fe07a6d 100644
+index c392f44..a80219b 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
 @@ -14,7 +14,9 @@ New features:
@@ -405,319 +87,42 @@ index 691600b8..2fe07a6d 100644
  Bug fixes:
  
 -- *add item here*
-+- Disable queuing of indexing-operations (PLIP https://github.com/plone/Products.CMFPlone/issues/1343)
-+  during migration to Dexterity to prevent catalog-errors.
-+  [pbauer]
++- Fix fields not being reorderable and missing their delete confirmation until a fieldset was added.
++  Fixes https://github.com/collective/collective.easyform/issues/81 and https://github.com/collective/collective.easyform/issues/82
++  [thet]
  
  
- 1.4.2 (2017-08-27)
-diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
-index 487fd9fc..662efb74 100644
---- a/plone/app/contenttypes/migration/browser.py
-+++ b/plone/app/contenttypes/migration/browser.py
-@@ -9,32 +9,24 @@
- from plone.app.contenttypes.content import NewsItem
- from plone.app.contenttypes.migration import dxmigration
- from plone.app.contenttypes.migration import migration
--from plone.app.contenttypes.migration.patches import patched_insertForwardIndexEntry  # noqa
- from plone.app.contenttypes.migration.utils import installTypeIfNeeded
- from plone.app.contenttypes.migration.utils import isSchemaExtended
- from plone.app.contenttypes.migration.utils import restore_references
- from plone.app.contenttypes.migration.utils import store_references
- from plone.app.contenttypes.migration.vocabularies import ATCT_LIST
-+from plone.app.contenttypes.migration.patches import patch_before_migration
-+from plone.app.contenttypes.migration.patches import undo_patch_after_migration
- from plone.app.contenttypes.upgrades import use_new_view_names
- from plone.app.contenttypes.utils import DEFAULT_TYPES
- from plone.browserlayer.interfaces import ILocalBrowserLayerType
--from plone.dexterity.content import DexterityContent
- from plone.dexterity.interfaces import IDexterityContent
- from plone.dexterity.interfaces import IDexterityFTI
--from plone.registry.interfaces import IRegistry
- from plone.z3cform.layout import wrap_form
- from pprint import pformat
--from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
--from Products.CMFCore.interfaces import IPropertiesTool
- from Products.CMFCore.utils import getToolByName
- from Products.CMFPlone import PloneMessageFactory as _
--from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
--from Products.CMFPlone.interfaces import IEditingSchema
--from Products.contentmigration.utils import patch
--from Products.contentmigration.utils import undoPatch
- from Products.Five.browser import BrowserView
- from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
--from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
- from Products.statusmessages.interfaces import IStatusMessage
- from z3c.form import button
- from z3c.form import field
-@@ -43,7 +35,6 @@
- from z3c.form.interfaces import HIDDEN_MODE
- from zope import schema
- from zope.component import getMultiAdapter
--from zope.component import getUtility
- from zope.component import queryUtility
- from zope.interface import Interface
+ 2.0.17 (2017-05-23)
+diff --git a/plone/schemaeditor/browser/schema/schemaeditor.js b/plone/schemaeditor/browser/schema/schemaeditor.js
+index ae8b72e..af9955f 100644
+--- a/plone/schemaeditor/browser/schema/schemaeditor.js
++++ b/plone/schemaeditor/browser/schema/schemaeditor.js
+@@ -275,14 +275,19 @@ require(['jquery'], function($) {
  
-@@ -60,22 +51,12 @@
+     $(document).ready(function() {
  
- logger = logging.getLogger(__name__)
+-        // Initialize only after autotoc has been initialized
+-        if ($('#form .autotoc-nav > a').length) {
+-            // pat-autotoc already initialized, script probably run after
+-            // mockup initialization.
+-            init_schemaeditor();
++        if ($('#form fieldset').length >= 2) {
++            // If multiple fieldsets, release after autotoc has been initialized
++            if ($('#form .autotoc-nav > a').length) {
++                // pat-autotoc already initialized, script probably run after
++                // mockup initialization.
++                init_schemaeditor();
++            } else {
++                // Otherwise, wait until autotoc is ready.
++                $(window).on('init.autotoc.patterns', init_schemaeditor);
++            }
+         } else {
+-            // Otherwise, wait until autotoc is ready.
+-            $(window).on('init.autotoc.patterns', init_schemaeditor);
++            // If only one fieldset, initialize immediately
++            init_schemaeditor();
+         }
  
--PATCH_NOTIFY = [
--    DexterityContent,
--    DefaultDublinCoreImpl,
--    ExtensibleMetadata
--]
- 
- # Average time to migrate one archetype object, in milliseconds.
- # This very much depends on the size of the object and system-speed
- ONE_OBJECT_MIGRATION_TIME = 500
- 
- 
--def pass_fn(*args, **kwargs):
--    """Empty function used for patching."""
--    pass
--
--
- class FixBaseClasses(BrowserView):
- 
-     def __call__(self):
-@@ -168,33 +149,8 @@ def __call__(self,
-             store_references(portal)
-         catalog = portal.portal_catalog
- 
--        # switch linkintegrity temp off
--        ptool = queryUtility(IPropertiesTool)
--        site_props = getattr(ptool, 'site_properties', None)
--        link_integrity_in_props = False
--        if site_props and site_props.hasProperty(
--                'enable_link_integrity_checks'):
--            link_integrity_in_props = True
--            link_integrity = site_props.getProperty(
--                'enable_link_integrity_checks', False)
--            site_props.manage_changeProperties(
--                enable_link_integrity_checks=False)
--        else:
--            # Plone 5
--            registry = getUtility(IRegistry)
--            editing_settings = registry.forInterface(
--                IEditingSchema, prefix='plone')
--            link_integrity = editing_settings.enable_link_integrity_checks
--            editing_settings.enable_link_integrity_checks = False
--
--        # switch of setModificationDate on changes
--        self.patchNotifyModified()
--
--        # patch UUIDIndex
--        patch(
--            UUIDIndex,
--            'insertForwardIndexEntry',
--            patched_insertForwardIndexEntry)
-+        # Patch various things that make migration harder
-+        link_integrity, queue_indexing = patch_before_migration()
- 
-         not_migrated = []
-         migrated_types = {}
-@@ -256,19 +212,8 @@ def __call__(self,
-         if migrate_references:
-             restore_references(portal)
- 
--        # switch linkintegrity back to what it was before migrating
--        if link_integrity_in_props:
--            site_props.manage_changeProperties(
--                enable_link_integrity_checks=link_integrity
--            )
--        else:
--            editing_settings.enable_link_integrity_checks = link_integrity
--
--        # switch on setModificationDate on changes
--        self.resetNotifyModified()
--
--        # unpatch UUIDIndex
--        undoPatch(UUIDIndex, 'insertForwardIndexEntry')
-+        # Revert to the original state
-+        undo_patch_after_migration(link_integrity, queue_indexing)
- 
-         duration = str(timedelta(seconds=(datetime.now() - starttime).seconds))
-         if not_migrated:
-@@ -313,22 +258,6 @@ def stats(self):
-             results[classname] = results.get(classname, 0) + 1
-         return results
- 
--    def patchNotifyModified(self):
--        """Patch notifyModified to prevent setModificationDate() on changes
--
--        notifyModified lives in several places and is also used on folders
--        when their content changes.
--        So when we migrate Documents before Folders the folders
--        ModifiedDate gets changed.
--        """
--        for klass in PATCH_NOTIFY:
--            patch(klass, 'notifyModified', pass_fn)
--
--    def resetNotifyModified(self):
--        """reset notifyModified to old state"""
--        for klass in PATCH_NOTIFY:
--            undoPatch(klass, 'notifyModified')
--
- 
- class IATCTMigratorForm(Interface):
- 
-diff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py
-index ee8438b8..95729f99 100644
---- a/plone/app/contenttypes/migration/migration.py
-+++ b/plone/app/contenttypes/migration/migration.py
-@@ -17,6 +17,8 @@
- from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
- from plone.app.contenttypes.migration.field_migrators import migrate_richtextfield  # noqa
- from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
-+from plone.app.contenttypes.migration.patches import patch_before_migration
-+from plone.app.contenttypes.migration.patches import undo_patch_after_migration
- from plone.app.contenttypes.migration.utils import copy_contentrules
- from plone.app.contenttypes.migration.utils import migrate_leadimage
- from plone.app.contenttypes.migration.utils import migrate_portlets
-@@ -476,6 +478,9 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-     """
-     portal = getSite()
- 
-+    # Patch various things that make migration harder
-+    link_integrity, queue_indexing = patch_before_migration()
-+
-     # if the type still exists get the src_meta_type from the portal_type
-     portal_types = getToolByName(portal, 'portal_types')
-     fti = portal_types.get(src_type, None)
-@@ -513,6 +518,7 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-                                     fields_mapping=fields_mapping,
-                                     is_folderish=is_folderish,
-                                     dry_run=dry_run)
-+    walker_infos = None
-     if migrator:
-         migrator.src_meta_type = src_meta_type
-         migrator.dst_meta_type = ''
-@@ -534,4 +540,8 @@ def migrateCustomAT(fields_mapping, src_type, dst_type, dry_run=False):
-             logger.error(error.get('message'))
-         if dry_run:
-             transaction.abort()
--        return walker_infos
-+
-+    # Revert to the original state
-+    undo_patch_after_migration(link_integrity, queue_indexing)
-+
-+    return walker_infos
-diff --git a/plone/app/contenttypes/migration/patches.py b/plone/app/contenttypes/migration/patches.py
-index 7cc10636..24e32f60 100644
---- a/plone/app/contenttypes/migration/patches.py
-+++ b/plone/app/contenttypes/migration/patches.py
-@@ -2,7 +2,25 @@
- """Patches used for migrations. These patches are applied before and removed
- after running the migration.
- """
-+from plone.dexterity.content import DexterityContent
-+from plone.registry.interfaces import IRegistry
-+from Products.Archetypes.ExtensibleMetadata import ExtensibleMetadata
-+from Products.CMFCore.interfaces import IPropertiesTool
-+from Products.CMFPlone.DublinCore import DefaultDublinCoreImpl
-+from Products.CMFPlone.interfaces import IEditingSchema
-+from Products.contentmigration.utils import patch
-+from Products.contentmigration.utils import undoPatch
- from Products.PluginIndexes.common.UnIndex import _marker
-+from Products.PluginIndexes.UUIDIndex.UUIDIndex import UUIDIndex
-+from zope.component import getUtility
-+from zope.component import queryUtility
-+
-+import os
-+
-+
-+def pass_fn(*args, **kwargs):
-+    """Empty function used for patching."""
-+    pass
- 
- 
- # Prevent UUID Error-Messages when migrating folders.
-@@ -18,3 +36,85 @@ def patched_insertForwardIndexEntry(self, entry, documentId):
-     if old_docid is _marker:
-         self._index[entry] = documentId
-         self._length.change(1)
-+
-+
-+def patch_before_migration():
-+    """Patch various things that make migration harder."""
-+    # Switch linkintegrity off
-+    ptool = queryUtility(IPropertiesTool)
-+    site_props = getattr(ptool, 'site_properties', None)
-+    if site_props and site_props.hasProperty(
-+            'enable_link_integrity_checks'):
-+        link_integrity = site_props.getProperty(
-+            'enable_link_integrity_checks', False)
-+        site_props.manage_changeProperties(
-+            enable_link_integrity_checks=False)
-+    else:
-+        # Plone 5
-+        registry = getUtility(IRegistry)
-+        editing_settings = registry.forInterface(
-+            IEditingSchema, prefix='plone')
-+        link_integrity = editing_settings.enable_link_integrity_checks
-+        editing_settings.enable_link_integrity_checks = False
-+
-+    # Patch notifyModified to prevent setModificationDate() on changes
-+    # notifyModified lives in several places and is also used on folders
-+    # when their content changes.
-+    # So when we migrate Documents before Folders the folders
-+    # ModifiedDate gets changed
-+    PATCH_NOTIFY = [
-+        DexterityContent,
-+        DefaultDublinCoreImpl,
-+        ExtensibleMetadata
-+    ]
-+    for klass in PATCH_NOTIFY:
-+        patch(klass, 'notifyModified', pass_fn)
-+
-+    # Disable queueing of indexing/reindexing/unindexing
-+    queue_indexing = os.environ.get('CATALOG_OPTIMIZATION_DISABLED', None)
-+    os.environ['CATALOG_OPTIMIZATION_DISABLED'] = '1'
-+
-+    # Patch UUIDIndex
-+    patch(
-+        UUIDIndex,
-+        'insertForwardIndexEntry',
-+        patched_insertForwardIndexEntry)
-+
-+    return link_integrity, queue_indexing
-+
-+
-+def undo_patch_after_migration(link_integrity=True, queue_indexing=None):
-+    """Revert to the original state."""
-+
-+    # Switch linkintegrity back to what it was before migrating
-+    ptool = queryUtility(IPropertiesTool)
-+    site_props = getattr(ptool, 'site_properties', None)
-+    if site_props and site_props.hasProperty(
-+            'enable_link_integrity_checks'):
-+        site_props.manage_changeProperties(
-+            enable_link_integrity_checks=link_integrity
-+        )
-+    else:
-+        # Plone 5
-+        registry = getUtility(IRegistry)
-+        editing_settings = registry.forInterface(
-+            IEditingSchema, prefix='plone')
-+        editing_settings.enable_link_integrity_checks = link_integrity
-+
-+    # Switch on setModificationDate on changes
-+    PATCH_NOTIFY = [
-+        DexterityContent,
-+        DefaultDublinCoreImpl,
-+        ExtensibleMetadata
-+    ]
-+    for klass in PATCH_NOTIFY:
-+        undoPatch(klass, 'notifyModified')
-+
-+    # Reset queueing of indexing/reindexing/unindexing
-+    if queue_indexing is not None:
-+        os.environ['CATALOG_OPTIMIZATION_DISABLED'] = queue_indexing
-+    else:
-+        del os.environ['CATALOG_OPTIMIZATION_DISABLED']
-+
-+    # Unpatch UUIDIndex
-+    undoPatch(UUIDIndex, 'insertForwardIndexEntry')
+     });
 
 
