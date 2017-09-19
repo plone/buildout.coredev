@@ -1,172 +1,208 @@
-Repository: Products.CMFPlone
+Repository: plone.scale
 
 
 Branch: refs/heads/master
-Date: 2017-09-19T17:07:22+02:00
-Author: Gagaro (Gagaro) <gagaro42@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/b212e10522c9262271de7b02ee4d994163bfeb52
+Date: 2017-09-19T12:19:25+02:00
+Author: Florian Schulze (fschulze) <florian.schulze@gmx.net>
+Commit: https://github.com/plone/plone.scale/commit/d7023c85f33a36910c774ed4900a08d0da66324f
 
-fix: Remove site path from path in show_inactive in catalog search
+Commit a082d72a4239d18cd2b7af15178cde5834994fe4 removed the 'Persistence' dependency, but it's needed for standalone test runs of the storage code.
+
+Files changed:
+M setup.py
+
+diff --git a/setup.py b/setup.py
+index c0431c5..df7fe18 100644
+--- a/setup.py
++++ b/setup.py
+@@ -11,6 +11,7 @@
+     'zope.component',
+     'zope.configuration',
+     'zope.interface',
++    'Persistence',
+ ]
+ 
+ TESTS_REQUIREMENTS = [
+
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2017-09-19T12:21:10+02:00
+Author: Florian Schulze (fschulze) <florian.schulze@gmx.net>
+Commit: https://github.com/plone/plone.scale/commit/f1ad566385bea072f2b6e9337cffc6d4d8e6d2b2
+
+Properly handle alpha channels in TIFF images.
+
+Since Pillow 4.2.0 TIFF is opened with RGBA mode, which causes a test failure.
+
+We now check if alpha is used at all, if not, we write a JPEG, otherwise we switch output to PNG.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/tests/testCatalogTool.py
+M plone/scale/scale.py
+M plone/scale/tests/test_scale.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index c5576c879..aa85c7eb9 100644
+index e4e938f..4d5bce1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -18,6 +18,9 @@ New features:
+@@ -12,7 +12,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Handle TIFF images with alpha channels.
++  [fschulze]
  
  Bug fixes:
  
-+- Remove site path from path in show_inactive in catalog search
-+  [Gagaro]
-+
- - Don't raise Unauthorized on show_inactive check in catalog search
-   [tomgross]
+diff --git a/plone/scale/scale.py b/plone/scale/scale.py
+index 0374eae..4bc414e 100644
+--- a/plone/scale/scale.py
++++ b/plone/scale/scale.py
+@@ -76,6 +76,16 @@ def scaleImage(image, width=None, height=None, direction='down',
+         elif format_ == 'PNG':
+             image = image.convert('P')
  
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index f421e9e02..d6cf97703 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -415,7 +415,8 @@ def allow_inactive(self, query_kw):
-         for path in list(paths):
-             path = path.encode('utf-8')  # paths must not be unicode
-             try:
--                parts = path.split('/')
-+                site_path = '/'.join(site.getPhysicalPath())
-+                parts = path[len(site_path) + 1:].split('/')
-                 parent = site.unrestrictedTraverse('/'.join(parts[:-1]))
-                 objs.append(parent.restrictedTraverse(parts[-1]))
-             except (KeyError, AttributeError, Unauthorized):
-diff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py
-index ffe06dae0..a9559b760 100644
---- a/Products/CMFPlone/tests/testCatalogTool.py
-+++ b/Products/CMFPlone/tests/testCatalogTool.py
-@@ -1170,6 +1170,35 @@ def testExpiredWithoutPermissionOnSubpath(self):
-         res = self.catalog(**query)
-         self.assertResults(res, expected_result)
++    if image.mode == 'RGBA' and format_ == 'JPEG':
++        extrema = dict(zip(image.getbands(), image.getextrema()))
++        if extrema.get('A') == (255, 255):
++            # no alpha used, just change the mode, which causes the alpha band
++            # to be dropped on save
++            image.mode = "RGB"
++        else:
++            # switch to PNG, which supports alpha
++            format_ = 'PNG'
++
+     new_result = False
  
-+    def testExpiredWithSameNameAsSite(self):
-+        # Create an expired folder with the same name as the site
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        self.portal.invokeFactory('Folder', id=self.portal.id)
+     if result is None:
+diff --git a/plone/scale/tests/test_scale.py b/plone/scale/tests/test_scale.py
+index 762055f..68b9fea 100644
+--- a/plone/scale/tests/test_scale.py
++++ b/plone/scale/tests/test_scale.py
+@@ -36,6 +36,24 @@ def testScaledImageKeepGIFto(self):
+     def testScaledImageIsJpeg(self):
+         self.assertEqual(scaleImage(TIFF, 84, 103, "down")[1], "JPEG")
+ 
++    def testAlphaForcesPNG(self):
++        # first image without alpha
++        src = PIL.Image.new("RGBA", (256, 256), (255, 255, 255, 255))
++        for y in range(0, 256):
++            for x in range(0, 256):
++                src.putpixel((x, y), (x, y, 0, 255))
++        result = StringIO()
++        src.save(result, "TIFF")
++        self.assertEqual(scaleImage(result, 84, 103, "down")[1], "JPEG")
++        # now with alpha
++        src = PIL.Image.new("RGBA", (256, 256), (255, 255, 255, 128))
++        result = StringIO()
++        for y in range(0, 256):
++            for x in range(0, 256):
++                src.putpixel((x, y), (x, y, 0, x))
++        src.save(result, "TIFF")
++        self.assertEqual(scaleImage(result, 84, 103, "down")[1], "PNG")
 +
-+        # Add the AccessInactivePortalContent permission in the plone folder
-+        # The user should NOT have this permission in self.folder
-+        self.portal.plone.manage_role('Member', [AccessInactivePortalContent])
-+
-+        # Expire a document
-+        self.folder.doc.setExpirationDate(DateTime(2000, 12, 31))
-+        self.folder.doc.reindexObject()
-+        self.nofx()
-+
-+        # Inactive content isn't shown without the required permission.
-+        expected_result = [content for content in base_content if content != 'doc'] + ['plone']
-+
-+        # Login as unprivileged user
-+        self.login(user2)
-+
-+        # Path is the site's one
-+        query = {
-+            'path': '/'.join(self.portal.getPhysicalPath())
-+        }
-+        res = self.catalog.searchResults(**query)
-+        self.assertResults(res, expected_result)
-+        res = self.catalog(**query)
-+        self.assertResults(res, expected_result)
-+
-     def testSearchResultsWithAdditionalExpiryFilter(self):
-         # For this test we want the expires and effective indices in place,
-         # let's make sure everything still works
+     def testScaledCMYKIsRGB(self):
+         (imagedata, format, size) = scaleImage(CMYK, 42, 51, "down")
+         input = StringIO(imagedata)
 
 
-Repository: Products.CMFPlone
+Repository: plone.scale
 
 
 Branch: refs/heads/master
-Date: 2017-09-19T18:10:23+02:00
+Date: 2017-09-19T18:13:37+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/722dbb22924912e75872fedccb3c304421b0f1b8
+Commit: https://github.com/plone/plone.scale/commit/e944bd6089d3eb0302a3dd1192153ad693749b73
 
-Merge pull request #2149 from plone/fix-catalog-allow-inactive-path
+Merge pull request #28 from fschulze/handle-alpha-channels
 
-fix: Remove site path from path in show_inactive in catalog search
+Handle alpha channels, which fixes a test failure introduced with Pillow 4.2.0
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/tests/testCatalogTool.py
+M plone/scale/scale.py
+M plone/scale/tests/test_scale.py
+M setup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index c5576c879..aa85c7eb9 100644
+index e4e938f..4d5bce1 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -18,6 +18,9 @@ New features:
+@@ -12,7 +12,8 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Handle TIFF images with alpha channels.
++  [fschulze]
  
  Bug fixes:
  
-+- Remove site path from path in show_inactive in catalog search
-+  [Gagaro]
-+
- - Don't raise Unauthorized on show_inactive check in catalog search
-   [tomgross]
+diff --git a/plone/scale/scale.py b/plone/scale/scale.py
+index 0374eae..4bc414e 100644
+--- a/plone/scale/scale.py
++++ b/plone/scale/scale.py
+@@ -76,6 +76,16 @@ def scaleImage(image, width=None, height=None, direction='down',
+         elif format_ == 'PNG':
+             image = image.convert('P')
  
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index f421e9e02..d6cf97703 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -415,7 +415,8 @@ def allow_inactive(self, query_kw):
-         for path in list(paths):
-             path = path.encode('utf-8')  # paths must not be unicode
-             try:
--                parts = path.split('/')
-+                site_path = '/'.join(site.getPhysicalPath())
-+                parts = path[len(site_path) + 1:].split('/')
-                 parent = site.unrestrictedTraverse('/'.join(parts[:-1]))
-                 objs.append(parent.restrictedTraverse(parts[-1]))
-             except (KeyError, AttributeError, Unauthorized):
-diff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py
-index ffe06dae0..a9559b760 100644
---- a/Products/CMFPlone/tests/testCatalogTool.py
-+++ b/Products/CMFPlone/tests/testCatalogTool.py
-@@ -1170,6 +1170,35 @@ def testExpiredWithoutPermissionOnSubpath(self):
-         res = self.catalog(**query)
-         self.assertResults(res, expected_result)
++    if image.mode == 'RGBA' and format_ == 'JPEG':
++        extrema = dict(zip(image.getbands(), image.getextrema()))
++        if extrema.get('A') == (255, 255):
++            # no alpha used, just change the mode, which causes the alpha band
++            # to be dropped on save
++            image.mode = "RGB"
++        else:
++            # switch to PNG, which supports alpha
++            format_ = 'PNG'
++
+     new_result = False
  
-+    def testExpiredWithSameNameAsSite(self):
-+        # Create an expired folder with the same name as the site
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        self.portal.invokeFactory('Folder', id=self.portal.id)
+     if result is None:
+diff --git a/plone/scale/tests/test_scale.py b/plone/scale/tests/test_scale.py
+index 762055f..68b9fea 100644
+--- a/plone/scale/tests/test_scale.py
++++ b/plone/scale/tests/test_scale.py
+@@ -36,6 +36,24 @@ def testScaledImageKeepGIFto(self):
+     def testScaledImageIsJpeg(self):
+         self.assertEqual(scaleImage(TIFF, 84, 103, "down")[1], "JPEG")
+ 
++    def testAlphaForcesPNG(self):
++        # first image without alpha
++        src = PIL.Image.new("RGBA", (256, 256), (255, 255, 255, 255))
++        for y in range(0, 256):
++            for x in range(0, 256):
++                src.putpixel((x, y), (x, y, 0, 255))
++        result = StringIO()
++        src.save(result, "TIFF")
++        self.assertEqual(scaleImage(result, 84, 103, "down")[1], "JPEG")
++        # now with alpha
++        src = PIL.Image.new("RGBA", (256, 256), (255, 255, 255, 128))
++        result = StringIO()
++        for y in range(0, 256):
++            for x in range(0, 256):
++                src.putpixel((x, y), (x, y, 0, x))
++        src.save(result, "TIFF")
++        self.assertEqual(scaleImage(result, 84, 103, "down")[1], "PNG")
 +
-+        # Add the AccessInactivePortalContent permission in the plone folder
-+        # The user should NOT have this permission in self.folder
-+        self.portal.plone.manage_role('Member', [AccessInactivePortalContent])
-+
-+        # Expire a document
-+        self.folder.doc.setExpirationDate(DateTime(2000, 12, 31))
-+        self.folder.doc.reindexObject()
-+        self.nofx()
-+
-+        # Inactive content isn't shown without the required permission.
-+        expected_result = [content for content in base_content if content != 'doc'] + ['plone']
-+
-+        # Login as unprivileged user
-+        self.login(user2)
-+
-+        # Path is the site's one
-+        query = {
-+            'path': '/'.join(self.portal.getPhysicalPath())
-+        }
-+        res = self.catalog.searchResults(**query)
-+        self.assertResults(res, expected_result)
-+        res = self.catalog(**query)
-+        self.assertResults(res, expected_result)
-+
-     def testSearchResultsWithAdditionalExpiryFilter(self):
-         # For this test we want the expires and effective indices in place,
-         # let's make sure everything still works
+     def testScaledCMYKIsRGB(self):
+         (imagedata, format, size) = scaleImage(CMYK, 42, 51, "down")
+         input = StringIO(imagedata)
+diff --git a/setup.py b/setup.py
+index c0431c5..df7fe18 100644
+--- a/setup.py
++++ b/setup.py
+@@ -11,6 +11,7 @@
+     'zope.component',
+     'zope.configuration',
+     'zope.interface',
++    'Persistence',
+ ]
+ 
+ TESTS_REQUIREMENTS = [
 
 
