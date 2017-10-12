@@ -1,206 +1,120 @@
-Repository: plone.autoform
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2017-10-09T19:15:38+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/plone.autoform/commit/f069b1754352c82f2a40b7429ce5bf32e5f9b96e
+Date: 2017-10-11T01:05:00+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/4305ce058f08648232354cb0f78b02f9dd38b6fc
 
-Add handler registration for text input widgets to support e.g. 'placeholder' parameter in parameterized widgets
+Fixed WrongType exception when migrating installed Iterate to 5.0.
 
-Files changed:
-M plone/autoform/configure.zcml
-M plone/autoform/tests/test_supermodel_handler.py
-M plone/autoform/widgets.py
-
-diff --git a/plone/autoform/configure.zcml b/plone/autoform/configure.zcml
-index e6260ed..e5e9e00 100644
---- a/plone/autoform/configure.zcml
-+++ b/plone/autoform/configure.zcml
-@@ -46,6 +46,13 @@
-         />
- 
-     <!-- widget import/export -->
-+
-+    <utility
-+        provides=".interfaces.IWidgetExportImportHandler"
-+        component=".widgets.TextInputWidgetExportImportHandler"
-+        name="z3c.form.browser.text.TextFieldWidget"
-+        />
-+
-     <utility
-         provides=".interfaces.IWidgetExportImportHandler"
-         component=".widgets.TextAreaWidgetExportImportHandler"
-diff --git a/plone/autoform/tests/test_supermodel_handler.py b/plone/autoform/tests/test_supermodel_handler.py
-index f06bce9..90e699e 100644
---- a/plone/autoform/tests/test_supermodel_handler.py
-+++ b/plone/autoform/tests/test_supermodel_handler.py
-@@ -212,8 +212,11 @@ def test_read_parameterized_widget_default(self):
- 
-         param_node = etree.Element('klass')
-         param_node.text = 'custom'
-+        param2_node = etree.Element('placeholder')
-+        param2_node.text = 'help'
-         widget_node = etree.Element(ns('widget', self.namespace))
-         widget_node.append(param_node)
-+        widget_node.append(param2_node)
-         field_node = etree.Element('field')
-         field_node.append(widget_node)
- 
-@@ -226,7 +229,10 @@ class IDummy(Interface):
-         widgets = IDummy.queryTaggedValue(WIDGETS_KEY)
-         self.assertTrue(isinstance(widgets['foo'], ParameterizedWidget))
-         self.assertTrue(widgets['foo'].widget_factory is None)
--        self.assertEqual(widgets['foo'].params, {'klass': 'custom'})
-+        self.assertIn('klass', widgets['foo'].params)
-+        self.assertEqual(widgets['foo'].params['klass'], 'custom')
-+        self.assertIn('placeholder', widgets['foo'].params)
-+        self.assertEqual(widgets['foo'].params['placeholder'], 'help')
- 
-     def test_write(self):
-         field_node = etree.Element('field')
-diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
-index e06c1c2..d24e829 100644
---- a/plone/autoform/widgets.py
-+++ b/plone/autoform/widgets.py
-@@ -149,6 +149,10 @@ def write(self, widgetNode, params):
-                 widgetNode.append(child)
- 
- 
-+TextInputWidgetExportImportHandler = WidgetExportImportHandler(
-+    z3c.form.browser.interfaces.IHTMLTextInputWidget
-+)
-+
- TextAreaWidgetExportImportHandler = WidgetExportImportHandler(
-     z3c.form.browser.interfaces.IHTMLTextAreaWidget
- )
-
-
-Repository: plone.autoform
-
-
-Branch: refs/heads/master
-Date: 2017-10-09T19:16:46+03:00
-Author: Asko Soukka (datakurre) <asko.soukka@iki.fi>
-Commit: https://github.com/plone/plone.autoform/commit/d61da6de5c0a25bb728dcca5e09ef15647eb4dd6
-
-Update changelog
+This mitigates the effects from https://github.com/plone/plone.app.upgrade/pull/136
 
 Files changed:
 M CHANGES.rst
+M plone/app/upgrade/v50/betas.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f9bff8d..5eac5f6 100644
+index 4e70d97..47b6d40 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Add handler registration for text input widgets to support e.g. 'placeholder'
-+  parameter in parameterized widgets
-+  [datakurre]
-+
+@@ -14,7 +14,8 @@ New features:
  
  Bug fixes:
  
+-- *add item here*
++- Fixed WrongType exception when migrating installed Iterate to 5.0.
++  [maurits]
+ 
+ 
+ 2.0.8 (2017-09-25)
+diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
+index 59412f4..c7a3487 100644
+--- a/plone/app/upgrade/v50/betas.py
++++ b/plone/app/upgrade/v50/betas.py
+@@ -17,6 +17,7 @@
+ from Products.CMFPlone.utils import safe_unicode
+ from zope.component import getUtility
+ from zope.component.hooks import getSite
++from zope.schema._bootstrapinterfaces import WrongType
+ 
+ import logging
+ import pkg_resources
+@@ -570,7 +571,14 @@ def to50rc3(context):
+         value = site_properties.getProperty('checkout_workflow_policy')
+         from plone.app.iterate.interfaces import IIterateSettings
+         settings = registry.forInterface(IIterateSettings)
+-        settings.checkout_workflow_policy = str(value)
++        # Some versions of plone.app.iterate require a string here,
++        # others a unicode.  Best seems to be to try both.
++        try:
++            # plone.app.iterate 3.3.2+
++            settings.checkout_workflow_policy = str(value)
++        except WrongType:
++            # plone.app.iterate 3.3.1-
++            settings.checkout_workflow_policy = safe_unicode(value)
+         site_properties._delProperty('checkout_workflow_policy')
+ 
+     if site_properties.hasProperty('default_page_types'):
 
 
-Repository: plone.autoform
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2017-10-10T09:19:33+02:00
+Date: 2017-10-11T12:19:10+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.autoform/commit/123eff12fe36433f2b9952d13d012e785abe9b50
+Commit: https://github.com/plone/plone.app.upgrade/commit/7142a0cc155ba129b9aa88f35d8ce257df9b4ff9
 
-Merge pull request #29 from plone/datakurre-parameterized
+Merge pull request #140 from plone/iterate-both-str-unicode
 
-Add handler registration for text input widgets to support e.g. 'placeholder' parameter in parametrized widgets
+Fixed WrongType exception when migrating installed Iterate to 5.0.
 
 Files changed:
 M CHANGES.rst
-M plone/autoform/configure.zcml
-M plone/autoform/tests/test_supermodel_handler.py
-M plone/autoform/widgets.py
+M plone/app/upgrade/v50/betas.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index f9bff8d..5eac5f6 100644
+index 4e70d97..47b6d40 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Add handler registration for text input widgets to support e.g. 'placeholder'
-+  parameter in parameterized widgets
-+  [datakurre]
-+
+@@ -14,7 +14,8 @@ New features:
  
  Bug fixes:
  
-diff --git a/plone/autoform/configure.zcml b/plone/autoform/configure.zcml
-index e6260ed..e5e9e00 100644
---- a/plone/autoform/configure.zcml
-+++ b/plone/autoform/configure.zcml
-@@ -46,6 +46,13 @@
-         />
- 
-     <!-- widget import/export -->
-+
-+    <utility
-+        provides=".interfaces.IWidgetExportImportHandler"
-+        component=".widgets.TextInputWidgetExportImportHandler"
-+        name="z3c.form.browser.text.TextFieldWidget"
-+        />
-+
-     <utility
-         provides=".interfaces.IWidgetExportImportHandler"
-         component=".widgets.TextAreaWidgetExportImportHandler"
-diff --git a/plone/autoform/tests/test_supermodel_handler.py b/plone/autoform/tests/test_supermodel_handler.py
-index f06bce9..90e699e 100644
---- a/plone/autoform/tests/test_supermodel_handler.py
-+++ b/plone/autoform/tests/test_supermodel_handler.py
-@@ -212,8 +212,11 @@ def test_read_parameterized_widget_default(self):
- 
-         param_node = etree.Element('klass')
-         param_node.text = 'custom'
-+        param2_node = etree.Element('placeholder')
-+        param2_node.text = 'help'
-         widget_node = etree.Element(ns('widget', self.namespace))
-         widget_node.append(param_node)
-+        widget_node.append(param2_node)
-         field_node = etree.Element('field')
-         field_node.append(widget_node)
- 
-@@ -226,7 +229,10 @@ class IDummy(Interface):
-         widgets = IDummy.queryTaggedValue(WIDGETS_KEY)
-         self.assertTrue(isinstance(widgets['foo'], ParameterizedWidget))
-         self.assertTrue(widgets['foo'].widget_factory is None)
--        self.assertEqual(widgets['foo'].params, {'klass': 'custom'})
-+        self.assertIn('klass', widgets['foo'].params)
-+        self.assertEqual(widgets['foo'].params['klass'], 'custom')
-+        self.assertIn('placeholder', widgets['foo'].params)
-+        self.assertEqual(widgets['foo'].params['placeholder'], 'help')
- 
-     def test_write(self):
-         field_node = etree.Element('field')
-diff --git a/plone/autoform/widgets.py b/plone/autoform/widgets.py
-index e06c1c2..d24e829 100644
---- a/plone/autoform/widgets.py
-+++ b/plone/autoform/widgets.py
-@@ -149,6 +149,10 @@ def write(self, widgetNode, params):
-                 widgetNode.append(child)
+-- *add item here*
++- Fixed WrongType exception when migrating installed Iterate to 5.0.
++  [maurits]
  
  
-+TextInputWidgetExportImportHandler = WidgetExportImportHandler(
-+    z3c.form.browser.interfaces.IHTMLTextInputWidget
-+)
-+
- TextAreaWidgetExportImportHandler = WidgetExportImportHandler(
-     z3c.form.browser.interfaces.IHTMLTextAreaWidget
- )
+ 2.0.8 (2017-09-25)
+diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
+index 59412f4..c7a3487 100644
+--- a/plone/app/upgrade/v50/betas.py
++++ b/plone/app/upgrade/v50/betas.py
+@@ -17,6 +17,7 @@
+ from Products.CMFPlone.utils import safe_unicode
+ from zope.component import getUtility
+ from zope.component.hooks import getSite
++from zope.schema._bootstrapinterfaces import WrongType
+ 
+ import logging
+ import pkg_resources
+@@ -570,7 +571,14 @@ def to50rc3(context):
+         value = site_properties.getProperty('checkout_workflow_policy')
+         from plone.app.iterate.interfaces import IIterateSettings
+         settings = registry.forInterface(IIterateSettings)
+-        settings.checkout_workflow_policy = str(value)
++        # Some versions of plone.app.iterate require a string here,
++        # others a unicode.  Best seems to be to try both.
++        try:
++            # plone.app.iterate 3.3.2+
++            settings.checkout_workflow_policy = str(value)
++        except WrongType:
++            # plone.app.iterate 3.3.1-
++            settings.checkout_workflow_policy = safe_unicode(value)
+         site_properties._delProperty('checkout_workflow_policy')
+ 
+     if site_properties.hasProperty('default_page_types'):
 
 
