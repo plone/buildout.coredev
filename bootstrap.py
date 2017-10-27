@@ -71,7 +71,7 @@ is_jython = sys.platform.startswith('java')
 
 setuptools_source = 'http://peak.telecommunity.com/dist/ez_setup.py'
 distribute_source = 'http://python-distribute.org/distribute_setup.py'
-
+distribute_source = 'https://bitbucket.org/pypa/setuptools/raw/f657df1f1ed46596d236376649c99a470662b4ba/distribute_setup.py'
 
 # parsing arguments
 def normalize_to_url(option, opt_str, value, parser):
