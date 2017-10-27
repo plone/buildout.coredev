@@ -1,38 +1,552 @@
-Repository: plone.app.upgrade
+Repository: plone.supermodel
 
 
 Branch: refs/heads/master
-Date: 2017-10-27T10:57:02+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/eb03bd905be52c3c7bcadc0d3388403fa96b1a35
+Date: 2017-10-24T22:43:42+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.supermodel/commit/c1aa136a4672b8f909bc2f5e3a0ee9f6095f7685
 
-fix test for 5.0 and 5.1
+Python3 compatibility with sixer
 
 Files changed:
-M plone/app/upgrade/v50/testing.py
+M CHANGES.rst
+M plone/supermodel/__init__.py
+M plone/supermodel/converters.py
+M plone/supermodel/exportimport.py
+M plone/supermodel/parser.py
+M plone/supermodel/tests.py
+M plone/supermodel/utils.py
+M setup.py
 
-diff --git a/plone/app/upgrade/v50/testing.py b/plone/app/upgrade/v50/testing.py
-index aa0d9e2a..165f5a1e 100644
---- a/plone/app/upgrade/v50/testing.py
-+++ b/plone/app/upgrade/v50/testing.py
-@@ -40,10 +40,14 @@ def setUpPloneSite(self, portal):
-             # run upgrades
-             self['portal'] = portal = app.test
-             setSite(portal)
--            loadMigrationProfile(
--                portal.portal_setup,
--                'profile-plone.app.upgrade.v52:to52alpha1',
--                steps=['componentregistry'])
-+            try:
-+                # for 5.2 we need tools as utilities
-+                loadMigrationProfile(
-+                    portal.portal_setup,
-+                    'profile-plone.app.upgrade.v52:to52alpha1',
-+                    steps=['componentregistry'])
-+            except KeyError:
-+                pass
-             portal.portal_migration.upgrade(swallow_errors=False)
-             setSite(None)
+diff --git a/CHANGES.rst b/CHANGES.rst
+index cfaf313..049190c 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
  
+ Bug fixes:
+ 
+-- *add item here*
++- Python3 compatibility with sixer
++  [ale-rt]
+ 
+ 
+ 1.3.3 (2017-06-04)
+diff --git a/plone/supermodel/__init__.py b/plone/supermodel/__init__.py
+index 8cedfcb..5b3a582 100644
+--- a/plone/supermodel/__init__.py
++++ b/plone/supermodel/__init__.py
+@@ -1,13 +1,14 @@
+ # -*- coding: utf-8 -*-
+-from StringIO import StringIO
+ from plone.supermodel import model
+ from plone.supermodel import parser
+ from plone.supermodel import serializer
+ from plone.supermodel import utils
+ from plone.supermodel.interfaces import FILENAME_KEY
+ from plone.supermodel.interfaces import IXMLToSchema
++from six import StringIO
+ from zope.interface import moduleProvides
+ 
++
+ # Cache models by absolute filename
+ _model_cache = {}
+ 
+diff --git a/plone/supermodel/converters.py b/plone/supermodel/converters.py
+index a496008..dbe9004 100644
+--- a/plone/supermodel/converters.py
++++ b/plone/supermodel/converters.py
+@@ -10,7 +10,9 @@
+ from zope.schema.interfaces import IFromUnicode
+ from zope.schema.interfaces import IInterfaceField
+ from zope.schema.interfaces import IObject
++
+ import datetime
++import six
+ import time
+ 
+ 
+@@ -35,7 +37,7 @@ def __init__(self, context):
+         self.context = context
+ 
+     def toUnicode(self, value):
+-        return unicode(value)
++        return six.text_type(value)
+ 
+ 
+ # Date/time fields
+@@ -95,7 +97,7 @@ def __init__(self, context):
+         self.context = context
+ 
+     def toUnicode(self, value):
+-        return unicode(value.__identifier__)
++        return six.text_type(value.__identifier__)
+ 
+ 
+ # Object fields - we can read, but not write, as there is no way to know
+diff --git a/plone/supermodel/exportimport.py b/plone/supermodel/exportimport.py
+index 2902a8b..0270c03 100644
+--- a/plone/supermodel/exportimport.py
++++ b/plone/supermodel/exportimport.py
+@@ -4,20 +4,23 @@
+ from plone.supermodel.interfaces import IDefaultFactory
+ from plone.supermodel.interfaces import IFieldExportImportHandler
+ from plone.supermodel.interfaces import IFieldNameExtractor
++from plone.supermodel.utils import elementToValue
+ from plone.supermodel.utils import noNS
+ from plone.supermodel.utils import valueToElement
+-from plone.supermodel.utils import elementToValue
+ from zope.component import queryUtility
+-from zope.interface import Interface
+ from zope.interface import implementedBy
+ from zope.interface import implementer
++from zope.interface import Interface
+ from zope.schema.interfaces import IContextAwareDefaultFactory
+ from zope.schema.interfaces import IField
+ from zope.schema.interfaces import IVocabularyTokenized
+ from zope.schema.vocabulary import SimpleTerm
+ from zope.schema.vocabulary import SimpleVocabulary
++
++import six
+ import zope.schema
+ 
++
+ try:
+     from collections import OrderedDict
+ except:
+@@ -395,7 +398,7 @@ def write(self, field, name, type, elementName='field'):
+             value = []
+             for term in field.vocabulary:
+                 if (
+-                    not isinstance(term.value, (str, unicode), ) or
++                    not isinstance(term.value, six.string_types, ) or
+                     term.token != term.value.encode('unicode_escape')
+                 ):
+                     raise NotImplementedError(
+diff --git a/plone/supermodel/parser.py b/plone/supermodel/parser.py
+index 0c712a2..10ba2eb 100644
+--- a/plone/supermodel/parser.py
++++ b/plone/supermodel/parser.py
+@@ -22,8 +22,10 @@
+ from zope.schema import getFields
+ 
+ import linecache
++import six
+ import sys
+ 
++
+ # Exception
+ 
+ 
+@@ -63,21 +65,21 @@ def name(self, schemaName, tree):
+ # Algorithm
+ def parse(source, policy=u""):
+     fname = None
+-    if isinstance(source, basestring):
++    if isinstance(source, six.string_types):
+         fname = source
+ 
+     try:
+         return _parse(source, policy)
+-    except Exception, e:
++    except Exception as e:
+         # Re-package the exception as a parse error that will get rendered with
+         # the filename and line number of the element that caused the problem.
+         # Keep the original traceback so the developer can debug where the
+         # problem happened.
+-        raise SupermodelParseError(
++        six.reraise(SupermodelParseError(
+             e,
+             fname,
+             parseinfo.stack[-1]
+-        ), None, sys.exc_info()[2]
++        ), None, sys.exc_info()[2])
+ 
+ 
+ def _parse(source, policy):
+@@ -195,7 +197,7 @@ def readField(fieldElement, schemaAttributes, fieldElements, baseFields):
+                     fieldset_order = subelement.get('order')
+                     if fieldset_order is None:
+                         fieldset_order = DEFAULT_ORDER
+-                    elif isinstance(fieldset_order, basestring):
++                    elif isinstance(fieldset_order, six.string_types):
+                         fieldset_order = int(fieldset_order)
+                     fieldset = fieldsets_by_name[fieldset_name] = Fieldset(
+                         fieldset_name,
+diff --git a/plone/supermodel/tests.py b/plone/supermodel/tests.py
+index 9f01d4a..46d8b5c 100644
+--- a/plone/supermodel/tests.py
++++ b/plone/supermodel/tests.py
+@@ -1,21 +1,22 @@
+ # -*- coding: utf-8 -*-
+-from cStringIO import StringIO
+ from lxml import etree
+ from plone.supermodel import utils
+ from plone.supermodel.exportimport import ChoiceHandler
+ from plone.supermodel.interfaces import IDefaultFactory
+ from plone.supermodel.interfaces import IInvariant
++from six.moves import cStringIO as StringIO
+ from zope import schema
+-from zope.interface import Interface
+-from zope.interface import Invalid
+ from zope.interface import alsoProvides
+ from zope.interface import implementer
++from zope.interface import Interface
++from zope.interface import Invalid
+ from zope.interface import provider
+ from zope.schema import getFieldNamesInOrder
+ from zope.schema.interfaces import IContextAwareDefaultFactory
+ from zope.schema.interfaces import IContextSourceBinder
+ from zope.schema.vocabulary import SimpleTerm
+ from zope.schema.vocabulary import SimpleVocabulary
++
+ import doctest
+ import unittest
+ import zope.component.testing
+diff --git a/plone/supermodel/utils.py b/plone/supermodel/utils.py
+index f06d7e3..246bde1 100644
+--- a/plone/supermodel/utils.py
++++ b/plone/supermodel/utils.py
+@@ -4,9 +4,7 @@
+ from plone.supermodel.interfaces import I18N_NAMESPACE
+ from plone.supermodel.interfaces import IToUnicode
+ from plone.supermodel.interfaces import XML_NAMESPACE
+-
+ from zope.component import getUtility
+-
+ from zope.i18nmessageid import Message
+ from zope.interface import directlyProvidedBy
+ from zope.interface import directlyProvides
+@@ -19,8 +17,10 @@
+ 
+ import os.path
+ import re
++import six
+ import sys
+ 
++
+ try:
+     from collections import OrderedDict
+ except:
+@@ -113,7 +113,7 @@ def elementToValue(field, element, default=_marker):
+             if key_text is None:
+                 k = None
+             else:
+-                k = key_converter.fromUnicode(unicode(key_text))
++                k = key_converter.fromUnicode(six.text_type(key_text))
+ 
+             value[k] = elementToValue(field.value_type, child)
+             parseinfo.stack.pop()
+@@ -140,7 +140,7 @@ def elementToValue(field, element, default=_marker):
+ 
+         if vocabulary and hasattr(vocabulary, 'by_value'):
+             try:
+-                field._type = type(vocabulary.by_value.keys()[0])
++                field._type = type(list(vocabulary.by_value.keys())[0])
+             except:
+                 pass
+ 
+@@ -153,10 +153,10 @@ def elementToValue(field, element, default=_marker):
+             value = field.missing_value
+         else:
+             converter = IFromUnicode(field)
+-            value = converter.fromUnicode(unicode(text))
++            value = converter.fromUnicode(six.text_type(text))
+ 
+         # handle i18n
+-        if isinstance(value, unicode) and parseinfo.i18n_domain is not None:
++        if isinstance(value, six.text_type) and parseinfo.i18n_domain is not None:
+             translate_attr = ns('translate', I18N_NAMESPACE)
+             domain_attr = ns('domain', I18N_NAMESPACE)
+             msgid = element.attrib.get(translate_attr)
+diff --git a/setup.py b/setup.py
+index 34da592..0e99206 100644
+--- a/setup.py
++++ b/setup.py
+@@ -41,6 +41,7 @@ def read(*rnames):
+     zip_safe=False,
+     install_requires=[
+         'setuptools',
++        'six',
+         'lxml',
+         'zope.component',
+         'zope.i18nmessageid',
+
+
+Repository: plone.supermodel
+
+
+Branch: refs/heads/master
+Date: 2017-10-27T13:37:52+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.supermodel/commit/465a1307ee830fa60a8ece41cafa056c3f1c0fbe
+
+Merge pull request #24 from plone/sixer
+
+Python3 compatibility with sixer
+
+Files changed:
+M CHANGES.rst
+M plone/supermodel/__init__.py
+M plone/supermodel/converters.py
+M plone/supermodel/exportimport.py
+M plone/supermodel/parser.py
+M plone/supermodel/tests.py
+M plone/supermodel/utils.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index cfaf313..049190c 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Python3 compatibility with sixer
++  [ale-rt]
+ 
+ 
+ 1.3.3 (2017-06-04)
+diff --git a/plone/supermodel/__init__.py b/plone/supermodel/__init__.py
+index 8cedfcb..5b3a582 100644
+--- a/plone/supermodel/__init__.py
++++ b/plone/supermodel/__init__.py
+@@ -1,13 +1,14 @@
+ # -*- coding: utf-8 -*-
+-from StringIO import StringIO
+ from plone.supermodel import model
+ from plone.supermodel import parser
+ from plone.supermodel import serializer
+ from plone.supermodel import utils
+ from plone.supermodel.interfaces import FILENAME_KEY
+ from plone.supermodel.interfaces import IXMLToSchema
++from six import StringIO
+ from zope.interface import moduleProvides
+ 
++
+ # Cache models by absolute filename
+ _model_cache = {}
+ 
+diff --git a/plone/supermodel/converters.py b/plone/supermodel/converters.py
+index a496008..dbe9004 100644
+--- a/plone/supermodel/converters.py
++++ b/plone/supermodel/converters.py
+@@ -10,7 +10,9 @@
+ from zope.schema.interfaces import IFromUnicode
+ from zope.schema.interfaces import IInterfaceField
+ from zope.schema.interfaces import IObject
++
+ import datetime
++import six
+ import time
+ 
+ 
+@@ -35,7 +37,7 @@ def __init__(self, context):
+         self.context = context
+ 
+     def toUnicode(self, value):
+-        return unicode(value)
++        return six.text_type(value)
+ 
+ 
+ # Date/time fields
+@@ -95,7 +97,7 @@ def __init__(self, context):
+         self.context = context
+ 
+     def toUnicode(self, value):
+-        return unicode(value.__identifier__)
++        return six.text_type(value.__identifier__)
+ 
+ 
+ # Object fields - we can read, but not write, as there is no way to know
+diff --git a/plone/supermodel/exportimport.py b/plone/supermodel/exportimport.py
+index 2902a8b..0270c03 100644
+--- a/plone/supermodel/exportimport.py
++++ b/plone/supermodel/exportimport.py
+@@ -4,20 +4,23 @@
+ from plone.supermodel.interfaces import IDefaultFactory
+ from plone.supermodel.interfaces import IFieldExportImportHandler
+ from plone.supermodel.interfaces import IFieldNameExtractor
++from plone.supermodel.utils import elementToValue
+ from plone.supermodel.utils import noNS
+ from plone.supermodel.utils import valueToElement
+-from plone.supermodel.utils import elementToValue
+ from zope.component import queryUtility
+-from zope.interface import Interface
+ from zope.interface import implementedBy
+ from zope.interface import implementer
++from zope.interface import Interface
+ from zope.schema.interfaces import IContextAwareDefaultFactory
+ from zope.schema.interfaces import IField
+ from zope.schema.interfaces import IVocabularyTokenized
+ from zope.schema.vocabulary import SimpleTerm
+ from zope.schema.vocabulary import SimpleVocabulary
++
++import six
+ import zope.schema
+ 
++
+ try:
+     from collections import OrderedDict
+ except:
+@@ -395,7 +398,7 @@ def write(self, field, name, type, elementName='field'):
+             value = []
+             for term in field.vocabulary:
+                 if (
+-                    not isinstance(term.value, (str, unicode), ) or
++                    not isinstance(term.value, six.string_types, ) or
+                     term.token != term.value.encode('unicode_escape')
+                 ):
+                     raise NotImplementedError(
+diff --git a/plone/supermodel/parser.py b/plone/supermodel/parser.py
+index 0c712a2..10ba2eb 100644
+--- a/plone/supermodel/parser.py
++++ b/plone/supermodel/parser.py
+@@ -22,8 +22,10 @@
+ from zope.schema import getFields
+ 
+ import linecache
++import six
+ import sys
+ 
++
+ # Exception
+ 
+ 
+@@ -63,21 +65,21 @@ def name(self, schemaName, tree):
+ # Algorithm
+ def parse(source, policy=u""):
+     fname = None
+-    if isinstance(source, basestring):
++    if isinstance(source, six.string_types):
+         fname = source
+ 
+     try:
+         return _parse(source, policy)
+-    except Exception, e:
++    except Exception as e:
+         # Re-package the exception as a parse error that will get rendered with
+         # the filename and line number of the element that caused the problem.
+         # Keep the original traceback so the developer can debug where the
+         # problem happened.
+-        raise SupermodelParseError(
++        six.reraise(SupermodelParseError(
+             e,
+             fname,
+             parseinfo.stack[-1]
+-        ), None, sys.exc_info()[2]
++        ), None, sys.exc_info()[2])
+ 
+ 
+ def _parse(source, policy):
+@@ -195,7 +197,7 @@ def readField(fieldElement, schemaAttributes, fieldElements, baseFields):
+                     fieldset_order = subelement.get('order')
+                     if fieldset_order is None:
+                         fieldset_order = DEFAULT_ORDER
+-                    elif isinstance(fieldset_order, basestring):
++                    elif isinstance(fieldset_order, six.string_types):
+                         fieldset_order = int(fieldset_order)
+                     fieldset = fieldsets_by_name[fieldset_name] = Fieldset(
+                         fieldset_name,
+diff --git a/plone/supermodel/tests.py b/plone/supermodel/tests.py
+index 9f01d4a..46d8b5c 100644
+--- a/plone/supermodel/tests.py
++++ b/plone/supermodel/tests.py
+@@ -1,21 +1,22 @@
+ # -*- coding: utf-8 -*-
+-from cStringIO import StringIO
+ from lxml import etree
+ from plone.supermodel import utils
+ from plone.supermodel.exportimport import ChoiceHandler
+ from plone.supermodel.interfaces import IDefaultFactory
+ from plone.supermodel.interfaces import IInvariant
++from six.moves import cStringIO as StringIO
+ from zope import schema
+-from zope.interface import Interface
+-from zope.interface import Invalid
+ from zope.interface import alsoProvides
+ from zope.interface import implementer
++from zope.interface import Interface
++from zope.interface import Invalid
+ from zope.interface import provider
+ from zope.schema import getFieldNamesInOrder
+ from zope.schema.interfaces import IContextAwareDefaultFactory
+ from zope.schema.interfaces import IContextSourceBinder
+ from zope.schema.vocabulary import SimpleTerm
+ from zope.schema.vocabulary import SimpleVocabulary
++
+ import doctest
+ import unittest
+ import zope.component.testing
+diff --git a/plone/supermodel/utils.py b/plone/supermodel/utils.py
+index f06d7e3..246bde1 100644
+--- a/plone/supermodel/utils.py
++++ b/plone/supermodel/utils.py
+@@ -4,9 +4,7 @@
+ from plone.supermodel.interfaces import I18N_NAMESPACE
+ from plone.supermodel.interfaces import IToUnicode
+ from plone.supermodel.interfaces import XML_NAMESPACE
+-
+ from zope.component import getUtility
+-
+ from zope.i18nmessageid import Message
+ from zope.interface import directlyProvidedBy
+ from zope.interface import directlyProvides
+@@ -19,8 +17,10 @@
+ 
+ import os.path
+ import re
++import six
+ import sys
+ 
++
+ try:
+     from collections import OrderedDict
+ except:
+@@ -113,7 +113,7 @@ def elementToValue(field, element, default=_marker):
+             if key_text is None:
+                 k = None
+             else:
+-                k = key_converter.fromUnicode(unicode(key_text))
++                k = key_converter.fromUnicode(six.text_type(key_text))
+ 
+             value[k] = elementToValue(field.value_type, child)
+             parseinfo.stack.pop()
+@@ -140,7 +140,7 @@ def elementToValue(field, element, default=_marker):
+ 
+         if vocabulary and hasattr(vocabulary, 'by_value'):
+             try:
+-                field._type = type(vocabulary.by_value.keys()[0])
++                field._type = type(list(vocabulary.by_value.keys())[0])
+             except:
+                 pass
+ 
+@@ -153,10 +153,10 @@ def elementToValue(field, element, default=_marker):
+             value = field.missing_value
+         else:
+             converter = IFromUnicode(field)
+-            value = converter.fromUnicode(unicode(text))
++            value = converter.fromUnicode(six.text_type(text))
+ 
+         # handle i18n
+-        if isinstance(value, unicode) and parseinfo.i18n_domain is not None:
++        if isinstance(value, six.text_type) and parseinfo.i18n_domain is not None:
+             translate_attr = ns('translate', I18N_NAMESPACE)
+             domain_attr = ns('domain', I18N_NAMESPACE)
+             msgid = element.attrib.get(translate_attr)
+diff --git a/setup.py b/setup.py
+index 34da592..0e99206 100644
+--- a/setup.py
++++ b/setup.py
+@@ -41,6 +41,7 @@ def read(*rnames):
+     zip_safe=False,
+     install_requires=[
+         'setuptools',
++        'six',
+         'lxml',
+         'zope.component',
+         'zope.i18nmessageid',
 
 
