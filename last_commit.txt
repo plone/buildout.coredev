@@ -1,126 +1,41 @@
-Repository: Products.CMFPlone
+Repository: Products.Marshall
 
 
 Branch: refs/heads/master
-Date: 2017-11-05T18:53:58-05:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/4d0fd9d255af215a04b5c592ca7d982d5e004dde
+Date: 2017-11-06T10:27:58+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/Products.Marshall/commit/23a775224247cfebf17366b981a45a5e5bd393e7
 
-Fix getPortalObject when portal_url is fetched as a utility (#2205)
-
-* Fix getPortalObject when portal_url is fetched as a utility
+Fix test isolation issue due to incomplete teardown
 
 Files changed:
-M Products/CMFPlone/URLTool.py
-M Products/CMFPlone/patches/gtbn.py
+M CHANGES.rst
+M Products/Marshall/doc/README.txt
 
-diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py
-index fc5bddc62..e77e07483 100644
---- a/Products/CMFPlone/URLTool.py
-+++ b/Products/CMFPlone/URLTool.py
-@@ -4,9 +4,11 @@
- from App.class_init import InitializeClass
- from plone.registry.interfaces import IRegistry
- from posixpath import normpath
-+from Products.CMFCore.interfaces import ISiteRoot
- from Products.CMFCore.URLTool import URLTool as BaseTool
- from Products.CMFPlone.interfaces import ILoginSchema
- from Products.CMFPlone.PloneBaseTool import PloneBaseTool
-+from Products.CMFPlone.patches.gtbn import rewrap_in_request_container
- from urlparse import urlparse, urljoin
- from zope.component import getUtility
- import re
-@@ -84,8 +86,11 @@ def isURLInPortal(self, url, context=None):
-         return False
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c6fee54..002360e 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
  
-     def getPortalObject(self):
--        # Make sure portal is wrapped properly
--        return aq_parent(aq_inner(self))
-+        portal = aq_parent(aq_inner(self))
-+        if portal is None:
-+            portal = getUtility(ISiteRoot)
-+        # Make sure portal can acquire REQUEST
-+        return rewrap_in_request_container(portal, context=self)
+ Bug fixes:
+ 
+-- *add item here*
++- Fix test isolation issue due to incomplete teardown.
++  [pbauer]
  
  
- URLTool.__doc__ = BaseTool.__doc__
-diff --git a/Products/CMFPlone/patches/gtbn.py b/Products/CMFPlone/patches/gtbn.py
-index 9d679c64c..6a9205126 100644
---- a/Products/CMFPlone/patches/gtbn.py
-+++ b/Products/CMFPlone/patches/gtbn.py
-@@ -1,5 +1,27 @@
- # -*- coding: utf-8 -*-
-+from Acquisition import aq_parent, aq_base, aq_inner
-+from Acquisition import IAcquirer
- from Products.CMFCore import utils
-+from zope.globalrequest import getRequest
-+from ZPublisher.BaseRequest import RequestContainer
-+
-+
-+def rewrap_in_request_container(obj, context=None):
-+    '''Fix an object's acquisition wrapper to be able to acquire the REQUEST.'''
-+    request = getattr(context, 'REQUEST', None) or getRequest()
-+    if IAcquirer.providedBy(obj) and request is not None:
-+        chain = []
-+        parent = obj
-+        while 1:
-+            chain.append(parent)
-+            parent = aq_parent(aq_inner(parent))
-+            if parent in chain or parent is None or isinstance(
-+                    parent, RequestContainer):
-+                break
-+        obj = RequestContainer(REQUEST=request)
-+        for ob in reversed(chain):
-+            obj = aq_base(ob).__of__(obj)
-+    return obj
+ 2.2.1 (2016-08-18)
+diff --git a/Products/Marshall/doc/README.txt b/Products/Marshall/doc/README.txt
+index dd68cc0..fb8b497 100644
+--- a/Products/Marshall/doc/README.txt
++++ b/Products/Marshall/doc/README.txt
+@@ -189,5 +189,6 @@ Get the ``raw`` body value. Using getBody() would return the rendered HTML.
+ Now, just restore the previous marshaller, as to leave everything in
+ the same state it was found:
  
- # Check return value of getToolByName
- # this used to be step 5 in earlypatches, but was moved to avoid
-@@ -8,12 +30,8 @@
- # rather than the entire function, to make sure that aliases to the function
- # that were imported prior to this patch will still run the patched code.
- code = """
--from Acquisition.interfaces import IAcquirer
--from Acquisition import aq_base, aq_chain, aq_inner
- from persistent.interfaces import IPersistent
- from OFS.interfaces import IItem
--from ZPublisher.BaseRequest import RequestContainer
--from zope.globalrequest import getRequest
- try:
-     from Products.ATContentTypes.tool.factory import FauxArchetypeTool
- except ImportError:
-@@ -32,22 +50,7 @@ def check_getToolByName(obj, name, default=_marker):
-             result.__class__.__module__ == 'mock' or \
-             result is _marker or \
-             result is default:
--
--        # Rewrap in request container
--        request = getattr(obj, 'REQUEST', None) or getRequest()
--        if IAcquirer.providedBy(result) and request is not None:
--            chain = []
--            parent = result
--            while 1:
--                chain.append(parent)
--                parent = aq_parent(aq_inner(parent))
--                if parent in chain or parent is None or isinstance(parent, RequestContainer):
--                    break
--            result = RequestContainer(REQUEST=request)
--            for ob in reversed(chain):
--                result = aq_base(ob).__of__(result)
--
--        return result
-+        return rewrap_in_request_container(result, context=obj)
-     else:
-         raise TypeError("Object found is not a portal tool (%s)" % (name,))
-     return result
-@@ -57,6 +60,8 @@ def check_getToolByName(obj, name, default=_marker):
-                     "with Products.PloneHotfix20121106, the fixes are "
-                     "included already in Products.CMFPlone, please remove "
-                     "the hotfix")
-+utils.getToolByName.func_globals[
-+    'rewrap_in_request_container'] = rewrap_in_request_container
- exec code in utils.getToolByName.func_globals
- utils._getToolByName.func_code = utils.getToolByName.func_code
- utils.getToolByName.func_code = utils.check_getToolByName.func_code
++    >>> AppZapper().clear()
+     >>> ATDocument.schema.registerLayer('marshall',
+     ...                                  old_marshall)
 
 
