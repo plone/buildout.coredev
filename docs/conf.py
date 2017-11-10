@@ -45,7 +45,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'buildout.coredev'
-copyright = u'2013, The Plone Foundation'
+copyright = u'2017, The Plone Foundation'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the

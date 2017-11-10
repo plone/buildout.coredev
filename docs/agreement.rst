@@ -4,16 +4,16 @@
 Contributing to Plone Core
 ==========================
 
-There are many people and companies who rely on Plone on a day-to-day basis so we have to introduce some level of code quality control.
+There are many people and companies who rely on Plone on a day-to-day basis so we have to enforce some level of code quality control.
 
-Plone's source code is hosted in git repositories at  https://github.com/plone, but only members of the developer team have commit-rights.
+Plone's source code is hosted in git repositories at  https://github.com/plone, but only members of the developer team have commit rights.
 
-Sending in a contributors agreement does not guarantee you access to the repositories,
+Sending in a contributors agreement does not guarantee your commit access to the repositories,
 but once you send it in we will always have it on file for when you are ready to contribute.
 
-We do ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
+We ask that before requesting core access you familiarize yourself a little with the community since they will help you get ramped up:
 
-* Ask and (especially) answer questions on `Stack Overflow <http://stackoverflow.com/>`_ and :doc:`IRC <culture>` with a focus on getting to know the active developers a bit.
+* Ask and (especially) answer questions on `the Plone forum <https://community.plone.org/>`_ and in :doc:`Plone chat <culture>` with a focus on getting to know the active developers a bit.
 
 * Attend a `conference <https://plone.org/events/conferences>`_ / `symposium <http://plone.org/events/regional>`_ or participate in a `sprint <https://plone.org/events/sprints>`_.
 
@@ -45,8 +45,8 @@ Once you have familiarized yourself with the community and you are excited to co
   For questions about why the agreement is required,
   please see :doc:`Contributor’s Agreement for Plone Explained <contributors_agreement_explained>`.
 
-If you aren't sure where to start or just want more direction, feel free to get on IRC, mailing lists,
-Twitter, ... and ask for help.
+If you aren't sure where to start or just want more direction, feel free to get in the forum or in chat, 
+and ask for help.
 While there is no official mentoring process, there are plenty of people willing to act in that role and
 guide you through the steps of getting involved in the community.
 A common way to start contributing is to participate in a `Plone sprint <ttps://plone.org/events/sprints>`_.
