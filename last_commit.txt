@@ -1,1082 +1,296 @@
-Repository: plone.app.upgrade
+Repository: plone.app.folder
 
 
 Branch: refs/heads/master
-Date: 2017-11-16T08:48:50-05:00
+Date: 2017-11-05T23:55:42-05:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/dd1e4f0513050b36823a8107a396d6b16e539324
+Commit: https://github.com/plone/plone.app.folder/commit/7edcb755f3f48f8e5dd39c8c64454f06fe9ae2ce
 
-Fix IUserGroupsSettingsSchema upgrade, and avoid swallowing errors during upgrade
+adjust ReplaceableWrapper to work in Zope 4
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
-M plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-M plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-M plone/app/upgrade/v51/betas.py
+M src/plone/app/folder/base.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index fe8fca67..f9f307e1 100644
+index 35928ed..72755b6 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -25,6 +25,12 @@ Bug fixes:
- - Register upgrades for Plone 5.2
-   [pbauer]
+@@ -14,7 +14,8 @@ New features:
  
-+- Fix installation of IUserGroupsSettingsSchema into registry for Plone 5.0rc1.
+ Bug fixes:
+ 
+-- *add item here*
++- Fix webdav PUT of index_html to work in Zope 4.
 +  [davisagli]
+ 
+ 
+ 1.2.3 (2017-03-27)
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index 3f09679..f39f199 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -12,12 +12,13 @@
+ from webdav.NullResource import NullResource
+ from zope.interface import implementer
+ from App.class_init import InitializeClass
++import Acquisition
+ 
+ # to keep backward compatibility
+ has_btree = 1
+ 
+ 
+-class ReplaceableWrapper:
++class ReplaceableWrapper(Acquisition.Implicit):
+     """ a wrapper around an object to make it replaceable """
+ 
+     def __init__(self, ob):
+@@ -28,6 +29,9 @@ def __getattr__(self, name):
+             return REPLACEABLE
+         return getattr(self.__ob, name)
+ 
++    def __repr__(self):
++        return repr(aq_base(self.__ob))
 +
-+- Avoid swallowing errors during registry setting upgrades.
-+  [davisagli]
-+
- 2.0.8 (2017-09-25)
- ------------------
  
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index c6fae6c1..8f594cba 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -229,45 +229,36 @@ def upgrade_editing_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
-+    settings = registry.forInterface(
-+        IEditingSchema,
-+        prefix='plone',
-+    )
-+    # migrate the old site properties to the new registry
-+    if site_properties.hasProperty('visible_ids'):
-+        settings.visible_ids = site_properties.visible_ids
-+    if site_properties.hasProperty('enable_link_integrity_checks'):
-+        settings.enable_link_integrity_checks = \
-+            site_properties.enable_link_integrity_checks
-+    if site_properties.hasProperty('ext_editor'):
-+        settings.ext_editor = site_properties.ext_editor
-+    # settings.available_editors = site_properties.available_editors
-+
-+    # Kupu will not be available as editor in Plone 5. Therefore we just
-+    # ignore the setting.  But there may be others (like an empty string)
-+    # that will give an error too.  So we validate the value.
-     try:
--        settings = registry.forInterface(
--            IEditingSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        # migrate the old site properties to the new registry
--        if site_properties.hasProperty('visible_ids'):
--            settings.visible_ids = site_properties.visible_ids
--        if site_properties.hasProperty('enable_link_integrity_checks'):
--            settings.enable_link_integrity_checks = \
--                site_properties.enable_link_integrity_checks
--        if site_properties.hasProperty('ext_editor'):
--            settings.ext_editor = site_properties.ext_editor
--        # settings.available_editors = site_properties.available_editors
--
--        # Kupu will not be available as editor in Plone 5. Therefore we just
--        # ignore the setting.  But there may be others (like an empty string)
--        # that will give an error too.  So we validate the value.
--        try:
--            IEditingSchema['default_editor'].validate(
--                site_properties.default_editor)
--        except ConstraintNotSatisfied:
--            logger.warn('Ignoring invalid site_properties.default_editor %r.',
--                        site_properties.default_editor)
--        else:
--            settings.default_editor = site_properties.default_editor
--        settings.lock_on_ttw_edit = get_property(
--            site_properties,
--            'lock_on_ttw_edit',
--            None,
--        )
-+        IEditingSchema['default_editor'].validate(
-+            site_properties.default_editor)
-+    except ConstraintNotSatisfied:
-+        logger.warn('Ignoring invalid site_properties.default_editor %r.',
-+                    site_properties.default_editor)
-+    else:
-+        settings.default_editor = site_properties.default_editor
-+    settings.lock_on_ttw_edit = get_property(
-+        site_properties,
-+        'lock_on_ttw_edit',
-+        None,
-+    )
+ @implementer(IOrderedContainer)
+ class BaseBTreeFolder(OrderedBTreeFolderBase, BaseFolder):
+@@ -74,8 +78,9 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+                 else:
+                     raise AttributeError('index_html')
+         # Acquire from parent
+-        target = aq_parent(aq_inner(self)).aq_acquire('index_html')
+-        return ReplaceableWrapper(aq_base(target).__of__(self))
++        parent = aq_parent(aq_inner(self))
++        target = parent.aq_acquire('index_html')
++        return ReplaceableWrapper(aq_base(target)).__of__(parent).__of__(self)
  
+     index_html = ComputedAttribute(index_html, 1)
  
- def upgrade_maintenance_controlpanel_settings(context):
-@@ -279,24 +270,15 @@ def upgrade_maintenance_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            IMaintenanceSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.days = get_property(
--            site_properties,
--            'number_of_days_to_keep',
--            None,
--        )
-+    settings = registry.forInterface(
-+        IMaintenanceSchema,
-+        prefix='plone',
-+    )
-+    settings.days = get_property(
-+        site_properties,
-+        'number_of_days_to_keep',
-+        None,
-+    )
- 
- 
- def upgrade_navigation_controlpanel_settings(context):
-@@ -310,40 +292,31 @@ def upgrade_navigation_controlpanel_settings(context):
-     types_tool = getToolByName(context, "portal_types")
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            INavigationSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.disable_folder_sections = site_properties.getProperty(
--            'disable_folder_sections')
--        settings.disable_nonfolderish_sections = site_properties.getProperty(
--            'disable_nonfolderish_sections')
--        settings.show_all_parents = navigation_properties.getProperty(
--            'showAllParents')
--        allTypes = types_tool.listContentTypes()
--        blacklist = get_property(
--            navigation_properties,
--            'metaTypesNotToList',
--            default_value=[],
--        )
--        settings.displayed_types = tuple([
--            t for t in allTypes if t not in blacklist
--            and t not in BAD_TYPES
--        ])
--
--        settings.enable_wf_state_filtering = navigation_properties.getProperty(
--            'enable_wf_state_filtering')
--        settings.wf_states_to_show = navigation_properties.getProperty(
--            'wf_states_to_show')
-+    settings = registry.forInterface(
-+        INavigationSchema,
-+        prefix='plone',
-+    )
-+    settings.disable_folder_sections = site_properties.getProperty(
-+        'disable_folder_sections')
-+    settings.disable_nonfolderish_sections = site_properties.getProperty(
-+        'disable_nonfolderish_sections')
-+    settings.show_all_parents = navigation_properties.getProperty(
-+        'showAllParents')
-+    allTypes = types_tool.listContentTypes()
-+    blacklist = get_property(
-+        navigation_properties,
-+        'metaTypesNotToList',
-+        default_value=[],
-+    )
-+    settings.displayed_types = tuple([
-+        t for t in allTypes if t not in blacklist
-+        and t not in BAD_TYPES
-+    ])
-+
-+    settings.enable_wf_state_filtering = navigation_properties.getProperty(
-+        'enable_wf_state_filtering')
-+    settings.wf_states_to_show = navigation_properties.getProperty(
-+        'wf_states_to_show')
- 
- 
- def upgrade_search_controlpanel_settings(context):
-@@ -356,18 +329,10 @@ def upgrade_search_controlpanel_settings(context):
-     types_tool = getToolByName(context, "portal_types")
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISearchSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
-+    settings = registry.forInterface(
-+        ISearchSchema,
-+        prefix='plone',
-+    )
- 
-     if site_properties.hasProperty('enable_livesearch'):
-         settings.enable_livesearch = site_properties.enable_livesearch
-@@ -393,18 +358,10 @@ def upgrade_site_controlpanel_settings(context):
-     portal = getSite()
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISiteSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
-+    settings = registry.forInterface(
-+        ISiteSchema,
-+        prefix='plone',
-+    )
-     settings.site_title = safe_unicode(portal.title)
-     webstat_js = get_property(site_properties, 'webstats_js', '')
-     settings.webstats_js = safe_unicode(webstat_js)
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index c7a34875..2ece1ce8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -51,15 +51,7 @@ def to50beta1(context):
- def upgrade_portal_language(context):
-     portal = getSite()
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        lang_settings = registry.forInterface(ILanguageSchema, prefix='plone')
--    except KeyError:
--        return
-+    lang_settings = registry.forInterface(ILanguageSchema, prefix='plone')
-     # Get old values
- 
-     # Merge default language options to registry
-@@ -84,15 +76,7 @@ def upgrade_portal_language(context):
- 
- def upgrade_mail_controlpanel_settings(context):
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        mail_settings = registry.forInterface(IMailSchema, prefix='plone')
--    except KeyError:
--        return
-+    mail_settings = registry.forInterface(IMailSchema, prefix='plone')
-     portal = getSite()
- 
-     smtp_host = getattr(portal.MailHost, 'smtp_host', '')
-@@ -125,36 +109,27 @@ def upgrade_markup_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            IMarkupSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.default_type = get_property(
--            site_properties,
--            'default_contenttype',
--            None,
--        )
-+    settings = registry.forInterface(
-+        IMarkupSchema,
-+        prefix='plone',
-+    )
-+    settings.default_type = get_property(
-+        site_properties,
-+        'default_contenttype',
-+        None,
-+    )
- 
--        forbidden_types = site_properties.getProperty('forbidden_contenttypes')
--        forbidden_types = list(forbidden_types) if forbidden_types else []
-+    forbidden_types = site_properties.getProperty('forbidden_contenttypes')
-+    forbidden_types = list(forbidden_types) if forbidden_types else []
- 
--        portal_transforms = getToolByName(context, 'portal_transforms')
--        allowable_types = portal_transforms.listAvailableTextInputs()
-+    portal_transforms = getToolByName(context, 'portal_transforms')
-+    allowable_types = portal_transforms.listAvailableTextInputs()
- 
--        settings.allowed_types = tuple([
--            _type for _type in allowable_types
--            if _type not in forbidden_types
--            and _type not in 'text/x-plone-outputfilters-html'  # removed, as in plone.app.vocabularies.types  # noqa
--        ])
-+    settings.allowed_types = tuple([
-+        _type for _type in allowable_types
-+        if _type not in forbidden_types
-+        and _type not in 'text/x-plone-outputfilters-html'  # removed, as in plone.app.vocabularies.types  # noqa
-+    ])
- 
- 
- def upgrade_security_controlpanel_settings(context):
-@@ -178,33 +153,24 @@ def _get_enable_self_reg():
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISecuritySchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.enable_self_reg = _get_enable_self_reg()
--        validate_email = portal.getProperty('validate_email', True)
--        if validate_email:
--            settings.enable_user_pwd_choice = False
--        else:
--            settings.enable_user_pwd_choice = True
--        pmembership = getToolByName(portal, 'portal_membership')
--        settings.enable_user_folders = pmembership.getMemberareaCreationFlag()
--        settings.allow_anon_views_about = site_properties.getProperty(
--            'allowAnonymousViewAbout', False)
--        settings.use_email_as_login = site_properties.getProperty(
--            'use_email_as_login', False)
--        settings.use_uuid_as_userid = site_properties.getProperty(
--            'use_uuid_as_userid', False)
-+    settings = registry.forInterface(
-+        ISecuritySchema,
-+        prefix='plone',
-+    )
-+    settings.enable_self_reg = _get_enable_self_reg()
-+    validate_email = portal.getProperty('validate_email', True)
-+    if validate_email:
-+        settings.enable_user_pwd_choice = False
-+    else:
-+        settings.enable_user_pwd_choice = True
-+    pmembership = getToolByName(portal, 'portal_membership')
-+    settings.enable_user_folders = pmembership.getMemberareaCreationFlag()
-+    settings.allow_anon_views_about = site_properties.getProperty(
-+        'allowAnonymousViewAbout', False)
-+    settings.use_email_as_login = site_properties.getProperty(
-+        'use_email_as_login', False)
-+    settings.use_uuid_as_userid = site_properties.getProperty(
-+        'use_uuid_as_userid', False)
- 
- 
- def to50beta2(context):
-@@ -304,21 +270,12 @@ def upgrade_usergroups_controlpanel_settings(context):
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(IUserGroupsSettingsSchema,
--                                         prefix='plone')
--    except KeyError:
--        settings = False
--    if settings:
--        settings.many_groups = site_properties.getProperty('many_groups',
--                                                           False)
--        settings.many_users = site_properties.getProperty('many_users',
--                                                          False)
-+    settings = registry.forInterface(IUserGroupsSettingsSchema,
-+                                     prefix='plone')
-+    settings.many_groups = site_properties.getProperty('many_groups',
-+                                                       False)
-+    settings.many_users = site_properties.getProperty('many_users',
-+                                                      False)
- 
- 
- def migrate_displayPublicationDateInByline(context):
-@@ -329,26 +286,17 @@ def migrate_displayPublicationDateInByline(context):
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(IUserGroupsSettingsSchema,
--                                         prefix='plone')
--    except KeyError:
--        settings = False
--    if settings:
--        # get the old site properties
--        portal_url = getToolByName(context, 'portal_url')
--        portal = portal_url.getPortalObject()
--        portal_properties = getToolByName(portal, "portal_properties")
--        site_properties = portal_properties.site_properties
--
--        value = site_properties.getProperty('displayPublicationDateInByline',
--                                            False)
--        settings.display_publication_date_in_byline = value
-+    settings = registry.forInterface(IUserGroupsSettingsSchema,
-+                                     prefix='plone')
-+    # get the old site properties
-+    portal_url = getToolByName(context, 'portal_url')
-+    portal = portal_url.getPortalObject()
-+    portal_properties = getToolByName(portal, "portal_properties")
-+    site_properties = portal_properties.site_properties
-+
-+    value = site_properties.getProperty('displayPublicationDateInByline',
-+                                        False)
-+    settings.display_publication_date_in_byline = value
- 
- 
- def to50rc1(context):
-diff --git a/plone/app/upgrade/v50/profiles/to_rc1/registry.xml b/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-index 534327c4..9fcfb191 100644
---- a/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-@@ -2,4 +2,6 @@
- <registry>
-   <records interface="Products.CMFPlone.interfaces.ISiteSchema"
-            prefix="plone" />
-+  <records interface="Products.CMFPlone.interfaces.IUserGroupsSettingsSchema"
-+           prefix="plone" />
- </registry>
-\ No newline at end of file
-diff --git a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-index 17993484..5f8bea79 100644
---- a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-@@ -12,8 +12,6 @@
-            prefix="plone" />
-   <records interface="Products.CMFPlone.interfaces.ITypesSchema"
-            prefix="plone" />
--  <records interface="Products.CMFPlone.interfaces.IUserGroupsSettingsSchema"
--           prefix="plone" />
-   <records interface="plone.app.iterate.interfaces.IIterateSettings" />
-   <records prefix="plone.resources/resource-plone-app-discussion-stylesheets"
-         interface='Products.CMFPlone.interfaces.IResourceRegistry'
-diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
-index 9adc6175..7a8931b5 100644
---- a/plone/app/upgrade/v51/betas.py
-+++ b/plone/app/upgrade/v51/betas.py
-@@ -28,26 +28,17 @@ def addSortOnProperty(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISearchSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        # migrate the old site properties to the new registry
--        if site_properties.hasProperty('sort_on'):
--            settings.sort_on = site_properties.sort_on
--        else:
--            settings.sort_on = 'relevance'
--        logger.log(logging.INFO,
--                   "Added 'sort_on' property to site_properties.")
-+    settings = registry.forInterface(
-+        ISearchSchema,
-+        prefix='plone',
-+    )
-+    # migrate the old site properties to the new registry
-+    if site_properties.hasProperty('sort_on'):
-+        settings.sort_on = site_properties.sort_on
-+    else:
-+        settings.sort_on = 'relevance'
-+    logger.log(logging.INFO,
-+               "Added 'sort_on' property to site_properties.")
- 
- 
- def remove_leftover_skin_layers(context):
 
 
-Repository: plone.app.upgrade
+Repository: plone.app.folder
 
 
 Branch: refs/heads/master
-Date: 2017-11-16T09:51:57-05:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/87d2bd01a776bf8bf3af68e25cb9f437352ff31f
+Date: 2017-11-06T20:40:06-05:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.folder/commit/e6aca05eaa3944b91b04c94b7ab928747062560b
 
-Merge pull request #143 from plone/davisagli-fix-registry-upgrades
+avoid recursion
 
-Fix IUserGroupsSettingsSchema upgrade
+Files changed:
+M src/plone/app/folder/base.py
+
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index f39f199..0771ae2 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -71,7 +71,9 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+                 method = request['REQUEST_METHOD']
+                 if method == 'PUT':
+                     # Very likely a WebDAV client trying to create something
+-                    return ReplaceableWrapper(NullResource(self, 'index_html'))
++                    nr = NullResource(self, 'index_html')
++                    nr.__replaceable__ = REPLACEABLE
++                    return nr
+                 elif method in ('GET', 'HEAD', 'POST'):
+                     # Do nothing, let it go and acquire.
+                     pass
+
+
+Repository: plone.app.folder
+
+
+Branch: refs/heads/master
+Date: 2017-11-13T23:45:11-05:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.folder/commit/c199b335b918a28762c38531d932b557023cc00b
+
+Yo dawg, I put a wrapper in your wrapper so you can unwrap while you unwrap
+
+Files changed:
+M src/plone/app/folder/base.py
+
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index 0771ae2..d8c1aee 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -27,10 +27,11 @@ def __init__(self, ob):
+     def __getattr__(self, name):
+         if name == '__replaceable__':
+             return REPLACEABLE
+-        return getattr(self.__ob, name)
++        ob = object.__getattribute__(self, '_ReplaceableWrapper__ob')
++        return getattr(ob, name)
+ 
+     def __repr__(self):
+-        return repr(aq_base(self.__ob))
++        return repr(object.__getattribute__(self, '_ReplaceableWrapper__ob'))
+ 
+ 
+ @implementer(IOrderedContainer)
+@@ -82,7 +83,7 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+         # Acquire from parent
+         parent = aq_parent(aq_inner(self))
+         target = parent.aq_acquire('index_html')
+-        return ReplaceableWrapper(aq_base(target)).__of__(parent).__of__(self)
++        return ReplaceableWrapper(target).__of__(parent).__of__(self)
+ 
+     index_html = ComputedAttribute(index_html, 1)
+ 
+
+
+Repository: plone.app.folder
+
+
+Branch: refs/heads/master
+Date: 2017-11-15T10:37:17-05:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.folder/commit/00c0822d9e5f35ff9bfbd2eb0776adb16dd5479f
+
+fix double wrapping
+
+Files changed:
+M src/plone/app/folder/base.py
+
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index d8c1aee..8c9be0f 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -83,7 +83,7 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+         # Acquire from parent
+         parent = aq_parent(aq_inner(self))
+         target = parent.aq_acquire('index_html')
+-        return ReplaceableWrapper(target).__of__(parent).__of__(self)
++        return ReplaceableWrapper(target.aq_base).__of__(parent).__of__(self)
+ 
+     index_html = ComputedAttribute(index_html, 1)
+ 
+
+
+Repository: plone.app.folder
+
+
+Branch: refs/heads/master
+Date: 2017-11-16T07:40:26-05:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.folder/commit/c1b3a950c53e3a68cf5fbf8f875a411a4bbc5305
+
+duct tape and baling wire
+
+Files changed:
+M src/plone/app/folder/base.py
+
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index 8c9be0f..bc2419c 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -31,7 +31,8 @@ def __getattr__(self, name):
+         return getattr(ob, name)
+ 
+     def __repr__(self):
+-        return repr(object.__getattribute__(self, '_ReplaceableWrapper__ob'))
++        return repr(
++            object.__getattribute__(self, '_ReplaceableWrapper__ob').aq_base)
+ 
+ 
+ @implementer(IOrderedContainer)
+@@ -83,7 +84,7 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+         # Acquire from parent
+         parent = aq_parent(aq_inner(self))
+         target = parent.aq_acquire('index_html')
+-        return ReplaceableWrapper(target.aq_base).__of__(parent).__of__(self)
++        return ReplaceableWrapper(target).__of__(parent).__of__(self)
+ 
+     index_html = ComputedAttribute(index_html, 1)
+ 
+
+
+Repository: plone.app.folder
+
+
+Branch: refs/heads/master
+Date: 2017-11-16T21:29:21+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.folder/commit/cc988863a04fdb8df18659732507b6b74075f731
+
+Merge pull request #14 from plone/davisagli-replaceable
+
+adjust ReplaceableWrapper to work in Zope 4
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/v50/alphas.py
-M plone/app/upgrade/v50/betas.py
-M plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-M plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-M plone/app/upgrade/v51/betas.py
+M src/plone/app/folder/base.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index fe8fca67..f9f307e1 100644
+index 35928ed..72755b6 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -25,6 +25,12 @@ Bug fixes:
- - Register upgrades for Plone 5.2
-   [pbauer]
+@@ -14,7 +14,8 @@ New features:
  
-+- Fix installation of IUserGroupsSettingsSchema into registry for Plone 5.0rc1.
+ Bug fixes:
+ 
+-- *add item here*
++- Fix webdav PUT of index_html to work in Zope 4.
 +  [davisagli]
+ 
+ 
+ 1.2.3 (2017-03-27)
+diff --git a/src/plone/app/folder/base.py b/src/plone/app/folder/base.py
+index 3f09679..bc2419c 100644
+--- a/src/plone/app/folder/base.py
++++ b/src/plone/app/folder/base.py
+@@ -12,12 +12,13 @@
+ from webdav.NullResource import NullResource
+ from zope.interface import implementer
+ from App.class_init import InitializeClass
++import Acquisition
+ 
+ # to keep backward compatibility
+ has_btree = 1
+ 
+ 
+-class ReplaceableWrapper:
++class ReplaceableWrapper(Acquisition.Implicit):
+     """ a wrapper around an object to make it replaceable """
+ 
+     def __init__(self, ob):
+@@ -26,7 +27,12 @@ def __init__(self, ob):
+     def __getattr__(self, name):
+         if name == '__replaceable__':
+             return REPLACEABLE
+-        return getattr(self.__ob, name)
++        ob = object.__getattribute__(self, '_ReplaceableWrapper__ob')
++        return getattr(ob, name)
 +
-+- Avoid swallowing errors during registry setting upgrades.
-+  [davisagli]
-+
- 2.0.8 (2017-09-25)
- ------------------
- 
-diff --git a/plone/app/upgrade/v50/alphas.py b/plone/app/upgrade/v50/alphas.py
-index c6fae6c1..8f594cba 100644
---- a/plone/app/upgrade/v50/alphas.py
-+++ b/plone/app/upgrade/v50/alphas.py
-@@ -229,45 +229,36 @@ def upgrade_editing_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
-+    settings = registry.forInterface(
-+        IEditingSchema,
-+        prefix='plone',
-+    )
-+    # migrate the old site properties to the new registry
-+    if site_properties.hasProperty('visible_ids'):
-+        settings.visible_ids = site_properties.visible_ids
-+    if site_properties.hasProperty('enable_link_integrity_checks'):
-+        settings.enable_link_integrity_checks = \
-+            site_properties.enable_link_integrity_checks
-+    if site_properties.hasProperty('ext_editor'):
-+        settings.ext_editor = site_properties.ext_editor
-+    # settings.available_editors = site_properties.available_editors
-+
-+    # Kupu will not be available as editor in Plone 5. Therefore we just
-+    # ignore the setting.  But there may be others (like an empty string)
-+    # that will give an error too.  So we validate the value.
-     try:
--        settings = registry.forInterface(
--            IEditingSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        # migrate the old site properties to the new registry
--        if site_properties.hasProperty('visible_ids'):
--            settings.visible_ids = site_properties.visible_ids
--        if site_properties.hasProperty('enable_link_integrity_checks'):
--            settings.enable_link_integrity_checks = \
--                site_properties.enable_link_integrity_checks
--        if site_properties.hasProperty('ext_editor'):
--            settings.ext_editor = site_properties.ext_editor
--        # settings.available_editors = site_properties.available_editors
--
--        # Kupu will not be available as editor in Plone 5. Therefore we just
--        # ignore the setting.  But there may be others (like an empty string)
--        # that will give an error too.  So we validate the value.
--        try:
--            IEditingSchema['default_editor'].validate(
--                site_properties.default_editor)
--        except ConstraintNotSatisfied:
--            logger.warn('Ignoring invalid site_properties.default_editor %r.',
--                        site_properties.default_editor)
--        else:
--            settings.default_editor = site_properties.default_editor
--        settings.lock_on_ttw_edit = get_property(
--            site_properties,
--            'lock_on_ttw_edit',
--            None,
--        )
-+        IEditingSchema['default_editor'].validate(
-+            site_properties.default_editor)
-+    except ConstraintNotSatisfied:
-+        logger.warn('Ignoring invalid site_properties.default_editor %r.',
-+                    site_properties.default_editor)
-+    else:
-+        settings.default_editor = site_properties.default_editor
-+    settings.lock_on_ttw_edit = get_property(
-+        site_properties,
-+        'lock_on_ttw_edit',
-+        None,
-+    )
++    def __repr__(self):
++        return repr(
++            object.__getattribute__(self, '_ReplaceableWrapper__ob').aq_base)
  
  
- def upgrade_maintenance_controlpanel_settings(context):
-@@ -279,24 +270,15 @@ def upgrade_maintenance_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            IMaintenanceSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.days = get_property(
--            site_properties,
--            'number_of_days_to_keep',
--            None,
--        )
-+    settings = registry.forInterface(
-+        IMaintenanceSchema,
-+        prefix='plone',
-+    )
-+    settings.days = get_property(
-+        site_properties,
-+        'number_of_days_to_keep',
-+        None,
-+    )
+ @implementer(IOrderedContainer)
+@@ -67,15 +73,18 @@ def index_html(self, REQUEST=None, RESPONSE=None):
+                 method = request['REQUEST_METHOD']
+                 if method == 'PUT':
+                     # Very likely a WebDAV client trying to create something
+-                    return ReplaceableWrapper(NullResource(self, 'index_html'))
++                    nr = NullResource(self, 'index_html')
++                    nr.__replaceable__ = REPLACEABLE
++                    return nr
+                 elif method in ('GET', 'HEAD', 'POST'):
+                     # Do nothing, let it go and acquire.
+                     pass
+                 else:
+                     raise AttributeError('index_html')
+         # Acquire from parent
+-        target = aq_parent(aq_inner(self)).aq_acquire('index_html')
+-        return ReplaceableWrapper(aq_base(target).__of__(self))
++        parent = aq_parent(aq_inner(self))
++        target = parent.aq_acquire('index_html')
++        return ReplaceableWrapper(target).__of__(parent).__of__(self)
  
+     index_html = ComputedAttribute(index_html, 1)
  
- def upgrade_navigation_controlpanel_settings(context):
-@@ -310,40 +292,31 @@ def upgrade_navigation_controlpanel_settings(context):
-     types_tool = getToolByName(context, "portal_types")
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            INavigationSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.disable_folder_sections = site_properties.getProperty(
--            'disable_folder_sections')
--        settings.disable_nonfolderish_sections = site_properties.getProperty(
--            'disable_nonfolderish_sections')
--        settings.show_all_parents = navigation_properties.getProperty(
--            'showAllParents')
--        allTypes = types_tool.listContentTypes()
--        blacklist = get_property(
--            navigation_properties,
--            'metaTypesNotToList',
--            default_value=[],
--        )
--        settings.displayed_types = tuple([
--            t for t in allTypes if t not in blacklist
--            and t not in BAD_TYPES
--        ])
--
--        settings.enable_wf_state_filtering = navigation_properties.getProperty(
--            'enable_wf_state_filtering')
--        settings.wf_states_to_show = navigation_properties.getProperty(
--            'wf_states_to_show')
-+    settings = registry.forInterface(
-+        INavigationSchema,
-+        prefix='plone',
-+    )
-+    settings.disable_folder_sections = site_properties.getProperty(
-+        'disable_folder_sections')
-+    settings.disable_nonfolderish_sections = site_properties.getProperty(
-+        'disable_nonfolderish_sections')
-+    settings.show_all_parents = navigation_properties.getProperty(
-+        'showAllParents')
-+    allTypes = types_tool.listContentTypes()
-+    blacklist = get_property(
-+        navigation_properties,
-+        'metaTypesNotToList',
-+        default_value=[],
-+    )
-+    settings.displayed_types = tuple([
-+        t for t in allTypes if t not in blacklist
-+        and t not in BAD_TYPES
-+    ])
-+
-+    settings.enable_wf_state_filtering = navigation_properties.getProperty(
-+        'enable_wf_state_filtering')
-+    settings.wf_states_to_show = navigation_properties.getProperty(
-+        'wf_states_to_show')
- 
- 
- def upgrade_search_controlpanel_settings(context):
-@@ -356,18 +329,10 @@ def upgrade_search_controlpanel_settings(context):
-     types_tool = getToolByName(context, "portal_types")
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISearchSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
-+    settings = registry.forInterface(
-+        ISearchSchema,
-+        prefix='plone',
-+    )
- 
-     if site_properties.hasProperty('enable_livesearch'):
-         settings.enable_livesearch = site_properties.enable_livesearch
-@@ -393,18 +358,10 @@ def upgrade_site_controlpanel_settings(context):
-     portal = getSite()
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISiteSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
-+    settings = registry.forInterface(
-+        ISiteSchema,
-+        prefix='plone',
-+    )
-     settings.site_title = safe_unicode(portal.title)
-     webstat_js = get_property(site_properties, 'webstats_js', '')
-     settings.webstats_js = safe_unicode(webstat_js)
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index c7a34875..2ece1ce8 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -51,15 +51,7 @@ def to50beta1(context):
- def upgrade_portal_language(context):
-     portal = getSite()
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        lang_settings = registry.forInterface(ILanguageSchema, prefix='plone')
--    except KeyError:
--        return
-+    lang_settings = registry.forInterface(ILanguageSchema, prefix='plone')
-     # Get old values
- 
-     # Merge default language options to registry
-@@ -84,15 +76,7 @@ def upgrade_portal_language(context):
- 
- def upgrade_mail_controlpanel_settings(context):
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        mail_settings = registry.forInterface(IMailSchema, prefix='plone')
--    except KeyError:
--        return
-+    mail_settings = registry.forInterface(IMailSchema, prefix='plone')
-     portal = getSite()
- 
-     smtp_host = getattr(portal.MailHost, 'smtp_host', '')
-@@ -125,36 +109,27 @@ def upgrade_markup_controlpanel_settings(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            IMarkupSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.default_type = get_property(
--            site_properties,
--            'default_contenttype',
--            None,
--        )
-+    settings = registry.forInterface(
-+        IMarkupSchema,
-+        prefix='plone',
-+    )
-+    settings.default_type = get_property(
-+        site_properties,
-+        'default_contenttype',
-+        None,
-+    )
- 
--        forbidden_types = site_properties.getProperty('forbidden_contenttypes')
--        forbidden_types = list(forbidden_types) if forbidden_types else []
-+    forbidden_types = site_properties.getProperty('forbidden_contenttypes')
-+    forbidden_types = list(forbidden_types) if forbidden_types else []
- 
--        portal_transforms = getToolByName(context, 'portal_transforms')
--        allowable_types = portal_transforms.listAvailableTextInputs()
-+    portal_transforms = getToolByName(context, 'portal_transforms')
-+    allowable_types = portal_transforms.listAvailableTextInputs()
- 
--        settings.allowed_types = tuple([
--            _type for _type in allowable_types
--            if _type not in forbidden_types
--            and _type not in 'text/x-plone-outputfilters-html'  # removed, as in plone.app.vocabularies.types  # noqa
--        ])
-+    settings.allowed_types = tuple([
-+        _type for _type in allowable_types
-+        if _type not in forbidden_types
-+        and _type not in 'text/x-plone-outputfilters-html'  # removed, as in plone.app.vocabularies.types  # noqa
-+    ])
- 
- 
- def upgrade_security_controlpanel_settings(context):
-@@ -178,33 +153,24 @@ def _get_enable_self_reg():
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISecuritySchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        settings.enable_self_reg = _get_enable_self_reg()
--        validate_email = portal.getProperty('validate_email', True)
--        if validate_email:
--            settings.enable_user_pwd_choice = False
--        else:
--            settings.enable_user_pwd_choice = True
--        pmembership = getToolByName(portal, 'portal_membership')
--        settings.enable_user_folders = pmembership.getMemberareaCreationFlag()
--        settings.allow_anon_views_about = site_properties.getProperty(
--            'allowAnonymousViewAbout', False)
--        settings.use_email_as_login = site_properties.getProperty(
--            'use_email_as_login', False)
--        settings.use_uuid_as_userid = site_properties.getProperty(
--            'use_uuid_as_userid', False)
-+    settings = registry.forInterface(
-+        ISecuritySchema,
-+        prefix='plone',
-+    )
-+    settings.enable_self_reg = _get_enable_self_reg()
-+    validate_email = portal.getProperty('validate_email', True)
-+    if validate_email:
-+        settings.enable_user_pwd_choice = False
-+    else:
-+        settings.enable_user_pwd_choice = True
-+    pmembership = getToolByName(portal, 'portal_membership')
-+    settings.enable_user_folders = pmembership.getMemberareaCreationFlag()
-+    settings.allow_anon_views_about = site_properties.getProperty(
-+        'allowAnonymousViewAbout', False)
-+    settings.use_email_as_login = site_properties.getProperty(
-+        'use_email_as_login', False)
-+    settings.use_uuid_as_userid = site_properties.getProperty(
-+        'use_uuid_as_userid', False)
- 
- 
- def to50beta2(context):
-@@ -304,21 +270,12 @@ def upgrade_usergroups_controlpanel_settings(context):
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(IUserGroupsSettingsSchema,
--                                         prefix='plone')
--    except KeyError:
--        settings = False
--    if settings:
--        settings.many_groups = site_properties.getProperty('many_groups',
--                                                           False)
--        settings.many_users = site_properties.getProperty('many_users',
--                                                          False)
-+    settings = registry.forInterface(IUserGroupsSettingsSchema,
-+                                     prefix='plone')
-+    settings.many_groups = site_properties.getProperty('many_groups',
-+                                                       False)
-+    settings.many_users = site_properties.getProperty('many_users',
-+                                                      False)
- 
- 
- def migrate_displayPublicationDateInByline(context):
-@@ -329,26 +286,17 @@ def migrate_displayPublicationDateInByline(context):
-     # get the new registry
-     registry = getUtility(IRegistry)
- 
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(IUserGroupsSettingsSchema,
--                                         prefix='plone')
--    except KeyError:
--        settings = False
--    if settings:
--        # get the old site properties
--        portal_url = getToolByName(context, 'portal_url')
--        portal = portal_url.getPortalObject()
--        portal_properties = getToolByName(portal, "portal_properties")
--        site_properties = portal_properties.site_properties
--
--        value = site_properties.getProperty('displayPublicationDateInByline',
--                                            False)
--        settings.display_publication_date_in_byline = value
-+    settings = registry.forInterface(IUserGroupsSettingsSchema,
-+                                     prefix='plone')
-+    # get the old site properties
-+    portal_url = getToolByName(context, 'portal_url')
-+    portal = portal_url.getPortalObject()
-+    portal_properties = getToolByName(portal, "portal_properties")
-+    site_properties = portal_properties.site_properties
-+
-+    value = site_properties.getProperty('displayPublicationDateInByline',
-+                                        False)
-+    settings.display_publication_date_in_byline = value
- 
- 
- def to50rc1(context):
-diff --git a/plone/app/upgrade/v50/profiles/to_rc1/registry.xml b/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-index 534327c4..9fcfb191 100644
---- a/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc1/registry.xml
-@@ -2,4 +2,6 @@
- <registry>
-   <records interface="Products.CMFPlone.interfaces.ISiteSchema"
-            prefix="plone" />
-+  <records interface="Products.CMFPlone.interfaces.IUserGroupsSettingsSchema"
-+           prefix="plone" />
- </registry>
-\ No newline at end of file
-diff --git a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-index 17993484..5f8bea79 100644
---- a/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-+++ b/plone/app/upgrade/v50/profiles/to_rc3/registry.xml
-@@ -12,8 +12,6 @@
-            prefix="plone" />
-   <records interface="Products.CMFPlone.interfaces.ITypesSchema"
-            prefix="plone" />
--  <records interface="Products.CMFPlone.interfaces.IUserGroupsSettingsSchema"
--           prefix="plone" />
-   <records interface="plone.app.iterate.interfaces.IIterateSettings" />
-   <records prefix="plone.resources/resource-plone-app-discussion-stylesheets"
-         interface='Products.CMFPlone.interfaces.IResourceRegistry'
-diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
-index 9adc6175..7a8931b5 100644
---- a/plone/app/upgrade/v51/betas.py
-+++ b/plone/app/upgrade/v51/betas.py
-@@ -28,26 +28,17 @@ def addSortOnProperty(context):
-     site_properties = portal_properties.site_properties
-     # get the new registry
-     registry = getUtility(IRegistry)
--    # XXX: Somehow this code is executed for old migration steps as well
--    # ( < Plone 4 ) and breaks because there is no registry. Looking up the
--    # registry interfaces with 'check=False' will not work, because it will
--    # return a settings object and then fail when we try to access the
--    # attributes.
--    try:
--        settings = registry.forInterface(
--            ISearchSchema,
--            prefix='plone',
--        )
--    except KeyError:
--        settings = False
--    if settings:
--        # migrate the old site properties to the new registry
--        if site_properties.hasProperty('sort_on'):
--            settings.sort_on = site_properties.sort_on
--        else:
--            settings.sort_on = 'relevance'
--        logger.log(logging.INFO,
--                   "Added 'sort_on' property to site_properties.")
-+    settings = registry.forInterface(
-+        ISearchSchema,
-+        prefix='plone',
-+    )
-+    # migrate the old site properties to the new registry
-+    if site_properties.hasProperty('sort_on'):
-+        settings.sort_on = site_properties.sort_on
-+    else:
-+        settings.sort_on = 'relevance'
-+    logger.log(logging.INFO,
-+               "Added 'sort_on' property to site_properties.")
- 
- 
- def remove_leftover_skin_layers(context):
 
 
