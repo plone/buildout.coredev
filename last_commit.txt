@@ -1,100 +1,258 @@
-Repository: plonetheme.barceloneta
+Repository: plone.autoform
 
 
 Branch: refs/heads/master
-Date: 2017-11-20T12:27:35-05:00
-Author: Thomas Massmann (tmassman) <thomas.massmann@it-spir.it>
-Commit: https://github.com/plone/plonetheme.barceloneta/commit/e02e816d21eb39e96e7a4803b850dfb5812446ba
+Date: 2017-11-22T11:41:37+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.autoform/commit/8fb9e3beab66e2ae6d6d3103bd68d9a75379cc4d
 
-Add theme classifier.
-
-Files changed:
-M setup.py
-
-diff --git a/setup.py b/setup.py
-index f3c872e..84c334c 100644
---- a/setup.py
-+++ b/setup.py
-@@ -21,6 +21,7 @@ def read(*rnames):
-           "Framework :: Plone",
-           "Framework :: Plone :: 5.0",
-           "Framework :: Plone :: 5.1",
-+          "Framework :: Plone :: Theme",
-           "Framework :: Zope2",
-           "License :: OSI Approved :: GNU General Public License (GPL)",
-           "Operating System :: OS Independent",
-
-
-Repository: plonetheme.barceloneta
-
-
-Branch: refs/heads/master
-Date: 2017-11-20T12:29:34-05:00
-Author: Thomas Massmann (tmassman) <thomas.massmann@it-spir.it>
-Commit: https://github.com/plone/plonetheme.barceloneta/commit/f09abda7e9b3b976446c8fd1ae5ded7bdac2a8a6
-
-Add changelog entry.
+Allow fieldset configuration via field-less schema
+Allow configuration of fieldsets via ``plone.supermodel`` fieldset directives via a schema without fields.
+This can be used to create a Plone behavior for stable ordering of fieldsets.
 
 Files changed:
 M CHANGES.rst
+M plone/autoform/tests/test_utils.py
+M plone/autoform/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 26cbfa4..827ceb2 100644
+index 5eac5f6..ff458c8 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -20,6 +20,9 @@ New features:
- - Define variable ``cursor-disabled`` in variables.less for better reuse.
-   [thet]
+@@ -10,6 +10,10 @@ Breaking changes:
  
-+- Add theme classifier.
-+  [tmassman]
+ New features:
+ 
++- Allow configuration of fieldsets via ``plone.supermodel`` fieldset directives via a schema without fields.
++  This can be used to create a Plone behavior for stable ordering of fieldsets.
++  [thet]
 +
- Bug fixes:
+ - Add handler registration for text input widgets to support e.g. 'placeholder'
+   parameter in parameterized widgets
+   [datakurre]
+diff --git a/plone/autoform/tests/test_utils.py b/plone/autoform/tests/test_utils.py
+index c449a39..7f5bf2a 100644
+--- a/plone/autoform/tests/test_utils.py
++++ b/plone/autoform/tests/test_utils.py
+@@ -93,3 +93,42 @@ class subschema(schema):
+         self.assertEqual(len(form.groups), 1)
+         self.assertEqual(len(form.groups[0].fields), 2)
+         self.assertEqual([g.__name__ for g in form.groups], ['custom'])
++
++    def test_fieldset_configuration(self):
++        """Test, if fieldsets can be orderd via fieldset configuration on a 
++        schema without fields. This schema should also not be included in form
++        groups.
++        """
++        form = Form(None, None)
++        form.groups = []
++
++        class schema1(Interface):
++            title = zope.schema.TextLine()
++
++        fs1 = Fieldset('fs1', label=u'fs1', fields=['title'])
++        schema1.setTaggedValue(FIELDSETS_KEY, [fs1])
++
++        class schema2(Interface):
++            subtitle = zope.schema.TextLine()
++
++        fs2 = Fieldset('fs2', label=u'fs2', fields=['subtitle'])
++        schema2.setTaggedValue(FIELDSETS_KEY, [fs2])
++
++        class schema3(Interface):
++            pass
++
++        fs3 = Fieldset('fs1', order=2)
++        fs4 = Fieldset('fs2', order=1)
++        schema3.setTaggedValue(FIELDSETS_KEY, [fs3, fs4])
++       
++        processFields(form, schema1, prefix='prefix', permissionChecks=True)
++        processFields(form, schema2, prefix='prefix', permissionChecks=True)
++        processFields(form, schema3, prefix='prefix', permissionChecks=True)
++
++        self.assertEqual(len(form.groups), 2)
++
++        self.assertEqual(form.groups[0].__name__, 'fs1')
++        self.assertEqual(form.groups[0].order, 2)
++
++        self.assertEqual(form.groups[1].__name__, 'fs2')
++        self.assertEqual(form.groups[1].order, 1)
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index defe059..6237a99 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -160,21 +160,10 @@ def _process_fieldsets(
+             *[_process_prefixed_name(prefix, name) for name in fieldset.fields
+               if _process_prefixed_name(prefix, name) in all_fields]
+         )
+-        if not (
+-            getattr(form, 'showEmptyGroups', False) or
+-            len(new_fields) > 0
+-        ):
+-            continue
+-        _process_widgets(form, widgets, modes, new_fields)
+-        if fieldset.__name__ not in groups:
+-            group = GroupFactory(fieldset.__name__,
+-                                 label=fieldset.label,
+-                                 description=fieldset.description,
+-                                 order=fieldset.order,
+-                                 fields=new_fields)
+-            form.groups.append(group)
+-            groups[group.__name__] = group
+-        else:
++
++        if fieldset.__name__ in groups:
++            # Process also, if no fields are defined to allow fieldset-only
++            # configurations via plone.supermodel fieldset directive.
+             group = groups[fieldset.__name__]
+             group.fields += new_fields
+             if (
+@@ -195,6 +184,17 @@ def _process_fieldsets(
+             ):
+                 group.order = fieldset.order
  
- - *add item here*
++        if len(new_fields) > 0 or getattr(form, 'showEmptyGroups', False):
++            _process_widgets(form, widgets, modes, new_fields)
++            if fieldset.__name__ not in groups:
++                group = GroupFactory(fieldset.__name__,
++                                     label=fieldset.label,
++                                     description=fieldset.description,
++                                     order=fieldset.order,
++                                     fields=new_fields)
++                form.groups.append(group)
++                groups[group.__name__] = group
++
+ 
+ def _process_permissions(schema, form, all_fields):
+     # Get either read or write permissions depending on what type of
 
 
-Repository: plonetheme.barceloneta
+Repository: plone.autoform
 
 
 Branch: refs/heads/master
-Date: 2017-11-20T13:11:13-06:00
-Author: T. Kim Nguyen (tkimnguyen) <tkimnguyen@users.noreply.github.com>
-Commit: https://github.com/plone/plonetheme.barceloneta/commit/2834aa07b207e5840b6a7db327408f8961d5fa7d
+Date: 2017-11-22T21:38:25+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.autoform/commit/489246aab405f14dcb2b05f11858e673565e2cfa
 
-Merge pull request #148 from plone/tmassman-theme-classifier
+Merge pull request #30 from plone/thet-fieldsetconfig
 
-Add theme classifier
+Allow fieldset configuration via field-less schema
 
 Files changed:
 M CHANGES.rst
-M setup.py
+M plone/autoform/tests/test_utils.py
+M plone/autoform/utils.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 26cbfa4..827ceb2 100644
+index 5eac5f6..ff458c8 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -20,6 +20,9 @@ New features:
- - Define variable ``cursor-disabled`` in variables.less for better reuse.
-   [thet]
+@@ -10,6 +10,10 @@ Breaking changes:
  
-+- Add theme classifier.
-+  [tmassman]
+ New features:
+ 
++- Allow configuration of fieldsets via ``plone.supermodel`` fieldset directives via a schema without fields.
++  This can be used to create a Plone behavior for stable ordering of fieldsets.
++  [thet]
 +
- Bug fixes:
+ - Add handler registration for text input widgets to support e.g. 'placeholder'
+   parameter in parameterized widgets
+   [datakurre]
+diff --git a/plone/autoform/tests/test_utils.py b/plone/autoform/tests/test_utils.py
+index c449a39..7f5bf2a 100644
+--- a/plone/autoform/tests/test_utils.py
++++ b/plone/autoform/tests/test_utils.py
+@@ -93,3 +93,42 @@ class subschema(schema):
+         self.assertEqual(len(form.groups), 1)
+         self.assertEqual(len(form.groups[0].fields), 2)
+         self.assertEqual([g.__name__ for g in form.groups], ['custom'])
++
++    def test_fieldset_configuration(self):
++        """Test, if fieldsets can be orderd via fieldset configuration on a 
++        schema without fields. This schema should also not be included in form
++        groups.
++        """
++        form = Form(None, None)
++        form.groups = []
++
++        class schema1(Interface):
++            title = zope.schema.TextLine()
++
++        fs1 = Fieldset('fs1', label=u'fs1', fields=['title'])
++        schema1.setTaggedValue(FIELDSETS_KEY, [fs1])
++
++        class schema2(Interface):
++            subtitle = zope.schema.TextLine()
++
++        fs2 = Fieldset('fs2', label=u'fs2', fields=['subtitle'])
++        schema2.setTaggedValue(FIELDSETS_KEY, [fs2])
++
++        class schema3(Interface):
++            pass
++
++        fs3 = Fieldset('fs1', order=2)
++        fs4 = Fieldset('fs2', order=1)
++        schema3.setTaggedValue(FIELDSETS_KEY, [fs3, fs4])
++       
++        processFields(form, schema1, prefix='prefix', permissionChecks=True)
++        processFields(form, schema2, prefix='prefix', permissionChecks=True)
++        processFields(form, schema3, prefix='prefix', permissionChecks=True)
++
++        self.assertEqual(len(form.groups), 2)
++
++        self.assertEqual(form.groups[0].__name__, 'fs1')
++        self.assertEqual(form.groups[0].order, 2)
++
++        self.assertEqual(form.groups[1].__name__, 'fs2')
++        self.assertEqual(form.groups[1].order, 1)
+diff --git a/plone/autoform/utils.py b/plone/autoform/utils.py
+index defe059..6237a99 100644
+--- a/plone/autoform/utils.py
++++ b/plone/autoform/utils.py
+@@ -160,21 +160,10 @@ def _process_fieldsets(
+             *[_process_prefixed_name(prefix, name) for name in fieldset.fields
+               if _process_prefixed_name(prefix, name) in all_fields]
+         )
+-        if not (
+-            getattr(form, 'showEmptyGroups', False) or
+-            len(new_fields) > 0
+-        ):
+-            continue
+-        _process_widgets(form, widgets, modes, new_fields)
+-        if fieldset.__name__ not in groups:
+-            group = GroupFactory(fieldset.__name__,
+-                                 label=fieldset.label,
+-                                 description=fieldset.description,
+-                                 order=fieldset.order,
+-                                 fields=new_fields)
+-            form.groups.append(group)
+-            groups[group.__name__] = group
+-        else:
++
++        if fieldset.__name__ in groups:
++            # Process also, if no fields are defined to allow fieldset-only
++            # configurations via plone.supermodel fieldset directive.
+             group = groups[fieldset.__name__]
+             group.fields += new_fields
+             if (
+@@ -195,6 +184,17 @@ def _process_fieldsets(
+             ):
+                 group.order = fieldset.order
  
- - *add item here*
-diff --git a/setup.py b/setup.py
-index f3c872e..84c334c 100644
---- a/setup.py
-+++ b/setup.py
-@@ -21,6 +21,7 @@ def read(*rnames):
-           "Framework :: Plone",
-           "Framework :: Plone :: 5.0",
-           "Framework :: Plone :: 5.1",
-+          "Framework :: Plone :: Theme",
-           "Framework :: Zope2",
-           "License :: OSI Approved :: GNU General Public License (GPL)",
-           "Operating System :: OS Independent",
++        if len(new_fields) > 0 or getattr(form, 'showEmptyGroups', False):
++            _process_widgets(form, widgets, modes, new_fields)
++            if fieldset.__name__ not in groups:
++                group = GroupFactory(fieldset.__name__,
++                                     label=fieldset.label,
++                                     description=fieldset.description,
++                                     order=fieldset.order,
++                                     fields=new_fields)
++                form.groups.append(group)
++                groups[group.__name__] = group
++
+ 
+ def _process_permissions(schema, form, all_fields):
+     # Get either read or write permissions depending on what type of
 
 
