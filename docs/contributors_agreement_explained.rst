@@ -73,7 +73,7 @@ so that I can contribute the same code to other projects under different terms o
 Does the Foundation control use of the Plone trademark?
 
   Yes.
-  to keep the trademark,
+  To keep the trademark,
   the Foundation (or any trademark owner) must demonstrate that they have acted to protect it.
 
 Will Plone always be available under an OSI-approved/Open Source license?
