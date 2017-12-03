@@ -1,7 +1,6 @@
 .. -*- coding: utf-8 -*-
-
 ===========================================
-Contributor’s Agreement for Plone Explained
+Contributor’s Agreement For Plone Explained
 ===========================================
 
 Prospective contributors to the Plone core code base are required to sign a contributor’s agreement,
@@ -10,7 +9,8 @@ which assigns copyright in the code to the Plone Foundation, the non-profit orga
 This document explains the purposes of this, along with questions and answers about what this means.
 
 The Plone Contributor Agreement can be found at:
-`https://plone.org/foundation/contributors-agreement/agreement.pdf`_
+`<https://plone.org/foundation/contributors-agreement/agreement.pdf>`_.
+
 
 About the Plone Contributor Agreement
 =====================================
@@ -62,7 +62,7 @@ Do I have to sign the contributor's agreement to submit a patch to the Plone cor
 
   We enthusiastically welcome patches,
   but we can't merge them until you sign and return a contributor's agreement.
-  (Unless, in the judgement of the Plone Release Manager, the patch is so tiny as not to constitute a "creative work".
+  (Unless, in the judgment of the Plone Release Manager, the patch is so tiny as not to constitute a "creative work".
   See the `Policy for Contributor Agreements and Patches`_ for more detail on this policy.)
 
 Can I grant the Plone foundation a non-exclusive license to my contributions rather than an exclusive license,
@@ -73,7 +73,7 @@ so that I can contribute the same code to other projects under different terms o
 Does the Foundation control use of the Plone trademark?
 
   Yes.
-  In order to keep the trademark,
+  to keep the trademark,
   the Foundation (or any trademark owner) must demonstrate that they have acted to protect it.
 
 Will Plone always be available under an OSI-approved/Open Source license?
@@ -142,4 +142,3 @@ How much would a non-GPL version of Plone cost?
 .. _https://github.com/plone: https://github.com/plone
 .. _https://github.com/collective: https://github.com/collective
 .. _Policy for Contributor Agreements and Patches : http://plone.org/foundation/materials/foundation-resolutions/patch-policy-052011
-
