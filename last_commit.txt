@@ -1,300 +1,144 @@
-Repository: Products.CMFPlone
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/5.0.x
-Date: 2017-12-01T00:49:03+01:00
+Branch: refs/heads/master
+Date: 2017-12-07T15:31:38+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/530572b5950edbddac638a2e8021b08a39fa2f45
+
+Unregister p.a.c import_steps (Fix https://github.com/plone/Products.CMFPlone/issues/2238)
+
+Files changed:
+M CHANGES.rst
+M plone/app/upgrade/v51/betas.py
+M plone/app/upgrade/v51/configure.zcml
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 28637d76..3c47c194 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,9 @@ New features:
+ 
+ Bug fixes:
+ 
+-- *add item here*
++- Unregister import_steps that were moved to post_handlers.
++  Fixes https://github.com/plone/Products.CMFPlone/issues/2238
++  [pbauer]
+ 
+ 
+ 2.0.9 (2017-11-26)
+diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
+index 7a8931b5..57eca92c 100644
+--- a/plone/app/upgrade/v51/betas.py
++++ b/plone/app/upgrade/v51/betas.py
+@@ -214,3 +214,18 @@ def remove_duplicate_iterate_settings(context):
+     qi = get_installer(context)
+     if qi.is_product_installed('plone.app.iterate'):
+         registry.registerInterface(IIterateSettings)
++
++
++def cleanup_import_steps(context):
++    """Remove registration of old GS-import_steps since they were transformed
++    into post_handlers. Otherwise the registered methods would run for each
++    profile.
++    See https://github.com/plone/Products.CMFPlone/issues/2238
++    """
++    steps = [
++        'plone.app.contenttypes--plone-content',
++        'plone.app.contenttypes',
++    ]
++    for step in steps:
++        if step in context._import_registry.listSteps():
++            context._import_registry.unregisterStep(step)
+diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
+index 788bca81..63b45a84 100644
+--- a/plone/app/upgrade/v51/configure.zcml
++++ b/plone/app/upgrade/v51/configure.zcml
+@@ -189,9 +189,8 @@ Add image scaling options to image handling control panel.
+         profile="Products.CMFPlone:plone">
+ 
+         <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
++            title="Remove registration of p.a.c import_steps since they were transformed into post_handlers"
++            handler=".betas.cleanup_import_steps"
+             />
+     </gs:upgradeSteps>
+ 
+
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2017-12-09T00:40:52+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a171f2728467907ec2c10c6896ae19994b198fd1
+Commit: https://github.com/plone/plone.app.upgrade/commit/6a3883674f899b7a96bc817307d064f213ee69a6
 
-Improved isURLInPortal according to PloneHotfix20171128.
+Merge pull request #144 from plone/unregister_import_steps
 
-Accept only http/https, and doubly check escaped urls.
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/URLTool.py
-M Products/CMFPlone/tests/testURLTool.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 94d590652..d77ae1010 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -26,6 +26,9 @@ New features:
- 
- Bug fixes:
- 
-+- Improved isURLInPortal according to PloneHotfix20171128.
-+  Accept only http/https, and doubly check escaped urls.  [maurits]
-+
- - Fixed Products.CMFPlacefulWorkflow being marked as not installed after upgrade from 4.3.
-   This is true for any package in the Products namespace that was installed.
-   Fixes `issue 2103 <https://github.com/plone/Products.CMFPlone/issues/2103>`_.
-diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py
-index 17c7cd3bd..2b6ebfe93 100644
---- a/Products/CMFPlone/URLTool.py
-+++ b/Products/CMFPlone/URLTool.py
-@@ -1,5 +1,6 @@
- from AccessControl import ClassSecurityInfo
- from App.class_init import InitializeClass
-+from HTMLParser import HTMLParser
- from plone.registry.interfaces import IRegistry
- from posixpath import normpath
- from Products.CMFCore.URLTool import URLTool as BaseTool
-@@ -10,6 +11,25 @@
- import re
- 
- 
-+hp = HTMLParser()
-+# These schemas are allowed in full urls to consider them in the portal:
-+# A mailto schema is an obvious sign of a url that is not in the portal.
-+# This is a whitelist.
-+ALLOWED_SCHEMAS = [
-+    'https',
-+    'http',
-+]
-+# These bad parts are not allowed in urls that are in the portal:
-+# This is a blacklist.
-+BAD_URL_PARTS = [
-+    '\\\\',
-+    '<script',
-+    '%3cscript',
-+    'javascript:',
-+    'javascript%3a',
-+]
-+
-+
- class URLTool(PloneBaseTool, BaseTool):
- 
-     meta_type = 'Plone URL Tool'
-@@ -33,16 +53,24 @@ def isURLInPortal(self, url, context=None):
-         # sanitize url
-         url = re.sub('^[\x00-\x20]+', '', url).strip()
-         cmp_url = url.lower()
--        if ('\\\\' in cmp_url or
--                '<script' in cmp_url or
--                '%3cscript' in cmp_url or
--                'javascript:' in cmp_url or
--                'javascript%3a' in cmp_url):
--            return False
-+        for bad in BAD_URL_PARTS:
-+            if bad in cmp_url:
-+                return False
- 
-         p_url = self()
- 
--        _, u_host, u_path, _, _, _ = urlparse(url)
-+        schema, u_host, u_path, _, _, _ = urlparse(url)
-+        if schema and schema not in ALLOWED_SCHEMAS:
-+            # Redirecting to 'data:' may be harmful,
-+            # and redirecting to 'mailto:' or 'ftp:' is silly.
-+            return False
-+
-+        # Someone may be doing tricks with escaped html code.
-+        unescaped_url = hp.unescape(url)
-+        if unescaped_url != url:
-+            if not self.isURLInPortal(unescaped_url):
-+                return False
-+
-         if not u_host and not u_path.startswith('/'):
-             if context is None:
-                 return True  # old behavior
-diff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py
-index afb491970..27caf2058 100644
---- a/Products/CMFPlone/tests/testURLTool.py
-+++ b/Products/CMFPlone/tests/testURLTool.py
-@@ -135,3 +135,43 @@ def test_double_back_slash(self):
-         url_tool = self._makeOne()
-         iURLiP = url_tool.isURLInPortal
-         self.assertFalse(iURLiP('\\\\www.example.com'))
-+
-+    def test_regression_absolute_url_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertTrue(iURLiP(url_tool()))
-+        self.assertTrue(iURLiP(url_tool() + '/shrubbery?knights=ni#ekki-ekki'))
-+
-+    def test_mailto_simple_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'mailto:someone@example.org')
-+        )
-+
-+    def test_mailto_complex_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'mailto&#58;192&#46;168&#46;163&#46;154&#58;8080&#47;Plone&apos;'
-+            '&quot;&gt;&lt;html&gt;&lt;svg&#32;onload&#61;alert&#40;document'
-+            '&#46;domain&#41;&gt;&lt;&#47;html&gt;')
-+        )
-+
-+    def test_data_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'data:text/html%3bbase64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4K')
-+        )
-+
-+    def test_double_slash(self):
-+        # I wondered if this might be a problem after reading
-+        # https://bugs.python.org/issue23505
-+        # Apparently not, but let's test it.
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            '//www.google.com'))
-+        self.assertFalse(iURLiP(
-+            '////www.google.com'))
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/5.0.x
-Date: 2017-12-01T11:37:02+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/0e50e1e67ea3b6d3187f78cb1a1628081f654d3b
-
-Merge pull request #2234 from plone/plone-hotfix20171128-isURLInPortal-5.0
-
-Improved isURLInPortal according to PloneHotfix20171128. [5.0]
+Unregister p.a.c import_steps
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/URLTool.py
-M Products/CMFPlone/tests/testURLTool.py
+M plone/app/upgrade/v51/betas.py
+M plone/app/upgrade/v51/configure.zcml
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 94d590652..d77ae1010 100644
+index 28637d76..3c47c194 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -26,6 +26,9 @@ New features:
+@@ -14,7 +14,9 @@ New features:
  
  Bug fixes:
  
-+- Improved isURLInPortal according to PloneHotfix20171128.
-+  Accept only http/https, and doubly check escaped urls.  [maurits]
-+
- - Fixed Products.CMFPlacefulWorkflow being marked as not installed after upgrade from 4.3.
-   This is true for any package in the Products namespace that was installed.
-   Fixes `issue 2103 <https://github.com/plone/Products.CMFPlone/issues/2103>`_.
-diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py
-index 17c7cd3bd..2b6ebfe93 100644
---- a/Products/CMFPlone/URLTool.py
-+++ b/Products/CMFPlone/URLTool.py
-@@ -1,5 +1,6 @@
- from AccessControl import ClassSecurityInfo
- from App.class_init import InitializeClass
-+from HTMLParser import HTMLParser
- from plone.registry.interfaces import IRegistry
- from posixpath import normpath
- from Products.CMFCore.URLTool import URLTool as BaseTool
-@@ -10,6 +11,25 @@
- import re
+-- *add item here*
++- Unregister import_steps that were moved to post_handlers.
++  Fixes https://github.com/plone/Products.CMFPlone/issues/2238
++  [pbauer]
  
  
-+hp = HTMLParser()
-+# These schemas are allowed in full urls to consider them in the portal:
-+# A mailto schema is an obvious sign of a url that is not in the portal.
-+# This is a whitelist.
-+ALLOWED_SCHEMAS = [
-+    'https',
-+    'http',
-+]
-+# These bad parts are not allowed in urls that are in the portal:
-+# This is a blacklist.
-+BAD_URL_PARTS = [
-+    '\\\\',
-+    '<script',
-+    '%3cscript',
-+    'javascript:',
-+    'javascript%3a',
-+]
+ 2.0.9 (2017-11-26)
+diff --git a/plone/app/upgrade/v51/betas.py b/plone/app/upgrade/v51/betas.py
+index 7a8931b5..57eca92c 100644
+--- a/plone/app/upgrade/v51/betas.py
++++ b/plone/app/upgrade/v51/betas.py
+@@ -214,3 +214,18 @@ def remove_duplicate_iterate_settings(context):
+     qi = get_installer(context)
+     if qi.is_product_installed('plone.app.iterate'):
+         registry.registerInterface(IIterateSettings)
 +
 +
- class URLTool(PloneBaseTool, BaseTool):
++def cleanup_import_steps(context):
++    """Remove registration of old GS-import_steps since they were transformed
++    into post_handlers. Otherwise the registered methods would run for each
++    profile.
++    See https://github.com/plone/Products.CMFPlone/issues/2238
++    """
++    steps = [
++        'plone.app.contenttypes--plone-content',
++        'plone.app.contenttypes',
++    ]
++    for step in steps:
++        if step in context._import_registry.listSteps():
++            context._import_registry.unregisterStep(step)
+diff --git a/plone/app/upgrade/v51/configure.zcml b/plone/app/upgrade/v51/configure.zcml
+index 788bca81..63b45a84 100644
+--- a/plone/app/upgrade/v51/configure.zcml
++++ b/plone/app/upgrade/v51/configure.zcml
+@@ -189,9 +189,8 @@ Add image scaling options to image handling control panel.
+         profile="Products.CMFPlone:plone">
  
-     meta_type = 'Plone URL Tool'
-@@ -33,16 +53,24 @@ def isURLInPortal(self, url, context=None):
-         # sanitize url
-         url = re.sub('^[\x00-\x20]+', '', url).strip()
-         cmp_url = url.lower()
--        if ('\\\\' in cmp_url or
--                '<script' in cmp_url or
--                '%3cscript' in cmp_url or
--                'javascript:' in cmp_url or
--                'javascript%3a' in cmp_url):
--            return False
-+        for bad in BAD_URL_PARTS:
-+            if bad in cmp_url:
-+                return False
+         <gs:upgradeStep
+-            title="Miscellaneous"
+-            description=""
+-            handler="..utils.null_upgrade_step"
++            title="Remove registration of p.a.c import_steps since they were transformed into post_handlers"
++            handler=".betas.cleanup_import_steps"
+             />
+     </gs:upgradeSteps>
  
-         p_url = self()
- 
--        _, u_host, u_path, _, _, _ = urlparse(url)
-+        schema, u_host, u_path, _, _, _ = urlparse(url)
-+        if schema and schema not in ALLOWED_SCHEMAS:
-+            # Redirecting to 'data:' may be harmful,
-+            # and redirecting to 'mailto:' or 'ftp:' is silly.
-+            return False
-+
-+        # Someone may be doing tricks with escaped html code.
-+        unescaped_url = hp.unescape(url)
-+        if unescaped_url != url:
-+            if not self.isURLInPortal(unescaped_url):
-+                return False
-+
-         if not u_host and not u_path.startswith('/'):
-             if context is None:
-                 return True  # old behavior
-diff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py
-index afb491970..27caf2058 100644
---- a/Products/CMFPlone/tests/testURLTool.py
-+++ b/Products/CMFPlone/tests/testURLTool.py
-@@ -135,3 +135,43 @@ def test_double_back_slash(self):
-         url_tool = self._makeOne()
-         iURLiP = url_tool.isURLInPortal
-         self.assertFalse(iURLiP('\\\\www.example.com'))
-+
-+    def test_regression_absolute_url_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertTrue(iURLiP(url_tool()))
-+        self.assertTrue(iURLiP(url_tool() + '/shrubbery?knights=ni#ekki-ekki'))
-+
-+    def test_mailto_simple_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'mailto:someone@example.org')
-+        )
-+
-+    def test_mailto_complex_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'mailto&#58;192&#46;168&#46;163&#46;154&#58;8080&#47;Plone&apos;'
-+            '&quot;&gt;&lt;html&gt;&lt;svg&#32;onload&#61;alert&#40;document'
-+            '&#46;domain&#41;&gt;&lt;&#47;html&gt;')
-+        )
-+
-+    def test_data_not_in_portal(self):
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            'data:text/html%3bbase64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4K')
-+        )
-+
-+    def test_double_slash(self):
-+        # I wondered if this might be a problem after reading
-+        # https://bugs.python.org/issue23505
-+        # Apparently not, but let's test it.
-+        url_tool = self._makeOne()
-+        iURLiP = url_tool.isURLInPortal
-+        self.assertFalse(iURLiP(
-+            '//www.google.com'))
-+        self.assertFalse(iURLiP(
-+            '////www.google.com'))
 
 
