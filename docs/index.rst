@@ -1,5 +1,3 @@
-.. -*- coding: utf-8 -*-
-
 =========================
 Developing for Plone Core
 =========================
@@ -9,9 +7,9 @@ Introduction
 This documentation describes the process for developing Plone.
 It is primarily a technical resource for setting up your core developer buildout, fixing bugs and writing plips.
 
-STOP!
------
-Legally, you can **NOT** contribute code unless you have signed the :doc:`contributor agreement <agreement>`.
+.. warning::
+
+   Legally, you can **NOT** contribute code unless you have signed the :doc:`contributor agreement <agreement>`.
 
 This means that we can **NOT** accept pull requests from you unless this is done,
 please don't put the code reviewers at risk and do it anyways.
@@ -55,4 +53,3 @@ These are some documents using as reference for this documentation.
    plipreview
 
 Our coding style guides are located at the :doc:`Plone Style Guide </develop/styleguide/index>` section.
-

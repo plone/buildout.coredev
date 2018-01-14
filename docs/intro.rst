@@ -1,18 +1,16 @@
-.. -*- coding: utf-8 -*-
-
 ================================
-Getting started with development
+Getting Started With Development
 ================================
 
-This document assumes you want to run the current latest Plone source,
-fix a bug in Plone, or test an addon in the context of the latest code,
+This document assumes you want to run the current latest Plone source, fix a bug in Plone, or test an add-on in the context of the latest code,
 and will detail the full process.
+
 For more information on writing PLIPS, please :doc:`go here <plips>`.
 
 Version Support Policy
 ======================
-If you are triaging or fixing bugs,
-keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
+
+If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
 
 Dependencies
 ============
@@ -37,60 +35,74 @@ Dependencies
 
 .. _setup-development-environment
 
-Setting up Your Development Environment
+Setting Up Your Development Environment
 =======================================
+
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running.
+
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
 `GitHub <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
+
 More information on switching release branches is below.
 
-To set up a plone 5 development environment::
+To set up a Plone 5 development environment
 
-  > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 5.1 https://github.com/plone/buildout.coredev ./plone5devel
-  > virtualenv --no-site-packages plone5devpy
-  > cd plone5devel
-  > ../plone5devpy/bin/pip install -r requirements.txt
-  > ../plone5devpy/bin/buildout bootstrap
-  > bin/buildout -v
+.. code-block:: console
 
-If you run into issues in this process,
-please see the doc :doc:`issues`.
+   cd ~/buildouts # or wherever you want to put things
+   git clone -b 5.1 https://github.com/plone/buildout.coredev ./plone5devel
+   virtualenv --no-site-packages plone5devpy
+   cd plone5devel
+   ../plone5devpy/bin/pip install -r requirements.txt
+   ../plone5devpy/bin/buildout bootstrap
+   bin/buildout -v
+
+If you run into issues in this process, please see the doc :doc:`issues`.
 
 This will run for a long time if it is your first pull (~20 mins).
-Once that is done pulling down eggs,
-you can start your new instance with::
+Once that is done pulling down eggs, you can start your new instance with
 
-  > ./bin/instance fg
+.. code-block:: console
+
+    ./bin/instance fg
 
 The default username/password for a dev instance is **admin/admin**.
 
 Switching Branches
 ------------------
 If your bug is specific to one branch or you think it should be `backported <http://en.wikipedia.org/wiki/Backporting>`_,
-you can easily switch branches. The first time you get a branch, you must do::
+you can switch branches.
 
-  > git checkout -t origin/4.1
+The first time you get a branch, you must do:
+
+.. code-block:: console
+
+    git checkout -t origin/4.1
 
 This should set up a local 4.1 branch tracking the one on GitHub.
-From then on you can just do::
+From then on you can just do:
 
-  > git checkout 4.1
+.. code-block:: console
 
-To see what branch you are currently on,
-just do::
+    git checkout 4.1
 
-  > git branch
+To see what branch you are currently on, do:
+
+.. code-block:: console
+
+   git branch
 
 The line with a * by it will indicate which branch you are currently working on.
 
 .. important::
+
    Make sure to rerun buildout if you were in a different branch earlier to get the correct versions of packages,
    otherwise you will get some weird behavior!
 
 
 Jenkins / mr.roboto
 ===================
+
 Plone has a Continuous Integration setup and follows CI rules.
 
 When you push a change to any Plone core package,
@@ -165,13 +177,18 @@ Alternatively,
 we can manage checkouts from the command line,
 by using mr.developer's :command:`bin/develop` command to get the latest source.
 For example,
-if the issue is in ``plone.app.caching`` and ``plone.caching``::
+if the issue is in ``plone.app.caching`` and ``plone.caching``:
 
-  > ./bin/develop co plone.app.caching
-  > ./bin/develop co plone.caching
-  > ./bin/buildout
+.. code-block:: console
 
-Don't forget to rerun buildout!
+    ./bin/develop co plone.app.caching
+   ./bin/develop co plone.caching
+   ./bin/buildout
+
+.. note::
+
+   Do not forget to rerun buildout!
+
 In both methods,
 ``mr.developer`` will download the source from GitHub (or otherwise) and put the package in the :file:`src/` directory.
 You can repeat this process with as many or as few packages as you need.
@@ -180,24 +197,29 @@ please :doc:`read more here <mrdeveloper>`.
 
 Testing Locally
 ===============
-To run a test for the specific module you are modifying::
+To run a test for the specific module you are modifying:
 
-  > ./bin/test -m plone.app.caching
+.. code-block:: console
+
+   ./bin/test -m plone.app.caching
 
 These should all run without error.
 Please don't check in anything that doesn't!
+
 Now write a test case for the bug you are fixing and make sure everything is running as it should.
 
 After the module level tests run with your change,
-please make sure other modules aren't affected by the change by running the full suite::
+please make sure other modules aren't affected by the change by running the full suite:
 
-  > ./bin/alltests
+.. code-block:: console
+
+   ./bin/alltests
 
 .. note::
-    Tests take a long time to run.
-    Once you become a master of bugfixes,
-    you may just let jenkins do this part for you.
-    More on that below.
+
+   Tests take a long time to run.
+   Once you become a master of bugfixes, you may just let jenkins do this part for you.
+   More on that below.
 
 Updating CHANGES.rst and checkouts.cfg
 ======================================
@@ -287,55 +309,63 @@ Let's say the bug starts in 4.1. Pull the 4.1 branch and fix and commit there wi
 If your fix only involved a single commit,
 you can use git's ``cherry-pick`` command to apply the same commit to a different branch.
 
-First check out the branch::
+First check out the branch:
 
-  > git checkout 4.2
+.. code-block:: console
 
-And then ``cherry-pick`` the commit (you can get the SHA hash from git log).::
+   git checkout 4.2
 
-  > git cherry-pick b6ff4309
+And then ``cherry-pick`` the commit (you can get the SHA hash from git log):
 
-There may be conflicts;
-if so,
-resolve them and then follow the directions git gives you to complete the ``cherry-pick``.
+.. code-block:: console
 
-If your fix involved multiple commits,
-``cherry-picking`` them one by one can get tedious.
+   git cherry-pick b6ff4309
+
+There may be conflicts; if so, resolve them and then follow the directions git gives you to complete the ``cherry-pick``.
+
+If your fix involved multiple commits, ``cherry-picking`` them one by one can get tedious.
+
 In this case things are easiest if you did your fix in a separate feature branch.
 
-In that scenario,
-you first merge the feature branch to the 4.1 branch::
+In that scenario, you first merge the feature branch to the 4.1 branch:
 
-  > git checkout 4.1
-  > git merge my-awesome-feature
+.. code-lock:: console
 
-Then you return to the feature branch and make a branch for `rebasing` it onto the 4.2 branch::
+   git checkout 4.1
+   git merge my-awesome-feature
 
-  > git checkout my-awesome-feature
-  > git checkout -b my-awesome-feature-4.2
-  > git rebase ef978a --onto 4.2
+Then you return to the feature branch and make a branch for ``rebasing`` it onto the 4.2 branch:
+
+.. code-block:: console
+
+   git checkout my-awesome-feature
+   git checkout -b my-awesome-feature-4.2
+   git rebase ef978a --onto 4.2
 
 (ef978a happens to be the last commit in the feature branch's history before it was branched off of 4.1.
+
 You can look at git log to find this.)
 
-At this point,
-the feature branch's history has been updated,
-but it hasn't actually been merged to 4.2 yet.
+At this point, the feature branch's history has been updated, but it hasn't actually been merged to 4.2 yet.
+
 This lets you deal with resolving conflicts before you actually merge it to the 4.2 release branch.
-Let's do that now::
 
-  > git checkout 4.2
-  > git merge my-awesome-feature-4.2
+Let's do that now:
+
+.. code-block:: console
+
+   git checkout 4.2
+   git merge my-awesome-feature-4.2
 
 
-Branches and Forks and Direct Commits - Oh My!
-----------------------------------------------
-Plone used to be in an svn repository,
-so everyone is familiar and accustomed to committing directly to the branches.
-After the migration to GitHub,
-the community decided to maintain this spirit.
-If you have signed the :doc:`contributor agreement <contributors_agreement_explained>` form,
-you can commit directly to the branch
+Branches and Forks and Direct Commits
+-------------------------------------
+
+Plone used to be in an svn repository, so everyone is familiar and accustomed to committing directly to the branches.
+
+After the migration to GitHub, the community decided to maintain this spirit.
+
+If you have signed the :doc:`contributor agreement <contributors_agreement_explained>` form, you can commit directly to the branch
 (for plone this would be the version branch, for most other packages this would be ``master``).
 
 HOWEVER,
@@ -349,51 +379,58 @@ If you:
 
 then you likely want to create a branch of whatever packages you are using and then use the `pull request <https://help.github.com/articles/using-pull-requests>`_ feature of GitHub to get review.
 Everything about this process would be the same except you need to work on a branch.
-Take the ``plone.app.caching`` example.
-After checking it out with ``mr.developer``,
-create your own branch with::
 
-  > cd src/plone.app.caching
-  > git checkout -b my_descriptive_branch_name
+Take the ``plone.app.caching`` example.
+
+After checking it out with ``mr.developer``, create your own branch with:
+
+.. code-block:: console
+
+   cd src/plone.app.caching
+   git checkout -b my_descriptive_branch_name
 
 .. note::
 
-    Branching or forking is your choice.
-    I prefer branching,
-    and I'm writing the docs so this uses the branch method.
-    If you branch,
-    it helps us because we *know* that you have committer rights.
-    Either way it's your call.
+   Branching or forking is your choice.
+   I prefer branching, and I'm writing the docs so this uses the branch method.
+   If you branch, it helps us because we *know* that you have committer rights.
+
+   Either way it's your call.
 
 Proceed as normal.
-When you are ready to ``push`` your fix,
-push to a remote branch with::
 
-  > git push origin my_descriptive_branch_name
+When you are ready to ``push`` your fix, push to a remote branch with:
+
+.. code-block:: console
+
+   git push origin my_descriptive_branch_name
 
 This will make a remote branch in GitHub.
+
 Navigate to this branch in the GitHub UI and on the top right there will be a button that says **"Pull Request"**.
+
 This will turn your request into a pull request on the main branch.
 There are people who look once a week or more for pending pull requests and will confirm whether or not its a good fix and give you feedback where necessary.
+
 The reviewers are informal and very nice so don't worry - they are there to help!
-If you want immediate feedback,
-jump into IRC with the ``pull request`` link and ask for a review.
+
+If you want immediate feedback, jump into IRC with the ``pull request`` link and ask for a review.
 
 .. note::
-    You still need to update :file:`checkouts.cfg` file in the correct branches of buildout.coredev!
+
+   You still need to update :file:`checkouts.cfg` file in the correct branches of buildout.coredev!
 
 Finalizing Tickets
 ==================
-If you are working from a ticket,
-please don't forget to go back to the ticket and add a link to the changeset.
+
+If you are working from a ticket, please don't forget to go back to the ticket and add a link to the changeset.
 We don't have integration with GitHub yet so it's a nice way to track changes.
 It also lets the reporter know that you care.
-If the bug is really bad,
-consider pinging the release manager and asking him to make a release pronto.
+
+If the bug is really bad, consider pinging the release manager and asking him to make a release pronto.
 
 FAQ
 ===
  * *How do I know when my package got made?*
     You can follow the project on GitHub and watch its `timeline <https://github.com/organizations/plone>`_.
     You can also check the :file:`CHANGES.rst` of every plone release for a comprehensive list of all changes and validate that yours is present.
-
