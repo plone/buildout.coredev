@@ -1,4 +1,3 @@
-.. -*- coding: utf-8 -*-
 ===========================================
 Contributor’s Agreement For Plone Explained
 ===========================================
@@ -8,8 +7,7 @@ which assigns copyright in the code to the Plone Foundation, the non-profit orga
 
 This document explains the purposes of this, along with questions and answers about what this means.
 
-The Plone Contributor Agreement can be found at:
-`<https://plone.org/foundation/contributors-agreement/agreement.pdf>`_.
+You can download *The Plone Contributor Agreement* from `plone.org <https://plone.org/foundation/contributors-agreement/agreement.pdf>`_.
 
 
 About The Plone Contributor Agreement
@@ -19,7 +17,7 @@ The Foundation feels that it benefits the community for a single organization to
 
 Prior to the Foundation, the intellectual property of Plone was jointly held by individual developers and by Alan Runyan and Alexander Limi.
 
-The community members who formed the Foundation felt that having the Foundation hold these rights provides several benefits:
+The community members who formed the Foundation felt that having the Foundation hold these rights provides benefits such as:
 
 1.  **Minimizing confusion / maximizing business compatibility** --
     Organizations considering adopting Plone have a simple answer for "Who owns this?",
@@ -30,12 +28,10 @@ The community members who formed the Foundation felt that having the Foundation 
     it can effectively protect these from unfair use.
 
 3.  **Guarantee of future Open Source versions** --
-    The Foundation's contributor agreement ensures that there will **always** be an OSI-approved version of Plone.
+    The Foundation's contributor agreement ensures that there will **always** be an `OSI-approved <https://opensource.org/licenses>`_ version of Plone.
 
 Questions & Answers
 ===================
-
-
 
 **What does the contributor's agreement cover?**
 
@@ -46,8 +42,8 @@ currently located at `https://github.com/plone`_.*
 
 *Contributions to the "Collective", currently located at `https://github.com/collective`_
 are not assigned to the Plone Foundation, and are made available under whatever license the project developers wish to use,
-although add-on products that import from GPLed Plone code are of course subject to the terms of the GPL,
-which requires derived works to be GPL licensed.*
+although add-on products that import from GPLed Plone code are of course subject to the terms of
+the `GPL <https://en.wikipedia.org/wiki/GNU_General_Public_License>`_, which requires derived works to be GPL licensed.*
 
 **What rights will I continue to have for my contributions?**
 
