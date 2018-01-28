@@ -1,1164 +1,626 @@
-Repository: Products.CMFPlone
+Repository: plone.cachepurging
 
 
-Branch: refs/heads/4.3.x
-Date: 2018-01-25T16:27:48+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/fa674500f7403ab50115d09a112b5a61b8c3c344
+Branch: refs/heads/master
+Date: 2018-01-25T17:01:08+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.cachepurging/commit/175ef839287e79a84265dd2c74a037ea4cc67d1c
 
-Use `guarded_getitem` in `SafeFormatter`.
-
-Part of PloneHotfix20171128.  Copied from `AccessControl`.
-Tests copied from PloneHotfix20171128 internal tests.
+Add Python 2 / 3 compatibility
 
 Files changed:
-M Products/CMFPlone/tests/test_safe_formatter.py
-M Products/CMFPlone/tests/using_format_zope3_page_template.pt
-M Products/CMFPlone/utils.py
-M docs/CHANGES.rst
+M CHANGES.rst
+M plone/cachepurging/browser.py
+M plone/cachepurging/purger.py
+M plone/cachepurging/rewrite.py
+M plone/cachepurging/tests/test_purger.py
+M setup.py
 
-diff --git a/Products/CMFPlone/tests/test_safe_formatter.py b/Products/CMFPlone/tests/test_safe_formatter.py
-index ac948f2ae..60b8f6b10 100644
---- a/Products/CMFPlone/tests/test_safe_formatter.py
-+++ b/Products/CMFPlone/tests/test_safe_formatter.py
-@@ -8,14 +8,33 @@
- from zExceptions import Unauthorized
- 
- 
--BAD_STR = """
-+BAD_ATTR_STR = """
- <p tal:content="python:'class of {0} is {0.__class__}'.format(context)" />
- """
--BAD_UNICODE = """
-+BAD_ATTR_UNICODE = """
- <p tal:content="python:u'class of {0} is {0.__class__}'.format(context)" />
- """
-+BAD_KEY_STR = """
-+<p tal:content="python:'access by key: {0[secret]}'.format(context)" />
-+"""
-+BAD_KEY_UNICODE = """
-+<p tal:content="python:u'access by key: {0[secret]}'.format(context)" />
-+"""
-+BAD_ITEM_STR = """
-+<p tal:content="python:'access by item: {0[0]}'.format(context)" />
-+"""
-+BAD_ITEM_UNICODE = """
-+<p tal:content="python:u'access by item: {0[0]}'.format(context)" />
-+"""
- GOOD_STR = '<p tal:content="python:(\'%s\' % context).lower()" />'
- GOOD_UNICODE = '<p tal:content="python:(\'%s\' % context).lower()" />'
-+# Attribute access is not completely forbidden, it is simply checked.
-+GOOD_FORMAT_ATTR_STR = """
-+<p tal:content="python:'title of {0} is {0.title}'.format(context)" />
-+"""
-+GOOD_FORMAT_ATTR_UNICODE = """
-+<p tal:content="python:u'title of {0} is {0.title}'.format(context)" />
-+"""
- AQ_TEST = """
- <p tal:content="python:\'parent of {0} is {0.aq_parent}\'.format(context)" />
- """
-@@ -33,45 +52,81 @@ def hack_pt(pt, context=None):
-     pt.context = context
- 
- 
-+def create_private_document(portal, _id):
-+    setRoles(portal, TEST_USER_ID, ['Manager'])
-+    login(portal, TEST_USER_ID)
-+    wf_tool = portal.portal_workflow
-+    wf_tool.setChainForPortalTypes(
-+        ['Document'], 'simple_publication_workflow')
-+    portal.invokeFactory('Document', _id)
-+    setRoles(portal, TEST_USER_ID, ['Member'])
-+    logout()
-+    return getattr(portal, _id)
-+
-+
-+class UnauthorizedSecurityPolicy:
-+    """Policy which denies every access."""
-+
-+    def validate(self, *args, **kw):
-+        from AccessControl.unauthorized import Unauthorized
-+        raise Unauthorized('Nothing is allowed!')
-+
-+
- class TestSafeFormatter(PloneTestCase):
-     """The safe formatter.
- 
--    This is from PloneHotfix20170117.
-+    This is from PloneHotfix20170117 and PloneHotfix20171128.
-     """
- 
--    def test_cook_zope2_page_templates_bad_str(self):
-+    def test_cook_zope2_page_templates_bad_attr_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', BAD_STR)
-+        pt = ZopePageTemplate('mytemplate', BAD_ATTR_STR)
-         hack_pt(pt)
-         self.assertRaises(Unauthorized, pt.pt_render)
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
- 
--    def test_cook_zope2_page_templates_bad_unicode(self):
-+    def test_cook_zope2_page_templates_bad_attr_unicode(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', BAD_UNICODE)
-+        pt = ZopePageTemplate('mytemplate', BAD_ATTR_UNICODE)
-         hack_pt(pt)
-         self.assertRaises(Unauthorized, pt.pt_render)
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
- 
-     def test_cook_zope2_page_templates_good_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-         pt = ZopePageTemplate('mytemplate', GOOD_STR)
-         hack_pt(pt)
-         self.assertEqual(pt.pt_render().strip(), '<p>none</p>')
-+        hack_pt(pt, context=self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(), '<p>&lt;plonesite at plone&gt;</p>')
- 
-     def test_cook_zope2_page_templates_good_unicode(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-         pt = ZopePageTemplate('mytemplate', unicode(GOOD_UNICODE))
-         hack_pt(pt)
-         self.assertEqual(pt.pt_render().strip(), '<p>none</p>')
-+        hack_pt(pt, self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(), '<p>&lt;plonesite at plone&gt;</p>')
- 
--    def test_cook_zope2_page_templates_aq_parent(self):
--        # Accessing aq_parent should be allowed normally.
-+    def test_cook_zope2_page_templates_good_format_attr_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', AQ_TEST)
--        hack_pt(pt, context=self.portal)
-+        pt = ZopePageTemplate('mytemplate', GOOD_FORMAT_ATTR_STR)
-+        hack_pt(pt, self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(),
-+            '<p>title of &lt;PloneSite at plone&gt; is Plone site</p>')
-+
-+    def test_cook_zope2_page_templates_good_format_attr_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', GOOD_FORMAT_ATTR_UNICODE)
-+        hack_pt(pt, self.portal)
-         self.assertEqual(
-             pt.pt_render().strip(),
--            u'<p>parent of &lt;PloneSite at plone&gt; is '
--            u'&lt;Application at &gt;</p>')
-+            '<p>title of &lt;PloneSite at plone&gt; is Plone site</p>')
- 
-     def test_access_to_private_content_not_allowed_via_rich_text(self):
-         try:
-@@ -81,47 +136,89 @@ def test_access_to_private_content_not_allowed_via_rich_text(self):
-         except ImportError:
-             return
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        foobar = create_private_document(self.portal, 'foobar')
-         login(self.portal, TEST_USER_ID)
--        wf_tool = self.portal.portal_workflow
--        wf_tool.setChainForPortalTypes(
--            ['Document'], 'simple_publication_workflow')
--        self.portal.invokeFactory('Document', 'foobar')
--        foobar = self.portal.foobar
-         foobar.text = RichTextValue(u'Secret.', 'text/plain', 'text/html')
-         self.assertEqual(
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
--        logout()
--        pt = ZopePageTemplate('mytemplate', '''
--<p tal:content="structure python:'access {0.foobar.text.output}'.format(context).lower()" />
--''')  # noqa
-+        # We could logout(), but that is not even needed.
-+        TEMPLATE = '<p tal:content="structure python:%s" />'
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'access {0.foobar.text.output}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+        # The simpler access without str.format is not allowed either.
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "context.foobar.text.output")
-         hack_pt(pt, context=self.portal)
-         self.assertRaises(Unauthorized, pt.pt_render)
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
- 
--    def test_access_to_private_content_not_allowed_via_any_attribute(self):
-+    def test_access_to_private_content_not_allowed_in_any_way(self):
-         # This is a more general version of the rich text one.
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        foobar = create_private_document(self.portal, 'foobar')
-         login(self.portal, TEST_USER_ID)
--        wf_tool = self.portal.portal_workflow
--        wf_tool.setChainForPortalTypes(
--            ['Document'], 'simple_publication_workflow')
--        self.portal.invokeFactory('Document', 'foobar')
--        foobar = self.portal.foobar
-         self.assertEqual(
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
--        logout()
-+        TEMPLATE = '<p tal:content="structure python:%s" />'
-+
-+        # attribute access
-         # If access to context.foobar.Title was allowed, it would still only
-         # say 'bound method ATDocument.Title', without giving the actual title,
-         # but there may be other attributes that give worse info.
--        pt = ZopePageTemplate('mytemplate', '''
--<p tal:content="structure python:'access {0.foobar.Title}'.format(context)" />
--''')
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'access {0.foobar.Title}'.format(context)")
-         hack_pt(pt, context=self.portal)
-+        login(self.portal, TEST_USER_ID)
-+        # We replace ATDocument with Document to make the tests pass
-+        # with ATContentTypes and plone.app.contenttypes.
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access <bound method Document.Title of <Document at /plone/foobar>></p>')  # noqa
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+        # key access
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0[foobar]}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p><Document at foobar></p>')
-+        logout()
-         self.assertRaises(Unauthorized, pt.pt_render)
- 
-+        # Prepare a list so we can test item access.
-+        self.portal.testlist = [foobar]
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0.testlist}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        # If you have such a list, you *can* see an id.
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            u'<p>[<Document at /plone/foobar>]</p>')
-+        # But you cannot access an item.
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0.testlist[0]}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+        # except as authenticated user
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p><Document at foobar></p>')
-+
-     # Zope 3 templates are always file system templates.  So we actually have
-     # no problems allowing str.format there.
- 
-@@ -149,7 +246,12 @@ def test_cook_zope3_page_templates_using_format(self):
-             u"<p>class of &lt;plonesite at plone&gt; is "
-             u"&lt;class 'products.cmfplone.portal.plonesite'&gt;</p>\n"
-             u"<p>CLASS OF &lt;PLONESITE AT PLONE&gt; IS "
--            u"&lt;CLASS 'PRODUCTS.CMFPLONE.PORTAL.PLONESITE'&gt;</p>")
-+            u"&lt;CLASS 'PRODUCTS.CMFPLONE.PORTAL.PLONESITE'&gt;</p>\n"
-+            u"<p>{'foo': 42} has foo=42</p>\n"
-+            u"<p>{'foo': 42} has foo=42</p>\n"
-+            u"<p>['ni'] has first item ni</p>\n"
-+            u"<p>['ni'] has first item ni</p>"
-+        )
- 
-     def test_positional_argument_regression(self):
-         """
-@@ -179,9 +281,22 @@ def test_positional_argument_regression(self):
- class TestFunctionalSafeFormatter(FunctionalTestCase):
-     """Functional tests for the safe formatter.
- 
--    This is from PloneHotfix20170117.
-+    This is from PloneHotfix20170117 and PloneHotfix20171128.
-     """
- 
-+    def test_safe_format_properly_applied(self):
-+        from AccessControl.SimpleObjectPolicies import ContainerAssertions
-+        import types
-+        ca = ContainerAssertions
-+        self.assertTrue(str in ca)
-+        self.assertTrue(isinstance(ca[str], dict))
-+        self.assertTrue('format' in ca[str])
-+        string_rule = ca[str]['format']
-+        self.assertTrue(isinstance(string_rule, types.FunctionType))
-+        # Take less steps for unicode.
-+        unicode_rule = ca[unicode]['format']
-+        self.assertTrue(isinstance(unicode_rule, types.FunctionType))
-+        self.assertEqual(string_rule, unicode_rule)
- 
-     def test_standard_error_message(self):
-         # In Plone 5.0 standard_error_message.py has:
-@@ -190,6 +305,7 @@ def test_standard_error_message(self):
-         #
-         # So if there is an error and the request does not accept html, then
-         # str.format is used.  We don't want this to fail with an Unauthorized.
-+        # For good measure we check this in Plone 4.3 too.
- 
-         response = self.publish(
-             '/plone/standard_error_message',
-@@ -202,24 +318,80 @@ def test_standard_error_message(self):
-         # We expect a json string back.
-         self.assertTrue(response.body, '{"error_type": "None"}')
- 
--    def test_resource_registry_vector(self):
--        for vector in ('less-variables.js', 'less-modify.js'):
--            src = '''
--class ctx:
--  def format(self, *args, **kwargs):
--    self.foo=context
--    return "foo"
--
--context.portal_registry['plone.lessvariables']['foo'] = ctx()
--context.portal_registry['plone.lessvariables']['bar'] = "{foo.foo.__class__}"
--js = context.restrictedTraverse("%s")
--return js()
--''' % vector
--            from Products.PythonScripts.PythonScript import PythonScript
--            script = PythonScript('evil')
--            script._filepath = 'evil'
--            script.write(src)
--            self.portal.evil = script
--            output = self.publish('/plone/evil')
--            self.assertFalse(
--                'Products.CMFPlone.Portal.PloneSite' in output.body)
-+    def test_cook_zope2_page_templates_bad_key_str(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', BAD_KEY_STR)
-+        hack_pt(pt, self.portal)
-+        create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by key: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_key_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', BAD_KEY_UNICODE)
-+        hack_pt(pt, self.portal)
-+        create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by key: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_item_str(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        secret = create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.portal.testlist = [secret]
-+        pt = ZopePageTemplate('mytemplate', BAD_ITEM_STR)
-+        hack_pt(pt, self.portal.testlist)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by item: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_item_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        secret = create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.portal.testlist = [secret]
-+        pt = ZopePageTemplate('mytemplate', BAD_ITEM_UNICODE)
-+        hack_pt(pt, self.portal.testlist)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by item: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def assert_is_checked_via_security_manager(self, pt_content):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        from AccessControl.SecurityManager import setSecurityPolicy
-+        from AccessControl.SecurityManagement import noSecurityManager
-+
-+        pt = ZopePageTemplate('mytemplate', pt_content)
-+        noSecurityManager()
-+        old_security_policy = setSecurityPolicy(UnauthorizedSecurityPolicy())
-+        try:
-+            hack_pt(pt, context=self.portal)
-+            self.assertRaises(Unauthorized, pt.pt_render)
-+        finally:
-+            setSecurityPolicy(old_security_policy)
-+
-+    def test_getattr_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{0.acl_users}'.format(context)" />""")
-+
-+    def test_getitem_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{c[acl_users]}'.format(c=context)" />"""
-+        )
-+
-+    def test_key_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{c[0]}'.format(c=[context])" />"""
-+        )
-diff --git a/Products/CMFPlone/tests/using_format_zope3_page_template.pt b/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-index 1e6508c25..4b0658a6a 100644
---- a/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-+++ b/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-@@ -1,2 +1,6 @@
- <p tal:content="python:'class of {0} is {0.__class__}'.format(context).lower()" />
- <p tal:content="python:u'class of {0} is {0.__class__}'.format(context).upper()" />
-+<p tal:content="python:'{0} has foo={0[foo]}'.format({'foo': 42})" />
-+<p tal:content="python:u'{0} has foo={0[foo]}'.format({'foo': 42})" />
-+<p tal:content="python:'{0} has first item {0[0]}'.format(['ni'])" />
-+<p tal:content="python:'{0} has first item {0[0]}'.format(['ni'])" />
-diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
-index 25872c123..61182c5a0 100644
---- a/Products/CMFPlone/utils.py
-+++ b/Products/CMFPlone/utils.py
-@@ -21,6 +21,7 @@
- from AccessControl import ModuleSecurityInfo
- from AccessControl import Unauthorized
- from AccessControl.ZopeGuards import guarded_getattr
-+from AccessControl.ZopeGuards import guarded_getitem
- from Acquisition import aq_base
- from Acquisition import aq_get
- from Acquisition import aq_inner
-@@ -679,8 +680,7 @@ def set_own_login_name(member, loginname):
- 
- 
- class _MagicFormatMapping(Mapping):
--    """
--    Pulled from Jinja2
-+    """Pulled from Jinja2.
- 
-     This class implements a dummy wrapper to fix a bug in the Python
-     standard library for string formatting.
-@@ -713,16 +713,14 @@ def __len__(self):
- 
- 
- class SafeFormatter(string.Formatter):
-+    """Formatter using guarded access."""
- 
-     def __init__(self, value):
-         self.value = value
-         super(SafeFormatter, self).__init__()
- 
-     def get_field(self, field_name, args, kwargs):
--        """
--        Here we're overridding so we can use guarded_getattr instead of
--        regular getattr
--        """
-+        """Get the field value using guarded methods."""
-         first, rest = field_name._formatter_field_name_split()
- 
-         obj = self.get_value(first, args, kwargs)
-@@ -733,17 +731,16 @@ def get_field(self, field_name, args, kwargs):
-             if is_attr:
-                 obj = guarded_getattr(obj, i)
-             else:
--                obj = obj[i]
-+                obj = guarded_getitem(obj, i)
- 
-         return obj, first
- 
-     def safe_format(self, *args, **kwargs):
-+        """Safe variant of `format` method."""
-         kwargs = _MagicFormatMapping(args, kwargs)
-         return self.vformat(self.value, args, kwargs)
- 
- 
- def safe_format(inst, method):
--    """
--    Use our SafeFormatter that uses guarded_getattr for attribute access
--    """
-+    """Use our SafeFormatter that uses guarded_getattr and guarded_getitem."""
-     return SafeFormatter(inst).safe_format
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 73474a252..90953046b 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -19,6 +19,9 @@ New features:
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c7c4c53..cca4b29 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
  
  Bug fixes:
  
-+- Use ``guarded_getitem`` in ``SafeFormatter``.
-+  Part of PloneHotfix20171128.  Copied from ``AccessControl``.  [maurits]
-+
- - Improved isURLInPortal according to PloneHotfix20171128.
-   Accept only http/https, and doubly check escaped urls.  [maurits]
- 
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2018-01-25T23:57:24+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/cc9c523659493597fa578e479b4aa264a01d170c
-
-Check guarded_getattr
-
-Files changed:
-M Products/CMFPlone/tests/test_safe_formatter.py
-
-diff --git a/Products/CMFPlone/tests/test_safe_formatter.py b/Products/CMFPlone/tests/test_safe_formatter.py
-index 60b8f6b10..f7d23febe 100644
---- a/Products/CMFPlone/tests/test_safe_formatter.py
-+++ b/Products/CMFPlone/tests/test_safe_formatter.py
-@@ -143,6 +143,8 @@ def test_access_to_private_content_not_allowed_via_rich_text(self):
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
-         # We could logout(), but that is not even needed.
-+        from AccessControl.ZopeGuards import guarded_getattr
-+        self.assertRaises(Unauthorized, guarded_getattr, self.portal.foobar.text, 'output')
-         TEMPLATE = '<p tal:content="structure python:%s" />'
-         pt = ZopePageTemplate(
-             'mytemplate', TEMPLATE %
-@@ -154,6 +156,7 @@ def test_access_to_private_content_not_allowed_via_rich_text(self):
-             'mytemplate', TEMPLATE %
-             "context.foobar.text.output")
-         hack_pt(pt, context=self.portal)
-+        pt.pt_render()
-         self.assertRaises(Unauthorized, pt.pt_render)
-         logout()
-         self.assertRaises(Unauthorized, pt.pt_render)
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2018-01-26T11:03:32+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/ae56607c403445339f8ca105a4a4c035594a62d0
-
-Fixed rich text template test.
-
-Files changed:
-M Products/CMFPlone/tests/test_safe_formatter.py
-
-diff --git a/Products/CMFPlone/tests/test_safe_formatter.py b/Products/CMFPlone/tests/test_safe_formatter.py
-index f7d23febe..b957d74e5 100644
---- a/Products/CMFPlone/tests/test_safe_formatter.py
-+++ b/Products/CMFPlone/tests/test_safe_formatter.py
-@@ -1,3 +1,4 @@
-+from AccessControl.ZopeGuards import guarded_getattr
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.app.testing import setRoles
-@@ -130,8 +131,6 @@ def test_cook_zope2_page_templates_good_format_attr_unicode(self):
- 
-     def test_access_to_private_content_not_allowed_via_rich_text(self):
-         try:
--            # This is only available for tests if we have plone.app.dexterity,
--            # which in tests is by default only the case for Plone 5.
-             from plone.app.textfield.value import RichTextValue
-         except ImportError:
-             return
-@@ -142,22 +141,51 @@ def test_access_to_private_content_not_allowed_via_rich_text(self):
-         self.assertEqual(
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
--        # We could logout(), but that is not even needed.
--        from AccessControl.ZopeGuards import guarded_getattr
--        self.assertRaises(Unauthorized, guarded_getattr, self.portal.foobar.text, 'output')
-+
-+        # Check that guarded_getattr is happy for the current user.
-+        self.assertEqual(guarded_getattr(self.portal, 'foobar'), foobar)
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar, 'text'), foobar.text)
-+        # Access to text.output may be more restricted than access to the
-+        # text object itself, but this makes no sense, so we switch that
-+        # off in this test.
-+        # self.assertRaises(
-+        #     Unauthorized, guarded_getattr, self.portal.foobar.text, 'output')
-+        self.portal.foobar.text.__allow_access_to_unprotected_subobjects__ = 1
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar.text, 'output'),
-+            '<p>Secret.</p>')
-         TEMPLATE = '<p tal:content="structure python:%s" />'
-         pt = ZopePageTemplate(
-             'mytemplate', TEMPLATE %
-             "'access {0.foobar.text.output}'.format(context)")
-         hack_pt(pt, context=self.portal)
-+        self.assertEqual(pt.pt_render(), '<p>access <p>Secret.</p></p>')
-+
-+        # Check the same for anonymous.
-+        logout()
-+        self.assertRaises(
-+            Unauthorized, guarded_getattr, self.portal, 'foobar')
-+        self.assertRaises(
-+            Unauthorized, guarded_getattr, self.portal.foobar, 'text')
-+        # *If* somehow anonymous can access the text, then we have allowed
-+        # access to the output as well.
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar.text, 'output'),
-+            '<p>Secret.</p>')
-+        # But for the template anonymous would need access to everything,
-+        # which rightly fails.
-         self.assertRaises(Unauthorized, pt.pt_render)
--        # The simpler access without str.format is not allowed either.
-+
-+        # Test the simpler access without str.format for the current user.
-+        login(self.portal, TEST_USER_ID)
-         pt = ZopePageTemplate(
-             'mytemplate', TEMPLATE %
-             "context.foobar.text.output")
-         hack_pt(pt, context=self.portal)
--        pt.pt_render()
--        self.assertRaises(Unauthorized, pt.pt_render)
-+        self.assertEqual(pt.pt_render(), '<p><p>Secret.</p></p>')
-+
-+        # and for anonymous
-         logout()
-         self.assertRaises(Unauthorized, pt.pt_render)
- 
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2018-01-26T23:58:43+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/d0cdfcee02f101a7c53706244a274fa951ddfc1d
-
-Merge pull request #2267 from plone/guarded-getitem-43
-
-Use `guarded_getitem` in `SafeFormatter`.
-
-Files changed:
-M Products/CMFPlone/tests/test_safe_formatter.py
-M Products/CMFPlone/tests/using_format_zope3_page_template.pt
-M Products/CMFPlone/utils.py
-M docs/CHANGES.rst
-
-diff --git a/Products/CMFPlone/tests/test_safe_formatter.py b/Products/CMFPlone/tests/test_safe_formatter.py
-index ac948f2ae..b957d74e5 100644
---- a/Products/CMFPlone/tests/test_safe_formatter.py
-+++ b/Products/CMFPlone/tests/test_safe_formatter.py
-@@ -1,3 +1,4 @@
-+from AccessControl.ZopeGuards import guarded_getattr
- from plone.app.testing import login
- from plone.app.testing import logout
- from plone.app.testing import setRoles
-@@ -8,14 +9,33 @@
- from zExceptions import Unauthorized
+-- *add item here*
++- Add Python 2 / 3 compatibility
++  [pbauer]
  
  
--BAD_STR = """
-+BAD_ATTR_STR = """
- <p tal:content="python:'class of {0} is {0.__class__}'.format(context)" />
- """
--BAD_UNICODE = """
-+BAD_ATTR_UNICODE = """
- <p tal:content="python:u'class of {0} is {0.__class__}'.format(context)" />
- """
-+BAD_KEY_STR = """
-+<p tal:content="python:'access by key: {0[secret]}'.format(context)" />
-+"""
-+BAD_KEY_UNICODE = """
-+<p tal:content="python:u'access by key: {0[secret]}'.format(context)" />
-+"""
-+BAD_ITEM_STR = """
-+<p tal:content="python:'access by item: {0[0]}'.format(context)" />
-+"""
-+BAD_ITEM_UNICODE = """
-+<p tal:content="python:u'access by item: {0[0]}'.format(context)" />
-+"""
- GOOD_STR = '<p tal:content="python:(\'%s\' % context).lower()" />'
- GOOD_UNICODE = '<p tal:content="python:(\'%s\' % context).lower()" />'
-+# Attribute access is not completely forbidden, it is simply checked.
-+GOOD_FORMAT_ATTR_STR = """
-+<p tal:content="python:'title of {0} is {0.title}'.format(context)" />
-+"""
-+GOOD_FORMAT_ATTR_UNICODE = """
-+<p tal:content="python:u'title of {0} is {0.title}'.format(context)" />
-+"""
- AQ_TEST = """
- <p tal:content="python:\'parent of {0} is {0.aq_parent}\'.format(context)" />
- """
-@@ -33,95 +53,203 @@ def hack_pt(pt, context=None):
-     pt.context = context
+ 1.0.13 (2016-10-04)
+diff --git a/plone/cachepurging/browser.py b/plone/cachepurging/browser.py
+index af41219..76a5589 100644
+--- a/plone/cachepurging/browser.py
++++ b/plone/cachepurging/browser.py
+@@ -5,7 +5,7 @@
+ from plone.cachepurging.utils import getURLsToPurge
+ from plone.cachepurging.utils import isCachePurgingEnabled
+ from plone.registry.interfaces import IRegistry
+-from StringIO import StringIO
++from six import StringIO
+ from z3c.caching.purge import Purge
+ from zope.component import getUtility
+ from zope.event import notify
+diff --git a/plone/cachepurging/purger.py b/plone/cachepurging/purger.py
+index 3e298b4..3f673bc 100644
+--- a/plone/cachepurging/purger.py
++++ b/plone/cachepurging/purger.py
+@@ -14,45 +14,47 @@
+ 
+ from App.config import getConfiguration
+ from plone.cachepurging.interfaces import IPurger
++from six.moves import http_client
++from six.moves import queue
++from six.moves import range
++from six.moves import urllib
+ from zope.interface import implementer
+ from zope.testing.cleanup import addCleanUp
+ 
+ import atexit
+-import httplib
+ import logging
+-import Queue
++import six
+ import socket
+ import sys
+ import threading
+ import time
+-import urlparse
  
  
-+def create_private_document(portal, _id):
-+    setRoles(portal, TEST_USER_ID, ['Manager'])
-+    login(portal, TEST_USER_ID)
-+    wf_tool = portal.portal_workflow
-+    wf_tool.setChainForPortalTypes(
-+        ['Document'], 'simple_publication_workflow')
-+    portal.invokeFactory('Document', _id)
-+    setRoles(portal, TEST_USER_ID, ['Member'])
-+    logout()
-+    return getattr(portal, _id)
-+
-+
-+class UnauthorizedSecurityPolicy:
-+    """Policy which denies every access."""
-+
-+    def validate(self, *args, **kw):
-+        from AccessControl.unauthorized import Unauthorized
-+        raise Unauthorized('Nothing is allowed!')
-+
-+
- class TestSafeFormatter(PloneTestCase):
-     """The safe formatter.
+ logger = logging.getLogger('plone.cachepurging')
  
--    This is from PloneHotfix20170117.
-+    This is from PloneHotfix20170117 and PloneHotfix20171128.
+ 
+-class Connection(httplib.HTTPConnection):
++class Connection(http_client.HTTPConnection):
+     """A connection that can handle either HTTP or HTTPS
      """
  
--    def test_cook_zope2_page_templates_bad_str(self):
-+    def test_cook_zope2_page_templates_bad_attr_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', BAD_STR)
-+        pt = ZopePageTemplate('mytemplate', BAD_ATTR_STR)
-         hack_pt(pt)
-         self.assertRaises(Unauthorized, pt.pt_render)
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
+     def __init__(self, host, port=None, strict=None, scheme="http", timeout=5):
+         self.scheme = scheme
+         if scheme == "http":
+-            self.default_port = httplib.HTTP_PORT
++            self.default_port = http_client.HTTP_PORT
+         elif scheme == "https":
+-            self.default_port = httplib.HTTPS_PORT
++            self.default_port = http_client.HTTPS_PORT
+         else:
+             raise ValueError("Invalid scheme '%s'" % scheme)
+-        httplib.HTTPConnection.__init__(self, host, port, strict,
+-                                        timeout=timeout)
++        http_client.HTTPConnection.__init__(self, host, port, strict,
++                                            timeout=timeout)
+         self.timeout = timeout
  
--    def test_cook_zope2_page_templates_bad_unicode(self):
-+    def test_cook_zope2_page_templates_bad_attr_unicode(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', BAD_UNICODE)
-+        pt = ZopePageTemplate('mytemplate', BAD_ATTR_UNICODE)
-         hack_pt(pt)
-         self.assertRaises(Unauthorized, pt.pt_render)
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
+     def connect(self):
+         if self.scheme == "http":
+-            httplib.HTTPConnection.connect(self)
++            http_client.HTTPConnection.connect(self)
+         elif self.scheme == "https":
+             import ssl  # import here in case python has no ssl support
+-            # Clone of httplib.HTTPSConnection.connect
++            # Clone of http_client.HTTPSConnection.connect
+             sock = socket.create_connection((self.host, self.port),
+                                             timeout=self.timeout)
+             key_file = cert_file = None
+@@ -76,7 +78,7 @@ def __init__(self, factory=Connection, timeout=30, backlog=200,
+         self.http_1_1 = http_1_1
  
-     def test_cook_zope2_page_templates_good_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-         pt = ZopePageTemplate('mytemplate', GOOD_STR)
-         hack_pt(pt)
-         self.assertEqual(pt.pt_render().strip(), '<p>none</p>')
-+        hack_pt(pt, context=self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(), '<p>&lt;plonesite at plone&gt;</p>')
+     def purgeAsync(self, url, httpVerb='PURGE'):
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)  # noqa: E501
+         __traceback_info__ = (url, httpVerb, scheme, host,
+                               path, params, query, fragment)
  
-     def test_cook_zope2_page_templates_good_unicode(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-         pt = ZopePageTemplate('mytemplate', unicode(GOOD_UNICODE))
-         hack_pt(pt)
-         self.assertEqual(pt.pt_render().strip(), '<p>none</p>')
-+        hack_pt(pt, self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(), '<p>&lt;plonesite at plone&gt;</p>')
- 
--    def test_cook_zope2_page_templates_aq_parent(self):
--        # Accessing aq_parent should be allowed normally.
-+    def test_cook_zope2_page_templates_good_format_attr_str(self):
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        pt = ZopePageTemplate('mytemplate', AQ_TEST)
--        hack_pt(pt, context=self.portal)
-+        pt = ZopePageTemplate('mytemplate', GOOD_FORMAT_ATTR_STR)
-+        hack_pt(pt, self.portal)
-         self.assertEqual(
-             pt.pt_render().strip(),
--            u'<p>parent of &lt;PloneSite at plone&gt; is '
--            u'&lt;Application at &gt;</p>')
-+            '<p>title of &lt;PloneSite at plone&gt; is Plone site</p>')
-+
-+    def test_cook_zope2_page_templates_good_format_attr_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', GOOD_FORMAT_ATTR_UNICODE)
-+        hack_pt(pt, self.portal)
-+        self.assertEqual(
-+            pt.pt_render().strip(),
-+            '<p>title of &lt;PloneSite at plone&gt; is Plone site</p>')
- 
-     def test_access_to_private_content_not_allowed_via_rich_text(self):
+@@ -84,7 +86,7 @@ def purgeAsync(self, url, httpVerb='PURGE'):
          try:
--            # This is only available for tests if we have plone.app.dexterity,
--            # which in tests is by default only the case for Plone 5.
-             from plone.app.textfield.value import RichTextValue
-         except ImportError:
-             return
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        foobar = create_private_document(self.portal, 'foobar')
-         login(self.portal, TEST_USER_ID)
--        wf_tool = self.portal.portal_workflow
--        wf_tool.setChainForPortalTypes(
--            ['Document'], 'simple_publication_workflow')
--        self.portal.invokeFactory('Document', 'foobar')
--        foobar = self.portal.foobar
-         foobar.text = RichTextValue(u'Secret.', 'text/plain', 'text/html')
-         self.assertEqual(
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
-+
-+        # Check that guarded_getattr is happy for the current user.
-+        self.assertEqual(guarded_getattr(self.portal, 'foobar'), foobar)
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar, 'text'), foobar.text)
-+        # Access to text.output may be more restricted than access to the
-+        # text object itself, but this makes no sense, so we switch that
-+        # off in this test.
-+        # self.assertRaises(
-+        #     Unauthorized, guarded_getattr, self.portal.foobar.text, 'output')
-+        self.portal.foobar.text.__allow_access_to_unprotected_subobjects__ = 1
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar.text, 'output'),
-+            '<p>Secret.</p>')
-+        TEMPLATE = '<p tal:content="structure python:%s" />'
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'access {0.foobar.text.output}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        self.assertEqual(pt.pt_render(), '<p>access <p>Secret.</p></p>')
-+
-+        # Check the same for anonymous.
-         logout()
--        pt = ZopePageTemplate('mytemplate', '''
--<p tal:content="structure python:'access {0.foobar.text.output}'.format(context).lower()" />
--''')  # noqa
-+        self.assertRaises(
-+            Unauthorized, guarded_getattr, self.portal, 'foobar')
-+        self.assertRaises(
-+            Unauthorized, guarded_getattr, self.portal.foobar, 'text')
-+        # *If* somehow anonymous can access the text, then we have allowed
-+        # access to the output as well.
-+        self.assertEqual(
-+            guarded_getattr(self.portal.foobar.text, 'output'),
-+            '<p>Secret.</p>')
-+        # But for the template anonymous would need access to everything,
-+        # which rightly fails.
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+        # Test the simpler access without str.format for the current user.
-+        login(self.portal, TEST_USER_ID)
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "context.foobar.text.output")
-         hack_pt(pt, context=self.portal)
-+        self.assertEqual(pt.pt_render(), '<p><p>Secret.</p></p>')
-+
-+        # and for anonymous
-+        logout()
-         self.assertRaises(Unauthorized, pt.pt_render)
+             q.put((url, httpVerb), block=False)
+             logger.debug('Queued %s' % url)
+-        except Queue.Full:
++        except queue.Full:
+             # Make a loud noise. Ideally the queue size would be
+             # user-configurable - but the more likely case is that the purge
+             # host is down.
+@@ -118,18 +120,18 @@ def purgeSync(self, url, httpVerb='PURGE'):
+         return status, xcache, xerror
  
--    def test_access_to_private_content_not_allowed_via_any_attribute(self):
-+    def test_access_to_private_content_not_allowed_in_any_way(self):
-         # This is a more general version of the rich text one.
-         from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
--        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        foobar = create_private_document(self.portal, 'foobar')
-         login(self.portal, TEST_USER_ID)
--        wf_tool = self.portal.portal_workflow
--        wf_tool.setChainForPortalTypes(
--            ['Document'], 'simple_publication_workflow')
--        self.portal.invokeFactory('Document', 'foobar')
--        foobar = self.portal.foobar
-         self.assertEqual(
-             self.portal.portal_workflow.getInfoFor(foobar, 'review_state'),
-             'private')
--        logout()
-+        TEMPLATE = '<p tal:content="structure python:%s" />'
-+
-+        # attribute access
-         # If access to context.foobar.Title was allowed, it would still only
-         # say 'bound method ATDocument.Title', without giving the actual title,
-         # but there may be other attributes that give worse info.
--        pt = ZopePageTemplate('mytemplate', '''
--<p tal:content="structure python:'access {0.foobar.Title}'.format(context)" />
--''')
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'access {0.foobar.Title}'.format(context)")
-         hack_pt(pt, context=self.portal)
-+        login(self.portal, TEST_USER_ID)
-+        # We replace ATDocument with Document to make the tests pass
-+        # with ATContentTypes and plone.app.contenttypes.
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access <bound method Document.Title of <Document at /plone/foobar>></p>')  # noqa
-+        logout()
-         self.assertRaises(Unauthorized, pt.pt_render)
- 
-+        # key access
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0[foobar]}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p><Document at foobar></p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+        # Prepare a list so we can test item access.
-+        self.portal.testlist = [foobar]
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0.testlist}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        # If you have such a list, you *can* see an id.
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            u'<p>[<Document at /plone/foobar>]</p>')
-+        # But you cannot access an item.
-+        pt = ZopePageTemplate(
-+            'mytemplate', TEMPLATE %
-+            "'{0.testlist[0]}'.format(context)")
-+        hack_pt(pt, context=self.portal)
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+        # except as authenticated user
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p><Document at foobar></p>')
-+
-     # Zope 3 templates are always file system templates.  So we actually have
-     # no problems allowing str.format there.
- 
-@@ -149,7 +277,12 @@ def test_cook_zope3_page_templates_using_format(self):
-             u"<p>class of &lt;plonesite at plone&gt; is "
-             u"&lt;class 'products.cmfplone.portal.plonesite'&gt;</p>\n"
-             u"<p>CLASS OF &lt;PLONESITE AT PLONE&gt; IS "
--            u"&lt;CLASS 'PRODUCTS.CMFPLONE.PORTAL.PLONESITE'&gt;</p>")
-+            u"&lt;CLASS 'PRODUCTS.CMFPLONE.PORTAL.PLONESITE'&gt;</p>\n"
-+            u"<p>{'foo': 42} has foo=42</p>\n"
-+            u"<p>{'foo': 42} has foo=42</p>\n"
-+            u"<p>['ni'] has first item ni</p>\n"
-+            u"<p>['ni'] has first item ni</p>"
-+        )
- 
-     def test_positional_argument_regression(self):
+     def stopThreads(self, wait=False):
+-        for w in self.workers.itervalues():
++        for w in six.itervalues(self.workers):
+             w.stopping = True
+         # in case the queue is empty, wake it up so the .stopping flag is seen
+         for q in self.queues.values():
+             try:
+                 q.put(None, block=False)
+-            except Queue.Full:
++            except queue.Full:
+                 # no problem - self.stopping should be seen.
+                 pass
+         ok = True
+         if wait:
+-            for w in self.workers.itervalues():
++            for w in six.itervalues(self.workers):
+                 w.join(5)
+                 if w.isAlive():
+                     logger.warning("Worker thread %s failed to terminate", w)
+@@ -142,7 +144,7 @@ def getConnection(self, url):
+         trapped.
          """
-@@ -179,9 +312,22 @@ def test_positional_argument_regression(self):
- class TestFunctionalSafeFormatter(FunctionalTestCase):
-     """Functional tests for the safe formatter.
  
--    This is from PloneHotfix20170117.
-+    This is from PloneHotfix20170117 and PloneHotfix20171128.
-     """
- 
-+    def test_safe_format_properly_applied(self):
-+        from AccessControl.SimpleObjectPolicies import ContainerAssertions
-+        import types
-+        ca = ContainerAssertions
-+        self.assertTrue(str in ca)
-+        self.assertTrue(isinstance(ca[str], dict))
-+        self.assertTrue('format' in ca[str])
-+        string_rule = ca[str]['format']
-+        self.assertTrue(isinstance(string_rule, types.FunctionType))
-+        # Take less steps for unicode.
-+        unicode_rule = ca[unicode]['format']
-+        self.assertTrue(isinstance(unicode_rule, types.FunctionType))
-+        self.assertEqual(string_rule, unicode_rule)
- 
-     def test_standard_error_message(self):
-         # In Plone 5.0 standard_error_message.py has:
-@@ -190,6 +336,7 @@ def test_standard_error_message(self):
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)
          #
-         # So if there is an error and the request does not accept html, then
-         # str.format is used.  We don't want this to fail with an Unauthorized.
-+        # For good measure we check this in Plone 4.3 too.
+         # process.
+         conn = self.factory(host, scheme=scheme, timeout=self.timeout)
+@@ -155,7 +157,7 @@ def getQueueAndWorker(self, url):
+         given URL.
+         """
  
-         response = self.publish(
-             '/plone/standard_error_message',
-@@ -202,24 +349,80 @@ def test_standard_error_message(self):
-         # We expect a json string back.
-         self.assertTrue(response.body, '{"error_type": "None"}')
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)
+         key = (host, scheme)
+         if key not in self.queues:
+             self.queueLock.acquire()
+@@ -164,9 +166,9 @@ def getQueueAndWorker(self, url):
+                     logger.debug("Creating worker thread for %s://%s",
+                                  scheme, host)
+                     assert key not in self.workers
+-                    self.queues[key] = queue = Queue.Queue(self.backlog)
++                    self.queues[key] = queue_ = queue.Queue(self.backlog)
+                     self.workers[key] = worker = Worker(
+-                        queue, host, scheme, self)
++                        queue_, host, scheme, self)
+                     worker.start()
+             finally:
+                 self.queueLock.release()
+@@ -180,7 +182,7 @@ def _purgeSync(self, conn, url, httpVerb):
+         header list in ``self.errorHeaders``.
+         """
  
--    def test_resource_registry_vector(self):
--        for vector in ('less-variables.js', 'less-modify.js'):
--            src = '''
--class ctx:
--  def format(self, *args, **kwargs):
--    self.foo=context
--    return "foo"
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)  # noqa: E501
+         __traceback_info__ = (url, httpVerb, scheme, host,
+                               path, params, query, fragment)
+ 
+@@ -195,7 +197,7 @@ def _purgeSync(self, conn, url, httpVerb):
+             # hosting in squid
+             path = url
+ 
+-        purge_path = urlparse.urlunparse(
++        purge_path = urllib.parse.urlunparse(
+             ('', '', path, params, query, fragment))
+         logger.debug('making %s request to %s for %s.',
+                      httpVerb, host, purge_path)
+@@ -234,7 +236,7 @@ def stop(self):
+ 
+     def run(self):
+         logger.debug("%s starting", self)
+-        # Queue should always exist!
++        # queue should always exist!
+         q = self.producer.queues[(self.host, self.scheme)]
+         connection = None
+         atexit.register(self.stop)
+@@ -271,14 +273,14 @@ def run(self):
+                         # connection.  It is not clear if IIS is evil for
+                         # not returning a "connection: close" header in this
+                         # case (ie, assuming HTTP 1.0 close semantics), or
+-                        # if httplib.py is evil for not detecting this
++                        # if http_client.py is evil for not detecting this
+                         # situation and flagging will_close.
+                         if not self.producer.http_1_1 or resp.will_close:
+                             connection.close()
+                             connection = None
+                         break  # all done with this item!
+ 
+-                    except (httplib.HTTPException, socket.error), e:
++                    except (http_client.HTTPException, socket.error), e:
+                         # All errors 'connection' related errors are treated
+                         # the same - simply drop the connection and retry.
+                         # the process for establishing the connection handles
+@@ -323,7 +325,7 @@ def getConnection(self, url):
+                     break
+                 logger.debug("Error %s connecting to %s - will "
+                              "retry in %d second(s)", e, url, wait_time)
+-                for i in xrange(wait_time):
++                for i in range(wait_time):
+                     if self.stopping:
+                         break
+                     time.sleep(1)
+diff --git a/plone/cachepurging/rewrite.py b/plone/cachepurging/rewrite.py
+index c5e3e8b..0be3121 100644
+--- a/plone/cachepurging/rewrite.py
++++ b/plone/cachepurging/rewrite.py
+@@ -2,13 +2,12 @@
+ from plone.cachepurging.interfaces import ICachePurgingSettings
+ from plone.cachepurging.interfaces import IPurgePathRewriter
+ from plone.registry.interfaces import IRegistry
++from six.moves import urllib
+ from zope.component import adapter
+ from zope.component import queryUtility
+ from zope.interface import implementer
+ from zope.interface import Interface
+ 
+-import urlparse
 -
--context.portal_registry['plone.lessvariables']['foo'] = ctx()
--context.portal_registry['plone.lessvariables']['bar'] = "{foo.foo.__class__}"
--js = context.restrictedTraverse("%s")
--return js()
--''' % vector
--            from Products.PythonScripts.PythonScript import PythonScript
--            script = PythonScript('evil')
--            script._filepath = 'evil'
--            script.write(src)
--            self.portal.evil = script
--            output = self.publish('/plone/evil')
--            self.assertFalse(
--                'Products.CMFPlone.Portal.PloneSite' in output.body)
-+    def test_cook_zope2_page_templates_bad_key_str(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', BAD_KEY_STR)
-+        hack_pt(pt, self.portal)
-+        create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by key: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_key_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        pt = ZopePageTemplate('mytemplate', BAD_KEY_UNICODE)
-+        hack_pt(pt, self.portal)
-+        create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by key: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_item_str(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        secret = create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.portal.testlist = [secret]
-+        pt = ZopePageTemplate('mytemplate', BAD_ITEM_STR)
-+        hack_pt(pt, self.portal.testlist)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by item: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def test_cook_zope2_page_templates_bad_item_unicode(self):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        secret = create_private_document(self.portal, 'secret')
-+        login(self.portal, TEST_USER_ID)
-+        self.portal.testlist = [secret]
-+        pt = ZopePageTemplate('mytemplate', BAD_ITEM_UNICODE)
-+        hack_pt(pt, self.portal.testlist)
-+        self.assertEqual(
-+            pt.pt_render().replace('ATDocument', 'Document'),
-+            '<p>access by item: &lt;Document at secret&gt;</p>')
-+        logout()
-+        self.assertRaises(Unauthorized, pt.pt_render)
-+
-+    def assert_is_checked_via_security_manager(self, pt_content):
-+        from Products.PageTemplates.ZopePageTemplate import ZopePageTemplate
-+        from AccessControl.SecurityManager import setSecurityPolicy
-+        from AccessControl.SecurityManagement import noSecurityManager
-+
-+        pt = ZopePageTemplate('mytemplate', pt_content)
-+        noSecurityManager()
-+        old_security_policy = setSecurityPolicy(UnauthorizedSecurityPolicy())
-+        try:
-+            hack_pt(pt, context=self.portal)
-+            self.assertRaises(Unauthorized, pt.pt_render)
-+        finally:
-+            setSecurityPolicy(old_security_policy)
-+
-+    def test_getattr_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{0.acl_users}'.format(context)" />""")
-+
-+    def test_getitem_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{c[acl_users]}'.format(c=context)" />"""
-+        )
-+
-+    def test_key_access_is_checked_via_security_manager(self):
-+        self.assert_is_checked_via_security_manager(
-+            """<p tal:content="python:'{c[0]}'.format(c=[context])" />"""
-+        )
-diff --git a/Products/CMFPlone/tests/using_format_zope3_page_template.pt b/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-index 1e6508c25..4b0658a6a 100644
---- a/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-+++ b/Products/CMFPlone/tests/using_format_zope3_page_template.pt
-@@ -1,2 +1,6 @@
- <p tal:content="python:'class of {0} is {0.__class__}'.format(context).lower()" />
- <p tal:content="python:u'class of {0} is {0.__class__}'.format(context).upper()" />
-+<p tal:content="python:'{0} has foo={0[foo]}'.format({'foo': 42})" />
-+<p tal:content="python:u'{0} has foo={0[foo]}'.format({'foo': 42})" />
-+<p tal:content="python:'{0} has first item {0[0]}'.format(['ni'])" />
-+<p tal:content="python:'{0} has first item {0[0]}'.format(['ni'])" />
-diff --git a/Products/CMFPlone/utils.py b/Products/CMFPlone/utils.py
-index 25872c123..61182c5a0 100644
---- a/Products/CMFPlone/utils.py
-+++ b/Products/CMFPlone/utils.py
-@@ -21,6 +21,7 @@
- from AccessControl import ModuleSecurityInfo
- from AccessControl import Unauthorized
- from AccessControl.ZopeGuards import guarded_getattr
-+from AccessControl.ZopeGuards import guarded_getitem
- from Acquisition import aq_base
- from Acquisition import aq_get
- from Acquisition import aq_inner
-@@ -679,8 +680,7 @@ def set_own_login_name(member, loginname):
  
+ @implementer(IPurgePathRewriter)
+ @adapter(Interface)
+@@ -75,7 +74,7 @@ def __call__(self, path):
  
- class _MagicFormatMapping(Mapping):
--    """
--    Pulled from Jinja2
-+    """Pulled from Jinja2.
+         paths = []
+         for domain in domains:
+-            scheme, host = urlparse.urlparse(domain)[:2]
++            scheme, host = urllib.parse.urlparse(domain)[:2]
+             paths.append(
+                 '/VirtualHostBase/%(scheme)s/%(host)s%(root)s/'
+                 'VirtualHostRoot%(prefix)s%(path)s' % {
+diff --git a/plone/cachepurging/tests/test_purger.py b/plone/cachepurging/tests/test_purger.py
+index 0e2d719..a71b005 100644
+--- a/plone/cachepurging/tests/test_purger.py
++++ b/plone/cachepurging/tests/test_purger.py
+@@ -3,12 +3,12 @@
+ licensed.
+ """
  
-     This class implements a dummy wrapper to fix a bug in the Python
-     standard library for string formatting.
-@@ -713,16 +713,14 @@ def __len__(self):
+-from BaseHTTPServer import BaseHTTPRequestHandler
+-from BaseHTTPServer import HTTPServer
+ from plone.cachepurging.purger import DefaultPurger
++from six.moves import queue
++from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
++from six.moves.BaseHTTPServer import HTTPServer
  
+ import os
+-import Queue
+ import threading
+ import time
+ import unittest
+@@ -28,8 +28,8 @@ def do_PURGE(self):
+         # Get the pre-defined response from the server's queue.
+         try:
+             nr = self.server.response_queue.get(block=False)
+-        except Queue.Empty:
+-            print "Unexpected connection from the purge tool"
++        except queue.Empty:
++            print("Unexpected connection from the purge tool")
+             print self.command, self.path, self.protocol_version
+             for h, v in self.headers.items():
+                 print "%s: %s" % (h, v)
+@@ -68,7 +68,7 @@ class TestHTTPServer(HTTPServer):
  
- class SafeFormatter(string.Formatter):
-+    """Formatter using guarded access."""
+     def __init__(self, address, handler):
+         HTTPServer.__init__(self, address, handler)
+-        self.response_queue = Queue.Queue()
++        self.response_queue = queue.Queue()
  
-     def __init__(self, value):
-         self.value = value
-         super(SafeFormatter, self).__init__()
- 
-     def get_field(self, field_name, args, kwargs):
--        """
--        Here we're overridding so we can use guarded_getattr instead of
--        regular getattr
--        """
-+        """Get the field value using guarded methods."""
-         first, rest = field_name._formatter_field_name_split()
- 
-         obj = self.get_value(first, args, kwargs)
-@@ -733,17 +731,16 @@ def get_field(self, field_name, args, kwargs):
-             if is_attr:
-                 obj = guarded_getattr(obj, i)
-             else:
--                obj = obj[i]
-+                obj = guarded_getitem(obj, i)
- 
-         return obj, first
- 
-     def safe_format(self, *args, **kwargs):
-+        """Safe variant of `format` method."""
-         kwargs = _MagicFormatMapping(args, kwargs)
-         return self.vformat(self.value, args, kwargs)
- 
- 
- def safe_format(inst, method):
--    """
--    Use our SafeFormatter that uses guarded_getattr for attribute access
--    """
-+    """Use our SafeFormatter that uses guarded_getattr and guarded_getitem."""
-     return SafeFormatter(inst).safe_format
-diff --git a/docs/CHANGES.rst b/docs/CHANGES.rst
-index 73474a252..90953046b 100644
---- a/docs/CHANGES.rst
-+++ b/docs/CHANGES.rst
-@@ -19,6 +19,9 @@ New features:
+     def queue_response(self, **kw):
+         self.response_queue.put(kw)
+diff --git a/setup.py b/setup.py
+index 69b3377..c0d8f7b 100644
+--- a/setup.py
++++ b/setup.py
+@@ -33,6 +33,7 @@
+         'setuptools',
+         'five.globalrequest',
+         'plone.registry',
++        'six',
+         'z3c.caching',
+         'zope.annotation',
+         'zope.component',
+
+
+Repository: plone.cachepurging
+
+
+Branch: refs/heads/master
+Date: 2018-01-28T11:58:34+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.cachepurging/commit/a9b73c4dc18a49a5aeac967ee19aeb189c050207
+
+Merge pull request #9 from plone/python3
+
+Add Python 2 / 3 compatibility
+
+Files changed:
+M CHANGES.rst
+M plone/cachepurging/browser.py
+M plone/cachepurging/purger.py
+M plone/cachepurging/rewrite.py
+M plone/cachepurging/tests/test_purger.py
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c7c4c53..cca4b29 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,7 +14,8 @@ New features:
  
  Bug fixes:
  
-+- Use ``guarded_getitem`` in ``SafeFormatter``.
-+  Part of PloneHotfix20171128.  Copied from ``AccessControl``.  [maurits]
-+
- - Improved isURLInPortal according to PloneHotfix20171128.
-   Accept only http/https, and doubly check escaped urls.  [maurits]
+-- *add item here*
++- Add Python 2 / 3 compatibility
++  [pbauer]
  
+ 
+ 1.0.13 (2016-10-04)
+diff --git a/plone/cachepurging/browser.py b/plone/cachepurging/browser.py
+index af41219..76a5589 100644
+--- a/plone/cachepurging/browser.py
++++ b/plone/cachepurging/browser.py
+@@ -5,7 +5,7 @@
+ from plone.cachepurging.utils import getURLsToPurge
+ from plone.cachepurging.utils import isCachePurgingEnabled
+ from plone.registry.interfaces import IRegistry
+-from StringIO import StringIO
++from six import StringIO
+ from z3c.caching.purge import Purge
+ from zope.component import getUtility
+ from zope.event import notify
+diff --git a/plone/cachepurging/purger.py b/plone/cachepurging/purger.py
+index 3e298b4..3f673bc 100644
+--- a/plone/cachepurging/purger.py
++++ b/plone/cachepurging/purger.py
+@@ -14,45 +14,47 @@
+ 
+ from App.config import getConfiguration
+ from plone.cachepurging.interfaces import IPurger
++from six.moves import http_client
++from six.moves import queue
++from six.moves import range
++from six.moves import urllib
+ from zope.interface import implementer
+ from zope.testing.cleanup import addCleanUp
+ 
+ import atexit
+-import httplib
+ import logging
+-import Queue
++import six
+ import socket
+ import sys
+ import threading
+ import time
+-import urlparse
+ 
+ 
+ logger = logging.getLogger('plone.cachepurging')
+ 
+ 
+-class Connection(httplib.HTTPConnection):
++class Connection(http_client.HTTPConnection):
+     """A connection that can handle either HTTP or HTTPS
+     """
+ 
+     def __init__(self, host, port=None, strict=None, scheme="http", timeout=5):
+         self.scheme = scheme
+         if scheme == "http":
+-            self.default_port = httplib.HTTP_PORT
++            self.default_port = http_client.HTTP_PORT
+         elif scheme == "https":
+-            self.default_port = httplib.HTTPS_PORT
++            self.default_port = http_client.HTTPS_PORT
+         else:
+             raise ValueError("Invalid scheme '%s'" % scheme)
+-        httplib.HTTPConnection.__init__(self, host, port, strict,
+-                                        timeout=timeout)
++        http_client.HTTPConnection.__init__(self, host, port, strict,
++                                            timeout=timeout)
+         self.timeout = timeout
+ 
+     def connect(self):
+         if self.scheme == "http":
+-            httplib.HTTPConnection.connect(self)
++            http_client.HTTPConnection.connect(self)
+         elif self.scheme == "https":
+             import ssl  # import here in case python has no ssl support
+-            # Clone of httplib.HTTPSConnection.connect
++            # Clone of http_client.HTTPSConnection.connect
+             sock = socket.create_connection((self.host, self.port),
+                                             timeout=self.timeout)
+             key_file = cert_file = None
+@@ -76,7 +78,7 @@ def __init__(self, factory=Connection, timeout=30, backlog=200,
+         self.http_1_1 = http_1_1
+ 
+     def purgeAsync(self, url, httpVerb='PURGE'):
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)  # noqa: E501
+         __traceback_info__ = (url, httpVerb, scheme, host,
+                               path, params, query, fragment)
+ 
+@@ -84,7 +86,7 @@ def purgeAsync(self, url, httpVerb='PURGE'):
+         try:
+             q.put((url, httpVerb), block=False)
+             logger.debug('Queued %s' % url)
+-        except Queue.Full:
++        except queue.Full:
+             # Make a loud noise. Ideally the queue size would be
+             # user-configurable - but the more likely case is that the purge
+             # host is down.
+@@ -118,18 +120,18 @@ def purgeSync(self, url, httpVerb='PURGE'):
+         return status, xcache, xerror
+ 
+     def stopThreads(self, wait=False):
+-        for w in self.workers.itervalues():
++        for w in six.itervalues(self.workers):
+             w.stopping = True
+         # in case the queue is empty, wake it up so the .stopping flag is seen
+         for q in self.queues.values():
+             try:
+                 q.put(None, block=False)
+-            except Queue.Full:
++            except queue.Full:
+                 # no problem - self.stopping should be seen.
+                 pass
+         ok = True
+         if wait:
+-            for w in self.workers.itervalues():
++            for w in six.itervalues(self.workers):
+                 w.join(5)
+                 if w.isAlive():
+                     logger.warning("Worker thread %s failed to terminate", w)
+@@ -142,7 +144,7 @@ def getConnection(self, url):
+         trapped.
+         """
+ 
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)
+         #
+         # process.
+         conn = self.factory(host, scheme=scheme, timeout=self.timeout)
+@@ -155,7 +157,7 @@ def getQueueAndWorker(self, url):
+         given URL.
+         """
+ 
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)
+         key = (host, scheme)
+         if key not in self.queues:
+             self.queueLock.acquire()
+@@ -164,9 +166,9 @@ def getQueueAndWorker(self, url):
+                     logger.debug("Creating worker thread for %s://%s",
+                                  scheme, host)
+                     assert key not in self.workers
+-                    self.queues[key] = queue = Queue.Queue(self.backlog)
++                    self.queues[key] = queue_ = queue.Queue(self.backlog)
+                     self.workers[key] = worker = Worker(
+-                        queue, host, scheme, self)
++                        queue_, host, scheme, self)
+                     worker.start()
+             finally:
+                 self.queueLock.release()
+@@ -180,7 +182,7 @@ def _purgeSync(self, conn, url, httpVerb):
+         header list in ``self.errorHeaders``.
+         """
+ 
+-        (scheme, host, path, params, query, fragment) = urlparse.urlparse(url)
++        (scheme, host, path, params, query, fragment) = urllib.parse.urlparse(url)  # noqa: E501
+         __traceback_info__ = (url, httpVerb, scheme, host,
+                               path, params, query, fragment)
+ 
+@@ -195,7 +197,7 @@ def _purgeSync(self, conn, url, httpVerb):
+             # hosting in squid
+             path = url
+ 
+-        purge_path = urlparse.urlunparse(
++        purge_path = urllib.parse.urlunparse(
+             ('', '', path, params, query, fragment))
+         logger.debug('making %s request to %s for %s.',
+                      httpVerb, host, purge_path)
+@@ -234,7 +236,7 @@ def stop(self):
+ 
+     def run(self):
+         logger.debug("%s starting", self)
+-        # Queue should always exist!
++        # queue should always exist!
+         q = self.producer.queues[(self.host, self.scheme)]
+         connection = None
+         atexit.register(self.stop)
+@@ -271,14 +273,14 @@ def run(self):
+                         # connection.  It is not clear if IIS is evil for
+                         # not returning a "connection: close" header in this
+                         # case (ie, assuming HTTP 1.0 close semantics), or
+-                        # if httplib.py is evil for not detecting this
++                        # if http_client.py is evil for not detecting this
+                         # situation and flagging will_close.
+                         if not self.producer.http_1_1 or resp.will_close:
+                             connection.close()
+                             connection = None
+                         break  # all done with this item!
+ 
+-                    except (httplib.HTTPException, socket.error), e:
++                    except (http_client.HTTPException, socket.error), e:
+                         # All errors 'connection' related errors are treated
+                         # the same - simply drop the connection and retry.
+                         # the process for establishing the connection handles
+@@ -323,7 +325,7 @@ def getConnection(self, url):
+                     break
+                 logger.debug("Error %s connecting to %s - will "
+                              "retry in %d second(s)", e, url, wait_time)
+-                for i in xrange(wait_time):
++                for i in range(wait_time):
+                     if self.stopping:
+                         break
+                     time.sleep(1)
+diff --git a/plone/cachepurging/rewrite.py b/plone/cachepurging/rewrite.py
+index c5e3e8b..0be3121 100644
+--- a/plone/cachepurging/rewrite.py
++++ b/plone/cachepurging/rewrite.py
+@@ -2,13 +2,12 @@
+ from plone.cachepurging.interfaces import ICachePurgingSettings
+ from plone.cachepurging.interfaces import IPurgePathRewriter
+ from plone.registry.interfaces import IRegistry
++from six.moves import urllib
+ from zope.component import adapter
+ from zope.component import queryUtility
+ from zope.interface import implementer
+ from zope.interface import Interface
+ 
+-import urlparse
+-
+ 
+ @implementer(IPurgePathRewriter)
+ @adapter(Interface)
+@@ -75,7 +74,7 @@ def __call__(self, path):
+ 
+         paths = []
+         for domain in domains:
+-            scheme, host = urlparse.urlparse(domain)[:2]
++            scheme, host = urllib.parse.urlparse(domain)[:2]
+             paths.append(
+                 '/VirtualHostBase/%(scheme)s/%(host)s%(root)s/'
+                 'VirtualHostRoot%(prefix)s%(path)s' % {
+diff --git a/plone/cachepurging/tests/test_purger.py b/plone/cachepurging/tests/test_purger.py
+index 0e2d719..a71b005 100644
+--- a/plone/cachepurging/tests/test_purger.py
++++ b/plone/cachepurging/tests/test_purger.py
+@@ -3,12 +3,12 @@
+ licensed.
+ """
+ 
+-from BaseHTTPServer import BaseHTTPRequestHandler
+-from BaseHTTPServer import HTTPServer
+ from plone.cachepurging.purger import DefaultPurger
++from six.moves import queue
++from six.moves.BaseHTTPServer import BaseHTTPRequestHandler
++from six.moves.BaseHTTPServer import HTTPServer
+ 
+ import os
+-import Queue
+ import threading
+ import time
+ import unittest
+@@ -28,8 +28,8 @@ def do_PURGE(self):
+         # Get the pre-defined response from the server's queue.
+         try:
+             nr = self.server.response_queue.get(block=False)
+-        except Queue.Empty:
+-            print "Unexpected connection from the purge tool"
++        except queue.Empty:
++            print("Unexpected connection from the purge tool")
+             print self.command, self.path, self.protocol_version
+             for h, v in self.headers.items():
+                 print "%s: %s" % (h, v)
+@@ -68,7 +68,7 @@ class TestHTTPServer(HTTPServer):
+ 
+     def __init__(self, address, handler):
+         HTTPServer.__init__(self, address, handler)
+-        self.response_queue = Queue.Queue()
++        self.response_queue = queue.Queue()
+ 
+     def queue_response(self, **kw):
+         self.response_queue.put(kw)
+diff --git a/setup.py b/setup.py
+index 69b3377..c0d8f7b 100644
+--- a/setup.py
++++ b/setup.py
+@@ -33,6 +33,7 @@
+         'setuptools',
+         'five.globalrequest',
+         'plone.registry',
++        'six',
+         'z3c.caching',
+         'zope.annotation',
+         'zope.component',
 
 
