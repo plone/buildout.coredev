@@ -1,104 +1,463 @@
-Repository: plone.app.layout
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2018-01-28T15:22:01+01:00
+Date: 2018-01-28T15:58:18+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.layout/commit/d160c9b2848c84706985448e0b6e48292e032024
+Commit: https://github.com/plone/plone.app.contenttypes/commit/0696311db2c245204e4c9ccd307f71bb8b2a901a
 
-Use `get_installer` in tests.
+Do not use `portal_quickinstaller` in the migration form.
+
+Use `get_installer` to check if `plone.app.contenttypes` is installed or installable.
+Use `portal_setup` directly for blacklisting the `type_info` step when installing our profile.
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/viewlets/tests/test_content.py
+M plone/app/contenttypes/migration/browser.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_custom.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 4dc2cfc..2d909a8 100644
+index 39f12ae4..9a8bfbab 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -15,6 +15,8 @@ New features:
+@@ -14,6 +14,12 @@ New features:
  
  Bug fixes:
  
-+- Use ``get_installer`` in tests.  [maurits]
++- Do not use ``portal_quickinstaller`` in the migration form.
++  Use ``get_installer`` to check if ``plone.app.contenttypes`` is
++  installed or installable.  Use ``portal_setup`` directly for
++  blacklisting the ``type_info`` step when installing our profile.
++  [maurits]
 +
- - Imports are Python3 compatible
-   [ale-rt]
+ - Add Python 2 / 3 compatibility
+   [pbauer]
  
-diff --git a/plone/app/layout/viewlets/tests/test_content.py b/plone/app/layout/viewlets/tests/test_content.py
-index 297f2a2..6fe448a 100644
---- a/plone/app/layout/viewlets/tests/test_content.py
-+++ b/plone/app/layout/viewlets/tests/test_content.py
-@@ -201,6 +201,7 @@ class TestDexterityRelatedItemsViewlet(ViewletsTestCase):
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index 7e4fdf3f..62b8b233 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -25,6 +25,7 @@
+ from pprint import pformat
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone.utils import get_installer
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from Products.statusmessages.interfaces import IStatusMessage
+@@ -574,31 +575,26 @@ class PACInstaller(form.Form):
  
-     def afterSetUp(self):
-         """ create some sample content to test with """
-+        from Products.CMFPlone.utils import get_installer
-         if not HAS_DEXTERITY:
-             return
-         self.setRoles(('Manager',))
-@@ -224,7 +225,8 @@ def afterSetUp(self):
-             'Dexterity Item with relatedItems behavior', 'dex2')
-         self.folder.invokeFactory(
-             'Dexterity Item without relatedItems behavior', 'dex3')
--        self.portal.portal_quickinstaller.installProduct('plone.app.intid')
+     @property
+     def pac_installable(self):
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        pac_installed = qi.isProductInstalled('plone.app.contenttypes')
+-        pac_installable = qi.isProductInstallable('plone.app.contenttypes')
++        qi = get_installer(self.context)
++        pac_installed = qi.is_product_installed('plone.app.contenttypes')
++        pac_installable = qi.is_product_installable('plone.app.contenttypes')
+         return pac_installable and not pac_installed
+ 
+     @property
+     def pac_installed(self):
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        return qi.isProductInstalled('plone.app.contenttypes')
++        qi = get_installer(self.context)
++        return qi.is_product_installed('plone.app.contenttypes')
+ 
+     @button.buttonAndHandler(_(u'Install'), name='install')
+     def handle_install(self, action):
+         """ install p.a.c
+         """
+         url = self.context.absolute_url()
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        fail = qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'],
++        portal_setup = getToolByName(self.context, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
+         )
+-        if fail:
+-            messages = IStatusMessage(self.request)
+-            messages.addStatusMessage(fail, type='error')
+-            self.request.response.redirect(url)
+ 
+         # For types without any instances we want to instantly
+         # replace the AT-FTI's with DX-FTI's.
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index b0705d4a..2eaa9a78 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -26,6 +26,7 @@
+ from plone.namedfile.file import NamedBlobImage
+ from plone.testing.z2 import Browser
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.utils import get_installer
+ from z3c.relationfield import RelationValue
+ from z3c.relationfield.index import dump
+ from zc.relation.interfaces import ICatalog
+@@ -2053,26 +2054,26 @@ def tearDown(self):
+             pass
+ 
+     def test_pac_installer_cancel(self):
+-        qi = self.portal.portal_quickinstaller
 +        qi = get_installer(self.portal)
-+        qi.install_product('plone.app.intid')
-         intids = getUtility(IIntIds)
-         self.folder.dex1.relatedItems = [
-             RelationValue(intids.getId(self.folder.doc1)),
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.browser.getControl('Cancel').click()
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertEqual(self.browser.url, self.portal_url)
+ 
+     def test_pac_installer_without_content(self):
+-        qi = self.portal.portal_quickinstaller
++        qi = get_installer(self.portal)
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertIn('proceed to the migration-form?', self.browser.contents)
+         self.browser.getControl('Install').click()
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
+-        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertTrue(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('Migration control panel', self.browser.contents)
+         self.assertIn('No content to migrate.', self.browser.contents)
+ 
+@@ -2080,16 +2081,16 @@ def test_pac_installer_with_content(self):
+         # add some at content:
+         self.portal.invokeFactory('Document', 'doc1')
+         transaction.commit()
+-        qi = self.portal.portal_quickinstaller
++        qi = get_installer(self.portal)
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('proceed to the migration-form?', self.browser.contents)
+         self.browser.getControl('Install').click()
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
+-        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertTrue(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('Migration control panel', self.browser.contents)
+         self.assertIn('You currently have <span class="strong">1</span> archetypes objects to be migrated.', self.browser.contents)  # noqa
+ 
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index f2f46e4b..32246de4 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -222,12 +222,12 @@ def test_migrate_extended_document(self):
+         from plone.app.contenttypes.migration.migration import migrateCustomAT
+         from plone.app.contenttypes.interfaces import INewsItem
+         at_document = self.createCustomATDocument('foo-document')
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'textExtended',
+@@ -285,12 +285,12 @@ def test_migrate_atevent_to_dxnewsitem(self):
+         oldTZ = os.environ.get('TZ', None)
+         os.environ['TZ'] = 'Asia/Tbilisi'
+ 
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'text',
+@@ -359,12 +359,12 @@ def test_migrate_atevent_to_dxevent(self):
+         os.environ['TZ'] = TZ
+         timezone = pytz.timezone(TZ)
+ 
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install Event
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('Event')
+         fields_mapping = (
+             {'AT_field_name': 'startDate',
+@@ -431,12 +431,12 @@ def test_migration_with_custom_fieldmigrator(self):
+             u'Some | field is | pipe-delimited | in the field\n'
+         )
+         at_document.setText(at_text)
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'text',
 
 
-Repository: plone.app.layout
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2018-01-29T09:55:20+01:00
+Date: 2018-01-29T10:00:48+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.layout/commit/181ff1b689c5ad4db87c99d4c04697be7469dbdb
+Commit: https://github.com/plone/plone.app.contenttypes/commit/ffbb1a05f7eb0dc94d5700d288125c95490e5eba
 
-Merge pull request #139 from plone/no-qi
+Merge pull request #448 from plone/no-qi
 
-Use `get_installer` in tests.
+Do not use `portal_quickinstaller` in the migration form.
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/viewlets/tests/test_content.py
+M plone/app/contenttypes/migration/browser.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_custom.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 88f933d..c707eca 100644
+index 39f12ae4..9a8bfbab 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -15,6 +15,8 @@ New features:
+@@ -14,6 +14,12 @@ New features:
  
  Bug fixes:
  
-+- Use ``get_installer`` in tests.  [maurits]
++- Do not use ``portal_quickinstaller`` in the migration form.
++  Use ``get_installer`` to check if ``plone.app.contenttypes`` is
++  installed or installable.  Use ``portal_setup`` directly for
++  blacklisting the ``type_info`` step when installing our profile.
++  [maurits]
 +
- - Imports are Python3 compatible
-   [ale-rt, jensens]
+ - Add Python 2 / 3 compatibility
+   [pbauer]
  
-diff --git a/plone/app/layout/viewlets/tests/test_content.py b/plone/app/layout/viewlets/tests/test_content.py
-index 297f2a2..6fe448a 100644
---- a/plone/app/layout/viewlets/tests/test_content.py
-+++ b/plone/app/layout/viewlets/tests/test_content.py
-@@ -201,6 +201,7 @@ class TestDexterityRelatedItemsViewlet(ViewletsTestCase):
+diff --git a/plone/app/contenttypes/migration/browser.py b/plone/app/contenttypes/migration/browser.py
+index 7e4fdf3f..62b8b233 100644
+--- a/plone/app/contenttypes/migration/browser.py
++++ b/plone/app/contenttypes/migration/browser.py
+@@ -25,6 +25,7 @@
+ from pprint import pformat
+ from Products.CMFCore.utils import getToolByName
+ from Products.CMFPlone import PloneMessageFactory as _
++from Products.CMFPlone.utils import get_installer
+ from Products.Five.browser import BrowserView
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from Products.statusmessages.interfaces import IStatusMessage
+@@ -574,31 +575,26 @@ class PACInstaller(form.Form):
  
-     def afterSetUp(self):
-         """ create some sample content to test with """
-+        from Products.CMFPlone.utils import get_installer
-         if not HAS_DEXTERITY:
-             return
-         self.setRoles(('Manager',))
-@@ -224,7 +225,8 @@ def afterSetUp(self):
-             'Dexterity Item with relatedItems behavior', 'dex2')
-         self.folder.invokeFactory(
-             'Dexterity Item without relatedItems behavior', 'dex3')
--        self.portal.portal_quickinstaller.installProduct('plone.app.intid')
+     @property
+     def pac_installable(self):
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        pac_installed = qi.isProductInstalled('plone.app.contenttypes')
+-        pac_installable = qi.isProductInstallable('plone.app.contenttypes')
++        qi = get_installer(self.context)
++        pac_installed = qi.is_product_installed('plone.app.contenttypes')
++        pac_installable = qi.is_product_installable('plone.app.contenttypes')
+         return pac_installable and not pac_installed
+ 
+     @property
+     def pac_installed(self):
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        return qi.isProductInstalled('plone.app.contenttypes')
++        qi = get_installer(self.context)
++        return qi.is_product_installed('plone.app.contenttypes')
+ 
+     @button.buttonAndHandler(_(u'Install'), name='install')
+     def handle_install(self, action):
+         """ install p.a.c
+         """
+         url = self.context.absolute_url()
+-        qi = getToolByName(self.context, 'portal_quickinstaller')
+-        fail = qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'],
++        portal_setup = getToolByName(self.context, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
+         )
+-        if fail:
+-            messages = IStatusMessage(self.request)
+-            messages.addStatusMessage(fail, type='error')
+-            self.request.response.redirect(url)
+ 
+         # For types without any instances we want to instantly
+         # replace the AT-FTI's with DX-FTI's.
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index b0705d4a..2eaa9a78 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -26,6 +26,7 @@
+ from plone.namedfile.file import NamedBlobImage
+ from plone.testing.z2 import Browser
+ from Products.CMFCore.utils import getToolByName
++from Products.CMFPlone.utils import get_installer
+ from z3c.relationfield import RelationValue
+ from z3c.relationfield.index import dump
+ from zc.relation.interfaces import ICatalog
+@@ -2053,26 +2054,26 @@ def tearDown(self):
+             pass
+ 
+     def test_pac_installer_cancel(self):
+-        qi = self.portal.portal_quickinstaller
 +        qi = get_installer(self.portal)
-+        qi.install_product('plone.app.intid')
-         intids = getUtility(IIntIds)
-         self.folder.dex1.relatedItems = [
-             RelationValue(intids.getId(self.folder.doc1)),
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.browser.getControl('Cancel').click()
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertEqual(self.browser.url, self.portal_url)
+ 
+     def test_pac_installer_without_content(self):
+-        qi = self.portal.portal_quickinstaller
++        qi = get_installer(self.portal)
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertIn('proceed to the migration-form?', self.browser.contents)
+         self.browser.getControl('Install').click()
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
+-        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertTrue(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('Migration control panel', self.browser.contents)
+         self.assertIn('No content to migrate.', self.browser.contents)
+ 
+@@ -2080,16 +2081,16 @@ def test_pac_installer_with_content(self):
+         # add some at content:
+         self.portal.invokeFactory('Document', 'doc1')
+         transaction.commit()
+-        qi = self.portal.portal_quickinstaller
++        qi = get_installer(self.portal)
+         portal_types = self.portal.portal_types
+         self.browser.open('{0}/@@pac_installer'.format(self.portal_url))
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+-        self.assertFalse(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertFalse(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('proceed to the migration-form?', self.browser.contents)
+         self.browser.getControl('Install').click()
+         self.assertFalse(IDexterityFTI.providedBy(portal_types['Document']))
+         self.assertTrue(IDexterityFTI.providedBy(portal_types['News Item']))
+-        self.assertTrue(qi.isProductInstalled('plone.app.contenttypes'))
++        self.assertTrue(qi.is_product_installed('plone.app.contenttypes'))
+         self.assertIn('Migration control panel', self.browser.contents)
+         self.assertIn('You currently have <span class="strong">1</span> archetypes objects to be migrated.', self.browser.contents)  # noqa
+ 
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index f2f46e4b..32246de4 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -222,12 +222,12 @@ def test_migrate_extended_document(self):
+         from plone.app.contenttypes.migration.migration import migrateCustomAT
+         from plone.app.contenttypes.interfaces import INewsItem
+         at_document = self.createCustomATDocument('foo-document')
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'textExtended',
+@@ -285,12 +285,12 @@ def test_migrate_atevent_to_dxnewsitem(self):
+         oldTZ = os.environ.get('TZ', None)
+         os.environ['TZ'] = 'Asia/Tbilisi'
+ 
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'text',
+@@ -359,12 +359,12 @@ def test_migrate_atevent_to_dxevent(self):
+         os.environ['TZ'] = TZ
+         timezone = pytz.timezone(TZ)
+ 
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install Event
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('Event')
+         fields_mapping = (
+             {'AT_field_name': 'startDate',
+@@ -431,12 +431,12 @@ def test_migration_with_custom_fieldmigrator(self):
+             u'Some | field is | pipe-delimited | in the field\n'
+         )
+         at_document.setText(at_text)
+-        qi = self.portal.portal_quickinstaller
+         # install pac but only install News Items
+-        qi.installProduct(
+-            'plone.app.contenttypes',
+-            profile='plone.app.contenttypes:default',
+-            blacklistedSteps=['typeinfo'])
++        portal_setup = getToolByName(self.portal, 'portal_setup')
++        portal_setup.runAllImportStepsFromProfile(
++            'profile-plone.app.contenttypes:default',
++            blacklisted_steps=['typeinfo'],
++        )
+         installTypeIfNeeded('News Item')
+         fields_mapping = (
+             {'AT_field_name': 'text',
 
 
