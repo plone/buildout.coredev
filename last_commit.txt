@@ -1,145 +1,184 @@
-Repository: Products.CMFPlone
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2018-02-02T00:29:06+01:00
+Date: 2018-02-02T00:52:32+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/0909383eb2bbc8d31794a7dbf4392eec6236be22
+Commit: https://github.com/plone/plone.app.querystring/commit/7de3bb179b7df882e95f858ad46dd7e34ab001ef
 
-Ignore invalid `sort_on` parameters in catalog `searchResults`.
+Ignore unknown `sort_on` indexes when parsing a query.
 
 Otherwise you get a `CatalogError`.
-I get crazy sort_ons like '194' or 'null'.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/tests/testCatalogTool.py
+M plone/app/querystring/queryparser.py
+M plone/app/querystring/tests/testQueryParser.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 5bc5dbd88..a557d38c6 100644
+index a080eb6..9c09a80 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -35,6 +35,11 @@ New Features:
+@@ -14,6 +14,9 @@ New features:
  
- Bug Fixes:
+ Bug fixes:
  
-+- Ignore invalid ``sort_on`` parameters in catalog ``searchResults``.
-+  Otherwise you get a ``CatalogError``.
-+  I get crazy sort_ons like '194' or 'null'.
-+  [maurits]
++- Ignore unknown ``sort_on`` indexes when parsing a query.
++  Otherwise you get a ``CatalogError``.  [maurits]
 +
- - Register the ``ExceptionView`` for the unspecific ``zope.interface.Interface`` for easier overloading.
-   Fixes a problem, where plone.rest couldn't overload the ExceptionView with an adapter bound to ``plone.rest.interfaces.IAPIRequest``.
-   [thet]
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index cce0a34f7..8c39d0dc8 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -458,6 +458,11 @@ def searchResults(self, query=None, **kw):
-         if not show_inactive and not self.allow_inactive(kw):
-             kw['effectiveRange'] = DateTime()
+ - Add Python 2 / 3 compatibility
+   [pbauer]
  
-+        sort_on = kw.get('sort_on')
-+        if sort_on and sort_on not in self.indexes():
-+            # I get crazy sort_ons like '194' or 'null'.
-+            kw.pop('sort_on')
-+
-         return ZCatalog.searchResults(self, query, **kw)
+diff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py
+index d1f4f18..b0ae6db 100644
+--- a/plone/app/querystring/queryparser.py
++++ b/plone/app/querystring/queryparser.py
+@@ -52,9 +52,12 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):
  
-     __call__ = searchResults
-diff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py
-index a9559b760..c64e08ff4 100644
---- a/Products/CMFPlone/tests/testCatalogTool.py
-+++ b/Products/CMFPlone/tests/testCatalogTool.py
-@@ -528,6 +528,16 @@ def afterSetUp(self):
-         self.folder.doc5.reindexObject()
-         self.folder.doc6.reindexObject()
- 
-+    def testUnknownSortOnIsIgnored(self):
-+        # You should not get a CatalogError when an invalid sort_on is passed.
+     # Add sorting (sort_on and sort_order) to the query
+     if sort_on:
+-        query['sort_on'] = sort_on
+-    if sort_order:
+-        query['sort_order'] = sort_order
++        catalog = getToolByName(context, 'portal_catalog')
 +        # I get crazy sort_ons like '194' or 'null'.
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='194')) > 0)
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='null')) > 0)
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='relevance')) > 0)
++        if sort_on in catalog.indexes():
++            query['sort_on'] = sort_on
++            if sort_order:
++                query['sort_order'] = sort_order
+     return query
+ 
+ 
+diff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py
+index 5cb63c2..45a5700 100644
+--- a/plone/app/querystring/tests/testQueryParser.py
++++ b/plone/app/querystring/tests/testQueryParser.py
+@@ -159,6 +159,34 @@ def test_exact_title(self):
+         parsed = queryparser.parseFormquery(MockSite(), [data, ])
+         self.assertEqual(parsed, {'Title': {'query': 'Welcome to Plone'}})
+ 
++    def test_sort_on_known(self):
++        data = {
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Welcome to Plone',
++        }
++        parsed = queryparser.parseFormquery(
++            MockSite(), [data, ],
++            sort_on='sortable_title',
++            sort_order='reverse')
++        self.assertEqual(
++            parsed, {'Title': {'query': 'Welcome to Plone'},
++                     'sort_on': 'sortable_title',
++                     'sort_order': 'reverse'})
 +
-     def testSortTitleReturnsProperOrderForNumbers(self):
-         # Documents should be returned in proper numeric order
-         results = self.catalog(SearchableText='foo', sort_on='sortable_title')
++    def test_sort_on_unknown(self):
++        data = {
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Welcome to Plone',
++        }
++        parsed = queryparser.parseFormquery(
++            MockSite(), [data, ],
++            sort_on='unknown',
++            sort_order='reverse')
++        self.assertEqual(
++            parsed, {'Title': {'query': 'Welcome to Plone'}})
++
+     def test_path_explicit(self):
+         data = {
+             'i': 'path',
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2018-02-02T21:58:07+01:00
+Date: 2018-02-02T21:58:30+01:00
 Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/1db95d954fa395eaa5479a93d376b9a55030f4cc
+Commit: https://github.com/plone/plone.app.querystring/commit/6a3d019edfdf41089e44d9fe0c60a4531acd0f9f
 
-Merge pull request #2287 from plone/ignore-unknown-sort-ons-52
+Merge pull request #87 from plone/ignore-unknown-sort-ons-master
 
-Ignore invalid `sort_on` parameters in catalog `searchResults`. [master]
+Ignore unknown `sort_on` indexes when parsing a query. [master]
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/CatalogTool.py
-M Products/CMFPlone/tests/testCatalogTool.py
+M plone/app/querystring/queryparser.py
+M plone/app/querystring/tests/testQueryParser.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 5bc5dbd88..a557d38c6 100644
+index a080eb6..9c09a80 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -35,6 +35,11 @@ New Features:
+@@ -14,6 +14,9 @@ New features:
  
- Bug Fixes:
+ Bug fixes:
  
-+- Ignore invalid ``sort_on`` parameters in catalog ``searchResults``.
-+  Otherwise you get a ``CatalogError``.
-+  I get crazy sort_ons like '194' or 'null'.
-+  [maurits]
++- Ignore unknown ``sort_on`` indexes when parsing a query.
++  Otherwise you get a ``CatalogError``.  [maurits]
 +
- - Register the ``ExceptionView`` for the unspecific ``zope.interface.Interface`` for easier overloading.
-   Fixes a problem, where plone.rest couldn't overload the ExceptionView with an adapter bound to ``plone.rest.interfaces.IAPIRequest``.
-   [thet]
-diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
-index cce0a34f7..8c39d0dc8 100644
---- a/Products/CMFPlone/CatalogTool.py
-+++ b/Products/CMFPlone/CatalogTool.py
-@@ -458,6 +458,11 @@ def searchResults(self, query=None, **kw):
-         if not show_inactive and not self.allow_inactive(kw):
-             kw['effectiveRange'] = DateTime()
+ - Add Python 2 / 3 compatibility
+   [pbauer]
  
-+        sort_on = kw.get('sort_on')
-+        if sort_on and sort_on not in self.indexes():
-+            # I get crazy sort_ons like '194' or 'null'.
-+            kw.pop('sort_on')
-+
-         return ZCatalog.searchResults(self, query, **kw)
+diff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py
+index d1f4f18..b0ae6db 100644
+--- a/plone/app/querystring/queryparser.py
++++ b/plone/app/querystring/queryparser.py
+@@ -52,9 +52,12 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):
  
-     __call__ = searchResults
-diff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py
-index a9559b760..c64e08ff4 100644
---- a/Products/CMFPlone/tests/testCatalogTool.py
-+++ b/Products/CMFPlone/tests/testCatalogTool.py
-@@ -528,6 +528,16 @@ def afterSetUp(self):
-         self.folder.doc5.reindexObject()
-         self.folder.doc6.reindexObject()
- 
-+    def testUnknownSortOnIsIgnored(self):
-+        # You should not get a CatalogError when an invalid sort_on is passed.
+     # Add sorting (sort_on and sort_order) to the query
+     if sort_on:
+-        query['sort_on'] = sort_on
+-    if sort_order:
+-        query['sort_order'] = sort_order
++        catalog = getToolByName(context, 'portal_catalog')
 +        # I get crazy sort_ons like '194' or 'null'.
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='194')) > 0)
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='null')) > 0)
-+        self.assertTrue(len(
-+            self.catalog(SearchableText='foo', sort_on='relevance')) > 0)
++        if sort_on in catalog.indexes():
++            query['sort_on'] = sort_on
++            if sort_order:
++                query['sort_order'] = sort_order
+     return query
+ 
+ 
+diff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py
+index 5cb63c2..45a5700 100644
+--- a/plone/app/querystring/tests/testQueryParser.py
++++ b/plone/app/querystring/tests/testQueryParser.py
+@@ -159,6 +159,34 @@ def test_exact_title(self):
+         parsed = queryparser.parseFormquery(MockSite(), [data, ])
+         self.assertEqual(parsed, {'Title': {'query': 'Welcome to Plone'}})
+ 
++    def test_sort_on_known(self):
++        data = {
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Welcome to Plone',
++        }
++        parsed = queryparser.parseFormquery(
++            MockSite(), [data, ],
++            sort_on='sortable_title',
++            sort_order='reverse')
++        self.assertEqual(
++            parsed, {'Title': {'query': 'Welcome to Plone'},
++                     'sort_on': 'sortable_title',
++                     'sort_order': 'reverse'})
 +
-     def testSortTitleReturnsProperOrderForNumbers(self):
-         # Documents should be returned in proper numeric order
-         results = self.catalog(SearchableText='foo', sort_on='sortable_title')
++    def test_sort_on_unknown(self):
++        data = {
++            'i': 'Title',
++            'o': 'plone.app.querystring.operation.string.is',
++            'v': 'Welcome to Plone',
++        }
++        parsed = queryparser.parseFormquery(
++            MockSite(), [data, ],
++            sort_on='unknown',
++            sort_order='reverse')
++        self.assertEqual(
++            parsed, {'Title': {'query': 'Welcome to Plone'}})
++
+     def test_path_explicit(self):
+         data = {
+             'i': 'path',
 
 
