@@ -10,7 +10,7 @@ which assigns copyright in the code to the Plone Foundation, the non-profit orga
 This document explains the purposes of this, along with questions and answers about what this means.
 
 The Plone Contributor Agreement can be found at:
-`https://plone.org/foundation/contributors-agreement/agreement.pdf`_
+`<https://plone.org/foundation/contributors-agreement>`_
 
 About the Plone Contributor Agreement
 =====================================
