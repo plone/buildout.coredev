@@ -1,2687 +1,810 @@
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-13T23:41:01+01:00
+Date: 2018-02-16T01:07:11+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/2081c3421ba2ba602bca27205f2d46681c71c782
+Commit: https://github.com/plone/plone.api/commit/43ed10e55cf1c63e7c48863a38a5189ff1bff30a
 
-Added functionality and tests from CMFPlone.
+Fixed import sort order.
 
 Files changed:
-A Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-A Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-A Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-M Products/CMFQuickInstallerTool/__init__.py
-M Products/CMFQuickInstallerTool/tests/test_browser.py
+M src/plone/api/portal.py
 
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index 638b7f4..2358f38 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -90,6 +90,7 @@ class QuickInstallerTool(UniqueObject, ObjectManager, SimpleItem):
+diff --git a/src/plone/api/portal.py b/src/plone/api/portal.py
+index eada107..897dd6e 100644
+--- a/src/plone/api/portal.py
++++ b/src/plone/api/portal.py
+@@ -2,8 +2,8 @@
+ """Module that provides various utility methods on the portal level."""
  
-     meta_type = 'CMF QuickInstaller Tool'
-     id = 'portal_quickinstaller'
-+    # toolicon = 'skins/plone_images/product_icon.png'
- 
-     security = ClassSecurityInfo()
- 
-@@ -817,5 +818,94 @@ def getInstanceHome(self):
-         """
-         return os.environ.get('INSTANCE_HOME')
- 
-+    @security.protected(ManagePortal)
-+    def upgradeInfo(self, pid):
-+        # Returns a dict with two booleans values, stating if an upgrade
-+        # required and available.
-+        available = self.isProductInstallable(pid)
-+        if not available:
-+            return False
-+        # Product version as per version.txt or fallback on metadata file
-+        product_version = str(self.getProductVersion(pid))
-+        installed_product_version = self._getOb(pid).getInstalledVersion()
-+        profile = self.getInstallProfile(pid)
-+        if profile is None:
-+            # No GS profile, simple case as before, we can always upgrade
-+            return dict(
-+                required=product_version != installed_product_version,
-+                available=True,
-+                hasProfile=False,
-+                installedVersion=installed_product_version,
-+                newVersion=product_version,
-+            )
-+        profile_id = profile['id']
-+        setup = getToolByName(self, 'portal_setup')
-+        profile_version = str(setup.getVersionForProfile(profile_id))
-+        if profile_version == 'latest':
-+            profile_version = self.getLatestUpgradeStep(profile_id)
-+        if profile_version == 'unknown':
-+            # If a profile doesn't have a metadata.xml use product version
-+            profile_version = product_version
-+        installed_profile_version = setup.getLastVersionForProfile(profile_id)
-+        # getLastVersionForProfile returns the version as a tuple or unknown.
-+        if installed_profile_version != 'unknown':
-+            installed_profile_version = str(
-+                '.'.join(installed_profile_version))
-+        return dict(
-+            required=profile_version != installed_profile_version,
-+            available=len(setup.listUpgrades(profile_id)) > 0,
-+            hasProfile=True,
-+            installedVersion=installed_profile_version,
-+            newVersion=profile_version,
-+        )
-+
-+    @security.protected(ManagePortal)
-+    def getLatestUpgradeStep(self, profile_id):
-+        """
-+        Get the highest ordered upgrade step available to
-+        a specific profile.
-+
-+        If anything errors out then go back to "old way"
-+        by returning 'unknown'
-+        """
-+        setup = getToolByName(self, 'portal_setup')
-+        profile_version = 'unknown'
-+        try:
-+            available = setup.listUpgrades(profile_id, True)
-+            if available:  # could return empty sequence
-+                latest = available[-1]
-+                profile_version = max(latest['dest'],
-+                                      key=pkg_resources.parse_version)
-+        except Exception:
-+            pass
-+
-+        return profile_version
-+
-+    @security.protected(ManagePortal)
-+    def upgradeProduct(self, pid):
-+        profile = self.getInstallProfile(pid)
-+        if profile is None:
-+            # No upgrade profiles
-+            return self.reinstallProducts(products=[pid])
-+        profile_id = profile['id']
-+        setup = getToolByName(self, 'portal_setup')
-+        upgrades = setup.listUpgrades(profile_id)
-+        for upgrade in upgrades:
-+            # An upgrade may be a single step (for a bare upgradeStep)
-+            # or a list of steps (for upgradeSteps containing upgradeStep
-+            # directives).
-+            if not type(upgrade) is list:
-+                upgrade = [upgrade]
-+            for upgradestep in upgrade:
-+                step = upgradestep['step']
-+                step.doStep(setup)
-+        version = str(profile['version'])
-+        if version == 'latest':
-+            version = self.getLatestUpgradeStep(profile_id)
-+        setup.setLastVersionForProfile(profile_id, version)
-+
- 
- InitializeClass(QuickInstallerTool)
-+# TODO: we probably want this, copied from CMPlone:
-+# from Products.CMFCore.utils import registerToolInterface
-+# registerToolInterface('portal_quickinstaller', IQuickInstallerTool)
-diff --git a/Products/CMFQuickInstallerTool/__init__.py b/Products/CMFQuickInstallerTool/__init__.py
-index cfe2766..5cfccca 100644
---- a/Products/CMFQuickInstallerTool/__init__.py
-+++ b/Products/CMFQuickInstallerTool/__init__.py
-@@ -10,6 +10,7 @@
- def initialize(context):
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import addQuickInstallerTool  # noqa
-+    # TODO: maybe copy Products/CMFPlone/skins/plone_images/product_icon.png
-     ToolInit(
-         'CMF QuickInstaller Tool',
-         tools=(QuickInstallerTool, ),
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-new file mode 100644
-index 0000000..4384a16
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -0,0 +1,57 @@
-+# -*- coding: utf-8 -*-
-+from Products.CMFPlone.tests import PloneTestCase
-+from Products.CMFPlone import tests
-+from zope.configuration import xmlconfig
-+
-+
-+class TestQuickInstallerTool(PloneTestCase.PloneTestCase):
-+
-+    def afterSetUp(self):
-+        self.qi = self.portal.portal_quickinstaller
-+
-+    def _installed(self):
-+        return [p['id'] for p in self.qi.listInstalledProducts()]
-+
-+    def _available(self):
-+        return [p['id'] for p in self.qi.listInstallableProducts()]
-+
-+    def testInstallUninstallProduct(self):
-+        try:
-+            import Products.CMFPlacefulWorkflow
-+            Products.CMFPlacefulWorkflow  # pyflakes
-+        except ImportError:
-+            return
-+        # CMFPlacefulWorkflow should be uninstalled, we install it and
-+        # it should not show up as installable
-+        self.setRoles(('Manager',))
-+        self.qi.installProducts(['CMFPlacefulWorkflow', ])
-+        self.assertTrue('CMFPlacefulWorkflow' in self._installed())
-+        self.assertFalse('CMFPlacefulWorkflow' in self._available())
-+        self.qi.uninstallProducts(['CMFPlacefulWorkflow', ])
-+        self.assertTrue('CMFPlacefulWorkflow' in self._available())
-+        self.assertFalse('CMFPlacefulWorkflow' in self._installed())
-+
-+    def testLatestUpgradeProfiles(self):
-+        xmlconfig.file(
-+            'test_upgrades1.zcml',
-+            package=tests,
-+            context=self.layer['configurationContext']
-+        )
-+        latest = self.qi.getLatestUpgradeStep('Products.CMFPlone:testfixture')
-+        self.assertTrue(latest == '3')
-+
-+    def testLatestUpgradeProfiles2(self):
-+        # make sure strings don't break things
-+        # note that pkg_resources interprets 1 as
-+        # ''00000001', which is > 'banana'
-+        xmlconfig.file(
-+            'test_upgrades2.zcml',
-+            package=tests,
-+            context=self.layer['configurationContext']
-+        )
-+        latest = self.qi.getLatestUpgradeStep('Products.CMFPlone:testfixture')
-+        self.assertTrue(latest == '3')
-+
-+
-+def dummy_handler():
-+    pass
-diff --git a/Products/CMFQuickInstallerTool/tests/test_browser.py b/Products/CMFQuickInstallerTool/tests/test_browser.py
-index 7505e0c..05d8746 100644
---- a/Products/CMFQuickInstallerTool/tests/test_browser.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_browser.py
-@@ -47,6 +47,11 @@ def _get_product_for_install(self, qi):
-         # Fall back to the first one.
-         return installable_ids[0]
- 
-+    def test_portal_quickinstaller(self):
-+        url = 'portal_quickinstaller/manage_installProductsForm'
-+        view = self.portal.restrictedTraverse(url)
-+        self.assertTrue(view(), msg='{0} is broken'.format(url))
-+
-     def test_installProducts_call(self):
-         # It should work fine without a REQUEST argument.
-         qi = self.portal.portal_quickinstaller
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-new file mode 100644
-index 0000000..9781b05
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-@@ -0,0 +1,33 @@
-+<configure
-+    xmlns="http://namespaces.zope.org/zope"
-+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
-+    i18n_domain="plone">
-+
-+  <genericsetup:upgradeStep
-+      source="*"
-+      destination="1"
-+      title="Null upgrade step"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFPlone:testfixture"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="2"
-+      destination="3"
-+      title="Add pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFPlone:testfixture"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="1"
-+      destination="2"
-+      title="Remove pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFPlone:testfixture"
-+      />
-+
-+</configure>
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-new file mode 100644
-index 0000000..8b61948
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-@@ -0,0 +1,24 @@
-+<configure
-+    xmlns="http://namespaces.zope.org/zope"
-+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
-+    i18n_domain="plone">
-+
-+  <genericsetup:upgradeStep
-+      source="apples"
-+      destination="banana"
-+      title="Add pants"
-+      description=""
-+      handler="Products.CMFPlone.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFPlone:testfixture"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="cumquats"
-+      destination="dandelions"
-+      title="Remove pants"
-+      description=""
-+      handler="Products.CMFPlone.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFPlone:testfixture"
-+      />
-+
-+</configure>
+ from Acquisition import aq_inner
+-from datetime import datetime as dtime
+ from datetime import date
++from datetime import datetime as dtime
+ from email.utils import formataddr
+ from email.utils import parseaddr
+ from logging import getLogger
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T00:24:28+01:00
+Date: 2018-02-16T01:07:11+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/c2ddb5fcc896ee517d281cc447551f14d66b5718
+Commit: https://github.com/plone/plone.api/commit/62b192f4840884c7eba24c88d66a18c94f913fe0
 
-Fixed tests and moved completely to plone.app.testing.
+Fixed flake8, mostly commas.
 
 Files changed:
-M Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-M Products/CMFQuickInstallerTool/tests/testSetup.py
-M Products/CMFQuickInstallerTool/tests/test_install.py
-M Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-M Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
+M src/plone/api/content.py
+M src/plone/api/tests/test_content.py
+M src/plone/api/tests/test_group.py
+M src/plone/api/tests/test_user.py
 
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-index 4384a16..3370e82 100644
---- a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -1,12 +1,18 @@
- # -*- coding: utf-8 -*-
--from Products.CMFPlone.tests import PloneTestCase
--from Products.CMFPlone import tests
-+from Products.CMFQuickInstallerTool import tests
-+from Products.CMFQuickInstallerTool.tests.test_install import CQI_INTEGRATION_TESTING  # noqa
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
- from zope.configuration import xmlconfig
-+import unittest
+diff --git a/src/plone/api/content.py b/src/plone/api/content.py
+index 03913c9..fd0136e 100644
+--- a/src/plone/api/content.py
++++ b/src/plone/api/content.py
+@@ -407,8 +407,9 @@ def _wf_transitions_for(workflow, from_state, to_state):
  
- 
--class TestQuickInstallerTool(PloneTestCase.PloneTestCase):
-+class TestQuickInstallerTool(unittest.TestCase):
- 
--    def afterSetUp(self):
-+    layer = CQI_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-         self.qi = self.portal.portal_quickinstaller
- 
-     def _installed(self):
-@@ -16,14 +22,14 @@ def _available(self):
-         return [p['id'] for p in self.qi.listInstallableProducts()]
- 
-     def testInstallUninstallProduct(self):
-+        import pkg_resources
-         try:
--            import Products.CMFPlacefulWorkflow
--            Products.CMFPlacefulWorkflow  # pyflakes
--        except ImportError:
-+            pkg_resources.get_distribution('Products.CMFPlacefulWorkflow')
-+        except pkg_resources.DistributionNotFound:
-             return
-         # CMFPlacefulWorkflow should be uninstalled, we install it and
-         # it should not show up as installable
--        self.setRoles(('Manager',))
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-         self.qi.installProducts(['CMFPlacefulWorkflow', ])
-         self.assertTrue('CMFPlacefulWorkflow' in self._installed())
-         self.assertFalse('CMFPlacefulWorkflow' in self._available())
-@@ -37,7 +43,8 @@ def testLatestUpgradeProfiles(self):
-             package=tests,
-             context=self.layer['configurationContext']
+     transition_maps = {}
+     for transition in workflow.transitions.objectValues():
+-        value = (transition.getId(), exit_state_maps.get(
+-            transition.getId(), [],),
++        value = (
++            transition.getId(),
++            exit_state_maps.get(transition.getId(), []),
          )
--        latest = self.qi.getLatestUpgradeStep('Products.CMFPlone:testfixture')
-+        latest = self.qi.getLatestUpgradeStep(
-+            'Products.CMFQuickInstallerTool:test')
-         self.assertTrue(latest == '3')
+         if transition.new_state_id not in transition_maps:
+             transition_maps[transition.new_state_id] = [value]
+diff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py
+index 1662e8f..1debbe8 100644
+--- a/src/plone/api/tests/test_content.py
++++ b/src/plone/api/tests/test_content.py
+@@ -748,7 +748,8 @@ def test_delete_ignore_linkintegrity(self):
  
-     def testLatestUpgradeProfiles2(self):
-@@ -49,7 +56,8 @@ def testLatestUpgradeProfiles2(self):
-             package=tests,
-             context=self.layer['configurationContext']
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_check_linkintegrity(self):
+         """Test deleting a content item with a link pointed at it."""
+         self._set_text(self.team, '<a href="contact">contact</a>')
+@@ -762,7 +763,8 @@ def test_delete_check_linkintegrity(self):
+ 
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_multiple_check_linkintegrity(self):
+         """Test deleting multiple item with linkintegrity-breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -778,7 +780,8 @@ def test_delete_multiple_check_linkintegrity(self):
+ 
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_multiple_ignore_linkintegrity(self):
+         """Test deleting multiple items ignoring linkintegrity-breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -793,7 +796,8 @@ def test_delete_multiple_ignore_linkintegrity(self):
+ 
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_with_internal_breaches(self):
+         """Test deleting multiple with internal linkintegrity breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -809,7 +813,9 @@ def test_delete_with_internal_breaches(self):
+             self.assertIn('training', self.portal['events'].keys())
+ 
+     @unittest.skipUnless(
+-        NEW_LINKINTEGRITY, 'Only new Linkintegrity resolves internal breaches')
++        NEW_LINKINTEGRITY,
++        'Only new Linkintegrity resolves internal breaches',
++    )
+     def test_delete_with_resolved_internal_breaches(self):
+         """Test deleting multiple with internal linkintegrity breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+diff --git a/src/plone/api/tests/test_group.py b/src/plone/api/tests/test_group.py
+index 187b992..d7dfb37 100644
+--- a/src/plone/api/tests/test_group.py
++++ b/src/plone/api/tests/test_group.py
+@@ -67,8 +67,8 @@ def test_create_with_roles_and_groups(self):
+ 
+         ham_group = api.group.create(
+             groupname='ham',
+-            roles=['Editor', ],
+-            groups=['Reviewer', ],
++            roles=['Editor'],
++            groups=['Reviewer'],
          )
--        latest = self.qi.getLatestUpgradeStep('Products.CMFPlone:testfixture')
-+        latest = self.qi.getLatestUpgradeStep(
-+            'Products.CMFQuickInstallerTool:test')
-         self.assertTrue(latest == '3')
+         group = self.group_tool.getGroupById('ham')
+         self.assertEqual(ham_group, group)
+@@ -491,7 +491,7 @@ def test_grant_roles_in_context(self):
+         )
+         self.assertEqual(
+             ROLES,
+-            set(api.group.get_roles(group=group, obj=folder, inherit=False,)),
++            set(api.group.get_roles(group=group, obj=folder, inherit=False)),
+         )
+         self.assertEqual(
+             set([]),
+@@ -749,7 +749,7 @@ def test_revoke_roles_in_context(self):
+             api.group.get_roles(group=group, obj=document),
+         )
  
+-        ROLES = set(['Authenticated', ])
++        ROLES = set(['Authenticated'])
+         self.assertEqual(
+             ROLES,
+             set(api.group.get_roles(groupname='ploneboat', obj=folder)),
+diff --git a/src/plone/api/tests/test_user.py b/src/plone/api/tests/test_user.py
+index 4c88bba..8036ca5 100644
+--- a/src/plone/api/tests/test_user.py
++++ b/src/plone/api/tests/test_user.py
+@@ -138,7 +138,7 @@ def test_create_default_roles(self):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(user=user),
+-            ['Member', 'Authenticated', ],
++            ['Member', 'Authenticated'],
+         )
  
-diff --git a/Products/CMFQuickInstallerTool/tests/testSetup.py b/Products/CMFQuickInstallerTool/tests/testSetup.py
-index ea1def6..e9ccff1 100644
---- a/Products/CMFQuickInstallerTool/tests/testSetup.py
-+++ b/Products/CMFQuickInstallerTool/tests/testSetup.py
-@@ -2,35 +2,42 @@
- #
- # Setup tests
- #
--from plone.app.testing.bbb import PloneTestCase
-+from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_INTEGRATION_TESTING
- from Products.CMFQuickInstallerTool.InstalledProduct import InstalledProduct
-+import unittest
+     def test_create_specified_roles(self):
+@@ -164,7 +164,7 @@ def test_create_no_roles(self):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(user=user),
+-            ['Authenticated', ],
++            ['Authenticated'],
+         )
  
+     def test_get_constraints(self):
+@@ -288,7 +288,7 @@ def test_is_anonymous(self):
  
--class TestQuickInstaller(PloneTestCase):
-+class TestQuickInstaller(unittest.TestCase):
+     def test_get_roles_username(self):
+         """Test get roles passing a username."""
+-        ROLES = ['Reviewer', 'Editor', ]
++        ROLES = ['Reviewer', 'Editor']
+         api.user.create(
+             username='chuck',
+             email='chuck@norris.org',
+@@ -710,15 +710,15 @@ def test_revoke_roles(self):
+             password='secret',
+         )
  
--    def afterSetUp(self):
-+    layer = PRODUCTS_CMFPLONE_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-         self.qi = getattr(self.portal, 'portal_quickinstaller', None)
+-        api.user.grant_roles(username='chuck', roles=['Reviewer', 'Editor', ])
+-        api.user.revoke_roles(username='chuck', roles=['Reviewer', ])
++        api.user.grant_roles(username='chuck', roles=['Reviewer', 'Editor'])
++        api.user.revoke_roles(username='chuck', roles=['Reviewer'])
+         self.assertNotIn('Reviewer', api.user.get_roles(username='chuck'))
+         self.assertNotIn('Reviewer', api.user.get_roles(user=user))
+         self.assertIn('Editor', api.user.get_roles(username='chuck'))
+         self.assertIn('Editor', api.user.get_roles(user=user))
  
-     def testTool(self):
--        self.failUnless('portal_quickinstaller' in self.portal.objectIds())
-+        self.assertTrue('portal_quickinstaller' in self.portal.objectIds())
+-        api.user.revoke_roles(username='chuck', roles=('Editor',))
+-        ROLES = ['Authenticated', 'Member', ]
++        api.user.revoke_roles(username='chuck', roles=('Editor'))
++        ROLES = ['Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck'),
+@@ -785,7 +785,7 @@ def test_revoke_roles_username(self):
+         )
+         from plone.api.exc import InvalidParameterError
+         with self.assertRaises(InvalidParameterError):
+-            api.user.revoke_roles(username='chuck', roles=['Authenticated', ])
++            api.user.revoke_roles(username='chuck', roles=['Authenticated'])
  
-     def testIsNotInstalled(self):
--        self.failIf(self.qi.isProductInstalled('CMFQuickInstallerTool'))
-+        self.assertFalse(self.qi.isProductInstalled('CMFQuickInstallerTool'))
+     @unittest.skip('Getting the Anonymous user does not work like this.')
+     def test_revoke_roles_from_anonymous(self):
+@@ -794,7 +794,7 @@ def test_revoke_roles_from_anonymous(self):
+             username='Anonymous User',
+             roles=['Reviewer'],
+         )
+-        ROLES = ['Anonymous', ]
++        ROLES = ['Anonymous']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='Anonymous User'),
+@@ -880,7 +880,7 @@ def test_grant_roles_in_context(self):
+             api.user.get_roles(user=user, obj=document),
+         )
  
-     def testIsNotListedAsInstallable(self):
-         prods = self.qi.listInstallableProducts()
-         prods = [x['id'] for x in prods]
--        self.failIf('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('CMFQuickInstallerTool' in prods)
+-        ROLES = ['Editor', 'Contributor', 'Authenticated', 'Member', ]
++        ROLES = ['Editor', 'Contributor', 'Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck', obj=folder),
+@@ -967,7 +967,7 @@ def getRoles(self, principal_id):
+         # The adapter role is in in the local roles but not persistent
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=folder, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         local_roles = getattr(folder, '__ac_local_roles__', {})
+         self.assertEqual(
+@@ -981,7 +981,7 @@ def getRoles(self, principal_id):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document),
+-            ['Member', 'Authenticated', 'Contributor', 'Reviewer', ],
++            ['Member', 'Authenticated', 'Contributor', 'Reviewer'],
+         )
  
-     def testIsNotListedAsInstalled(self):
-         prods = self.qi.listInstalledProducts()
-         prods = [x['id'] for x in prods]
--        self.failIf('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('CMFQuickInstallerTool' in prods)
-+
+         # add a group and test mix of group and adapter and user-roles
+@@ -995,12 +995,12 @@ def getRoles(self, principal_id):
  
-+class TestInstalledProduct(unittest.TestCase):
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         api.group.grant_roles(groupname='foo', roles=['Manager'], obj=folder)
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document),
+@@ -1024,7 +1024,7 @@ def getRoles(self, principal_id):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=folder, inherit=False),
+-            ['Contributor', 'Reviewer', 'Manager', ],
++            ['Contributor', 'Reviewer', 'Manager'],
+         )
  
--class TestInstalledProduct(PloneTestCase):
-+    layer = PRODUCTS_CMFPLONE_INTEGRATION_TESTING
+         # cleanup
+@@ -1098,7 +1098,7 @@ def test_revoke_roles_in_context(self):
+         )
+         self.assertNotIn('Editor', api.user.get_roles(user=user, obj=document))
  
--    def afterSetUp(self):
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-         self.qi = getattr(self.portal, 'portal_quickinstaller', None)
- 
-     def testSlotsMigration(self):
-@@ -39,8 +46,8 @@ def testSlotsMigration(self):
- 
-         # New instances should have the properties
-         new = InstalledProduct('new')
--        self.failUnless(hasattr(new, 'leftslots'))
--        self.failUnless(hasattr(new, 'rightslots'))
-+        self.assertTrue(hasattr(new, 'leftslots'))
-+        self.assertTrue(hasattr(new, 'rightslots'))
- 
-         # Now emulate an old instance
-         old = InstalledProduct('old')
-@@ -50,12 +57,12 @@ def testSlotsMigration(self):
-         # Make sure calling the API will give you no error but silently
-         # add the property
-         left = old.getLeftSlots()
--        self.failUnless(left == [])
--        self.failUnless(old.leftslots == [])
-+        self.assertTrue(left == [])
-+        self.assertTrue(old.leftslots == [])
- 
-         right = old.getRightSlots()
--        self.failUnless(right == [])
--        self.failUnless(old.rightslots == [])
-+        self.assertTrue(right == [])
-+        self.assertTrue(old.rightslots == [])
- 
-         slots = old.getSlots()
--        self.failUnless(slots == [])
-+        self.assertTrue(slots == [])
-diff --git a/Products/CMFQuickInstallerTool/tests/test_install.py b/Products/CMFQuickInstallerTool/tests/test_install.py
-index 271f91b..87df332 100644
---- a/Products/CMFQuickInstallerTool/tests/test_install.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_install.py
-@@ -60,6 +60,8 @@ def patched_isProductInstallable(self, productname):
- 
-     def tearDownPloneSite(self, portal):
-         QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
-+
-+    def tearDownZope(self, app):
-         profile_registry.unregisterProfile(
-             'test',
-             'Products.CMFQuickInstallerTool'
-@@ -70,6 +72,8 @@ def tearDownPloneSite(self, portal):
- 
- 
- CQI_FIXTURE = QuickInstallerCaseFixture()
-+CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
-+    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
- CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
-     bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
- 
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-index 9781b05..6b37b26 100644
---- a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-@@ -9,7 +9,7 @@
-       title="Null upgrade step"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFPlone:testfixture"
-+      profile="Products.CMFQuickInstallerTool:test"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -18,7 +18,7 @@
-       title="Add pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFPlone:testfixture"
-+      profile="Products.CMFQuickInstallerTool:test"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -27,7 +27,7 @@
-       title="Remove pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFPlone:testfixture"
-+      profile="Products.CMFQuickInstallerTool:test"
-       />
- 
- </configure>
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-index 8b61948..391f575 100644
---- a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-@@ -8,8 +8,8 @@
-       destination="banana"
-       title="Add pants"
-       description=""
--      handler="Products.CMFPlone.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFPlone:testfixture"
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool:test"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -17,8 +17,8 @@
-       destination="dandelions"
-       title="Remove pants"
-       description=""
--      handler="Products.CMFPlone.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFPlone:testfixture"
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool:test"
-       />
- 
- </configure>
+-        ROLES = ['Authenticated', 'Member', ]
++        ROLES = ['Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck', obj=folder),
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T00:32:07+01:00
+Date: 2018-02-16T01:07:11+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/d56d856a79684f915da05903baa7be7feb9ed4bd
+Commit: https://github.com/plone/plone.api/commit/4c778403f767e6210a0fbea0fdb6d5d5a195ad1c
 
-Move general test setup code from test_install.py to testing.py.
+Solve isort confusion with datetime and DateTime.
+
+flake8 wants it one way, isort another.
+And when you let isort fix it, it complains again.
 
 Files changed:
-A Products/CMFQuickInstallerTool/testing.py
-M Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-M Products/CMFQuickInstallerTool/tests/test_browser.py
-M Products/CMFQuickInstallerTool/tests/test_install.py
+M src/plone/api/tests/test_portal.py
 
-diff --git a/Products/CMFQuickInstallerTool/testing.py b/Products/CMFQuickInstallerTool/testing.py
-new file mode 100644
-index 0000000..8fc4952
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/testing.py
-@@ -0,0 +1,74 @@
-+# -*- coding: utf-8 -*-
-+from plone.app import testing
-+from Products.CMFQuickInstallerTool.events import handleBeforeProfileImportEvent  # noqa
-+from Products.CMFQuickInstallerTool.events import handleProfileImportedEvent
-+from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-+from Products.GenericSetup import EXTENSION
-+from Products.GenericSetup import profile_registry
-+
-+import pkg_resources
-+import zope.component
-+
-+
-+try:
-+    pkg_resources.get_distribution('plone.app.contenttypes')
-+except pkg_resources.DistributionNotFound:
-+    # assume we have an other content framework (Archetypes) here
-+    TESTING_FIXTURE = testing.PLONE_FIXTURE
-+else:
-+    from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
-+    TESTING_FIXTURE = PLONE_APP_CONTENTTYPES_FIXTURE
-+
-+
-+# We patch a method and store the original here so we can restore it later:
-+TEST_PATCHES = {}
-+
-+
-+class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
-+
-+    defaultBases = (TESTING_FIXTURE, )
-+
-+    def setUpZope(self, app, configurationContext):
-+        sm = zope.component.getSiteManager()
-+        sm.registerHandler(handleBeforeProfileImportEvent)
-+        sm.registerHandler(handleProfileImportedEvent)
-+
-+        profile_registry.registerProfile(
-+            'test',
-+            'CMFQI test profile',
-+            'Test profile for CMFQuickInstallerTool',
-+            'profiles/test',
-+            'Products.CMFQuickInstallerTool',
-+            EXTENSION,
-+            for_=None)
-+
-+    def setUpPloneSite(self, portal):
-+        TEST_PATCHES['orig_isProductInstallable'] = QuickInstallerTool.isProductInstallable  # noqa
-+
-+        def patched_isProductInstallable(self, productname):
-+            if (
-+                'QITest' in productname
-+                or 'CMFQuickInstallerTool' in productname
-+            ):
-+                return True
-+            return TEST_PATCHES['orig_isProductInstallable'](self, productname)
-+        QuickInstallerTool.isProductInstallable = patched_isProductInstallable
-+
-+    def tearDownPloneSite(self, portal):
-+        QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
-+
-+    def tearDownZope(self, app):
-+        profile_registry.unregisterProfile(
-+            'test',
-+            'Products.CMFQuickInstallerTool'
-+        )
-+        sm = zope.component.getSiteManager()
-+        sm.unregisterHandler(handleBeforeProfileImportEvent)
-+        sm.unregisterHandler(handleProfileImportedEvent)
-+
-+
-+CQI_FIXTURE = QuickInstallerCaseFixture()
-+CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
-+    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
-+CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
-+    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-index 3370e82..b6c69c8 100644
---- a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -1,6 +1,6 @@
- # -*- coding: utf-8 -*-
- from Products.CMFQuickInstallerTool import tests
--from Products.CMFQuickInstallerTool.tests.test_install import CQI_INTEGRATION_TESTING  # noqa
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- from plone.app.testing import setRoles
- from plone.app.testing import TEST_USER_ID
- from zope.configuration import xmlconfig
-diff --git a/Products/CMFQuickInstallerTool/tests/test_browser.py b/Products/CMFQuickInstallerTool/tests/test_browser.py
-index 05d8746..2b53c9f 100644
---- a/Products/CMFQuickInstallerTool/tests/test_browser.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_browser.py
-@@ -6,7 +6,7 @@
- from plone.app.testing import TEST_USER_PASSWORD
- from plone.protect import createToken
- from plone.testing import z2
--from Products.CMFQuickInstallerTool.tests.test_install import CQI_FUNCTIONAL_TESTING  # noqa
-+from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
- from zExceptions import Forbidden
+diff --git a/src/plone/api/tests/test_portal.py b/src/plone/api/tests/test_portal.py
+index b4ad86f..8b06571 100644
+--- a/src/plone/api/tests/test_portal.py
++++ b/src/plone/api/tests/test_portal.py
+@@ -3,7 +3,6 @@
  
- import unittest
-diff --git a/Products/CMFQuickInstallerTool/tests/test_install.py b/Products/CMFQuickInstallerTool/tests/test_install.py
-index 87df332..7afdcb6 100644
---- a/Products/CMFQuickInstallerTool/tests/test_install.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_install.py
-@@ -1,82 +1,12 @@
- # -*- coding: utf-8 -*-
--from plone.app import testing
- from plone.testing import layered
--from Products.CMFQuickInstallerTool.events import handleBeforeProfileImportEvent  # noqa
--from Products.CMFQuickInstallerTool.events import handleProfileImportedEvent
--from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
--from Products.GenericSetup import EXTENSION
--from Products.GenericSetup import profile_registry
--
-+from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
- import doctest
--import pkg_resources
- import unittest
--import zope.component
--
--
--try:
--    pkg_resources.get_distribution('plone.app.contenttypes')
--except pkg_resources.DistributionNotFound:
--    # assume we have an other content framework (Archetypes) here
--    TESTING_FIXTURE = testing.PLONE_FIXTURE
--else:
--    from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
--    TESTING_FIXTURE = PLONE_APP_CONTENTTYPES_FIXTURE
+ from datetime import date
+ from datetime import datetime
+-from DateTime import DateTime
+ from email import message_from_string
+ from pkg_resources import parse_version
+ from plone.api import content
+@@ -23,6 +22,7 @@
+ from zope.interface import Interface
+ from zope.site import LocalSiteManager
  
- 
- OPTIONFLAGS = (doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE)
- 
--TEST_PATCHES = {}
--
--
--class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
--
--    defaultBases = (TESTING_FIXTURE, )
--
--    def setUpZope(self, app, configurationContext):
--        sm = zope.component.getSiteManager()
--        sm.registerHandler(handleBeforeProfileImportEvent)
--        sm.registerHandler(handleProfileImportedEvent)
--
--        profile_registry.registerProfile(
--            'test',
--            'CMFQI test profile',
--            'Test profile for CMFQuickInstallerTool',
--            'profiles/test',
--            'Products.CMFQuickInstallerTool',
--            EXTENSION,
--            for_=None)
--
--    def setUpPloneSite(self, portal):
--        TEST_PATCHES['orig_isProductInstallable'] = QuickInstallerTool.isProductInstallable  # noqa
--
--        def patched_isProductInstallable(self, productname):
--            if (
--                'QITest' in productname
--                or 'CMFQuickInstallerTool' in productname
--            ):
--                return True
--            return TEST_PATCHES['orig_isProductInstallable'](self, productname)
--        QuickInstallerTool.isProductInstallable = patched_isProductInstallable
--
--    def tearDownPloneSite(self, portal):
--        QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
--
--    def tearDownZope(self, app):
--        profile_registry.unregisterProfile(
--            'test',
--            'Products.CMFQuickInstallerTool'
--        )
--        sm = zope.component.getSiteManager()
--        sm.unregisterHandler(handleBeforeProfileImportEvent)
--        sm.unregisterHandler(handleProfileImportedEvent)
--
--
--CQI_FIXTURE = QuickInstallerCaseFixture()
--CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
--    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
--CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
--    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
--
- 
- def test_suite():
-     suite = unittest.TestSuite()
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T01:37:08+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/2af42128e2b3cd42e9cad8a501a3f23e738d0c76
-
-Fixed tests when CMFPlone no longer creates a portal_quickinstaller.
-
-Files changed:
-A Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-M Products/CMFQuickInstallerTool/configure.zcml
-M Products/CMFQuickInstallerTool/testing.py
-M Products/CMFQuickInstallerTool/tests/testSetup.py
-
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index 2358f38..5178610 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -37,8 +37,11 @@
-     pkg_resources.get_distribution('Products.CMFPlone')
- except pkg_resources.DistributionNotFound:
-     from Products.CMFCore.interfaces import ISiteRoot
-+    INonInstallablePlone = None
- else:
-     from Products.CMFPlone.interfaces import IPloneSiteRoot as ISiteRoot
-+    from Products.CMFPlone.interfaces import INonInstallable as \
-+        INonInstallablePlone
- 
- _ = MessageFactory("plone")
- 
-@@ -73,6 +76,20 @@ def getNonInstallableProducts(self):
-         return ['CMFQuickInstallerTool', 'Products.CMFQuickInstallerTool']
- 
- 
-+if INonInstallablePlone is not None:
-+    @implementer(INonInstallablePlone)
-+    class HiddenProductsForPlone(object):
-+
-+        def getNonInstallableProducts(self):
-+            return ['Products.CMFQuickInstallerTool']
-+
-+        def getNonInstallableProfiles(self):
-+            return [
-+                'Products.CMFQuickInstallerTool:CMFQuickInstallerTool',
-+                'Products.CMFQuickInstallerTool:uninstall',
-+            ]
-+
-+
- def _product_sort_key(product):
-     return product.get('title', product.get('id', None))
- 
-diff --git a/Products/CMFQuickInstallerTool/configure.zcml b/Products/CMFQuickInstallerTool/configure.zcml
-index ee28c45..fddc58d 100644
---- a/Products/CMFQuickInstallerTool/configure.zcml
-+++ b/Products/CMFQuickInstallerTool/configure.zcml
-@@ -14,6 +14,13 @@
-       provides="Products.GenericSetup.interfaces.EXTENSION"
-       />
- 
-+  <genericsetup:registerProfile
-+      name="uninstall"
-+      title="uninstall CMFQuickInstallerTool"
-+      directory="profiles/uninstall"
-+      provides="Products.GenericSetup.interfaces.EXTENSION"
-+      />
-+
-   <subscriber
-       zcml:condition="installed Products.GenericSetup.events"
-       handler=".events.handleBeforeProfileImportEvent" />
-@@ -26,5 +33,10 @@
-       factory=".QuickInstallerTool.HiddenProducts"
-       name="Products.CMFQuickInstallerTool"
-       />
-+  <utility
-+      factory=".QuickInstallerTool.HiddenProductsForPlone"
-+      zcml:condition="installed Products.CMFQuickInstallerTool.QuickInstallerTool.HiddenProductsForPlone"
-+      name="Products.CMFQuickInstallerTool"
-+      />
- 
- </configure>
-diff --git a/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml b/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-new file mode 100644
-index 0000000..338a410
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-@@ -0,0 +1,4 @@
-+<?xml version="1.0"?>
-+<tool-setup>
-+ <forbidden tool_id="portal_quickinstaller" />
-+</tool-setup>
-diff --git a/Products/CMFQuickInstallerTool/testing.py b/Products/CMFQuickInstallerTool/testing.py
-index 8fc4952..1a79f49 100644
---- a/Products/CMFQuickInstallerTool/testing.py
-+++ b/Products/CMFQuickInstallerTool/testing.py
-@@ -24,9 +24,56 @@
- TEST_PATCHES = {}
- 
- 
--class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
-+class QuickInstallerInstalledFixture(testing.PloneSandboxLayer):
- 
-     defaultBases = (TESTING_FIXTURE, )
-+    installed_self = False
-+
-+    def setUpZope(self, app, configurationContext):
-+        sm = zope.component.getSiteManager()
-+        sm.registerHandler(handleBeforeProfileImportEvent)
-+        sm.registerHandler(handleProfileImportedEvent)
-+
-+        profile_registry.registerProfile(
-+            'test',
-+            'CMFQI test profile',
-+            'Test profile for CMFQuickInstallerTool',
-+            'profiles/test',
-+            'Products.CMFQuickInstallerTool',
-+            EXTENSION,
-+            for_=None)
-+
-+    def setUpPloneSite(self, portal):
-+        qi = getattr(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            setup_tool = portal.portal_setup
-+            setup_tool.runAllImportStepsFromProfile(
-+                'Products.CMFQuickInstallerTool:CMFQuickInstallerTool')
-+            self.installed_self = True
-+
-+    def tearDownPloneSite(self, portal):
-+        if self.installed_self:
-+            setup_tool = portal.portal_setup
-+            setup_tool.runAllImportStepsFromProfile(
-+                'Products.CMFQuickInstallerTool:uninstall')
-+
-+    def tearDownZope(self, app):
-+        profile_registry.unregisterProfile(
-+            'test',
-+            'Products.CMFQuickInstallerTool'
-+        )
-+        sm = zope.component.getSiteManager()
-+        sm.unregisterHandler(handleBeforeProfileImportEvent)
-+        sm.unregisterHandler(handleProfileImportedEvent)
-+
-+BASE_CQI_FIXTURE = QuickInstallerInstalledFixture()
-+CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
-+    bases=(BASE_CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
-+
-+
-+class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
-+
-+    defaultBases = (BASE_CQI_FIXTURE,)
- 
-     def setUpZope(self, app, configurationContext):
-         sm = zope.component.getSiteManager()
-@@ -68,7 +115,5 @@ def tearDownZope(self, app):
- 
- 
- CQI_FIXTURE = QuickInstallerCaseFixture()
--CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
--    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
- CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
-     bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
-diff --git a/Products/CMFQuickInstallerTool/tests/testSetup.py b/Products/CMFQuickInstallerTool/tests/testSetup.py
-index e9ccff1..9526ff5 100644
---- a/Products/CMFQuickInstallerTool/tests/testSetup.py
-+++ b/Products/CMFQuickInstallerTool/tests/testSetup.py
-@@ -2,14 +2,13 @@
- #
- # Setup tests
- #
--from Products.CMFPlone.testing import PRODUCTS_CMFPLONE_INTEGRATION_TESTING
--from Products.CMFQuickInstallerTool.InstalledProduct import InstalledProduct
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
++import DateTime
+ import mock
  import unittest
  
+@@ -386,19 +386,19 @@ def test_get_localized_time(self):
  
- class TestQuickInstaller(unittest.TestCase):
+         # tests
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+             long_format=True,
+         )
+         self.assertEqual(result, 'Dec 31, 1999 11:59 PM')
  
--    layer = PRODUCTS_CMFPLONE_INTEGRATION_TESTING
-+    layer = CQI_INTEGRATION_TESTING
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+             time_only=True,
+         )
+         self.assertEqual(result, '11:59 PM')
  
-     def setUp(self):
-         self.portal = self.layer['portal']
-@@ -31,16 +30,23 @@ def testIsNotListedAsInstalled(self):
-         prods = [x['id'] for x in prods]
-         self.assertFalse('CMFQuickInstallerTool' in prods)
- 
-+    def test_getToolByName(self):
-+        from Products.CMFCore.utils import getToolByName
-+        self.assertIsNotNone(
-+            getToolByName(self.portal, 'portal_quickinstaller', None))
-+
- 
- class TestInstalledProduct(unittest.TestCase):
- 
--    layer = PRODUCTS_CMFPLONE_INTEGRATION_TESTING
-+    layer = CQI_INTEGRATION_TESTING
- 
-     def setUp(self):
-         self.portal = self.layer['portal']
-         self.qi = getattr(self.portal, 'portal_quickinstaller', None)
- 
-     def testSlotsMigration(self):
-+        from Products.CMFQuickInstallerTool.InstalledProduct import \
-+            InstalledProduct
-         # leftslots and rightslots have been class variables ones. Make sure
-         # using old instances without these properties doesn't break.
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+         )
+         self.assertEqual(result, 'Dec 31, 1999')
  
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T02:36:13+01:00
+Date: 2018-02-16T01:08:09+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/977ff55d1c9e96cc4fa71a16d0b1d578e3a336ad
+Commit: https://github.com/plone/plone.api/commit/9c6ad0180b1336d7a60f138607b65b95e0aa4c77
 
-Fixed tests by using more separated test profile.
-
-Files changed:
-A Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-A Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-A Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-M Products/CMFQuickInstallerTool/testing.py
-M Products/CMFQuickInstallerTool/tests/actions.txt
-M Products/CMFQuickInstallerTool/tests/install.txt
-M Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-M Products/CMFQuickInstallerTool/tests/test_install.py
-M Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-M Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-D Products/CMFQuickInstallerTool/profiles/test/actions.xml
-D Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml
-D Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml
-
-diff --git a/Products/CMFQuickInstallerTool/testing.py b/Products/CMFQuickInstallerTool/testing.py
-index 1a79f49..7ddfaf3 100644
---- a/Products/CMFQuickInstallerTool/testing.py
-+++ b/Products/CMFQuickInstallerTool/testing.py
-@@ -1,5 +1,6 @@
- # -*- coding: utf-8 -*-
- from plone.app import testing
-+from plone.testing import z2
- from Products.CMFQuickInstallerTool.events import handleBeforeProfileImportEvent  # noqa
- from Products.CMFQuickInstallerTool.events import handleProfileImportedEvent
- from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-@@ -33,13 +34,13 @@ def setUpZope(self, app, configurationContext):
-         sm = zope.component.getSiteManager()
-         sm.registerHandler(handleBeforeProfileImportEvent)
-         sm.registerHandler(handleProfileImportedEvent)
--
-+        z2.installProduct(app, 'Products.CMFQuickInstallerTool.tests')
-         profile_registry.registerProfile(
--            'test',
-+            'default',
-             'CMFQI test profile',
-             'Test profile for CMFQuickInstallerTool',
-             'profiles/test',
--            'Products.CMFQuickInstallerTool',
-+            'Products.CMFQuickInstallerTool.tests',
-             EXTENSION,
-             for_=None)
- 
-@@ -59,44 +60,32 @@ def tearDownPloneSite(self, portal):
- 
-     def tearDownZope(self, app):
-         profile_registry.unregisterProfile(
--            'test',
--            'Products.CMFQuickInstallerTool'
-+            'default',
-+            'Products.CMFQuickInstallerTool.tests'
-         )
-         sm = zope.component.getSiteManager()
-         sm.unregisterHandler(handleBeforeProfileImportEvent)
-         sm.unregisterHandler(handleProfileImportedEvent)
- 
-+
- BASE_CQI_FIXTURE = QuickInstallerInstalledFixture()
- CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
-     bases=(BASE_CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
- 
- 
- class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
-+    """Layer with a hack to always consider the QITest package installable.
- 
--    defaultBases = (BASE_CQI_FIXTURE,)
-+    This avoids needing to register dummy products.
-+    """
- 
--    def setUpZope(self, app, configurationContext):
--        sm = zope.component.getSiteManager()
--        sm.registerHandler(handleBeforeProfileImportEvent)
--        sm.registerHandler(handleProfileImportedEvent)
--
--        profile_registry.registerProfile(
--            'test',
--            'CMFQI test profile',
--            'Test profile for CMFQuickInstallerTool',
--            'profiles/test',
--            'Products.CMFQuickInstallerTool',
--            EXTENSION,
--            for_=None)
-+    defaultBases = (BASE_CQI_FIXTURE,)
- 
-     def setUpPloneSite(self, portal):
-         TEST_PATCHES['orig_isProductInstallable'] = QuickInstallerTool.isProductInstallable  # noqa
- 
-         def patched_isProductInstallable(self, productname):
--            if (
--                'QITest' in productname
--                or 'CMFQuickInstallerTool' in productname
--            ):
-+            if 'QITest' in productname:
-                 return True
-             return TEST_PATCHES['orig_isProductInstallable'](self, productname)
-         QuickInstallerTool.isProductInstallable = patched_isProductInstallable
-@@ -104,15 +93,6 @@ def patched_isProductInstallable(self, productname):
-     def tearDownPloneSite(self, portal):
-         QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
- 
--    def tearDownZope(self, app):
--        profile_registry.unregisterProfile(
--            'test',
--            'Products.CMFQuickInstallerTool'
--        )
--        sm = zope.component.getSiteManager()
--        sm.unregisterHandler(handleBeforeProfileImportEvent)
--        sm.unregisterHandler(handleProfileImportedEvent)
--
- 
- CQI_FIXTURE = QuickInstallerCaseFixture()
- CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
-diff --git a/Products/CMFQuickInstallerTool/tests/actions.txt b/Products/CMFQuickInstallerTool/tests/actions.txt
-index a48becc..d63ac78 100644
---- a/Products/CMFQuickInstallerTool/tests/actions.txt
-+++ b/Products/CMFQuickInstallerTool/tests/actions.txt
-@@ -25,8 +25,8 @@ And register the QI tool as a utility:
- Install a product through an extension profile
- ----------------------------------------------
- 
--  >>> result = qi.installProduct('CMFQuickInstallerTool',
--  ...     profile='Products.CMFQuickInstallerTool:test')
-+  >>> result = qi.installProduct('Products.CMFQuickInstallerTool.tests',
-+  ...     profile='Products.CMFQuickInstallerTool.tests:default')
- 
- Make sure the actions were added:
- 
-@@ -39,7 +39,7 @@ Make sure the actions were added:
- Uninstall the product
- ---------------------
- 
--  >>> qi.uninstallProducts(products=['CMFQuickInstallerTool'])
-+  >>> qi.uninstallProducts(products=['Products.CMFQuickInstallerTool.tests'])
- 
- Verify that all added entries were removed again:
- 
-diff --git a/Products/CMFQuickInstallerTool/tests/install.txt b/Products/CMFQuickInstallerTool/tests/install.txt
-index 34ff46c..c9a750c 100644
---- a/Products/CMFQuickInstallerTool/tests/install.txt
-+++ b/Products/CMFQuickInstallerTool/tests/install.txt
-@@ -213,8 +213,9 @@ Installing the product should not run any profile and thus set no properties.
- 
- Register a 'default'-profile that points to profiles/test
- 
--  >>> interfaces_path = interfaces.__path__[0]
--  >>> default_path = interfaces_path[:-11] + '/profiles/test'
-+  >>> from Products.CMFQuickInstallerTool import tests
-+  >>> tests_path = tests.__path__[0]
-+  >>> default_path = tests_path + '/profiles/test'
-   >>> _profile_registry.registerProfile('default', 'UninstallTest', '', default_path, 'QITest4', 2)
- 
- Installing the product now runs the default-profile.
-@@ -240,7 +241,7 @@ Install again.
- 
- Register a uninstall profile that points to the profiles/test_uninstall
- 
--  >>> uninstall_path = interfaces_path[:-11] + '/profiles/test_uninstall'
-+  >>> uninstall_path = tests_path + '/profiles/test_uninstall'
-   >>> _profile_registry.registerProfile('uninstall', 'UninstallTest', '', uninstall_path, 'QITest4', 2)
- 
-   >>> uninstall = qi.getUninstallProfile('QITest4')
-diff --git a/Products/CMFQuickInstallerTool/profiles/test/actions.xml b/Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test/actions.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-diff --git a/Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml b/Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-diff --git a/Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml b/Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-index b6c69c8..1fff3a0 100644
---- a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -44,8 +44,8 @@ def testLatestUpgradeProfiles(self):
-             context=self.layer['configurationContext']
-         )
-         latest = self.qi.getLatestUpgradeStep(
--            'Products.CMFQuickInstallerTool:test')
--        self.assertTrue(latest == '3')
-+            'Products.CMFQuickInstallerTool.tests:default')
-+        self.assertEqual(latest, '3')
- 
-     def testLatestUpgradeProfiles2(self):
-         # make sure strings don't break things
-@@ -57,8 +57,8 @@ def testLatestUpgradeProfiles2(self):
-             context=self.layer['configurationContext']
-         )
-         latest = self.qi.getLatestUpgradeStep(
--            'Products.CMFQuickInstallerTool:test')
--        self.assertTrue(latest == '3')
-+            'Products.CMFQuickInstallerTool.tests:default')
-+        self.assertEqual(latest, '3')
- 
- 
- def dummy_handler():
-diff --git a/Products/CMFQuickInstallerTool/tests/test_install.py b/Products/CMFQuickInstallerTool/tests/test_install.py
-index 7afdcb6..6f5f12b 100644
---- a/Products/CMFQuickInstallerTool/tests/test_install.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_install.py
-@@ -1,5 +1,6 @@
- # -*- coding: utf-8 -*-
- from plone.testing import layered
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
- import doctest
- import unittest
-@@ -10,7 +11,14 @@
- 
- def test_suite():
-     suite = unittest.TestSuite()
--    for testfile in ['actions.txt', 'profiles.txt', 'install.txt']:
-+    for testfile in ['actions.txt', 'profiles.txt']:
-+        suite.addTest(layered(
-+            doctest.DocFileSuite(
-+                testfile,
-+                package='Products.CMFQuickInstallerTool.tests',
-+                optionflags=OPTIONFLAGS),
-+            layer=CQI_INTEGRATION_TESTING))
-+    for testfile in ['install.txt']:
-         suite.addTest(layered(
-             doctest.DocFileSuite(
-                 testfile,
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-index 6b37b26..e3b65de 100644
---- a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-@@ -9,7 +9,7 @@
-       title="Null upgrade step"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFQuickInstallerTool:test"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -18,7 +18,7 @@
-       title="Add pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFQuickInstallerTool:test"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -27,7 +27,7 @@
-       title="Remove pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFQuickInstallerTool:test"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-       />
- 
- </configure>
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-index 391f575..c184f34 100644
---- a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-@@ -9,7 +9,7 @@
-       title="Add pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFQuickInstallerTool:test"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-       />
- 
-   <genericsetup:upgradeStep
-@@ -18,7 +18,7 @@
-       title="Remove pants"
-       description=""
-       handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
--      profile="Products.CMFQuickInstallerTool:test"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-       />
- 
- </configure>
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T02:47:51+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/665298b7a65f1800efd4fef0ee9cf94daf7e28cf
-
-Added changelog entry.
-
-Added a few more tests.
+Added history note: Improved code quality according to isort and flake8.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFQuickInstallerTool/tests/testSetup.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 09e6175..ec2cd95 100644
+index eda8c7a..eee3653 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Added functionality and tests from CMFPlone.
-+  Added uninstall profile.
-+  And no longer count on being installed by CMFPlone, especially in tests.
-+  [maurits]
+@@ -14,6 +14,8 @@ New features:
  
  Bug fixes:
  
-diff --git a/Products/CMFQuickInstallerTool/tests/testSetup.py b/Products/CMFQuickInstallerTool/tests/testSetup.py
-index 9526ff5..7f8b411 100644
---- a/Products/CMFQuickInstallerTool/tests/testSetup.py
-+++ b/Products/CMFQuickInstallerTool/tests/testSetup.py
-@@ -19,22 +19,32 @@ def testTool(self):
- 
-     def testIsNotInstalled(self):
-         self.assertFalse(self.qi.isProductInstalled('CMFQuickInstallerTool'))
-+        self.assertFalse(self.qi.isProductInstalled(
-+            'Products.CMFQuickInstallerTool'))
- 
-     def testIsNotListedAsInstallable(self):
-         prods = self.qi.listInstallableProducts()
-         prods = [x['id'] for x in prods]
-         self.assertFalse('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('Products.CMFQuickInstallerTool' in prods)
- 
-     def testIsNotListedAsInstalled(self):
-         prods = self.qi.listInstalledProducts()
-         prods = [x['id'] for x in prods]
-         self.assertFalse('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('Products.CMFQuickInstallerTool' in prods)
- 
-     def test_getToolByName(self):
-         from Products.CMFCore.utils import getToolByName
-         self.assertIsNotNone(
-             getToolByName(self.portal, 'portal_quickinstaller', None))
- 
-+    def test_uninstall_self_via_portal_setup(self):
-+        setup_tool = self.portal.portal_setup
-+        setup_tool.runAllImportStepsFromProfile(
-+            'Products.CMFQuickInstallerTool:uninstall')
-+        self.assertFalse('portal_quickinstaller' in self.portal.objectIds())
++- Improved code quality according to isort and flake8.  [maurits]
 +
+ - Fixed regular expression in test for Plone version.  [maurits]
  
- class TestInstalledProduct(unittest.TestCase):
  
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T02:50:13+01:00
+Date: 2018-02-16T01:29:46+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/88620c0917357bed9ea964f122a789d05b6227ab
+Commit: https://github.com/plone/plone.api/commit/bd8d4615c60d020cc4439f48f123636f97471c79
 
-Replace failIf by assertFalse.
+Solve more isort confusion with datetime.
+
+The isort setups on Jenkins and Travis do not agree.
+Apparently it is unclear what the correct sort order is for these versions:
+
+  from datetime import date
+  from datetime import datetime as dtime
+
+So I replaced it with:
+
+  import datetime as dtime
+
+We don't use simple `import datetime` under its own name,
+because one of the functions uses 'datetime' as an argument.
 
 Files changed:
-M Products/CMFQuickInstallerTool/tests/test_browser.py
+M src/plone/api/portal.py
 
-diff --git a/Products/CMFQuickInstallerTool/tests/test_browser.py b/Products/CMFQuickInstallerTool/tests/test_browser.py
-index 2b53c9f..1056127 100644
---- a/Products/CMFQuickInstallerTool/tests/test_browser.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_browser.py
-@@ -122,6 +122,6 @@ def test_installProducts_get(self):
-             product, csrf_token)
-         self.assertRaises(Forbidden, self.browser.open, url)
-         # The product must NOT have successfully been installed.
--        self.failIf(
-+        self.assertFalse(
-             qi.isProductInstalled(product),
-             'Should not have installed %s using GET request.' % product)
+diff --git a/src/plone/api/portal.py b/src/plone/api/portal.py
+index 897dd6e..8d1791b 100644
+--- a/src/plone/api/portal.py
++++ b/src/plone/api/portal.py
+@@ -2,8 +2,6 @@
+ """Module that provides various utility methods on the portal level."""
+ 
+ from Acquisition import aq_inner
+-from datetime import date
+-from datetime import datetime as dtime
+ from email.utils import formataddr
+ from email.utils import parseaddr
+ from logging import getLogger
+@@ -20,6 +18,7 @@
+ from zope.globalrequest import getRequest
+ from zope.interface.interfaces import IInterface
+ 
++import datetime as dtime
+ import pkg_resources
+ import six
+ 
+@@ -239,10 +238,10 @@ def get_localized_time(datetime=None, long_format=False, time_only=False):
+     request = getRequest()
+ 
+     # isinstance won't work because of date -> datetime inheritance
+-    if type(datetime) is date:
++    if type(datetime) is dtime.date:
+         if time_only:
+             return ''
+-        datetime = dtime(datetime.year, datetime.month, datetime.day)
++        datetime = dtime.datetime(datetime.year, datetime.month, datetime.day)
+         long_format = False
+ 
+     return tool.ulocalized_time(
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T02:52:24+01:00
+Date: 2018-02-16T01:49:45+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/f50ca4977f0d6a4ef5ddb983f9d29bf7177411f4
+Commit: https://github.com/plone/plone.api/commit/7244364b94371ccb715f7665c913c250ff0b1103
 
-Do not use the deprecated isProductAvailable method ourselves.
+Re-added comma that I should not have removed.
 
-Replaced with isProductInstallable.
+I thought flake8 complained about this line, but it apparently was a different one.
+I wondered about this one.
+When you revoke the ('Editor') roles, without comma, you revoke the role E, d, i, t, o, r.
+Not what you want. :-)
+('Editor',) works.  A list would work too.
 
 Files changed:
-M Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-M Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
+M src/plone/api/tests/test_user.py
 
-diff --git a/Products/CMFQuickInstallerTool/forms/install_products_form.zpt b/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-index 57b6489..22abadb 100644
---- a/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-+++ b/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-@@ -110,14 +110,14 @@
-                 class="form-help">
-               product version
-             </td>
--            <td tal:condition="python:here.isProductAvailable(product['id'])"
-+            <td tal:condition="python:here.isProductInstallable(product['id'])"
-                 class="form-help">
-               <font tal:attributes="color python:test(prodver != product['installedVersion'],'#ff0000','#000000')"
-                     tal:content="prodver">
-                 product version
-               </font>
-             </td>
--            <td tal:condition="python:not here.isProductAvailable(product['id'])"
-+            <td tal:condition="python:not here.isProductInstallable(product['id'])"
-                 class="form-help">
-               <font color="#ff0000">
-                 removed from Products folder
-diff --git a/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py b/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-index dea30c2..8ca94e4 100644
---- a/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-+++ b/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-@@ -22,7 +22,10 @@ def isProductInstallable(productname):
+diff --git a/src/plone/api/tests/test_user.py b/src/plone/api/tests/test_user.py
+index 8036ca5..1925c0a 100644
+--- a/src/plone/api/tests/test_user.py
++++ b/src/plone/api/tests/test_user.py
+@@ -717,7 +717,7 @@ def test_revoke_roles(self):
+         self.assertIn('Editor', api.user.get_roles(username='chuck'))
+         self.assertIn('Editor', api.user.get_roles(user=user))
  
-     def isProductAvailable(productname):
-         ''' is the product directory present (to check if it has been deleted
--            from the Filesystem '''
-+            from the Filesystem
-+
-+        Deprecated: use isProductInstallable instead.
-+        '''
- 
-     def installProduct(productname, locked=False, hidden=False,
-                        swallowExceptions=False, forceProfile=False,
+-        api.user.revoke_roles(username='chuck', roles=('Editor'))
++        api.user.revoke_roles(username='chuck', roles=('Editor',))
+         ROLES = ['Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
 
 
-Repository: Products.CMFQuickInstallerTool
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2018-02-14T02:53:21+01:00
+Date: 2018-02-16T09:21:20+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/1892be9c65991c780619dbb0ce2fd185f5b73ca1
+Commit: https://github.com/plone/plone.api/commit/c978a7af13ef0337926c5c2fc82bbf9f48d482a9
 
-Use isinstance for comparing types.
+Merge pull request #397 from plone/isort-flake8-improvements
+
+Isort flake8 improvements
 
 Files changed:
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index 5178610..dd6d165 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -911,7 +911,7 @@ def upgradeProduct(self, pid):
-             # An upgrade may be a single step (for a bare upgradeStep)
-             # or a list of steps (for upgradeSteps containing upgradeStep
-             # directives).
--            if not type(upgrade) is list:
-+            if not isinstance(upgrade, list):
-                 upgrade = [upgrade]
-             for upgradestep in upgrade:
-                 step = upgradestep['step']
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T02:54:14+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/3262549fd8c5d56587ac633d316e835d9fdb1a28
-
-isort changes in tests.
-
-Files changed:
-M Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-M Products/CMFQuickInstallerTool/tests/testSetup.py
-M Products/CMFQuickInstallerTool/tests/test_install.py
-
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-index 1fff3a0..f871955 100644
---- a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -1,9 +1,10 @@
- # -*- coding: utf-8 -*-
--from Products.CMFQuickInstallerTool import tests
--from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- from plone.app.testing import setRoles
- from plone.app.testing import TEST_USER_ID
-+from Products.CMFQuickInstallerTool import tests
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- from zope.configuration import xmlconfig
-+
- import unittest
- 
- 
-diff --git a/Products/CMFQuickInstallerTool/tests/testSetup.py b/Products/CMFQuickInstallerTool/tests/testSetup.py
-index 7f8b411..9a12262 100644
---- a/Products/CMFQuickInstallerTool/tests/testSetup.py
-+++ b/Products/CMFQuickInstallerTool/tests/testSetup.py
-@@ -3,6 +3,7 @@
- # Setup tests
- #
- from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
-+
- import unittest
- 
- 
-diff --git a/Products/CMFQuickInstallerTool/tests/test_install.py b/Products/CMFQuickInstallerTool/tests/test_install.py
-index 6f5f12b..4477e25 100644
---- a/Products/CMFQuickInstallerTool/tests/test_install.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_install.py
-@@ -1,7 +1,8 @@
- # -*- coding: utf-8 -*-
- from plone.testing import layered
--from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
-+
- import doctest
- import unittest
- 
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T03:00:31+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/d50683652517885f765bf6b620e3f02b85e66b8b
-
-Install dummy product quietly to stop a warning.
-
-Files changed:
-M Products/CMFQuickInstallerTool/testing.py
-
-diff --git a/Products/CMFQuickInstallerTool/testing.py b/Products/CMFQuickInstallerTool/testing.py
-index 7ddfaf3..f6787de 100644
---- a/Products/CMFQuickInstallerTool/testing.py
-+++ b/Products/CMFQuickInstallerTool/testing.py
-@@ -34,7 +34,10 @@ def setUpZope(self, app, configurationContext):
-         sm = zope.component.getSiteManager()
-         sm.registerHandler(handleBeforeProfileImportEvent)
-         sm.registerHandler(handleProfileImportedEvent)
--        z2.installProduct(app, 'Products.CMFQuickInstallerTool.tests')
-+        # Install a dummy product.  Quietly, because it is not a real product,
-+        # so it cannot be found.
-+        z2.installProduct(
-+            app, 'Products.CMFQuickInstallerTool.tests', quiet=True)
-         profile_registry.registerProfile(
-             'default',
-             'CMFQI test profile',
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T03:08:07+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/3ef68ce4a6e1ee3bd7c16acfb3dc143acdc3b0ba
-
-Use working condition to hide our profiles/product from Plone.
-
-Files changed:
-M Products/CMFQuickInstallerTool/configure.zcml
-
-diff --git a/Products/CMFQuickInstallerTool/configure.zcml b/Products/CMFQuickInstallerTool/configure.zcml
-index fddc58d..53d31fd 100644
---- a/Products/CMFQuickInstallerTool/configure.zcml
-+++ b/Products/CMFQuickInstallerTool/configure.zcml
-@@ -35,7 +35,7 @@
-       />
-   <utility
-       factory=".QuickInstallerTool.HiddenProductsForPlone"
--      zcml:condition="installed Products.CMFQuickInstallerTool.QuickInstallerTool.HiddenProductsForPlone"
-+      zcml:condition="installed Products.CMFPlone"
-       name="Products.CMFQuickInstallerTool"
-       />
- 
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T03:22:29+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/0c4a3ef1de182614d7e6c161d4c078be5c1c2283
-
-Show main profile in advanced Plone Site add form.
-
-This is when Plone no longer depends on us.
-
-Files changed:
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index dd6d165..5a48a00 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -73,6 +73,8 @@ def addQuickInstallerTool(self, REQUEST=None):
- class HiddenProducts(object):
- 
-     def getNonInstallableProducts(self):
-+        # We can't really install ourselves: that would be weird.
-+        # So hide ourselves from ourselves.
-         return ['CMFQuickInstallerTool', 'Products.CMFQuickInstallerTool']
- 
- 
-@@ -81,11 +83,20 @@ def getNonInstallableProducts(self):
-     class HiddenProductsForPlone(object):
- 
-         def getNonInstallableProducts(self):
-+            # Even though the Plone add-ons control panel is only using
-+            # GenericSetup, it seems best not to advertise ourselves as an
-+            # installable product there.
-             return ['Products.CMFQuickInstallerTool']
- 
-         def getNonInstallableProfiles(self):
-             return [
--                'Products.CMFQuickInstallerTool:CMFQuickInstallerTool',
-+                # When CMFPlone no longer depends on us,
-+                # but some other add-on (or an admin) pulls us in anyway,
-+                # we *do* want to be visible in the advanced form
-+                # when adding a Plone Site.  So we keep our main profile
-+                # visible:
-+                # 'Products.CMFQuickInstallerTool:CMFQuickInstallerTool',
-+                # But our uninstall profile should not be shown.
-                 'Products.CMFQuickInstallerTool:uninstall',
-             ]
- 
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-14T13:58:24+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/351b9ad87555a638522a63f0f1ab29681775f32d
-
-Removed several TODOs and use tool.png instead of .gif.
-
-PNG copied from Products/CMFPlone/skins/plone_images/product_icon.png.
-Several TODO items were ancient.
-
-Files changed:
-A Products/CMFQuickInstallerTool/tool.png
-M Products/CMFQuickInstallerTool/InstalledProduct.py
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-M Products/CMFQuickInstallerTool/__init__.py
-
-diff --git a/Products/CMFQuickInstallerTool/InstalledProduct.py b/Products/CMFQuickInstallerTool/InstalledProduct.py
-index c8a0b6c..6aa872f 100644
---- a/Products/CMFQuickInstallerTool/InstalledProduct.py
-+++ b/Products/CMFQuickInstallerTool/InstalledProduct.py
-@@ -259,8 +259,9 @@ def uninstall(
-         """
-         portal = getToolByName(self, 'portal_url').getPortalObject()
- 
--        # TODO eventually we will land Event system and could remove
--        # this 'removal_inprogress' hack
-+        # Years ago we wanted to remove this 'removal_inprogress' hack
-+        # after an Event system was landed, but no one did that,
-+        # so let's just keep it.
-         if self.isLocked() and getattr(portal, 'removal_inprogress', False):
-             raise ValueError(
-                 'The product is locked and cannot be uninstalled!'
-@@ -276,7 +277,6 @@ def uninstall(
-             uninstaller = uninstaller.__of__(portal)
-             try:
-                 res = uninstaller(portal, reinstall=reinstall)
--                # XXX log it
-             except TypeError:
-                 res = uninstaller(portal)
-         elif not reinstall:
-@@ -375,11 +375,12 @@ def _cascadeRemove(self, cascade):
-                     logger.warning("Failed to delete '%s' from content type "
-                                    "registry" % pred)
- 
--        if 'adapters' in cascade:
--            adapters = getattr(aq_base(self), 'adapters', [])
--            if adapters:
--                sm = getSiteManager()
--                # TODO: expand this to actually cover adapter registrations
-+        # We could have expanded this to actually cover adapter registrations,
-+        # but no one wanted this enough to implement it.
-+        # if 'adapters' in cascade:
-+        #     adapters = getattr(aq_base(self), 'adapters', [])
-+        #     if adapters:
-+        #         sm = getSiteManager()
- 
-         if 'utilities' in cascade:
-             utilities = getattr(aq_base(self), 'utilities', [])
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index 5a48a00..961cc7e 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -118,7 +118,6 @@ class QuickInstallerTool(UniqueObject, ObjectManager, SimpleItem):
- 
-     meta_type = 'CMF QuickInstaller Tool'
-     id = 'portal_quickinstaller'
--    # toolicon = 'skins/plone_images/product_icon.png'
- 
-     security = ClassSecurityInfo()
- 
-@@ -153,7 +152,7 @@ def _install_profile_info(self, productname):
-         profiles = portal_setup.listProfileInfo()
- 
-         # We are only interested in extension profiles for the product
--        # TODO Remove the manual Products.* check here. It is still needed.
-+        # We keep the manual Products.* check here.  It is still needed.
-         profiles = [
-             prof for prof in profiles
-             if prof['type'] == EXTENSION
-@@ -176,7 +175,7 @@ def getInstallProfile(self, productname):
-         """
-         profiles = self._install_profile_info(productname)
- 
--        # XXX Currently QI always uses the first profile
-+        # QI always uses the first profile
-         if profiles:
-             return profiles[0]
-         return None
-@@ -233,7 +232,7 @@ def isProductInstallable(self, productname):
- 
-         setup_tool = getToolByName(self, 'portal_setup')
-         try:
--            # XXX Currently QI always uses the first profile
-+            # QI always uses the first profile
-             setup_tool.getProfileDependencyChain(profiles[0])
-         except KeyError as e:
-             self._init_errors()
-@@ -489,7 +488,6 @@ def deriveSettingsFromSnapshots(self, before, after):
-         if len(after['adapters']) > len(before['adapters']):
-             registrations = [reg for reg in after['adapters']
-                              if reg not in before['adapters']]
--            # TODO: expand this to actually cover adapter registrations
- 
-         utilities = []
-         if len(after['utilities']) > len(before['utilities']):
-@@ -583,7 +581,7 @@ def installProduct(
-         else:
-             reqstorage = None
- 
--        # XXX We can not use getToolByName since that returns a utility
-+        # We can not use getToolByName since that might return a utility
-         # without a RequestContainer. This breaks import steps that need
-         # to run tools which request self.REQUEST.
-         portal_setup = aq_get(portal, 'portal_setup', None, 1)
-@@ -934,6 +932,3 @@ def upgradeProduct(self, pid):
- 
- 
- InitializeClass(QuickInstallerTool)
--# TODO: we probably want this, copied from CMPlone:
--# from Products.CMFCore.utils import registerToolInterface
--# registerToolInterface('portal_quickinstaller', IQuickInstallerTool)
-diff --git a/Products/CMFQuickInstallerTool/__init__.py b/Products/CMFQuickInstallerTool/__init__.py
-index 5cfccca..b6bae32 100644
---- a/Products/CMFQuickInstallerTool/__init__.py
-+++ b/Products/CMFQuickInstallerTool/__init__.py
-@@ -10,16 +10,16 @@
- def initialize(context):
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import addQuickInstallerTool  # noqa
--    # TODO: maybe copy Products/CMFPlone/skins/plone_images/product_icon.png
-+
-     ToolInit(
-         'CMF QuickInstaller Tool',
-         tools=(QuickInstallerTool, ),
--        icon='tool.gif'
-+        icon='tool.png'
-     ).initialize(context)
- 
-     context.registerClass(
-         QuickInstallerTool,
-         meta_type="CMFQuickInstallerTool",
-         constructors=(addQuickInstallerTool, ),
--        icon='tool.gif'
-+        icon='tool.png'
-     )
-diff --git a/Products/CMFQuickInstallerTool/tool.png b/Products/CMFQuickInstallerTool/tool.png
-new file mode 100644
-index 0000000..e8536e0
-Binary files /dev/null and b/Products/CMFQuickInstallerTool/tool.png differ
-
-
-Repository: Products.CMFQuickInstallerTool
-
-
-Branch: refs/heads/master
-Date: 2018-02-15T23:38:09+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFQuickInstallerTool/commit/6ef1b3b0d897037cf5dd122e1646f2c8b0eb90e8
-
-Merge pull request #18 from plone/add-functionality-and-tests-from-cmfplone
-
-Add functionality and tests from cmfplone
-
-Files changed:
-A Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-A Products/CMFQuickInstallerTool/testing.py
-A Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-A Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-A Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-A Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-A Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-A Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-A Products/CMFQuickInstallerTool/tool.png
 M CHANGES.rst
-M Products/CMFQuickInstallerTool/InstalledProduct.py
-M Products/CMFQuickInstallerTool/QuickInstallerTool.py
-M Products/CMFQuickInstallerTool/__init__.py
-M Products/CMFQuickInstallerTool/configure.zcml
-M Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-M Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-M Products/CMFQuickInstallerTool/tests/actions.txt
-M Products/CMFQuickInstallerTool/tests/install.txt
-M Products/CMFQuickInstallerTool/tests/testSetup.py
-M Products/CMFQuickInstallerTool/tests/test_browser.py
-M Products/CMFQuickInstallerTool/tests/test_install.py
-D Products/CMFQuickInstallerTool/profiles/test/actions.xml
-D Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml
-D Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml
+M src/plone/api/content.py
+M src/plone/api/portal.py
+M src/plone/api/tests/test_content.py
+M src/plone/api/tests/test_group.py
+M src/plone/api/tests/test_portal.py
+M src/plone/api/tests/test_user.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 09e6175..ec2cd95 100644
+index eda8c7a..eee3653 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -10,7 +10,10 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Added functionality and tests from CMFPlone.
-+  Added uninstall profile.
-+  And no longer count on being installed by CMFPlone, especially in tests.
-+  [maurits]
+@@ -14,6 +14,8 @@ New features:
  
  Bug fixes:
  
-diff --git a/Products/CMFQuickInstallerTool/InstalledProduct.py b/Products/CMFQuickInstallerTool/InstalledProduct.py
-index c8a0b6c..6aa872f 100644
---- a/Products/CMFQuickInstallerTool/InstalledProduct.py
-+++ b/Products/CMFQuickInstallerTool/InstalledProduct.py
-@@ -259,8 +259,9 @@ def uninstall(
-         """
-         portal = getToolByName(self, 'portal_url').getPortalObject()
- 
--        # TODO eventually we will land Event system and could remove
--        # this 'removal_inprogress' hack
-+        # Years ago we wanted to remove this 'removal_inprogress' hack
-+        # after an Event system was landed, but no one did that,
-+        # so let's just keep it.
-         if self.isLocked() and getattr(portal, 'removal_inprogress', False):
-             raise ValueError(
-                 'The product is locked and cannot be uninstalled!'
-@@ -276,7 +277,6 @@ def uninstall(
-             uninstaller = uninstaller.__of__(portal)
-             try:
-                 res = uninstaller(portal, reinstall=reinstall)
--                # XXX log it
-             except TypeError:
-                 res = uninstaller(portal)
-         elif not reinstall:
-@@ -375,11 +375,12 @@ def _cascadeRemove(self, cascade):
-                     logger.warning("Failed to delete '%s' from content type "
-                                    "registry" % pred)
- 
--        if 'adapters' in cascade:
--            adapters = getattr(aq_base(self), 'adapters', [])
--            if adapters:
--                sm = getSiteManager()
--                # TODO: expand this to actually cover adapter registrations
-+        # We could have expanded this to actually cover adapter registrations,
-+        # but no one wanted this enough to implement it.
-+        # if 'adapters' in cascade:
-+        #     adapters = getattr(aq_base(self), 'adapters', [])
-+        #     if adapters:
-+        #         sm = getSiteManager()
- 
-         if 'utilities' in cascade:
-             utilities = getattr(aq_base(self), 'utilities', [])
-diff --git a/Products/CMFQuickInstallerTool/QuickInstallerTool.py b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-index 638b7f4..961cc7e 100644
---- a/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-+++ b/Products/CMFQuickInstallerTool/QuickInstallerTool.py
-@@ -37,8 +37,11 @@
-     pkg_resources.get_distribution('Products.CMFPlone')
- except pkg_resources.DistributionNotFound:
-     from Products.CMFCore.interfaces import ISiteRoot
-+    INonInstallablePlone = None
- else:
-     from Products.CMFPlone.interfaces import IPloneSiteRoot as ISiteRoot
-+    from Products.CMFPlone.interfaces import INonInstallable as \
-+        INonInstallablePlone
- 
- _ = MessageFactory("plone")
- 
-@@ -70,9 +73,34 @@ def addQuickInstallerTool(self, REQUEST=None):
- class HiddenProducts(object):
- 
-     def getNonInstallableProducts(self):
-+        # We can't really install ourselves: that would be weird.
-+        # So hide ourselves from ourselves.
-         return ['CMFQuickInstallerTool', 'Products.CMFQuickInstallerTool']
++- Improved code quality according to isort and flake8.  [maurits]
++
+ - Fixed regular expression in test for Plone version.  [maurits]
  
  
-+if INonInstallablePlone is not None:
-+    @implementer(INonInstallablePlone)
-+    class HiddenProductsForPlone(object):
-+
-+        def getNonInstallableProducts(self):
-+            # Even though the Plone add-ons control panel is only using
-+            # GenericSetup, it seems best not to advertise ourselves as an
-+            # installable product there.
-+            return ['Products.CMFQuickInstallerTool']
-+
-+        def getNonInstallableProfiles(self):
-+            return [
-+                # When CMFPlone no longer depends on us,
-+                # but some other add-on (or an admin) pulls us in anyway,
-+                # we *do* want to be visible in the advanced form
-+                # when adding a Plone Site.  So we keep our main profile
-+                # visible:
-+                # 'Products.CMFQuickInstallerTool:CMFQuickInstallerTool',
-+                # But our uninstall profile should not be shown.
-+                'Products.CMFQuickInstallerTool:uninstall',
-+            ]
-+
-+
- def _product_sort_key(product):
-     return product.get('title', product.get('id', None))
+diff --git a/src/plone/api/content.py b/src/plone/api/content.py
+index 03913c9..fd0136e 100644
+--- a/src/plone/api/content.py
++++ b/src/plone/api/content.py
+@@ -407,8 +407,9 @@ def _wf_transitions_for(workflow, from_state, to_state):
  
-@@ -124,7 +152,7 @@ def _install_profile_info(self, productname):
-         profiles = portal_setup.listProfileInfo()
+     transition_maps = {}
+     for transition in workflow.transitions.objectValues():
+-        value = (transition.getId(), exit_state_maps.get(
+-            transition.getId(), [],),
++        value = (
++            transition.getId(),
++            exit_state_maps.get(transition.getId(), []),
+         )
+         if transition.new_state_id not in transition_maps:
+             transition_maps[transition.new_state_id] = [value]
+diff --git a/src/plone/api/portal.py b/src/plone/api/portal.py
+index eada107..8d1791b 100644
+--- a/src/plone/api/portal.py
++++ b/src/plone/api/portal.py
+@@ -2,8 +2,6 @@
+ """Module that provides various utility methods on the portal level."""
  
-         # We are only interested in extension profiles for the product
--        # TODO Remove the manual Products.* check here. It is still needed.
-+        # We keep the manual Products.* check here.  It is still needed.
-         profiles = [
-             prof for prof in profiles
-             if prof['type'] == EXTENSION
-@@ -147,7 +175,7 @@ def getInstallProfile(self, productname):
-         """
-         profiles = self._install_profile_info(productname)
+ from Acquisition import aq_inner
+-from datetime import datetime as dtime
+-from datetime import date
+ from email.utils import formataddr
+ from email.utils import parseaddr
+ from logging import getLogger
+@@ -20,6 +18,7 @@
+ from zope.globalrequest import getRequest
+ from zope.interface.interfaces import IInterface
  
--        # XXX Currently QI always uses the first profile
-+        # QI always uses the first profile
-         if profiles:
-             return profiles[0]
-         return None
-@@ -204,7 +232,7 @@ def isProductInstallable(self, productname):
++import datetime as dtime
+ import pkg_resources
+ import six
  
-         setup_tool = getToolByName(self, 'portal_setup')
-         try:
--            # XXX Currently QI always uses the first profile
-+            # QI always uses the first profile
-             setup_tool.getProfileDependencyChain(profiles[0])
-         except KeyError as e:
-             self._init_errors()
-@@ -460,7 +488,6 @@ def deriveSettingsFromSnapshots(self, before, after):
-         if len(after['adapters']) > len(before['adapters']):
-             registrations = [reg for reg in after['adapters']
-                              if reg not in before['adapters']]
--            # TODO: expand this to actually cover adapter registrations
+@@ -239,10 +238,10 @@ def get_localized_time(datetime=None, long_format=False, time_only=False):
+     request = getRequest()
  
-         utilities = []
-         if len(after['utilities']) > len(before['utilities']):
-@@ -554,7 +581,7 @@ def installProduct(
-         else:
-             reqstorage = None
+     # isinstance won't work because of date -> datetime inheritance
+-    if type(datetime) is date:
++    if type(datetime) is dtime.date:
+         if time_only:
+             return ''
+-        datetime = dtime(datetime.year, datetime.month, datetime.day)
++        datetime = dtime.datetime(datetime.year, datetime.month, datetime.day)
+         long_format = False
  
--        # XXX We can not use getToolByName since that returns a utility
-+        # We can not use getToolByName since that might return a utility
-         # without a RequestContainer. This breaks import steps that need
-         # to run tools which request self.REQUEST.
-         portal_setup = aq_get(portal, 'portal_setup', None, 1)
-@@ -817,5 +844,91 @@ def getInstanceHome(self):
-         """
-         return os.environ.get('INSTANCE_HOME')
+     return tool.ulocalized_time(
+diff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py
+index 1662e8f..1debbe8 100644
+--- a/src/plone/api/tests/test_content.py
++++ b/src/plone/api/tests/test_content.py
+@@ -748,7 +748,8 @@ def test_delete_ignore_linkintegrity(self):
  
-+    @security.protected(ManagePortal)
-+    def upgradeInfo(self, pid):
-+        # Returns a dict with two booleans values, stating if an upgrade
-+        # required and available.
-+        available = self.isProductInstallable(pid)
-+        if not available:
-+            return False
-+        # Product version as per version.txt or fallback on metadata file
-+        product_version = str(self.getProductVersion(pid))
-+        installed_product_version = self._getOb(pid).getInstalledVersion()
-+        profile = self.getInstallProfile(pid)
-+        if profile is None:
-+            # No GS profile, simple case as before, we can always upgrade
-+            return dict(
-+                required=product_version != installed_product_version,
-+                available=True,
-+                hasProfile=False,
-+                installedVersion=installed_product_version,
-+                newVersion=product_version,
-+            )
-+        profile_id = profile['id']
-+        setup = getToolByName(self, 'portal_setup')
-+        profile_version = str(setup.getVersionForProfile(profile_id))
-+        if profile_version == 'latest':
-+            profile_version = self.getLatestUpgradeStep(profile_id)
-+        if profile_version == 'unknown':
-+            # If a profile doesn't have a metadata.xml use product version
-+            profile_version = product_version
-+        installed_profile_version = setup.getLastVersionForProfile(profile_id)
-+        # getLastVersionForProfile returns the version as a tuple or unknown.
-+        if installed_profile_version != 'unknown':
-+            installed_profile_version = str(
-+                '.'.join(installed_profile_version))
-+        return dict(
-+            required=profile_version != installed_profile_version,
-+            available=len(setup.listUpgrades(profile_id)) > 0,
-+            hasProfile=True,
-+            installedVersion=installed_profile_version,
-+            newVersion=profile_version,
-+        )
-+
-+    @security.protected(ManagePortal)
-+    def getLatestUpgradeStep(self, profile_id):
-+        """
-+        Get the highest ordered upgrade step available to
-+        a specific profile.
-+
-+        If anything errors out then go back to "old way"
-+        by returning 'unknown'
-+        """
-+        setup = getToolByName(self, 'portal_setup')
-+        profile_version = 'unknown'
-+        try:
-+            available = setup.listUpgrades(profile_id, True)
-+            if available:  # could return empty sequence
-+                latest = available[-1]
-+                profile_version = max(latest['dest'],
-+                                      key=pkg_resources.parse_version)
-+        except Exception:
-+            pass
-+
-+        return profile_version
-+
-+    @security.protected(ManagePortal)
-+    def upgradeProduct(self, pid):
-+        profile = self.getInstallProfile(pid)
-+        if profile is None:
-+            # No upgrade profiles
-+            return self.reinstallProducts(products=[pid])
-+        profile_id = profile['id']
-+        setup = getToolByName(self, 'portal_setup')
-+        upgrades = setup.listUpgrades(profile_id)
-+        for upgrade in upgrades:
-+            # An upgrade may be a single step (for a bare upgradeStep)
-+            # or a list of steps (for upgradeSteps containing upgradeStep
-+            # directives).
-+            if not isinstance(upgrade, list):
-+                upgrade = [upgrade]
-+            for upgradestep in upgrade:
-+                step = upgradestep['step']
-+                step.doStep(setup)
-+        version = str(profile['version'])
-+        if version == 'latest':
-+            version = self.getLatestUpgradeStep(profile_id)
-+        setup.setLastVersionForProfile(profile_id, version)
-+
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_check_linkintegrity(self):
+         """Test deleting a content item with a link pointed at it."""
+         self._set_text(self.team, '<a href="contact">contact</a>')
+@@ -762,7 +763,8 @@ def test_delete_check_linkintegrity(self):
  
- InitializeClass(QuickInstallerTool)
-diff --git a/Products/CMFQuickInstallerTool/__init__.py b/Products/CMFQuickInstallerTool/__init__.py
-index cfe2766..b6bae32 100644
---- a/Products/CMFQuickInstallerTool/__init__.py
-+++ b/Products/CMFQuickInstallerTool/__init__.py
-@@ -10,15 +10,16 @@
- def initialize(context):
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-     from Products.CMFQuickInstallerTool.QuickInstallerTool import addQuickInstallerTool  # noqa
-+
-     ToolInit(
-         'CMF QuickInstaller Tool',
-         tools=(QuickInstallerTool, ),
--        icon='tool.gif'
-+        icon='tool.png'
-     ).initialize(context)
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_multiple_check_linkintegrity(self):
+         """Test deleting multiple item with linkintegrity-breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -778,7 +780,8 @@ def test_delete_multiple_check_linkintegrity(self):
  
-     context.registerClass(
-         QuickInstallerTool,
-         meta_type="CMFQuickInstallerTool",
-         constructors=(addQuickInstallerTool, ),
--        icon='tool.gif'
-+        icon='tool.png'
-     )
-diff --git a/Products/CMFQuickInstallerTool/configure.zcml b/Products/CMFQuickInstallerTool/configure.zcml
-index ee28c45..53d31fd 100644
---- a/Products/CMFQuickInstallerTool/configure.zcml
-+++ b/Products/CMFQuickInstallerTool/configure.zcml
-@@ -14,6 +14,13 @@
-       provides="Products.GenericSetup.interfaces.EXTENSION"
-       />
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_multiple_ignore_linkintegrity(self):
+         """Test deleting multiple items ignoring linkintegrity-breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -793,7 +796,8 @@ def test_delete_multiple_ignore_linkintegrity(self):
  
-+  <genericsetup:registerProfile
-+      name="uninstall"
-+      title="uninstall CMFQuickInstallerTool"
-+      directory="profiles/uninstall"
-+      provides="Products.GenericSetup.interfaces.EXTENSION"
-+      />
-+
-   <subscriber
-       zcml:condition="installed Products.GenericSetup.events"
-       handler=".events.handleBeforeProfileImportEvent" />
-@@ -26,5 +33,10 @@
-       factory=".QuickInstallerTool.HiddenProducts"
-       name="Products.CMFQuickInstallerTool"
-       />
-+  <utility
-+      factory=".QuickInstallerTool.HiddenProductsForPlone"
-+      zcml:condition="installed Products.CMFPlone"
-+      name="Products.CMFQuickInstallerTool"
-+      />
+     @unittest.skipIf(
+         HAS_PACONTENTYPES and not NEW_LINKINTEGRITY,
+-        'This test only makes sense with Archetypes or new Linkintegrity.')
++        'This test only makes sense with Archetypes or new Linkintegrity.',
++    )
+     def test_delete_with_internal_breaches(self):
+         """Test deleting multiple with internal linkintegrity breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+@@ -809,7 +813,9 @@ def test_delete_with_internal_breaches(self):
+             self.assertIn('training', self.portal['events'].keys())
  
- </configure>
-diff --git a/Products/CMFQuickInstallerTool/forms/install_products_form.zpt b/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-index 57b6489..22abadb 100644
---- a/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-+++ b/Products/CMFQuickInstallerTool/forms/install_products_form.zpt
-@@ -110,14 +110,14 @@
-                 class="form-help">
-               product version
-             </td>
--            <td tal:condition="python:here.isProductAvailable(product['id'])"
-+            <td tal:condition="python:here.isProductInstallable(product['id'])"
-                 class="form-help">
-               <font tal:attributes="color python:test(prodver != product['installedVersion'],'#ff0000','#000000')"
-                     tal:content="prodver">
-                 product version
-               </font>
-             </td>
--            <td tal:condition="python:not here.isProductAvailable(product['id'])"
-+            <td tal:condition="python:not here.isProductInstallable(product['id'])"
-                 class="form-help">
-               <font color="#ff0000">
-                 removed from Products folder
-diff --git a/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py b/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-index dea30c2..8ca94e4 100644
---- a/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-+++ b/Products/CMFQuickInstallerTool/interfaces/portal_quickinstaller.py
-@@ -22,7 +22,10 @@ def isProductInstallable(productname):
+     @unittest.skipUnless(
+-        NEW_LINKINTEGRITY, 'Only new Linkintegrity resolves internal breaches')
++        NEW_LINKINTEGRITY,
++        'Only new Linkintegrity resolves internal breaches',
++    )
+     def test_delete_with_resolved_internal_breaches(self):
+         """Test deleting multiple with internal linkintegrity breaches."""
+         self._set_text(self.team, '<a href="../about/contact">contact</a>')
+diff --git a/src/plone/api/tests/test_group.py b/src/plone/api/tests/test_group.py
+index 187b992..d7dfb37 100644
+--- a/src/plone/api/tests/test_group.py
++++ b/src/plone/api/tests/test_group.py
+@@ -67,8 +67,8 @@ def test_create_with_roles_and_groups(self):
  
-     def isProductAvailable(productname):
-         ''' is the product directory present (to check if it has been deleted
--            from the Filesystem '''
-+            from the Filesystem
-+
-+        Deprecated: use isProductInstallable instead.
-+        '''
+         ham_group = api.group.create(
+             groupname='ham',
+-            roles=['Editor', ],
+-            groups=['Reviewer', ],
++            roles=['Editor'],
++            groups=['Reviewer'],
+         )
+         group = self.group_tool.getGroupById('ham')
+         self.assertEqual(ham_group, group)
+@@ -491,7 +491,7 @@ def test_grant_roles_in_context(self):
+         )
+         self.assertEqual(
+             ROLES,
+-            set(api.group.get_roles(group=group, obj=folder, inherit=False,)),
++            set(api.group.get_roles(group=group, obj=folder, inherit=False)),
+         )
+         self.assertEqual(
+             set([]),
+@@ -749,7 +749,7 @@ def test_revoke_roles_in_context(self):
+             api.group.get_roles(group=group, obj=document),
+         )
  
-     def installProduct(productname, locked=False, hidden=False,
-                        swallowExceptions=False, forceProfile=False,
-diff --git a/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml b/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-new file mode 100644
-index 0000000..338a410
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/profiles/uninstall/toolset.xml
-@@ -0,0 +1,4 @@
-+<?xml version="1.0"?>
-+<tool-setup>
-+ <forbidden tool_id="portal_quickinstaller" />
-+</tool-setup>
-diff --git a/Products/CMFQuickInstallerTool/testing.py b/Products/CMFQuickInstallerTool/testing.py
-new file mode 100644
-index 0000000..f6787de
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/testing.py
-@@ -0,0 +1,102 @@
-+# -*- coding: utf-8 -*-
-+from plone.app import testing
-+from plone.testing import z2
-+from Products.CMFQuickInstallerTool.events import handleBeforeProfileImportEvent  # noqa
-+from Products.CMFQuickInstallerTool.events import handleProfileImportedEvent
-+from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
-+from Products.GenericSetup import EXTENSION
-+from Products.GenericSetup import profile_registry
-+
-+import pkg_resources
-+import zope.component
-+
-+
-+try:
-+    pkg_resources.get_distribution('plone.app.contenttypes')
-+except pkg_resources.DistributionNotFound:
-+    # assume we have an other content framework (Archetypes) here
-+    TESTING_FIXTURE = testing.PLONE_FIXTURE
-+else:
-+    from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
-+    TESTING_FIXTURE = PLONE_APP_CONTENTTYPES_FIXTURE
-+
-+
-+# We patch a method and store the original here so we can restore it later:
-+TEST_PATCHES = {}
-+
-+
-+class QuickInstallerInstalledFixture(testing.PloneSandboxLayer):
-+
-+    defaultBases = (TESTING_FIXTURE, )
-+    installed_self = False
-+
-+    def setUpZope(self, app, configurationContext):
-+        sm = zope.component.getSiteManager()
-+        sm.registerHandler(handleBeforeProfileImportEvent)
-+        sm.registerHandler(handleProfileImportedEvent)
-+        # Install a dummy product.  Quietly, because it is not a real product,
-+        # so it cannot be found.
-+        z2.installProduct(
-+            app, 'Products.CMFQuickInstallerTool.tests', quiet=True)
-+        profile_registry.registerProfile(
-+            'default',
-+            'CMFQI test profile',
-+            'Test profile for CMFQuickInstallerTool',
-+            'profiles/test',
-+            'Products.CMFQuickInstallerTool.tests',
-+            EXTENSION,
-+            for_=None)
-+
-+    def setUpPloneSite(self, portal):
-+        qi = getattr(portal, 'portal_quickinstaller', None)
-+        if qi is None:
-+            setup_tool = portal.portal_setup
-+            setup_tool.runAllImportStepsFromProfile(
-+                'Products.CMFQuickInstallerTool:CMFQuickInstallerTool')
-+            self.installed_self = True
-+
-+    def tearDownPloneSite(self, portal):
-+        if self.installed_self:
-+            setup_tool = portal.portal_setup
-+            setup_tool.runAllImportStepsFromProfile(
-+                'Products.CMFQuickInstallerTool:uninstall')
-+
-+    def tearDownZope(self, app):
-+        profile_registry.unregisterProfile(
-+            'default',
-+            'Products.CMFQuickInstallerTool.tests'
-+        )
-+        sm = zope.component.getSiteManager()
-+        sm.unregisterHandler(handleBeforeProfileImportEvent)
-+        sm.unregisterHandler(handleProfileImportedEvent)
-+
-+
-+BASE_CQI_FIXTURE = QuickInstallerInstalledFixture()
-+CQI_INTEGRATION_TESTING = testing.IntegrationTesting(
-+    bases=(BASE_CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Integration')
-+
-+
-+class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
-+    """Layer with a hack to always consider the QITest package installable.
-+
-+    This avoids needing to register dummy products.
-+    """
-+
-+    defaultBases = (BASE_CQI_FIXTURE,)
-+
-+    def setUpPloneSite(self, portal):
-+        TEST_PATCHES['orig_isProductInstallable'] = QuickInstallerTool.isProductInstallable  # noqa
-+
-+        def patched_isProductInstallable(self, productname):
-+            if 'QITest' in productname:
-+                return True
-+            return TEST_PATCHES['orig_isProductInstallable'](self, productname)
-+        QuickInstallerTool.isProductInstallable = patched_isProductInstallable
-+
-+    def tearDownPloneSite(self, portal):
-+        QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
-+
-+
-+CQI_FIXTURE = QuickInstallerCaseFixture()
-+CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
-+    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
-diff --git a/Products/CMFQuickInstallerTool/tests/actions.txt b/Products/CMFQuickInstallerTool/tests/actions.txt
-index a48becc..d63ac78 100644
---- a/Products/CMFQuickInstallerTool/tests/actions.txt
-+++ b/Products/CMFQuickInstallerTool/tests/actions.txt
-@@ -25,8 +25,8 @@ And register the QI tool as a utility:
- Install a product through an extension profile
- ----------------------------------------------
+-        ROLES = set(['Authenticated', ])
++        ROLES = set(['Authenticated'])
+         self.assertEqual(
+             ROLES,
+             set(api.group.get_roles(groupname='ploneboat', obj=folder)),
+diff --git a/src/plone/api/tests/test_portal.py b/src/plone/api/tests/test_portal.py
+index b4ad86f..8b06571 100644
+--- a/src/plone/api/tests/test_portal.py
++++ b/src/plone/api/tests/test_portal.py
+@@ -3,7 +3,6 @@
  
--  >>> result = qi.installProduct('CMFQuickInstallerTool',
--  ...     profile='Products.CMFQuickInstallerTool:test')
-+  >>> result = qi.installProduct('Products.CMFQuickInstallerTool.tests',
-+  ...     profile='Products.CMFQuickInstallerTool.tests:default')
+ from datetime import date
+ from datetime import datetime
+-from DateTime import DateTime
+ from email import message_from_string
+ from pkg_resources import parse_version
+ from plone.api import content
+@@ -23,6 +22,7 @@
+ from zope.interface import Interface
+ from zope.site import LocalSiteManager
  
- Make sure the actions were added:
- 
-@@ -39,7 +39,7 @@ Make sure the actions were added:
- Uninstall the product
- ---------------------
- 
--  >>> qi.uninstallProducts(products=['CMFQuickInstallerTool'])
-+  >>> qi.uninstallProducts(products=['Products.CMFQuickInstallerTool.tests'])
- 
- Verify that all added entries were removed again:
- 
-diff --git a/Products/CMFQuickInstallerTool/tests/install.txt b/Products/CMFQuickInstallerTool/tests/install.txt
-index 34ff46c..c9a750c 100644
---- a/Products/CMFQuickInstallerTool/tests/install.txt
-+++ b/Products/CMFQuickInstallerTool/tests/install.txt
-@@ -213,8 +213,9 @@ Installing the product should not run any profile and thus set no properties.
- 
- Register a 'default'-profile that points to profiles/test
- 
--  >>> interfaces_path = interfaces.__path__[0]
--  >>> default_path = interfaces_path[:-11] + '/profiles/test'
-+  >>> from Products.CMFQuickInstallerTool import tests
-+  >>> tests_path = tests.__path__[0]
-+  >>> default_path = tests_path + '/profiles/test'
-   >>> _profile_registry.registerProfile('default', 'UninstallTest', '', default_path, 'QITest4', 2)
- 
- Installing the product now runs the default-profile.
-@@ -240,7 +241,7 @@ Install again.
- 
- Register a uninstall profile that points to the profiles/test_uninstall
- 
--  >>> uninstall_path = interfaces_path[:-11] + '/profiles/test_uninstall'
-+  >>> uninstall_path = tests_path + '/profiles/test_uninstall'
-   >>> _profile_registry.registerProfile('uninstall', 'UninstallTest', '', uninstall_path, 'QITest4', 2)
- 
-   >>> uninstall = qi.getUninstallProfile('QITest4')
-diff --git a/Products/CMFQuickInstallerTool/profiles/test/actions.xml b/Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test/actions.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test/actions.xml
-diff --git a/Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml b/Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test/propertiestool.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test/propertiestool.xml
-diff --git a/Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml b/Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-similarity index 100%
-rename from Products/CMFQuickInstallerTool/profiles/test_uninstall/propertiestool.xml
-rename to Products/CMFQuickInstallerTool/tests/profiles/test_uninstall/propertiestool.xml
-diff --git a/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-new file mode 100644
-index 0000000..f871955
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/testQuickInstallerTool.py
-@@ -0,0 +1,66 @@
-+# -*- coding: utf-8 -*-
-+from plone.app.testing import setRoles
-+from plone.app.testing import TEST_USER_ID
-+from Products.CMFQuickInstallerTool import tests
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
-+from zope.configuration import xmlconfig
-+
-+import unittest
-+
-+
-+class TestQuickInstallerTool(unittest.TestCase):
-+
-+    layer = CQI_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-+        self.qi = self.portal.portal_quickinstaller
-+
-+    def _installed(self):
-+        return [p['id'] for p in self.qi.listInstalledProducts()]
-+
-+    def _available(self):
-+        return [p['id'] for p in self.qi.listInstallableProducts()]
-+
-+    def testInstallUninstallProduct(self):
-+        import pkg_resources
-+        try:
-+            pkg_resources.get_distribution('Products.CMFPlacefulWorkflow')
-+        except pkg_resources.DistributionNotFound:
-+            return
-+        # CMFPlacefulWorkflow should be uninstalled, we install it and
-+        # it should not show up as installable
-+        setRoles(self.portal, TEST_USER_ID, ['Manager'])
-+        self.qi.installProducts(['CMFPlacefulWorkflow', ])
-+        self.assertTrue('CMFPlacefulWorkflow' in self._installed())
-+        self.assertFalse('CMFPlacefulWorkflow' in self._available())
-+        self.qi.uninstallProducts(['CMFPlacefulWorkflow', ])
-+        self.assertTrue('CMFPlacefulWorkflow' in self._available())
-+        self.assertFalse('CMFPlacefulWorkflow' in self._installed())
-+
-+    def testLatestUpgradeProfiles(self):
-+        xmlconfig.file(
-+            'test_upgrades1.zcml',
-+            package=tests,
-+            context=self.layer['configurationContext']
-+        )
-+        latest = self.qi.getLatestUpgradeStep(
-+            'Products.CMFQuickInstallerTool.tests:default')
-+        self.assertEqual(latest, '3')
-+
-+    def testLatestUpgradeProfiles2(self):
-+        # make sure strings don't break things
-+        # note that pkg_resources interprets 1 as
-+        # ''00000001', which is > 'banana'
-+        xmlconfig.file(
-+            'test_upgrades2.zcml',
-+            package=tests,
-+            context=self.layer['configurationContext']
-+        )
-+        latest = self.qi.getLatestUpgradeStep(
-+            'Products.CMFQuickInstallerTool.tests:default')
-+        self.assertEqual(latest, '3')
-+
-+
-+def dummy_handler():
-+    pass
-diff --git a/Products/CMFQuickInstallerTool/tests/testSetup.py b/Products/CMFQuickInstallerTool/tests/testSetup.py
-index ea1def6..9a12262 100644
---- a/Products/CMFQuickInstallerTool/tests/testSetup.py
-+++ b/Products/CMFQuickInstallerTool/tests/testSetup.py
-@@ -2,45 +2,69 @@
- #
- # Setup tests
- #
--from plone.app.testing.bbb import PloneTestCase
--from Products.CMFQuickInstallerTool.InstalledProduct import InstalledProduct
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
- 
-+import unittest
- 
--class TestQuickInstaller(PloneTestCase):
- 
--    def afterSetUp(self):
-+class TestQuickInstaller(unittest.TestCase):
-+
-+    layer = CQI_INTEGRATION_TESTING
-+
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-         self.qi = getattr(self.portal, 'portal_quickinstaller', None)
- 
-     def testTool(self):
--        self.failUnless('portal_quickinstaller' in self.portal.objectIds())
-+        self.assertTrue('portal_quickinstaller' in self.portal.objectIds())
- 
-     def testIsNotInstalled(self):
--        self.failIf(self.qi.isProductInstalled('CMFQuickInstallerTool'))
-+        self.assertFalse(self.qi.isProductInstalled('CMFQuickInstallerTool'))
-+        self.assertFalse(self.qi.isProductInstalled(
-+            'Products.CMFQuickInstallerTool'))
- 
-     def testIsNotListedAsInstallable(self):
-         prods = self.qi.listInstallableProducts()
-         prods = [x['id'] for x in prods]
--        self.failIf('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('Products.CMFQuickInstallerTool' in prods)
- 
-     def testIsNotListedAsInstalled(self):
-         prods = self.qi.listInstalledProducts()
-         prods = [x['id'] for x in prods]
--        self.failIf('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('CMFQuickInstallerTool' in prods)
-+        self.assertFalse('Products.CMFQuickInstallerTool' in prods)
-+
-+    def test_getToolByName(self):
-+        from Products.CMFCore.utils import getToolByName
-+        self.assertIsNotNone(
-+            getToolByName(self.portal, 'portal_quickinstaller', None))
-+
-+    def test_uninstall_self_via_portal_setup(self):
-+        setup_tool = self.portal.portal_setup
-+        setup_tool.runAllImportStepsFromProfile(
-+            'Products.CMFQuickInstallerTool:uninstall')
-+        self.assertFalse('portal_quickinstaller' in self.portal.objectIds())
-+
- 
-+class TestInstalledProduct(unittest.TestCase):
- 
--class TestInstalledProduct(PloneTestCase):
-+    layer = CQI_INTEGRATION_TESTING
- 
--    def afterSetUp(self):
-+    def setUp(self):
-+        self.portal = self.layer['portal']
-         self.qi = getattr(self.portal, 'portal_quickinstaller', None)
- 
-     def testSlotsMigration(self):
-+        from Products.CMFQuickInstallerTool.InstalledProduct import \
-+            InstalledProduct
-         # leftslots and rightslots have been class variables ones. Make sure
-         # using old instances without these properties doesn't break.
- 
-         # New instances should have the properties
-         new = InstalledProduct('new')
--        self.failUnless(hasattr(new, 'leftslots'))
--        self.failUnless(hasattr(new, 'rightslots'))
-+        self.assertTrue(hasattr(new, 'leftslots'))
-+        self.assertTrue(hasattr(new, 'rightslots'))
- 
-         # Now emulate an old instance
-         old = InstalledProduct('old')
-@@ -50,12 +74,12 @@ def testSlotsMigration(self):
-         # Make sure calling the API will give you no error but silently
-         # add the property
-         left = old.getLeftSlots()
--        self.failUnless(left == [])
--        self.failUnless(old.leftslots == [])
-+        self.assertTrue(left == [])
-+        self.assertTrue(old.leftslots == [])
- 
-         right = old.getRightSlots()
--        self.failUnless(right == [])
--        self.failUnless(old.rightslots == [])
-+        self.assertTrue(right == [])
-+        self.assertTrue(old.rightslots == [])
- 
-         slots = old.getSlots()
--        self.failUnless(slots == [])
-+        self.assertTrue(slots == [])
-diff --git a/Products/CMFQuickInstallerTool/tests/test_browser.py b/Products/CMFQuickInstallerTool/tests/test_browser.py
-index 7505e0c..1056127 100644
---- a/Products/CMFQuickInstallerTool/tests/test_browser.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_browser.py
-@@ -6,7 +6,7 @@
- from plone.app.testing import TEST_USER_PASSWORD
- from plone.protect import createToken
- from plone.testing import z2
--from Products.CMFQuickInstallerTool.tests.test_install import CQI_FUNCTIONAL_TESTING  # noqa
-+from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
- from zExceptions import Forbidden
- 
++import DateTime
+ import mock
  import unittest
-@@ -47,6 +47,11 @@ def _get_product_for_install(self, qi):
-         # Fall back to the first one.
-         return installable_ids[0]
  
-+    def test_portal_quickinstaller(self):
-+        url = 'portal_quickinstaller/manage_installProductsForm'
-+        view = self.portal.restrictedTraverse(url)
-+        self.assertTrue(view(), msg='{0} is broken'.format(url))
-+
-     def test_installProducts_call(self):
-         # It should work fine without a REQUEST argument.
-         qi = self.portal.portal_quickinstaller
-@@ -117,6 +122,6 @@ def test_installProducts_get(self):
-             product, csrf_token)
-         self.assertRaises(Forbidden, self.browser.open, url)
-         # The product must NOT have successfully been installed.
--        self.failIf(
-+        self.assertFalse(
-             qi.isProductInstalled(product),
-             'Should not have installed %s using GET request.' % product)
-diff --git a/Products/CMFQuickInstallerTool/tests/test_install.py b/Products/CMFQuickInstallerTool/tests/test_install.py
-index 271f91b..4477e25 100644
---- a/Products/CMFQuickInstallerTool/tests/test_install.py
-+++ b/Products/CMFQuickInstallerTool/tests/test_install.py
-@@ -1,82 +1,25 @@
- # -*- coding: utf-8 -*-
--from plone.app import testing
- from plone.testing import layered
--from Products.CMFQuickInstallerTool.events import handleBeforeProfileImportEvent  # noqa
--from Products.CMFQuickInstallerTool.events import handleProfileImportedEvent
--from Products.CMFQuickInstallerTool.QuickInstallerTool import QuickInstallerTool  # noqa
--from Products.GenericSetup import EXTENSION
--from Products.GenericSetup import profile_registry
-+from Products.CMFQuickInstallerTool.testing import CQI_FUNCTIONAL_TESTING
-+from Products.CMFQuickInstallerTool.testing import CQI_INTEGRATION_TESTING
+@@ -386,19 +386,19 @@ def test_get_localized_time(self):
  
- import doctest
--import pkg_resources
- import unittest
--import zope.component
--
--
--try:
--    pkg_resources.get_distribution('plone.app.contenttypes')
--except pkg_resources.DistributionNotFound:
--    # assume we have an other content framework (Archetypes) here
--    TESTING_FIXTURE = testing.PLONE_FIXTURE
--else:
--    from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FIXTURE
--    TESTING_FIXTURE = PLONE_APP_CONTENTTYPES_FIXTURE
+         # tests
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+             long_format=True,
+         )
+         self.assertEqual(result, 'Dec 31, 1999 11:59 PM')
  
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+             time_only=True,
+         )
+         self.assertEqual(result, '11:59 PM')
  
- OPTIONFLAGS = (doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE)
+         result = portal.get_localized_time(
+-            datetime=DateTime(1999, 12, 31, 23, 59),
++            datetime=DateTime.DateTime(1999, 12, 31, 23, 59),
+         )
+         self.assertEqual(result, 'Dec 31, 1999')
  
--TEST_PATCHES = {}
--
--
--class QuickInstallerCaseFixture(testing.PloneSandboxLayer):
--
--    defaultBases = (TESTING_FIXTURE, )
--
--    def setUpZope(self, app, configurationContext):
--        sm = zope.component.getSiteManager()
--        sm.registerHandler(handleBeforeProfileImportEvent)
--        sm.registerHandler(handleProfileImportedEvent)
--
--        profile_registry.registerProfile(
--            'test',
--            'CMFQI test profile',
--            'Test profile for CMFQuickInstallerTool',
--            'profiles/test',
--            'Products.CMFQuickInstallerTool',
--            EXTENSION,
--            for_=None)
--
--    def setUpPloneSite(self, portal):
--        TEST_PATCHES['orig_isProductInstallable'] = QuickInstallerTool.isProductInstallable  # noqa
--
--        def patched_isProductInstallable(self, productname):
--            if (
--                'QITest' in productname
--                or 'CMFQuickInstallerTool' in productname
--            ):
--                return True
--            return TEST_PATCHES['orig_isProductInstallable'](self, productname)
--        QuickInstallerTool.isProductInstallable = patched_isProductInstallable
--
--    def tearDownPloneSite(self, portal):
--        QuickInstallerTool.isProductInstallable = TEST_PATCHES['orig_isProductInstallable']  # noqa
--        profile_registry.unregisterProfile(
--            'test',
--            'Products.CMFQuickInstallerTool'
--        )
--        sm = zope.component.getSiteManager()
--        sm.unregisterHandler(handleBeforeProfileImportEvent)
--        sm.unregisterHandler(handleProfileImportedEvent)
--
--
--CQI_FIXTURE = QuickInstallerCaseFixture()
--CQI_FUNCTIONAL_TESTING = testing.FunctionalTesting(
--    bases=(CQI_FIXTURE, ), name='CMFQuickInstallerToolTest:Functional')
--
+diff --git a/src/plone/api/tests/test_user.py b/src/plone/api/tests/test_user.py
+index 4c88bba..1925c0a 100644
+--- a/src/plone/api/tests/test_user.py
++++ b/src/plone/api/tests/test_user.py
+@@ -138,7 +138,7 @@ def test_create_default_roles(self):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(user=user),
+-            ['Member', 'Authenticated', ],
++            ['Member', 'Authenticated'],
+         )
  
- def test_suite():
-     suite = unittest.TestSuite()
--    for testfile in ['actions.txt', 'profiles.txt', 'install.txt']:
-+    for testfile in ['actions.txt', 'profiles.txt']:
-+        suite.addTest(layered(
-+            doctest.DocFileSuite(
-+                testfile,
-+                package='Products.CMFQuickInstallerTool.tests',
-+                optionflags=OPTIONFLAGS),
-+            layer=CQI_INTEGRATION_TESTING))
-+    for testfile in ['install.txt']:
-         suite.addTest(layered(
-             doctest.DocFileSuite(
-                 testfile,
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-new file mode 100644
-index 0000000..e3b65de
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades1.zcml
-@@ -0,0 +1,33 @@
-+<configure
-+    xmlns="http://namespaces.zope.org/zope"
-+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
-+    i18n_domain="plone">
-+
-+  <genericsetup:upgradeStep
-+      source="*"
-+      destination="1"
-+      title="Null upgrade step"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="2"
-+      destination="3"
-+      title="Add pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="1"
-+      destination="2"
-+      title="Remove pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-+      />
-+
-+</configure>
-diff --git a/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-new file mode 100644
-index 0000000..c184f34
---- /dev/null
-+++ b/Products/CMFQuickInstallerTool/tests/test_upgrades2.zcml
-@@ -0,0 +1,24 @@
-+<configure
-+    xmlns="http://namespaces.zope.org/zope"
-+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
-+    i18n_domain="plone">
-+
-+  <genericsetup:upgradeStep
-+      source="apples"
-+      destination="banana"
-+      title="Add pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-+      />
-+
-+  <genericsetup:upgradeStep
-+      source="cumquats"
-+      destination="dandelions"
-+      title="Remove pants"
-+      description=""
-+      handler="Products.CMFQuickInstallerTool.tests.testQuickInstallerTool.dummy_handler"
-+      profile="Products.CMFQuickInstallerTool.tests:default"
-+      />
-+
-+</configure>
-diff --git a/Products/CMFQuickInstallerTool/tool.png b/Products/CMFQuickInstallerTool/tool.png
-new file mode 100644
-index 0000000..e8536e0
-Binary files /dev/null and b/Products/CMFQuickInstallerTool/tool.png differ
+     def test_create_specified_roles(self):
+@@ -164,7 +164,7 @@ def test_create_no_roles(self):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(user=user),
+-            ['Authenticated', ],
++            ['Authenticated'],
+         )
+ 
+     def test_get_constraints(self):
+@@ -288,7 +288,7 @@ def test_is_anonymous(self):
+ 
+     def test_get_roles_username(self):
+         """Test get roles passing a username."""
+-        ROLES = ['Reviewer', 'Editor', ]
++        ROLES = ['Reviewer', 'Editor']
+         api.user.create(
+             username='chuck',
+             email='chuck@norris.org',
+@@ -710,15 +710,15 @@ def test_revoke_roles(self):
+             password='secret',
+         )
+ 
+-        api.user.grant_roles(username='chuck', roles=['Reviewer', 'Editor', ])
+-        api.user.revoke_roles(username='chuck', roles=['Reviewer', ])
++        api.user.grant_roles(username='chuck', roles=['Reviewer', 'Editor'])
++        api.user.revoke_roles(username='chuck', roles=['Reviewer'])
+         self.assertNotIn('Reviewer', api.user.get_roles(username='chuck'))
+         self.assertNotIn('Reviewer', api.user.get_roles(user=user))
+         self.assertIn('Editor', api.user.get_roles(username='chuck'))
+         self.assertIn('Editor', api.user.get_roles(user=user))
+ 
+         api.user.revoke_roles(username='chuck', roles=('Editor',))
+-        ROLES = ['Authenticated', 'Member', ]
++        ROLES = ['Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck'),
+@@ -785,7 +785,7 @@ def test_revoke_roles_username(self):
+         )
+         from plone.api.exc import InvalidParameterError
+         with self.assertRaises(InvalidParameterError):
+-            api.user.revoke_roles(username='chuck', roles=['Authenticated', ])
++            api.user.revoke_roles(username='chuck', roles=['Authenticated'])
+ 
+     @unittest.skip('Getting the Anonymous user does not work like this.')
+     def test_revoke_roles_from_anonymous(self):
+@@ -794,7 +794,7 @@ def test_revoke_roles_from_anonymous(self):
+             username='Anonymous User',
+             roles=['Reviewer'],
+         )
+-        ROLES = ['Anonymous', ]
++        ROLES = ['Anonymous']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='Anonymous User'),
+@@ -880,7 +880,7 @@ def test_grant_roles_in_context(self):
+             api.user.get_roles(user=user, obj=document),
+         )
+ 
+-        ROLES = ['Editor', 'Contributor', 'Authenticated', 'Member', ]
++        ROLES = ['Editor', 'Contributor', 'Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck', obj=folder),
+@@ -967,7 +967,7 @@ def getRoles(self, principal_id):
+         # The adapter role is in in the local roles but not persistent
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=folder, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         local_roles = getattr(folder, '__ac_local_roles__', {})
+         self.assertEqual(
+@@ -981,7 +981,7 @@ def getRoles(self, principal_id):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document),
+-            ['Member', 'Authenticated', 'Contributor', 'Reviewer', ],
++            ['Member', 'Authenticated', 'Contributor', 'Reviewer'],
+         )
+ 
+         # add a group and test mix of group and adapter and user-roles
+@@ -995,12 +995,12 @@ def getRoles(self, principal_id):
+ 
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         api.group.grant_roles(groupname='foo', roles=['Manager'], obj=folder)
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document, inherit=False),
+-            ['Contributor', 'Reviewer', ],
++            ['Contributor', 'Reviewer'],
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=document),
+@@ -1024,7 +1024,7 @@ def getRoles(self, principal_id):
+         )
+         self.assertItemsEqual(
+             api.user.get_roles(username='chuck', obj=folder, inherit=False),
+-            ['Contributor', 'Reviewer', 'Manager', ],
++            ['Contributor', 'Reviewer', 'Manager'],
+         )
+ 
+         # cleanup
+@@ -1098,7 +1098,7 @@ def test_revoke_roles_in_context(self):
+         )
+         self.assertNotIn('Editor', api.user.get_roles(user=user, obj=document))
+ 
+-        ROLES = ['Authenticated', 'Member', ]
++        ROLES = ['Authenticated', 'Member']
+         self.assertItemsEqual(
+             ROLES,
+             api.user.get_roles(username='chuck', obj=folder),
 
 
