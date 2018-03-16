@@ -1,88 +1,447 @@
-Repository: Products.ATContentTypes
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.3.x
-Date: 2018-03-14T09:16:22-04:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/Products.ATContentTypes/commit/ec109e83e980a94baead0606026355255e17d77a
+Branch: refs/heads/5.1.x
+Date: 2018-03-14T18:29:31+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/1001cd81a675d9b2f5d42a7e0c9c73dbdea382fe
 
-Handle no icon in folder_tabular_view
+Advanced Catalog Clear And Rebuild
 
 Files changed:
 M CHANGES.rst
-M Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
+M Products/CMFPlone/CatalogTool.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 12c0f1d2..34add3ab 100644
+index 852324c81..c24d00a5d 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -14,11 +14,15 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Enhanced output of Advanced Catalog Clear And Rebuild feature.
++  Better logging with progress and number of objects before and after.
++  [jensens]
  
  Bug fixes:
  
 -- *add item here*
-+- Handle no content icon in folder_tabular_view
-+  [davisagli]
++- Advanced Catalog Clear And Rebuild feature showed wrong processing time due to new queue processing.
++  This was fixed bei calling ``processQueue()`` after indexing.
++  [jensens]
  
  
- 2.3.7 (2017-11-24)
-diff --git a/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt b/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-index 5b6ab848..042791d3 100644
---- a/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-+++ b/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-@@ -43,7 +43,7 @@
-                             <td>
-                                 <img width="16" height="16"
-                                      src="" alt=""
--                                     tal:condition="item_icon/url"
-+                                     tal:condition="item_icon/url|nothing"
-                                      tal:attributes="src item_icon/url;
-                                                      alt item_icon/description;
-                                                      title item_icon/title;
+ 5.1.1 (2018-03-10)
+diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
+index da29b7a80..164f46aa9 100644
+--- a/Products/CMFPlone/CatalogTool.py
++++ b/Products/CMFPlone/CatalogTool.py
+@@ -177,6 +177,7 @@ def object_provides(obj):
+ def zero_fill(matchobj):
+     return matchobj.group().zfill(4)
+ 
++
+ num_sort_regex = re.compile('\d+')
+ 
+ 
+@@ -213,6 +214,7 @@ def getObjPositionInParent(obj):
+         return ordered.getObjectPosition(obj.getId())
+     return 0
+ 
++
+ SIZE_CONST = {'KB': 1024, 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024}
+ SIZE_ORDER = ('GB', 'MB', 'KB')
+ 
+@@ -295,6 +297,53 @@ def location(obj):
+     return obj.getField('location').get(obj)
+ 
+ 
++class ContentIndexer(object):
++    """An instance of this class can be passed to ZopeFindAndApply
++    """
++
++    def __init__(self, catalog, queue_interval=100, log_progress=100):
++        self.catalog = catalog
++        self.queue_interval = queue_interval
++        self.log_progress = log_progress
++        self.counter = 0
++
++    def index_discussion(self, obj):
++        # index conversions from plone.app.discussion
++        annotations = IAnnotations(obj)
++        if DISCUSSION_ANNOTATION_KEY not in annotations:
++            return
++        conversation = annotations[DISCUSSION_ANNOTATION_KEY]
++        conversation = conversation.__of__(obj)
++        for comment in conversation.getComments():
++            try:
++                self.catalog.indexObject(comment)
++            except StopIteration:  # pragma: no cover
++                pass
++            self.counter += 1
++
++    def __call__(self, obj, path):
++        if not base_hasattr(obj, 'indexObject'):
++            return
++        if not safe_callable(obj.indexObject):
++            return
++        self.counter += 1
++        try:
++            obj.indexObject()
++            self.index_discussion(obj)
++        except TypeError:
++            # Catalogs have 'indexObject' as well, but they
++            # take different args, and will fail
++            pass
++        except Exception:
++            logger.exception(
++                'Problem indexing {0}'.format(obj.absolute_url())
++            )
++        if self.queue_interval and not(self.counter % self.queue_interval):
++            processQueue()
++        if self.log_progress and not(self.counter % self.log_progress):
++            logger.info('Indexed {0} objects.'.format(self.counter))
++
++
+ @implementer(IPloneCatalogTool)
+ class CatalogTool(PloneBaseTool, BaseTool):
+     """Plone's catalog tool"""
+@@ -324,7 +373,7 @@ def _removeIndex(self, index):
+         # Safe removal of an index.
+         try:
+             self.manage_delIndex(index)
+-        except:
++        except Exception:
+             pass
+ 
+     def _listAllowedRolesAndUsers(self, user):
+@@ -496,38 +545,15 @@ def clearFindAndRebuild(self):
+         # Empties catalog, then finds all contentish objects (i.e. objects
+         # with an indexObject method), and reindexes them.
+         # This may take a long time.
+-
+-        def indexObject(obj, path):
+-            if (base_hasattr(obj, 'indexObject') and
+-                    safe_callable(obj.indexObject)):
+-                try:
+-                    obj.indexObject()
+-
+-                    # index conversions from plone.app.discussion
+-                    annotions = IAnnotations(obj)
+-                    catalog = getToolByName(obj, "portal_catalog")
+-                    if DISCUSSION_ANNOTATION_KEY in annotions:
+-                        conversation = annotions[DISCUSSION_ANNOTATION_KEY]
+-                        conversation = conversation.__of__(obj)
+-                        for comment in conversation.getComments():
+-                            try:
+-                                if catalog:
+-                                    catalog.indexObject(comment)
+-                            except StopIteration:  # pragma: no cover
+-                                pass
+-
+-
+-                except TypeError:
+-                    # Catalogs have 'indexObject' as well, but they
+-                    # take different args, and will fail
+-                    pass
+         self.manage_catalogClear()
+         portal = aq_parent(aq_inner(self))
++        index_content = ContentIndexer(aq_inner(self))
+         portal.ZopeFindAndApply(
+             portal,
+             search_sub=True,
+-            apply_func=indexObject
++            apply_func=index_content,
+         )
++        processQueue()
+ 
+     @security.protected(ManageZCatalogEntries)
+     def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+@@ -536,15 +562,28 @@ def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+         """
+         elapse = time.time()
+         c_elapse = time.clock()
++        num_before = len(self._catalog)
+ 
++        logger.info(
++            'Catalog Rebuilt started. '
++            '{0} objects cataloged before clear'.format(num_before)
++        )
+         self.clearFindAndRebuild()
+ 
+         elapse = time.time() - elapse
+         c_elapse = time.clock() - c_elapse
+ 
+-        msg = ('Catalog Rebuilt\n'
+-               'Total time: %s\n'
+-               'Total CPU time: %s' % (repr(elapse), repr(c_elapse)))
++        msg = (
++            'Catalog Rebuilt\n'
++            '    Total time: {0}\n'
++            '    Total CPU time: {1}\n'
++            '    Number of objects changed from {2} to {3}'.format(
++                repr(elapse),
++                repr(c_elapse),
++                num_before,
++                len(self._catalog),
++            )
++        )
+         logger.info(msg)
+ 
+         if RESPONSE is not None:
+@@ -552,4 +591,5 @@ def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+                 URL1 + '/manage_catalogAdvanced?manage_tabs_message=' +
+                 urllib.quote(msg))
+ 
++
+ InitializeClass(CatalogTool)
 
 
-Repository: Products.ATContentTypes
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/2.3.x
-Date: 2018-03-14T16:00:26+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/Products.ATContentTypes/commit/b03f53594e8bfc1984a063517ce88a15d383d019
+Branch: refs/heads/5.1.x
+Date: 2018-03-16T11:41:54+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/ee40011828475ea7a98c74f0692b877ce82cb540
 
-Merge pull request #52 from plone/davisagli-tabular-view
-
-Handle no icon in folder_tabular_view
+Merge branch '5.1.x' into jensens-enhanced-clear-and-rebuild
 
 Files changed:
 M CHANGES.rst
-M Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
+M Products/CMFPlone/static/patterns/toolbar/src/toolbar.js
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 12c0f1d2..34add3ab 100644
+index c24d00a5d..10cf5c29f 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -24,6 +24,9 @@ Bug fixes:
+   This was fixed bei calling ``processQueue()`` after indexing.
+   [jensens]
+ 
++- Some nested `section id="edit-bar"` tag in folder_contents page #2322 
++  [terapyon]
++
+ 
+ 5.1.1 (2018-03-10)
+ ------------------
+diff --git a/Products/CMFPlone/static/patterns/toolbar/src/toolbar.js b/Products/CMFPlone/static/patterns/toolbar/src/toolbar.js
+index fb29ec552..337e5b943 100644
+--- a/Products/CMFPlone/static/patterns/toolbar/src/toolbar.js
++++ b/Products/CMFPlone/static/patterns/toolbar/src/toolbar.js
+@@ -390,7 +390,7 @@ define([
+           url: $('body').attr('data-portal-url') + path + '/@@render-toolbar'
+         }).done(function(data) {
+           var $el = $(utils.parseBodyTag(data));
+-          that.$el.replaceWith($el);
++          that.$el.parent.replaceWith($el);
+           Registry.scan($el);
+         });
+       });
+
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/5.1.x
+Date: 2018-03-16T14:41:47+01:00
+Author: agitator (agitator) <agitator@users.noreply.github.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/01c5417caf54059426584b5d70599d12f09bdbc0
+
+Merge pull request #2342 from plone/jensens-enhanced-clear-and-rebuild
+
+Advanced Catalog Clear And Rebuild
+
+Files changed:
+M CHANGES.rst
+M Products/CMFPlone/CatalogTool.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index bc25728f6..10cf5c29f 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -14,10 +14,16 @@ Breaking changes:
+ 
+ New features:
+ 
+-- *add item here*
++- Enhanced output of Advanced Catalog Clear And Rebuild feature.
++  Better logging with progress and number of objects before and after.
++  [jensens]
  
  Bug fixes:
  
--- *add item here*
-+- Handle no content icon in folder_tabular_view
-+  [davisagli]
++- Advanced Catalog Clear And Rebuild feature showed wrong processing time due to new queue processing.
++  This was fixed bei calling ``processQueue()`` after indexing.
++  [jensens]
++
+ - Some nested `section id="edit-bar"` tag in folder_contents page #2322 
+   [terapyon]
+ 
+diff --git a/Products/CMFPlone/CatalogTool.py b/Products/CMFPlone/CatalogTool.py
+index da29b7a80..164f46aa9 100644
+--- a/Products/CMFPlone/CatalogTool.py
++++ b/Products/CMFPlone/CatalogTool.py
+@@ -177,6 +177,7 @@ def object_provides(obj):
+ def zero_fill(matchobj):
+     return matchobj.group().zfill(4)
+ 
++
+ num_sort_regex = re.compile('\d+')
  
  
- 2.3.7 (2017-11-24)
-diff --git a/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt b/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-index 5b6ab848..042791d3 100644
---- a/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-+++ b/Products/ATContentTypes/skins/ATContentTypes/folder_tabular_view.pt
-@@ -43,7 +43,7 @@
-                             <td>
-                                 <img width="16" height="16"
-                                      src="" alt=""
--                                     tal:condition="item_icon/url"
-+                                     tal:condition="item_icon/url|nothing"
-                                      tal:attributes="src item_icon/url;
-                                                      alt item_icon/description;
-                                                      title item_icon/title;
+@@ -213,6 +214,7 @@ def getObjPositionInParent(obj):
+         return ordered.getObjectPosition(obj.getId())
+     return 0
+ 
++
+ SIZE_CONST = {'KB': 1024, 'MB': 1024 * 1024, 'GB': 1024 * 1024 * 1024}
+ SIZE_ORDER = ('GB', 'MB', 'KB')
+ 
+@@ -295,6 +297,53 @@ def location(obj):
+     return obj.getField('location').get(obj)
+ 
+ 
++class ContentIndexer(object):
++    """An instance of this class can be passed to ZopeFindAndApply
++    """
++
++    def __init__(self, catalog, queue_interval=100, log_progress=100):
++        self.catalog = catalog
++        self.queue_interval = queue_interval
++        self.log_progress = log_progress
++        self.counter = 0
++
++    def index_discussion(self, obj):
++        # index conversions from plone.app.discussion
++        annotations = IAnnotations(obj)
++        if DISCUSSION_ANNOTATION_KEY not in annotations:
++            return
++        conversation = annotations[DISCUSSION_ANNOTATION_KEY]
++        conversation = conversation.__of__(obj)
++        for comment in conversation.getComments():
++            try:
++                self.catalog.indexObject(comment)
++            except StopIteration:  # pragma: no cover
++                pass
++            self.counter += 1
++
++    def __call__(self, obj, path):
++        if not base_hasattr(obj, 'indexObject'):
++            return
++        if not safe_callable(obj.indexObject):
++            return
++        self.counter += 1
++        try:
++            obj.indexObject()
++            self.index_discussion(obj)
++        except TypeError:
++            # Catalogs have 'indexObject' as well, but they
++            # take different args, and will fail
++            pass
++        except Exception:
++            logger.exception(
++                'Problem indexing {0}'.format(obj.absolute_url())
++            )
++        if self.queue_interval and not(self.counter % self.queue_interval):
++            processQueue()
++        if self.log_progress and not(self.counter % self.log_progress):
++            logger.info('Indexed {0} objects.'.format(self.counter))
++
++
+ @implementer(IPloneCatalogTool)
+ class CatalogTool(PloneBaseTool, BaseTool):
+     """Plone's catalog tool"""
+@@ -324,7 +373,7 @@ def _removeIndex(self, index):
+         # Safe removal of an index.
+         try:
+             self.manage_delIndex(index)
+-        except:
++        except Exception:
+             pass
+ 
+     def _listAllowedRolesAndUsers(self, user):
+@@ -496,38 +545,15 @@ def clearFindAndRebuild(self):
+         # Empties catalog, then finds all contentish objects (i.e. objects
+         # with an indexObject method), and reindexes them.
+         # This may take a long time.
+-
+-        def indexObject(obj, path):
+-            if (base_hasattr(obj, 'indexObject') and
+-                    safe_callable(obj.indexObject)):
+-                try:
+-                    obj.indexObject()
+-
+-                    # index conversions from plone.app.discussion
+-                    annotions = IAnnotations(obj)
+-                    catalog = getToolByName(obj, "portal_catalog")
+-                    if DISCUSSION_ANNOTATION_KEY in annotions:
+-                        conversation = annotions[DISCUSSION_ANNOTATION_KEY]
+-                        conversation = conversation.__of__(obj)
+-                        for comment in conversation.getComments():
+-                            try:
+-                                if catalog:
+-                                    catalog.indexObject(comment)
+-                            except StopIteration:  # pragma: no cover
+-                                pass
+-
+-
+-                except TypeError:
+-                    # Catalogs have 'indexObject' as well, but they
+-                    # take different args, and will fail
+-                    pass
+         self.manage_catalogClear()
+         portal = aq_parent(aq_inner(self))
++        index_content = ContentIndexer(aq_inner(self))
+         portal.ZopeFindAndApply(
+             portal,
+             search_sub=True,
+-            apply_func=indexObject
++            apply_func=index_content,
+         )
++        processQueue()
+ 
+     @security.protected(ManageZCatalogEntries)
+     def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+@@ -536,15 +562,28 @@ def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+         """
+         elapse = time.time()
+         c_elapse = time.clock()
++        num_before = len(self._catalog)
+ 
++        logger.info(
++            'Catalog Rebuilt started. '
++            '{0} objects cataloged before clear'.format(num_before)
++        )
+         self.clearFindAndRebuild()
+ 
+         elapse = time.time() - elapse
+         c_elapse = time.clock() - c_elapse
+ 
+-        msg = ('Catalog Rebuilt\n'
+-               'Total time: %s\n'
+-               'Total CPU time: %s' % (repr(elapse), repr(c_elapse)))
++        msg = (
++            'Catalog Rebuilt\n'
++            '    Total time: {0}\n'
++            '    Total CPU time: {1}\n'
++            '    Number of objects changed from {2} to {3}'.format(
++                repr(elapse),
++                repr(c_elapse),
++                num_before,
++                len(self._catalog),
++            )
++        )
+         logger.info(msg)
+ 
+         if RESPONSE is not None:
+@@ -552,4 +591,5 @@ def manage_catalogRebuild(self, RESPONSE=None, URL1=None):
+                 URL1 + '/manage_catalogAdvanced?manage_tabs_message=' +
+                 urllib.quote(msg))
+ 
++
+ InitializeClass(CatalogTool)
 
 
