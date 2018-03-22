@@ -1,28 +1,344 @@
-Repository: plone.recipe.zope2instance
+Repository: Products.PlonePAS
 
 
 Branch: refs/heads/master
-Date: 2018-03-22T17:21:20+01:00
+Date: 2018-03-22T22:15:01+01:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/c220fa95ef21feade566f890c5887a2a91b090b6
+Commit: https://github.com/plone/Products.PlonePAS/commit/3172fb8b2fbe173f872b397c3b14c7e4a2ad4705
 
-prevent the password being wrapped in another b''
+Fix startup issues in python3
 
 Files changed:
-M src/plone/recipe/zope2instance/make.py
+M CHANGES.rst
+M src/Products/PlonePAS/plugins/cookie_handler.py
+M src/Products/PlonePAS/plugins/crumbler.py
+M src/Products/PlonePAS/plugins/group.py
+M src/Products/PlonePAS/plugins/property.py
+M src/Products/PlonePAS/plugins/ufactory.py
+M src/Products/PlonePAS/sheet.py
+M src/Products/PlonePAS/tests/test_membershiptool.py
+M src/Products/PlonePAS/tools/groupdata.py
+M src/Products/PlonePAS/tools/memberdata.py
+M src/Products/PlonePAS/tools/membership.py
+M src/Products/PlonePAS/utils.py
 
-diff --git a/src/plone/recipe/zope2instance/make.py b/src/plone/recipe/zope2instance/make.py
-index 2747c17..2132544 100644
---- a/src/plone/recipe/zope2instance/make.py
-+++ b/src/plone/recipe/zope2instance/make.py
-@@ -60,7 +60,7 @@ def get_inituser():
- def write_inituser(fn, user, password):
-     fp = open(fn, 'w')
-     pw = b2a_base64(sha1(password.encode('utf-8')).digest())[:-1]
--    fp.write('%s:{SHA}%s\n' % (user, pw))
-+    fp.write('%s:{SHA}%s\n' % (user, pw.decode('ascii')))
-     fp.close()
-     os.chmod(fn, 0o644)
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 2490de0..3e3653f 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -12,7 +12,7 @@ Breaking changes:
  
+ New features:
+ 
+-- Make imports work with python 3
++- Make imports work with python 3. Fix startup.
+   [pbauer]
+ 
+ Bug fixes:
+diff --git a/src/Products/PlonePAS/plugins/cookie_handler.py b/src/Products/PlonePAS/plugins/cookie_handler.py
+index 9c65297..a301a1e 100644
+--- a/src/Products/PlonePAS/plugins/cookie_handler.py
++++ b/src/Products/PlonePAS/plugins/cookie_handler.py
+@@ -12,6 +12,7 @@
+ from Acquisition import aq_parent
+ from App.class_init import InitializeClass
+ from App.special_dtml import DTMLFile
++from base64 import encodestring
+ from Products.PluggableAuthService.interfaces.authservice import \
+     IPluggableAuthService
+ from Products.PluggableAuthService.interfaces.plugins \
+@@ -24,8 +25,7 @@
+     import ILoginPasswordHostExtractionPlugin
+ from Products.PluggableAuthService.plugins.CookieAuthHelper \
+     import CookieAuthHelper as BasePlugin
+-from base64 import encodestring
+-from urllib import quote
++from six.moves.urllib.parse import quote
+ from zope.interface import implementer
+ 
+ 
+diff --git a/src/Products/PlonePAS/plugins/crumbler.py b/src/Products/PlonePAS/plugins/crumbler.py
+index 9838693..0061e1a 100644
+--- a/src/Products/PlonePAS/plugins/crumbler.py
++++ b/src/Products/PlonePAS/plugins/crumbler.py
+@@ -65,7 +65,7 @@ def extractCredentials(self, request):
+         try:
+             self._getCC().modifyRequest(request, request.RESPONSE)
+ 
+-        except Exception, e:
++        except Exception as e:
+             logger.error("PlonePAS error: %s", e, exc_info=1)
+ 
+         return {}
+diff --git a/src/Products/PlonePAS/plugins/group.py b/src/Products/PlonePAS/plugins/group.py
+index 1e24d5c..2bc36bf 100644
+--- a/src/Products/PlonePAS/plugins/group.py
++++ b/src/Products/PlonePAS/plugins/group.py
+@@ -22,7 +22,7 @@
+ from Products.PluggableAuthService.interfaces.plugins import IRolesPlugin
+ from Products.PluggableAuthService.plugins.ZODBGroupManager \
+     import ZODBGroupManager
+-from ufactory import PloneUser
++from .ufactory import PloneUser
+ from zope.interface import implementer
+ import logging
+ 
+diff --git a/src/Products/PlonePAS/plugins/property.py b/src/Products/PlonePAS/plugins/property.py
+index 25e8ee5..799bd37 100644
+--- a/src/Products/PlonePAS/plugins/property.py
++++ b/src/Products/PlonePAS/plugins/property.py
+@@ -19,7 +19,9 @@
+ from ZODB.PersistentMapping import PersistentMapping
+ from zope.i18nmessageid import MessageFactory
+ from zope.interface import implementer
++
+ import copy
++import six
+ 
+ _ = MessageFactory('plone')
+ 
+@@ -40,7 +42,7 @@ def manage_addZODBMutablePropertyProvider(self, id, title='',
+ 
+ 
+ def isStringType(data):
+-    return isinstance(data, str) or isinstance(data, unicode)
++    return isinstance(data, str) or isinstance(data, six.text_type)
+ 
+ 
+ @implementer(
+diff --git a/src/Products/PlonePAS/plugins/ufactory.py b/src/Products/PlonePAS/plugins/ufactory.py
+index b4e6b16..6663650 100644
+--- a/src/Products/PlonePAS/plugins/ufactory.py
++++ b/src/Products/PlonePAS/plugins/ufactory.py
+@@ -14,6 +14,8 @@
+ from Products.PluggableAuthService.plugins.BasePlugin import BasePlugin
+ from zope.interface import implementer
+ 
++import six
++
+ try:
+     from collections import OrderedDict
+ except ImportError:
+@@ -225,7 +227,7 @@ def getProperty(self, id, default=_marker):
+         for sheet in self.getOrderedPropertySheets():
+             if sheet.hasProperty(id):
+                 value = sheet.getProperty(id)
+-                if isinstance(value, unicode):
++                if isinstance(value, six.text_type):
+                     # XXX Temporarily work around the fact that
+                     # property sheets blindly store and return
+                     # unicode. This is sub-optimal and should be
+diff --git a/src/Products/PlonePAS/sheet.py b/src/Products/PlonePAS/sheet.py
+index 570fd21..7a83c7e 100644
+--- a/src/Products/PlonePAS/sheet.py
++++ b/src/Products/PlonePAS/sheet.py
+@@ -8,10 +8,11 @@
+ from Products.CMFCore.interfaces import ISiteRoot
+ from Products.PlonePAS.interfaces.propertysheets import IMutablePropertySheet
+ from Products.PluggableAuthService.UserPropertySheet import UserPropertySheet
+-from Products.PluggableAuthService.UserPropertySheet import _SequenceTypes
+ from zope.component import getUtility
+ from zope.interface import implementer
+ 
++import six
++
+ 
+ class PropertyValueError(ValueError):
+     pass
+@@ -44,11 +45,11 @@ def validate(self, property_type, value):
+ PropertySchema = PropertySchemaTypeMap()
+ PropertySchema.addType(
+     'string',
+-    lambda x: x is None or isinstance(x, basestring)
++    lambda x: x is None or isinstance(x, six.string_types)
+ )
+ PropertySchema.addType(
+     'text',
+-    lambda x: x is None or isinstance(x, basestring)
++    lambda x: x is None or isinstance(x, six.string_types)
+ )
+ PropertySchema.addType(
+     'boolean',
+@@ -68,15 +69,15 @@ def validate(self, property_type, value):
+ )
+ PropertySchema.addType(
+     'lines',
+-    lambda x: x is None or isinstance(x, _SequenceTypes)
++    lambda x: x is None or isinstance(x, (tuple, list))
+ )
+ PropertySchema.addType(
+     'selection',
+-    lambda x: x is None or isinstance(x, basestring)
++    lambda x: x is None or isinstance(x, six.string_types)
+ )
+ PropertySchema.addType(
+     'multiple selection',
+-    lambda x: x is None or isinstance(x, _SequenceTypes)
++    lambda x: x is None or isinstance(x, (tuple, list))
+ )
+ PropertySchema.addType(
+     'date',
+diff --git a/src/Products/PlonePAS/tests/test_membershiptool.py b/src/Products/PlonePAS/tests/test_membershiptool.py
+index c57210d..5f1ab79 100644
+--- a/src/Products/PlonePAS/tests/test_membershiptool.py
++++ b/src/Products/PlonePAS/tests/test_membershiptool.py
+@@ -20,6 +20,7 @@
+ from Products.PlonePAS.tools.memberdata import MemberData
+ from Products.PlonePAS.tools.membership import MembershipTool
+ from Products.PlonePAS.utils import getGroupsForPrincipal
++import six
+ from six import StringIO
+ from zExceptions import BadRequest
+ 
+@@ -119,7 +120,7 @@ def test_id_clean(self):
+         cleaned = cleanId(u'abc')
+         self.assertEqual(cleaned, 'abc')
+         self.assertTrue(isinstance(cleaned, str))
+-        self.assertFalse(isinstance(cleaned, unicode))
++        self.assertFalse(isinstance(cleaned, six.text_type))
+ 
+ 
+ class MemberAreaTest(base.TestCase):
+diff --git a/src/Products/PlonePAS/tools/groupdata.py b/src/Products/PlonePAS/tools/groupdata.py
+index a7b74e6..24b9d82 100644
+--- a/src/Products/PlonePAS/tools/groupdata.py
++++ b/src/Products/PlonePAS/tools/groupdata.py
+@@ -35,6 +35,10 @@
+ _marker = object()
+ 
+ 
++class GroupDataError(Exception):
++    pass
++
++
+ @implementer(IGroupDataTool)
+ class GroupDataTool(UniqueObject, SimpleItem, PropertyManager):
+     """This tool wraps group objects, allowing transparent access to
+@@ -132,7 +136,7 @@ def getGroup(self):
+         bcontext = aq_base(parent)
+         bcontainer = aq_base(aq_parent(aq_inner(self)))
+         if bcontext is bcontainer or not hasattr(bcontext, 'getUserName'):
+-            raise 'GroupDataError', "Can't find group data"
++            raise GroupDataError("Can't find group data")
+         # Return the user object, which is our context.
+         return parent
+ 
+@@ -510,9 +514,9 @@ def canWriteProperty(self, prop_name):
+                     break  # shadowed by read-only
+         return 0
+ 
+-    canAddToGroup = MemberData.canAddToGroup.im_func
+-    canRemoveFromGroup = MemberData.canRemoveFromGroup.im_func
+-    canAssignRole = MemberData.canAssignRole.im_func
++    canAddToGroup = MemberData.canAddToGroup.__func__
++    canRemoveFromGroup = MemberData.canRemoveFromGroup.__func__
++    canAssignRole = MemberData.canAssignRole.__func__
+ 
+     # plugin getters
+ 
+diff --git a/src/Products/PlonePAS/tools/memberdata.py b/src/Products/PlonePAS/tools/memberdata.py
+index 493e1c4..29d2386 100644
+--- a/src/Products/PlonePAS/tools/memberdata.py
++++ b/src/Products/PlonePAS/tools/memberdata.py
+@@ -24,6 +24,8 @@
+     IRoleAssignerPlugin
+ from zope.interface import implementer
+ 
++import six
++
+ 
+ class MemberDataTool(BaseTool):
+     """PAS-specific implementation of memberdata tool.
+@@ -302,7 +304,7 @@ def getProperty(self, id, default=_marker):
+             if sheet.hasProperty(id):
+                 # Return the first one that has the property.
+                 value = sheet.getProperty(id)
+-                if isinstance(value, unicode):
++                if isinstance(value, six.text_type):
+                     # XXX Temporarily work around the fact that
+                     # property sheets blindly store and return
+                     # unicode. This is sub-optimal and should be
+diff --git a/src/Products/PlonePAS/tools/membership.py b/src/Products/PlonePAS/tools/membership.py
+index 591dc97..58cd826 100644
+--- a/src/Products/PlonePAS/tools/membership.py
++++ b/src/Products/PlonePAS/tools/membership.py
+@@ -31,6 +31,7 @@
+ from Products.PlonePAS.utils import scale_image
+ from ZODB.POSException import ConflictError
+ from plone.protect.interfaces import IDisableCSRFProtection
++import six
+ from six import StringIO
+ from zExceptions import BadRequest
+ from zope import event
+@@ -273,7 +274,7 @@ def dedupe(seq):
+             if last_login_time:
+                 last_login = member.getProperty('last_login_time', '')
+ 
+-                if isinstance(last_login, basestring):
++                if isinstance(last_login, six.string_types):
+                     # value is a string when member hasn't yet logged in
+                     last_login = DateTime(last_login or '2000/01/01')
+ 
+@@ -389,7 +390,7 @@ def getMemberInfo(self, memberId=None):
+ 
+         # Special handling to avoid bad home_pages, like javascript.
+         home_page = member.getProperty('home_page', '')
+-        if isinstance(home_page, basestring):
++        if isinstance(home_page, six.string_types):
+             if (not home_page.startswith('https://') and
+                     not home_page.startswith('http://')):
+                 # Suspicious.  But if it is internal, it is fine.
+diff --git a/src/Products/PlonePAS/utils.py b/src/Products/PlonePAS/utils.py
+index 7834830..61af69c 100644
+--- a/src/Products/PlonePAS/utils.py
++++ b/src/Products/PlonePAS/utils.py
+@@ -2,8 +2,9 @@
+ from Products.PlonePAS.config import IMAGE_SCALE_PARAMS
+ from Products.PluggableAuthService.interfaces.plugins import IGroupsPlugin
+ from six import StringIO
+-from urllib import quote as url_quote
+-from urllib import unquote as url_unquote
++from six.moves import urllib
++
++import six
+ 
+ 
+ def unique(iterable):
+@@ -23,9 +24,9 @@ def cleanId(id):
+     __traceback_info__ = (id,)
+     if id:
+         # note: we provide the 'safe' param to get '/' encoded
+-        if isinstance(id, unicode):
++        if isinstance(id, six.text_type):
+             id = id.encode('utf-8')
+-        return url_quote(id, '').replace('-', '--').replace('%', '-')
++        return urllib.parse.quote(id, '').replace('-', '--').replace('%', '-')
+     return ''
+ 
+ 
+@@ -33,7 +34,7 @@ def decleanId(id):
+     """Reverse cleanId."""
+     if id:
+         id = id.replace('--', '\x00').replace('-', '%').replace('\x00', '-')
+-        return url_unquote(id)
++        return urllib.parse.unquote(id)
+     return ''
+ 
+ 
+@@ -175,11 +176,11 @@ def getGroupsForPrincipal(principal, plugins, request=None):
+ def safe_unicode(value, encoding='utf-8'):
+     """Converts a value to unicode, even it is already a unicode string.
+     """
+-    if isinstance(value, unicode):
++    if isinstance(value, six.text_type):
+         return value
+-    elif isinstance(value, basestring):
++    elif isinstance(value, six.string_types):
+         try:
+-            value = unicode(value, encoding)
++            value = six.text_type(value, encoding)
+         except UnicodeDecodeError:
+             value = value.decode('utf-8', 'replace')
+     return value
 
 
