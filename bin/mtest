@@ -1,0 +1,558 @@
+#!/usr/bin/env python
+"""A concurrent wrapper for timing xmltestrunner tests for buildout.coredev."""
+from __future__ import print_function
+from argparse import ArgumentParser
+from fnmatch import fnmatch
+from logging import DEBUG
+from logging import Formatter
+from logging import getLogger
+from logging import INFO
+from logging import StreamHandler
+from logging.handlers import MemoryHandler
+from math import ceil
+from multiprocessing import cpu_count
+from multiprocessing import Pool
+from os import access
+from os import environ
+from os import killpg
+from os import path
+from os import pathsep
+from os import setpgrp
+from os import unlink
+from os import walk
+from os import X_OK
+from signal import SIGINT
+from signal import SIGKILL
+from signal import signal
+from subprocess import check_output
+from subprocess import PIPE
+from subprocess import Popen
+from time import sleep
+from time import time
+import locale
+import re
+import sys
+
+
+def which(program):
+    def is_exe(fpath):
+        return path.isfile(fpath) and access(fpath, X_OK)
+
+    fpath, fname = path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for dpath in environ["PATH"].split(pathsep):
+            exe_file = path.join(dpath, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
+
+
+# From https://gist.github.com/moshekaplan/4678925
+def chunks(chunkable, n):
+    """Yield successive n-sized chunks from l."""
+    for i in xrange(0, len(chunkable), n):
+        yield tuple(chunkable[i:i + n])
+
+
+def split_into_batches(
+        iterable,
+        chunk_count=None,
+        minimum_chunk_count=3,
+        minimum_chunk_size=8,
+        optimal_chunk_size=64,
+    ):
+    length = len(iterable)
+
+    if length / float(minimum_chunk_count) < minimum_chunk_size:
+        return (iterable, )
+
+    if not chunk_count:
+        chunk_count = max(length / optimal_chunk_size, minimum_chunk_count)
+    chunksize = int(ceil(length / float(chunk_count)))
+
+    return chunks(iterable, chunksize)
+
+
+def humanize_time(seconds):
+    """Humanize a seconds based delta time.
+
+    Only handles time spans up to weeks for simplicity.
+    """
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    weeks, days = divmod(days, 7)
+
+    seconds = int(seconds)
+    minutes = int(minutes)
+    hours = int(hours)
+    days = int(days)
+    weeks = int(weeks)
+
+    output = []
+
+    if weeks:
+        output.append('{:02d} weeks'.format(weeks))
+    if days:
+        output.append('{:02d} days'.format(days))
+    if hours:
+        output.append('{:02d} hours'.format(hours))
+    if minutes:
+        output.append('{:02d} minutes'.format(minutes))
+
+    output.append('{:02d} seconds'.format(seconds))
+
+    return ' '.join(output)
+
+
+def setup_termination():
+    # Set the group flag so that subprocesses will be in the same group.
+    setpgrp()
+
+    def terminate(signum, frame):
+        # Kill the group (including main process) on terminal signal.
+        killpg(0, SIGKILL)
+
+    signal(SIGINT, terminate)
+
+
+def discover_tests(layers=None, modules=None):
+    logger.info('Discovering test classes')
+
+    test_classes_per_layer = {}
+
+    testsuites = (
+        'bin/alltests',
+        'bin/alltests-at',
+        )
+
+    discovery_arguments = tuple(
+        {'testsuite': testsuite, 'layers': layers, 'modules': modules}
+        for testsuite in testsuites
+        )
+
+    pool = Pool(CONCURRENCY)
+    test_discovery = pool.map(fetch_test_discovery_output, discovery_arguments)
+    pool.close()
+    pool.join()
+
+    # We get init noise in all discovery runs
+    for results in test_discovery:
+        current_layer = None
+        for result in results:
+            is_layer_header = result.startswith('Listing')
+
+            # We're guaranteed the output format so we can just set this
+            if is_layer_header:
+                # Layer names can have spaces in them
+                current_layer = re.search('^Listing\ (.*)\ tests:', result).groups()[0]
+                test_classes_per_layer[current_layer] = []
+
+            # There are unrelated lines in the beginning we do not want to catch
+            # All listed tests are indented with 2 spaces
+            if current_layer and not is_layer_header and result.startswith('  '):
+                if '(' in result:
+                    test_classes_per_layer[current_layer].append(re.search('.*\((.*)\).*', result).groups()[0])
+                else:
+                    # Some doctests have a filename:testcase convention
+                    test_classes_per_layer[current_layer].append(re.search('([^:]*)', result).groups()[0].strip())
+
+    # Prune to unique test classes per layer
+    return {
+        layer: sorted(set(tests))
+        for layer, tests in test_classes_per_layer.iteritems()
+        }
+
+def fetch_test_discovery_output(runner_arguments):
+        testsuite = runner_arguments.get('testsuite')
+        layers = runner_arguments.get('layers')
+        modules = runner_arguments.get('modules')
+
+        arguments = [
+            testsuite,
+            '--all',
+            '--list-tests',
+            ]
+
+        output_encoding = sys.stdout.encoding
+
+        if output_encoding is None:
+            output_encoding = locale.getpreferredencoding()
+
+        if layers:
+            for layer in layers:
+                arguments.append('--layer')
+                arguments.append(layer)
+
+        if modules:
+            for module in modules:
+                arguments.append('-m')
+                arguments.append(module)
+
+        return check_output(arguments).decode(output_encoding).splitlines()
+
+def create_test_run_params(layers=None, modules=None):
+    test_run_params = []
+    port = 0
+
+    for layer, test_classes in discover_tests(layers, modules).iteritems():
+        layersize = len(test_classes)
+        batches = tuple(split_into_batches(test_classes))
+        batches_count = len(batches)
+
+        for i, batch in enumerate(batches):
+            n = i + 1
+            port += 1
+
+            test_run_params.append({
+                'layers': (layer, ),
+                'test_classes': batch,
+                'batch': '{} / {}'.format(n, batches_count),
+                'count': len(batch),
+                'port': port,
+                'layersize': layersize,
+                })
+
+    return sorted(test_run_params, key=lambda batch: -batch.get('layersize'))
+
+
+def remove_bytecode_files(directory_path):
+    logger.info('Removing bytecode files from %s', directory_path)
+
+    for filename in find_bytecode_files(directory_path):
+        unlink(filename)
+
+
+def find_bytecode_files(directory_path):
+    for root, _, files in walk(directory_path):
+        for name in files:
+            if fnmatch(name, '*.py[co]'):
+                yield path.join(root, name)
+
+
+def run_tests(test_run_params):
+    """Run and time 'bin/test --layer layer -m module [-m module]'.
+
+    Return the module name, layer name and stderr.
+    """
+    params = ['bin/test', '--all']
+
+    layers = test_run_params.get('layers')
+    test_classes = test_run_params.get('test_classes')
+    batch = test_run_params.get('batch')
+    count = test_run_params.get('count')
+    port = test_run_params.get('port')
+
+    if layers:
+        for layer in layers:
+            params.append('--layer')
+            params.append(layer)
+
+    if test_classes:
+        for test_class in test_classes:
+            params.append('-t')
+            params.append(test_class)
+
+    test_classes_text = 'test classes' if count > 1 else 'test class'
+    printable_layers = ', '.join(layers)
+    printable_params = ' '.join(["'{}'".format(param) if ' ' in param else param for param in params])
+
+    if DEBUG_MODE:
+        logger.debug(
+            'Start: %s - %d %s - batch %s - commandline: %s',
+            printable_layers,
+            count,
+            test_classes_text,
+            batch,
+            printable_params,
+            )
+    else:
+        logger.info(
+            'Start: %s - %d %s - batch %s',
+            printable_layers,
+            count,
+            test_classes_text,
+            batch,
+            )
+
+    if DEBUG_MODE:
+        memory_handler.flush()
+
+    env = environ.copy()
+    if which('phantomjs'):
+        env['ROBOT_BROWSER'] = 'phantomjs'
+    env['ZSERVER_PORT'] = env.get('PORT{}'.format(port), str(55000 + port))
+
+    start = time()
+
+    process = Popen(
+        params,
+        env=env,
+        stderr=PIPE,
+        stdout=PIPE,
+        )
+
+    stdout, stderr = process.communicate()
+    returncode = process.returncode
+
+    runtime = time() - start
+
+    result = {
+        'params': printable_params,
+        'layers': layers,
+        'test_classes': test_classes,
+        'batch': batch,
+        'port': env.get('ZSERVER_PORT'),
+        'returncode': returncode,
+        'runtime': runtime,
+        'stderr': stderr,
+        'stdout': stdout,
+        }
+
+    if DEBUG_MODE and not returncode:
+        logger.debug(
+            'Done : %s - %d %s - batch %s in %s at %.2fs / test class - commandline: %s',
+            printable_layers,
+            count,
+            test_classes_text,
+            batch,
+            humanize_time(runtime),
+            runtime / len(test_classes),
+            printable_params,
+            )
+    elif returncode:
+        logger.error(
+            'Done : %s - %d %s - batch %s in %s at %.2fs / test class - commandline: %s',
+            printable_layers,
+            count,
+            test_classes_text,
+            batch,
+            humanize_time(runtime),
+            runtime / len(test_classes),
+            printable_params,
+            )
+    else:
+        logger.info(
+            'Done : %s - %d %s - batch %s',
+            printable_layers,
+            count,
+            test_classes_text,
+            batch,
+            )
+
+    if DEBUG_MODE:
+        memory_handler.flush()
+
+    return result
+
+
+def handle_results(results):
+    failures = []
+    batch_count = len(results)
+    runtime = 0
+
+    # Set up a logger for writing output to stdout. We do this because
+    # the logging module handles I/O encoding properly, whereas with 'print'
+    # we'd need to do it ourselves. (Think piping the output of bin/mtest
+    # somewhere, or shell I/O redirection).
+    log_output = getLogger('mtest.output')
+    log_output.propagate = False
+    stdout_handler = StreamHandler(stream=sys.stdout)
+    stdout_handler.setFormatter(Formatter(''))
+    log_output.addHandler(stdout_handler)
+    log_output.setLevel(INFO)
+
+    while results:
+        sleep(1)
+        memory_handler.flush()
+
+        mature_indices = []
+        mature_results = []
+
+        for i, result in enumerate(results):
+            if result.ready():
+                mature_indices.append(i)
+                # The enumeration index can be off for the .pop() otherwise
+                break
+
+        for i in mature_indices:
+            mature_results.append(results.pop(i).get())
+
+        for result in mature_results:
+            # For some reason we get the test run result dict wrapped in a list
+            returncode = result.get('returncode', 1)
+            stderr = result.get('stderr')
+            stdout = result.get('stdout')
+            runtime += result.get('runtime')
+
+            if returncode or stderr:
+                failures.append(result)
+                log_output.error('')
+                log_output.error('Command line')
+                log_output.error('')
+                log_output.error(result.get('params'))
+                log_output.error('')
+
+                if stderr:
+                    log_output.error('STDERR')
+                    log_output.error('')
+                    log_output.error(stderr)
+                    log_output.error('')
+
+                if returncode:
+                    log_output.error('STDOUT')
+                    log_output.error('')
+                    log_output.error(stdout)
+                    log_output.error('')
+
+    error_count = len(failures)
+
+    if error_count:
+        logger.error('%d / %d batches failed.', error_count, batch_count)
+        failed_layers = set(
+            "'{}'".format(layer) if ' ' in layer else layer
+            for result in failures
+            for layer in result.get('layers')
+            )
+
+        for layer in failed_layers:
+            logger.error('Failure(s) in layer %s', layer)
+
+    logger.info(
+        'Aggregate runtime %s.',
+        humanize_time(runtime)
+        )
+
+    return len(failures) == 0
+
+
+def main(layers=None, modules=None):
+    """Discovers and times tests in parallel via multiprocessing.Pool()."""
+    # Remove *.py[co] files to avoid race conditions with parallel workers
+    # stepping on each other's toes when trying to clean up stale bytecode.
+    #
+    # Setting PYTHONDONTWRITEBYTECODE is not enough, because running buildout
+    # also already precompiles bytecode for some eggs.
+    logger.info('Cleaning bytecode files')
+    remove_bytecode_files(SOURCE_PATH)
+    remove_bytecode_files('src')
+
+    test_run_params = create_test_run_params(layers, modules)
+
+    start = time()
+
+    logger.info('Running tests')
+    # We need to explicitly flush here in order to avoid weird multiprocessing
+    # related log output duplications
+    memory_handler.flush()
+
+    pool = Pool(CONCURRENCY)
+
+    results = [
+        pool.apply_async(run_tests, (params, ))
+        for params in test_run_params
+        ]
+
+    success = handle_results(results)
+
+    pool.close()
+    pool.join()
+
+    logger.info('Wallclock runtime %s.', humanize_time(time() - start))
+    memory_handler.flush()
+
+    if success:
+        logger.info('No failed tests.')
+        memory_handler.flush()
+        return True
+
+    return False
+
+
+# Having the __main__ guard is necessary for multiprocessing.Pool().
+if __name__ == '__main__':
+    # Globals
+    environ['PYTHONUNBUFFERED'] = '1'
+    environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+    DEBUG_MODE = False
+
+    CONCURRENCY = int(environ.get('MTEST_PROCESSORS', cpu_count()))
+
+    BUILDOUT_PATH = path.abspath(path.join(__file__, '..', '..'))
+    SOURCE_PATH = path.join(BUILDOUT_PATH, 'src')
+
+    # CLI arguments
+    parser = ArgumentParser(description='Run tests in parallel.')
+
+    parser.add_argument(
+        '-l',
+        '--layer',
+        help='Greedy match test layer name.',
+        action='append',
+        )
+
+    parser.add_argument(
+        '-m',
+        '--module',
+        help='Greedy match module name.',
+        action='append',
+        )
+
+    parser.add_argument(
+        '-d',
+        '--debug',
+        help='Set the log level to debug.',
+        action='store_true',
+        )
+
+    parser.add_argument(
+        '-j',
+        '--jobs',
+        help='Set the testing concurrency level.',
+        )
+
+    args = parser.parse_args()
+
+    if args.jobs:
+        CONCURRENCY = int(args.jobs)
+
+    if args.debug:
+        DEBUG_MODE = True
+        default_loglevel = DEBUG
+    else:
+        default_loglevel = INFO
+
+    # Logging
+    logger = getLogger('mtest')
+    logger.setLevel(default_loglevel)
+
+    # Set up logging to stdout
+    stream_handler = StreamHandler()
+    stream_handler.setLevel(default_loglevel)
+    log_formatter = Formatter(
+        ' - '.join((
+            '%(asctime)s',
+            '%(name)s',
+            '%(levelname)s',
+            '%(message)s',
+            )),
+        )
+    stream_handler.setFormatter(log_formatter)
+
+    # Buffer log messages so we do not get broken-by-racecondition lines
+    memory_handler = MemoryHandler(2, target=stream_handler)
+    memory_handler.setLevel(default_loglevel)
+
+    logger.addHandler(memory_handler)
+
+    setup_termination()
+
+    if main(layers=args.layer, modules=args.module):
+        exit(0)
+
+    exit(1)
