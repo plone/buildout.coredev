@@ -226,11 +226,11 @@ reflog
 
 .. _general-guidelines-label:
 
-General guidelines
+General Guidelines
 ==================
 
 
-Pulling code
+Pulling Code
 ------------
 
 Let's compare this two histories::
@@ -280,7 +280,7 @@ By default it does a ``merge`` meaning that an extra commit is always added,
 tangling the history and making this more complex when looking back for what happened there.
 
 
-How to solve it?
+How To Solve It?
 ^^^^^^^^^^^^^^^^
 
 *ALWAYS* do a :command:`git pull --rebase` when fetching new code,
@@ -302,7 +302,7 @@ http://www.slideshare.net/michalczyzcs3b/git-merge-vs-rebase-miksturait-4
 Search for ``git merge vs rebase``, you will find plenty of literature.
 
 
-Reviewing your changes
+Reviewing Your Changes
 ----------------------
 
 After hacking for some minutes/hours/days you are finished and about to commit your changes,
@@ -322,13 +322,13 @@ that a permission is not defined on Generic Setup, that an upgrade should be nee
 
 Remember that the first code review is the one you do on your own.
 Some inspiration/better phrasing:
-http://ada.mbecker.cc/2012/11/22/be-your-own-code-review/
+http://www.programmr.com/blogs/5-ways-developers-can-review-their-own-code
 
 And please, do remember the gold metric about reviewing code:
 http://www.osnews.com/story/19266/WTFs_m
 
 
-One commit does one thing
+One Commit Does One Thing
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Repeat with me: *One commit does one thing*. Period.
@@ -382,13 +382,13 @@ Following this advice will:
 - make later on lookups on those changes easy to follow
 
 
-Making commits
+Making Commits
 --------------
 
 For commit messages see: :ref:`git_commit_message_style_guide`.
 
 
-Adding references to issues
+Adding References To Issues
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Always add the full URL to the issue/pull request you are fixing/referring to.
@@ -409,7 +409,7 @@ It would be far better if the commit goes instead like::
     Fixes: https://github.com/plone/plone.app.discussion/issue/999
 
 
-Bad examples
+Bad Examples
 ^^^^^^^^^^^^
 
 Some bad examples of commit messages:
@@ -433,7 +433,7 @@ when comparing the commit message and the actual code.
 Does the commit message match the code changed?
 
 
-Before pushing commits
+Before Pushing Commits
 ----------------------
 
 Code is reviewed, spread into nice isolated commits, descriptive enough commit messages are written, *what's left?*
@@ -492,8 +492,8 @@ is to make him/her spend time reviewing some code changes that one the next comm
 It will not only make your commits smaller, but it will also make it easy to do atomic commits.
 
 
-No cleanup commits please
--------------------------
+No Cleanup Commits
+------------------
 
 *On the context of a pull request*
 
@@ -521,7 +521,7 @@ it has already been refactored, maybe a :command:`git blame` will report that wi
 there are +5 related current commits to check, not nice right?
 
 
-Squashing commits
+Squashing Commits
 ^^^^^^^^^^^^^^^^^
 
 To fix the previous example, run the following command::
@@ -548,7 +548,7 @@ Where ``HASH`` is the commit hash you want the changes you are about to commit b
 This way, when running :command:`git rebase --interactive`, Git will already reorder the commits as you already want.
 
 
-No side changes
+No Side Changes
 ---------------
 
 That's an extension to the previous point.
@@ -566,7 +566,7 @@ Recipes
 Assorted list of tips and tricks.
 
 
-Change branches with uncommitted changes
+Change Branches With Uncommitted Changes
 ----------------------------------------
 
 **Situation:** you are working on a pull request and while working on it founds that some cleanups are needed,
@@ -589,7 +589,7 @@ Command line version::
     # if needed, fix the conflicts, with patience and practise that's a piece of cake once you are used to
 
 
-Git visual applications
+Git Visual Applications
 -----------------------
 
 Not everyone is a fan of the command line, for them there is a list of GUI clients on the official Git website:
@@ -597,7 +597,7 @@ Not everyone is a fan of the command line, for them there is a list of GUI clien
 http://git-scm.com/downloads/guis
 
 
-Enhanced Git prompt
+Enhanced Git Prompt
 -------------------
 
 Do one (or more) of the following:
@@ -607,7 +607,7 @@ Do one (or more) of the following:
 * http://gitready.com/advanced/2009/02/05/bash-auto-completion.html
 
 
-Git dotfiles
+Git Dotfiles
 ------------
 
 Plone developers have dotfiles similar to these:
@@ -615,7 +615,7 @@ https://github.com/plone/plone.dotfiles.
 
 
 
-Learn more
+Learn More
 ==========
 
 What's here is just the tip of the iceberg, there's plenty of Git knowledge on the web.
