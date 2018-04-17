@@ -1,1327 +1,524 @@
-Repository: plone.app.upgrade
+Repository: plone.app.layout
 
 
 Branch: refs/heads/master
-Date: 2018-04-17T22:05:40+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/4730214ecabbbf1f6e10de691e67cdf86fca05d8
+Date: 2018-04-17T18:33:37+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.layout/commit/da045f2f9ca271dfed965b44d5bbbb67b13a6ba9
 
-Made several functions less complex by splitting them.
-
-This was the code-analysis report beforehand:
-
-$ bin/code-analysis
-Check clean lines....................[ OK ] in 0.132s
-Flake8..........................[ FAILURE ] in 1.715s
-plone/app/upgrade/utils.py:266:1: C901 'updateIconsInBrains' is too complex (19)
-plone/app/upgrade/v41/alphas.py:30:1: C901 'add_siteadmin_role' is too complex (14)
-plone/app/upgrade/v40/alphas.py:179:1: C901 'migrateActionIcons' is too complex (17)
-plone/app/upgrade/v40/betas.py:43:1: C901 'updateSafeHTMLConfig' is too complex (11)
-plone/app/upgrade/v40/betas.py:220:1: C901 'fix_cataloged_interface_names' is too complex (11)
-plone/app/upgrade/v43/alphas.py:17:1: C901 'reindex_sortable_title' is too complex (11)
-plone/app/upgrade/v43/alphas.py:137:1: C901 'upgradeSyndication' is too complex (21)
-plone/app/upgrade/v43/final.py:238:1: C901 'removeFakeKupu' is too complex (15)
-plone/app/upgrade/v50/betas.py:495:1: C901 'to50rc3' is too complex (19)
-Check MANIFEST.in....................[ OK ] in 2.107s
-
-And afterwards:
-
-$ bin/code-analysis
-Check clean lines....................[ OK ] in 0.133s
-Flake8...............................[ OK ] in 1.713s
-Check MANIFEST.in....................[ OK ] in 2.163s
+Allow addition of extra body classes via multiple ``IBodyClassAdapter`` adapter registrations without the need to overload the ILayoutPolicy view.
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v40/betas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v50/betas.py
+M plone/app/layout/globals/interfaces.py
+M plone/app/layout/globals/layout.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 85379235..2e98c4b3 100644
+index 5e4d028..54ffcdc 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,8 @@ New features:
+@@ -10,6 +10,9 @@ Breaking changes:
+ 
+ New features:
+ 
++- Allow addition of extra body classes via multiple IBodyClassAdapter adapter registrations without the need to overload the ILayoutPolicy view.
++  [thet, jensens, agitator]
++
+ - Make it easier to override seperator in title viewlet
+   [tomgross]
+ 
+@@ -18,13 +21,8 @@ Bug fixes:
+ - More py3 fixes.
+   [pbauer]
+ 
+-- Use ``get_installer`` in tests.  [maurits]
+-
+-- Imports are Python3 compatible
+-  [ale-rt, jensens]
+-
+-- Fix for situations where pathbar viewlet variables were undefined in toolbar context
+-  [tomgross]
++- Use ``get_installer`` in tests.
++  [maurits]
+ 
+ 2.7.5 (2017-11-26)
+ ------------------
+@@ -37,6 +35,8 @@ New features:
+ - Imports are Python3 compatible
+   [ale-rt, jensens]
+ 
++Bug fixes:
++
+ - Fix for situations where pathbar viewlet variables were undefined in toolbar context
+   [tomgross]
+ 
+@@ -72,6 +72,9 @@ New features:
+ 
+ - Added membertools viewlet. If user is not anonymous and toolbar is not visible according to ``is_toolbar_visible`` the viewlet will show at the location of anontools.
+   [agitator]
++- Allow addition of extra body classes via multiple ``IBodyClassAdapter`` adapter registrations without the need to overload the ILayoutPolicy view.
++  RFC / DRAFT / WORK IN PROGRESS
++  [thet]
  
  Bug fixes:
  
-+- Made several functions less complex by splitting them.  [maurits]
-+
- - Improved code quality.  [maurits]
+diff --git a/plone/app/layout/globals/interfaces.py b/plone/app/layout/globals/interfaces.py
+index 1c7f6e9..26dc255 100644
+--- a/plone/app/layout/globals/interfaces.py
++++ b/plone/app/layout/globals/interfaces.py
+@@ -282,6 +282,11 @@ class IViewView(Interface):
+     """
  
  
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 506776bb..82fc1a65 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -263,6 +263,47 @@ def unregisterSteps(context, import_steps=None, export_steps=None):
-     context._p_changed = True
++class IBodyClassAdapter(Interface):
++    """Adapter interface for retrieving extra body classes.
++    """
++
++
+ class IPatternsSettingsRenderer(Interface):
+     """ Interface for the adapter that renders the settings for patterns
  
+diff --git a/plone/app/layout/globals/layout.py b/plone/app/layout/globals/layout.py
+index 88cc15a..0587e45 100644
+--- a/plone/app/layout/globals/layout.py
++++ b/plone/app/layout/globals/layout.py
+@@ -1,4 +1,5 @@
+ # -*- coding: utf-8 -*-
++from plone.app.layout.globals.interfaces import IBodyClassAdapter
+ from plone.app.layout.globals.interfaces import ILayoutPolicy
+ from plone.app.layout.globals.interfaces import IViewView
+ from plone.app.layout.icons.interfaces import IContentIcon
+@@ -13,6 +14,8 @@
+ from Products.Five.browser.metaconfigure import ViewMixinForTemplates
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile as ZopeViewPageTemplateFile  # noqa
++from zope.component import adapter
++from zope.component import getAdapters
+ from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ from zope.component import queryMultiAdapter
+@@ -20,6 +23,7 @@
+ from zope.deprecation import deprecate
+ from zope.interface import alsoProvides
+ from zope.interface import implementer
++from zope.interface import Interface
+ from zope.publisher.browser import BrowserView
  
-+def _types_with_empty_icons(context, typesToUpdate):
-+    ttool = getToolByName(context, 'portal_types')
-+    empty_icons = []
-+    for name in typesToUpdate.keys():
-+        fti = ttool.get(name)
-+        if fti:
-+            icon_expr = fti.getIconExprObject()
-+            if not icon_expr:
-+                empty_icons.append(name)
-+    return empty_icons
-+
-+
-+def _update_icon_in_single_brain(brain, typesToUpdate, getIconPos, metadata):
-+    # if the old icon is a standard icon, we assume no customization
-+    # has taken place and we can simply empty the getIcon metadata
-+    # without loading the object
-+    new_value = ''
-+    old_icons = typesToUpdate[brain.portal_type]
-+    brain_icon = brain.getIcon
-+    if brain_icon not in old_icons:
-+        # Otherwise we need to ask the object
-+        new_value = ''
-+        obj = brain.getObject()
-+        method = getattr(aq_base(obj), 'getIcon', None)
-+        if method is not None:
-+            try:
-+                new_value = obj.getIcon
-+                if callable(new_value):
-+                    new_value = new_value()
-+            except ConflictError:
-+                raise
-+            except Exception:
-+                new_value = ''
-+    if brain_icon != new_value:
-+        rid = brain.getRID()
-+        record = metadata[rid]
-+        new_record = list(record)
-+        new_record[getIconPos] = new_value
-+        metadata[rid] = tuple(new_record)
-+
-+
- def updateIconsInBrains(context, typesToUpdate=None):
-     """Update getIcon metadata column in given types.
+ import json
+@@ -153,9 +157,9 @@ def _toolbar_classes(self):
+         """current toolbar controlling classes
+         """
+         if not self._context_state.is_toolbar_visible():
+-            return []
++            return set()
  
-@@ -286,15 +327,7 @@ def updateIconsInBrains(context, typesToUpdate=None):
-     if _catalog is not None:
-         metadata = _catalog.data
-         getIconPos = _catalog.schema.get('getIcon', None)
--    ttool = getToolByName(context, 'portal_types')
--    empty_icons = []
--    for name in typesToUpdate.keys():
--        fti = ttool.get(name)
--        if fti:
--            icon_expr = fti.getIconExprObject()
--            if not icon_expr:
--                empty_icons.append(name)
--
-+    empty_icons = _types_with_empty_icons(context, typesToUpdate)
-     brains = search(portal_type=empty_icons, sort_on='path')
-     num_objects = len(brains)
-     pghandler = ZLogHandler(1000)
-@@ -305,32 +338,9 @@ def updateIconsInBrains(context, typesToUpdate=None):
-         brain_icon = brain.getIcon
-         if not brain_icon:
-             continue
--        old_icons = typesToUpdate[brain.portal_type]
-         if getIconPos is not None:
--            # if the old icon is a standard icon, we assume no customization
--            # has taken place and we can simply empty the getIcon metadata
--            # without loading the object
--            new_value = ''
--            if brain_icon not in old_icons:
--                # Otherwise we need to ask the object
--                new_value = ''
--                obj = brain.getObject()
--                method = getattr(aq_base(obj), 'getIcon', None)
--                if method is not None:
--                    try:
--                        new_value = obj.getIcon
--                        if callable(new_value):
--                            new_value = new_value()
--                    except ConflictError:
--                        raise
--                    except Exception:
--                        new_value = ''
--            if brain_icon != new_value:
--                rid = brain.getRID()
--                record = metadata[rid]
--                new_record = list(record)
--                new_record[getIconPos] = new_value
--                metadata[rid] = tuple(new_record)
-+            _update_icon_in_single_brain(
-+                brain, typesToUpdate, getIconPos, metadata)
+-        toolbar_classes = []
++        toolbar_classes = set()
+         registry = getUtility(IRegistry)
+         site_settings = registry.forInterface(
+             ISiteSchema,
+@@ -167,25 +171,25 @@ def _toolbar_classes(self):
+         except KeyError:
+             left = True
+         if left:
+-            toolbar_classes.append('plone-toolbar-left')
++            toolbar_classes.add('plone-toolbar-left')
          else:
-             # If we don't have a standard catalog tool, fall back to the
-             # official API
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index 707fa173..91f1bf39 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -176,6 +176,26 @@ def setupReferencebrowser(context):
-         sels[skinname] = new_layers
- 
- 
-+def _fix_expression(portal, expr):
-+    try:
-+        expr = str(expr)
-+    except UnicodeEncodeError:
-+        pass
-+    if not expr.endswith('gif'):
-+        return expr
-+    try:
-+        png_expr = expr[:-4] + '.png'
-+        portal.restrictedTraverse(png_expr)
-+        expr = png_expr
-+    except (AttributeError, KeyError, TypeError, NotFound):
-+        pass
-+    prefix = ''
-+    if ':' not in expr:
-+        prefix = 'string:$portal_url/'
-+    expr = '{0}{1}'.format(prefix, expr)
-+    return expr
-+
-+
- def migrateActionIcons(context):
-     portal = getToolByName(context, 'portal_url').getPortalObject()
-     atool = getToolByName(portal, 'portal_actions', None)
-@@ -191,27 +211,11 @@ def migrateActionIcons(context):
-     for ic in aitool.listActionIcons():
-         cat = ic._category
-         ident = ic._action_id
--        expr = ic._icon_expr_text
--        try:
--            expr = str(expr)
--        except UnicodeEncodeError:
--            pass
--        if expr.endswith('gif'):
--            try:
--                png_expr = expr[:-4] + '.png'
--                portal.restrictedTraverse(png_expr)
--                expr = png_expr
--            except (AttributeError, KeyError, TypeError, NotFound):
--                pass
--        prefix = ''
--
-         if (cat not in _KNOWN_ACTION_ICONS.keys() or
-                 ident not in _KNOWN_ACTION_ICONS[cat]):
-             continue
--
--        prefix = ''
--        if ':' not in expr:
--            prefix = 'string:$portal_url/'
-+        expr = ic._icon_expr_text
-+        expr = _fix_expression(portal, expr)
- 
-         if cat == 'plone':
-             new_cat = 'document_actions'
-@@ -220,18 +224,15 @@ def migrateActionIcons(context):
-         if new_cat in categories:
-             # actions tool
-             action = atool[new_cat].get(ident)
--            if action is not None:
--                if not action.icon_expr:
--                    action._setPropValue(
--                        'icon_expr', '{0}{1}'.format(prefix, expr))
-+            if action is not None and not action.icon_expr:
-+                action._setPropValue('icon_expr', expr)
-         elif cat == 'controlpanel':
-             # control panel tool
-             action_infos = [a for a in cptool.listActions()
-                             if a.getId() == ident]
-             if len(action_infos):
-                 if not action_infos[0].getIconExpression():
--                    action_infos[0].setIconExpression(
--                        '{0}{1}'.format(prefix, expr))
-+                    action_infos[0].setIconExpression(expr)
- 
-         # Remove the action icon
-         aitool.removeActionIcon(cat, ident)
-diff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py
-index 3df9adcb..1442ea93 100644
---- a/plone/app/upgrade/v40/betas.py
-+++ b/plone/app/upgrade/v40/betas.py
-@@ -64,6 +64,12 @@ def updateSafeHTMLConfig(context):
-     if safe_hasattr(kupu_tool_base, 'html_exclusions'):
-         list_conf.append(
-             ('stripped_attributes', kupu_tool.get_stripped_attributes()))
-+        ksc = dict((str(' '.join(k)), str(' '.join(v)))
-+                   for k, v in kupu_tool.get_stripped_combinations())
-+        tsc = transform._config['stripped_combinations']
-+        if tsc != ksc:
-+            tsc.clear()
-+            tsc.update(ksc)
-     for k, v in list_conf:
-         tdata = transform._config[k]
-         if tdata == v:
-@@ -71,13 +77,6 @@ def updateSafeHTMLConfig(context):
-         while tdata:
-             tdata.pop()
-         tdata.extend(v)
--    if safe_hasattr(kupu_tool_base, 'html_exclusions'):
--        ksc = dict((str(' '.join(k)), str(' '.join(v)))
--                   for k, v in kupu_tool.get_stripped_combinations())
--        tsc = transform._config['stripped_combinations']
--        if tsc != ksc:
--            tsc.clear()
--            tsc.update(ksc)
-     transform._p_changed = True
-     transform.reload()
- 
-@@ -224,42 +223,50 @@ def fix_cataloged_interface_names(context):
-     # introduced in Plone 4.1 - but it saves us from walking the index twice
-     catalog = getToolByName(context, 'portal_catalog')
-     index = catalog._catalog.indexes.get('object_provides', None)
--    if index is not None:
--        logger.info('Updating `object_provides` index.')
--        _index = index._index
--        names = list(_index.keys())
--        delete = set()
--        rename = set()
--        for name in names:
--            try:
--                klass = resolve(name)
--            except ImportError:
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--                continue
--            new_name = klass.__identifier__
--            if new_name in BLACKLISTED_INTERFACES:
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--            elif name != new_name:
--                rename.add(new_name)
--                _index[new_name] = _index[name]
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--        if delete or rename:
--            logger.info('Cleaning up `object_provides` _unindex.')
--            _unindex = index._unindex
--            for pos, (docid, value) in enumerate(_unindex.iteritems()):
--                new_value = list(sorted((set(value) - delete).union(rename)))
--                if value != new_value:
--                    _unindex[docid] = new_value
--                # Note: flake8 erroneously complains about module formatter.
--                if pos and pos % 10000 == 0:  # noqa S001
--                    logger.info('Processed %s items.', pos)
--                    transaction.savepoint(optimistic=True)
-+    if index is None:
-+        return
-+    logger.info('Updating `object_provides` index.')
-+    _index = index._index
-+    names = list(_index.keys())
-+    delete = set()
-+    rename = set()
-+    for name in names:
-+        try:
-+            klass = resolve(name)
-+        except ImportError:
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+            continue
-+        new_name = klass.__identifier__
-+        if new_name in BLACKLISTED_INTERFACES:
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+        elif name != new_name:
-+            rename.add(new_name)
-+            _index[new_name] = _index[name]
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+    if not (delete or rename):
-+        return
-+    # flake8 complained that fix_cataloged_interface_names is too complex (11).
-+    # So we split it in two.
-+    _cleanup_object_provides_index(index, delete, rename)
-+
-+
-+def _cleanup_object_provides_index(index, delete, rename):
-+    logger.info('Cleaning up `object_provides` _unindex.')
-+    _unindex = index._unindex
-+    for pos, (docid, value) in enumerate(_unindex.iteritems()):
-+        new_value = list(sorted((set(value) - delete).union(rename)))
-+        if value != new_value:
-+            _unindex[docid] = new_value
-+        # Note: flake8 erroneously complains about module formatter.
-+        if pos and pos % 10000 == 0:  # noqa S001
-+            logger.info('Processed %s items.', pos)
-+            transaction.savepoint(optimistic=True)
- 
-     transaction.savepoint(optimistic=True)
-     logger.info('Updated `object_provides` index.')
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index 5b67e3b2..727ab761 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -46,7 +46,12 @@ def add_siteadmin_role(context):
-             title='Site Administrators',
-             roles=['Site Administrator'],
-         )
-+    # add_siteadmin_role was too complex, so we split it.
-+    _update_rolemap_for_siteadmin_role(portal)
-+    _update_workflows_for_siteadmin_role(portal)
- 
-+
-+def _update_rolemap_for_siteadmin_role(portal):
-     # update rolemap:
-     # add Site Administrator role to permissions that have the Manager role,
-     # plus some additional ones that only have Manager as a default role
-@@ -97,6 +102,8 @@ def add_siteadmin_role(context):
-     for permission_id in extra_permissions:
-         portal.manage_permission(permission_id, ['Site Administrator', ], True)
- 
-+
-+def _update_workflows_for_siteadmin_role(portal):
-     # update workflows:
-     # add Site Administrator role where Manager already is;
-     wtool = getToolByName(portal, 'portal_workflow')
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index 908c7e75..faa911d2 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -39,13 +39,19 @@ def reindex_sortable_title(context):
+-            toolbar_classes.append('plone-toolbar-top')
++            toolbar_classes.add('plone-toolbar-top')
+         try:
+             toolbar_state = {}
+             toolbar_state_cookie = self.request.cookies.get('plone-toolbar')
+             if toolbar_state_cookie:
+                 toolbar_state = json.loads(toolbar_state_cookie)
+             if toolbar_state.get('expanded', True):
+-                toolbar_classes.append('plone-toolbar-expanded')
++                toolbar_classes.add('plone-toolbar-expanded')
+                 if left:
+-                    toolbar_classes.append('plone-toolbar-left-expanded')
++                    toolbar_classes.add('plone-toolbar-left-expanded')
+                 else:
+-                    toolbar_classes.append('plone-toolbar-top-expanded')
++                    toolbar_classes.add('plone-toolbar-top-expanded')
              else:
-                 change.extend(list(keys))
-     pghandler.finish()
--    update_metadata = 'sortable_title' in _catalog.schema
-+    # flake8 complained that reindex_sortable_title is too complex (11).
-+    # So we split it in two.
-+    _update_sortable_title(_catalog, change)
-+
-+
-+def _update_sortable_title(catalog, change):
-+    update_metadata = 'sortable_title' in catalog.schema
-     pghandler = ZLogHandler(1000)
-     logger.info('Updating sortable_title index')
-     pghandler.init('Updating sortable_title index', len(change))
-     for i, rid in enumerate(change):
-         pghandler.report(i)
--        brain = _catalog[rid]
-+        brain = catalog[rid]
-         try:
-             obj = brain.getObject()
-         except (AttributeError, KeyError):
-@@ -134,34 +140,35 @@ def to43alpha1(context):
-     upgradePloneAppJQuery(context)
- 
- 
-+def _getDexterityFolderTypes(portal):
-+    try:
-+        from plone.dexterity.interfaces import IDexterityFTI
-+        from plone.dexterity.utils import resolveDottedName
-+        from Products.CMFPlone.interfaces.syndication import ISyndicatable
-+    except ImportError:
-+        return set([])
-+
-+    portal_types = getToolByName(portal, 'portal_types')
-+    types = [fti for fti in portal_types.listTypeInfo() if
-+             IDexterityFTI.providedBy(fti)]
-+
-+    ftypes = set([])
-+    for _type in types:
-+        klass = resolveDottedName(_type.klass)
-+        if ISyndicatable.implementedBy(klass):
-+            ftypes.add(_type.getId())
-+    return ftypes
-+
-+
- def upgradeSyndication(context):
-     from zope.component import getUtility, getSiteManager
-     from plone.registry.interfaces import IRegistry
-     from Products.CMFCore.interfaces import ISyndicationTool
--    from Products.CMFPlone.interfaces.syndication import ISyndicatable
-     from Products.CMFPlone.interfaces.syndication import (
--        ISiteSyndicationSettings, IFeedSettings)
-+        ISiteSyndicationSettings)
- 
-     portal = getToolByName(context, 'portal_url').getPortalObject()
- 
--    def getDexterityFolderTypes():
--        try:
--            from plone.dexterity.interfaces import IDexterityFTI
--            from plone.dexterity.utils import resolveDottedName
--        except ImportError:
--            return set([])
--
--        portal_types = getToolByName(portal, 'portal_types')
--        types = [fti for fti in portal_types.listTypeInfo() if
--                 IDexterityFTI.providedBy(fti)]
--
--        ftypes = set([])
--        for _type in types:
--            klass = resolveDottedName(_type.klass)
--            if ISyndicatable.implementedBy(klass):
--                ftypes.add(_type.getId())
--        return ftypes
--
-     logger.info('Migrating syndication tool')
-     registry = getUtility(IRegistry)
-     synd_settings = registry.forInterface(ISiteSyndicationSettings)
-@@ -169,6 +176,9 @@ def getDexterityFolderTypes():
-     # available
-     try:
-         old_synd_tool = portal.portal_syndication
-+    except AttributeError:
-+        pass
-+    else:
-         try:
-             synd_settings.allowed = old_synd_tool.isAllowed
-         except AttributeError:
-@@ -178,39 +188,47 @@ def getDexterityFolderTypes():
-         except AttributeError:
+                 if left:
+-                    toolbar_classes.append('plone-toolbar-left-default')
++                    toolbar_classes.add('plone-toolbar-left-default')
+                 else:
+-                    toolbar_classes.append('plone-toolbar-top-default')
++                    toolbar_classes.add('plone-toolbar-top-default')
+         except Exception:
              pass
-         portal.manage_delObjects(['portal_syndication'])
--    except AttributeError:
--        pass
-+
-     sm = getSiteManager()
-     sm.unregisterUtility(provided=ISyndicationTool)
-+    # flake8 complained that upgradeSyndication is too complex (11).
-+    # So we split it in two.
-+    _update_syndication_info(portal)
-+
-+
-+def _update_syndication_info(portal):
-     # now, go through all containers and look for syndication_info
-     # objects
-+    from Products.CMFPlone.interfaces.syndication import IFeedSettings
-+    from Products.CMFPlone.interfaces.syndication import ISyndicatable
-     catalog = getToolByName(portal, 'portal_catalog')
-     # get all folder types from portal_types
-     at_tool = getToolByName(portal, 'archetype_tool')
-     folder_types = set([])
-     for _type in at_tool.listPortalTypesWithInterfaces([ISyndicatable]):
-         folder_types.add(_type.getId())
--    folder_types = folder_types | getDexterityFolderTypes()
-+    folder_types = folder_types | _getDexterityFolderTypes(portal)
-     for brain in catalog(portal_type=tuple(folder_types)):
-         try:
-             obj = brain.getObject()
-         except (AttributeError, KeyError):
-             continue
--        if 'syndication_information' in obj.objectIds():
--            # just having syndication info object means
--            # syndication is enabled
--            info = obj.syndication_information
--            try:
--                settings = IFeedSettings(obj)
--            except TypeError:
--                continue
--            settings.enabled = True
--            try:
--                settings.max_items = info.max_items
--            except AttributeError:
--                pass
--            settings.feed_types = ('RSS',)
--            obj.manage_delObjects(['syndication_information'])
-+        if 'syndication_information' not in obj.objectIds():
-+            return
-+        # just having syndication info object means
-+        # syndication is enabled
-+        info = obj.syndication_information
-+        try:
-+            settings = IFeedSettings(obj)
-+        except TypeError:
-+            continue
-+        settings.enabled = True
-+        try:
-+            settings.max_items = info.max_items
-+        except AttributeError:
-+            pass
-+        settings.feed_types = ('RSS',)
-+        obj.manage_delObjects(['syndication_information'])
+         return toolbar_classes
+@@ -238,21 +242,21 @@ def bodyClass(self, template, view):
+             template_name = view.__name__
+         if template_name:
+             template_name = normalizer.normalize(template_name)
+-            body_classes.append('template-%s' % template_name)
++            body_classes.add('template-%s' % template_name)
  
+         # portal type class (optional)
+         portal_type = normalizer.normalize(self.context.portal_type)
+         if portal_type:
+-            body_classes.append("portaltype-%s" % portal_type)
++            body_classes.add("portaltype-%s" % portal_type)
  
- def to43alpha2(context):
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index b8aced8d..d503ecab 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -291,6 +291,12 @@ def removeFakeKupu(context):
-         # Note that this does nothing when the configlet is not there.
-         control_panel.unregisterConfiglet('kupu')
-         logger.info('Removed kupu control panel configlet.')
-+
-+    # The function was too complex, so we split it.
-+    _remove_kupu_from_props(portal)
-+
-+
-+def _remove_kupu_from_props(portal):
-     # Remove editor from site_properties.
-     pprops = getToolByName(portal, 'portal_properties', None)
-     available_editors = []
-@@ -315,7 +321,7 @@ def removeFakeKupu(context):
-     # Remove from portal_memberdata.  Note that you can use
-     # collective.setdefaulteditor if you want more options, like
-     # updating the chosen editor for all existing members.
--    member_data = getToolByName(context, 'portal_memberdata')
-+    member_data = getToolByName(portal, 'portal_memberdata')
-     if member_data.getProperty('wysiwyg_editor') == 'Kupu':
-         member_data._updateProperty('wysiwyg_editor', '')
-         logger.info('Changed new member wysiwyg_editor to site default.')
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 9cd42a25..3901ba72 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -492,6 +492,47 @@ def upgrade_navigation_controlpanel_settings_2(context):
-             navigation_properties._delProperty(p)
+         # section class (optional)
+         navroot = portal_state.navigation_root()
+-        body_classes.append("site-%s" % navroot.getId())
++        body_classes.add("site-%s" % navroot.getId())
  
+         contentPath = self.context.getPhysicalPath()[
+             len(navroot.getPhysicalPath()):]
+         if contentPath:
+-            body_classes.append("section-%s" % contentPath[0])
++            body_classes.add("section-%s" % contentPath[0])
+             # skip first section since we already have that...
+             if len(contentPath) > 1:
+                 depth = registry.get(
+@@ -263,19 +267,19 @@ def bodyClass(self, template, view):
+                     classes = ['subsection-%s' % contentPath[1]]
+                     for section in contentPath[2:depth]:
+                         classes.append('-'.join([classes[-1], section]))
+-                    body_classes.extend(classes)
++                    body_classes.update(classes)
  
-+def _migrate_site_properties(site_properties, registry):
-+    properties_to_migrate = [
-+        'external_links_open_new_window',
-+        'mark_special_links',
-+        'calendar_starting_year',
-+        'calendar_future_years_available',
-+        'redirect_links',
-+        'enable_checkout_workflow',
-+    ]
-+    for p in properties_to_migrate:
-+        if site_properties.hasProperty(p):
-+            value = site_properties.getProperty(p)
-+            if isinstance(value, basestring):
-+                if value.lower() == 'true':
-+                    value = True
-+                elif value.lower() == 'false':
-+                    value = False
-+            try:
-+                registry['plone.{0}'.format(p)] = value
-+                site_properties._delProperty(p)
-+            except KeyError:
-+                logger.warn('could not upgrade %s property', p)
+         # class for hiding icons (optional)
+         if self.icons_visible():
+-            body_classes.append('icons-on')
++            body_classes.add('icons-on')
+         else:
+-            body_classes.append('icons-off')
++            body_classes.add('icons-off')
+ 
+         # class for hiding thumbs (optional)
+         if self.thumb_visible():
+-            body_classes.append('thumbs-on')
++            body_classes.add('thumbs-on')
+         else:
+-            body_classes.append('thumbs-off')
++            body_classes.add('thumbs-off')
+ 
+         # permissions required. Useful to theme frontend and backend
+         # differently
+@@ -285,18 +289,18 @@ def bodyClass(self, template, view):
+         for permission, roles in getattr(view, '__ac_permissions__', tuple()):
+             permissions.append(normalizer.normalize(permission))
+         if 'none' in permissions or 'view' in permissions:
+-            body_classes.append('frontend')
++            body_classes.add('frontend')
+         for permission in permissions:
+-            body_classes.append('viewpermission-' + permission)
++            body_classes.add('viewpermission-' + permission)
+ 
+         # class for user roles
+         membership = getToolByName(self.context, "portal_membership")
+         if membership.isAnonymousUser():
+-            body_classes.append('userrole-anonymous')
++            body_classes.add('userrole-anonymous')
+         else:
+             user = membership.getAuthenticatedMember()
+             for role in user.getRolesInContext(self.context):
+-                body_classes.append(
++                body_classes.add(
+                     'userrole-' + role.lower().replace(' ', '-')
+                 )
+ 
+@@ -309,6 +313,31 @@ def bodyClass(self, template, view):
+         msl = link_settings.mark_special_links
+         elonw = link_settings.external_links_open_new_window
+         if msl or elonw:
+-            body_classes.append('pat-markspeciallinks')
++            body_classes.add('pat-markspeciallinks')
++
++        # Add externally defined extra body classes
++        body_class_adapters = getAdapters(
++            (self.context, self.request),
++            IBodyClassAdapter
++        )
++        for name, body_class_adapter in body_class_adapters:
++            extra_classes = body_class_adapter.get_classes() or []
++            if isinstance(extra_classes, basestring):
++                extra_classes = extra_classes.split(' ')
++            body_classes.update(extra_classes)
+ 
+         return ' '.join(sorted(body_classes))
 +
 +
-+def _migrate_lists(site_properties, registry):
-+    def _migrate_list(original_id, new_id=None):
-+        if new_id is None:
-+            new_id = original_id
-+        if site_properties.hasProperty(original_id):
-+            value = site_properties.getProperty(original_id)
-+            value = [safe_unicode(a) for a in value]
-+            registry['plone.{0}'.format(new_id)] = value
-+            site_properties._delProperty(original_id)
++@adapter(Interface)
++@implementer(IBodyClassAdapter)
++class DefaultBodyClasses(object):
 +
-+    _migrate_list('typesUseViewActionInListings',
-+                  'types_use_view_action_in_listings')
-+    _migrate_list('default_page')
-+    _migrate_list('parentMetaTypesNotToQuery', 'parent_types_not_to_query')
-+    _migrate_list('allowRolesToAddKeywords', 'roles_allowed_to_add_keywords')
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
 +
-+
- def to50rc3(context):
-     """5.0rc2 -> 5.0rc3"""
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc3')
-@@ -511,25 +552,7 @@ def to50rc3(context):
-         if site_properties.hasProperty(p):
-             site_properties._delProperty(p)
- 
--    properties_to_migrate = ['external_links_open_new_window',
--                             'mark_special_links',
--                             'calendar_starting_year',
--                             'calendar_future_years_available',
--                             'redirect_links',
--                             'enable_checkout_workflow']
--    for p in properties_to_migrate:
--        if site_properties.hasProperty(p):
--            value = site_properties.getProperty(p)
--            if isinstance(value, basestring):
--                if value.lower() == 'true':
--                    value = True
--                elif value.lower() == 'false':
--                    value = False
--            try:
--                registry['plone.{0}'.format(p)] = value
--                site_properties._delProperty(p)
--            except KeyError:
--                logger.warn('could not upgrade %s property', p)
-+    _migrate_site_properties(site_properties, registry)
- 
-     if site_properties.hasProperty('checkout_workflow_policy'):
-         value = site_properties.getProperty('checkout_workflow_policy')
-@@ -555,20 +578,7 @@ def to50rc3(context):
-         registry['plone.sitemap_depth'] = value
-         site_properties._delProperty('sitemapDepth')
- 
--    def _migrate_list(original_id, new_id=None):
--        if new_id is None:
--            new_id = original_id
--        if site_properties.hasProperty(original_id):
--            value = site_properties.getProperty(original_id)
--            value = [safe_unicode(a) for a in value]
--            registry['plone.{0}'.format(new_id)] = value
--            site_properties._delProperty(original_id)
--
--    _migrate_list('typesUseViewActionInListings',
--                  'types_use_view_action_in_listings')
--    _migrate_list('default_page')
--    _migrate_list('parentMetaTypesNotToQuery', 'parent_types_not_to_query')
--    _migrate_list('allowRolesToAddKeywords', 'roles_allowed_to_add_keywords')
-+    _migrate_lists(site_properties, registry)
- 
-     # migrate navtree properties
-     upgrade_navigation_controlpanel_settings_2(context)
++    def get_classes(self):
++        """Default body classes adapter.
++        """
++        return []
 
 
-Repository: plone.app.upgrade
+Repository: plone.app.layout
 
 
 Branch: refs/heads/master
-Date: 2018-04-17T22:07:11+02:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/194b870dfb6fa4d091fcf4a1acfab4b2ea3afa8c
+Date: 2018-04-17T22:55:54+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.layout/commit/b47ea5b420dac5326fd360358a415dd5ebf5a415
 
-Merge pull request #158 from plone/complexity
+Merge pull request #127 from plone/thet-IBodyClassAdapter
 
-Reduce code complexity
+Introduce IBodyClassAdapter
 
 Files changed:
 M CHANGES.rst
-M plone/app/upgrade/utils.py
-M plone/app/upgrade/v40/alphas.py
-M plone/app/upgrade/v40/betas.py
-M plone/app/upgrade/v41/alphas.py
-M plone/app/upgrade/v43/alphas.py
-M plone/app/upgrade/v43/final.py
-M plone/app/upgrade/v50/betas.py
+M plone/app/layout/globals/interfaces.py
+M plone/app/layout/globals/layout.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 85379235..2e98c4b3 100644
+index 5e4d028..54ffcdc 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,6 +14,8 @@ New features:
+@@ -10,6 +10,9 @@ Breaking changes:
+ 
+ New features:
+ 
++- Allow addition of extra body classes via multiple IBodyClassAdapter adapter registrations without the need to overload the ILayoutPolicy view.
++  [thet, jensens, agitator]
++
+ - Make it easier to override seperator in title viewlet
+   [tomgross]
+ 
+@@ -18,13 +21,8 @@ Bug fixes:
+ - More py3 fixes.
+   [pbauer]
+ 
+-- Use ``get_installer`` in tests.  [maurits]
+-
+-- Imports are Python3 compatible
+-  [ale-rt, jensens]
+-
+-- Fix for situations where pathbar viewlet variables were undefined in toolbar context
+-  [tomgross]
++- Use ``get_installer`` in tests.
++  [maurits]
+ 
+ 2.7.5 (2017-11-26)
+ ------------------
+@@ -37,6 +35,8 @@ New features:
+ - Imports are Python3 compatible
+   [ale-rt, jensens]
+ 
++Bug fixes:
++
+ - Fix for situations where pathbar viewlet variables were undefined in toolbar context
+   [tomgross]
+ 
+@@ -72,6 +72,9 @@ New features:
+ 
+ - Added membertools viewlet. If user is not anonymous and toolbar is not visible according to ``is_toolbar_visible`` the viewlet will show at the location of anontools.
+   [agitator]
++- Allow addition of extra body classes via multiple ``IBodyClassAdapter`` adapter registrations without the need to overload the ILayoutPolicy view.
++  RFC / DRAFT / WORK IN PROGRESS
++  [thet]
  
  Bug fixes:
  
-+- Made several functions less complex by splitting them.  [maurits]
-+
- - Improved code quality.  [maurits]
+diff --git a/plone/app/layout/globals/interfaces.py b/plone/app/layout/globals/interfaces.py
+index 1c7f6e9..26dc255 100644
+--- a/plone/app/layout/globals/interfaces.py
++++ b/plone/app/layout/globals/interfaces.py
+@@ -282,6 +282,11 @@ class IViewView(Interface):
+     """
  
  
-diff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py
-index 506776bb..82fc1a65 100644
---- a/plone/app/upgrade/utils.py
-+++ b/plone/app/upgrade/utils.py
-@@ -263,6 +263,47 @@ def unregisterSteps(context, import_steps=None, export_steps=None):
-     context._p_changed = True
++class IBodyClassAdapter(Interface):
++    """Adapter interface for retrieving extra body classes.
++    """
++
++
+ class IPatternsSettingsRenderer(Interface):
+     """ Interface for the adapter that renders the settings for patterns
  
+diff --git a/plone/app/layout/globals/layout.py b/plone/app/layout/globals/layout.py
+index 88cc15a..0587e45 100644
+--- a/plone/app/layout/globals/layout.py
++++ b/plone/app/layout/globals/layout.py
+@@ -1,4 +1,5 @@
+ # -*- coding: utf-8 -*-
++from plone.app.layout.globals.interfaces import IBodyClassAdapter
+ from plone.app.layout.globals.interfaces import ILayoutPolicy
+ from plone.app.layout.globals.interfaces import IViewView
+ from plone.app.layout.icons.interfaces import IContentIcon
+@@ -13,6 +14,8 @@
+ from Products.Five.browser.metaconfigure import ViewMixinForTemplates
+ from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+ from zope.browserpage.viewpagetemplatefile import ViewPageTemplateFile as ZopeViewPageTemplateFile  # noqa
++from zope.component import adapter
++from zope.component import getAdapters
+ from zope.component import getMultiAdapter
+ from zope.component import getUtility
+ from zope.component import queryMultiAdapter
+@@ -20,6 +23,7 @@
+ from zope.deprecation import deprecate
+ from zope.interface import alsoProvides
+ from zope.interface import implementer
++from zope.interface import Interface
+ from zope.publisher.browser import BrowserView
  
-+def _types_with_empty_icons(context, typesToUpdate):
-+    ttool = getToolByName(context, 'portal_types')
-+    empty_icons = []
-+    for name in typesToUpdate.keys():
-+        fti = ttool.get(name)
-+        if fti:
-+            icon_expr = fti.getIconExprObject()
-+            if not icon_expr:
-+                empty_icons.append(name)
-+    return empty_icons
-+
-+
-+def _update_icon_in_single_brain(brain, typesToUpdate, getIconPos, metadata):
-+    # if the old icon is a standard icon, we assume no customization
-+    # has taken place and we can simply empty the getIcon metadata
-+    # without loading the object
-+    new_value = ''
-+    old_icons = typesToUpdate[brain.portal_type]
-+    brain_icon = brain.getIcon
-+    if brain_icon not in old_icons:
-+        # Otherwise we need to ask the object
-+        new_value = ''
-+        obj = brain.getObject()
-+        method = getattr(aq_base(obj), 'getIcon', None)
-+        if method is not None:
-+            try:
-+                new_value = obj.getIcon
-+                if callable(new_value):
-+                    new_value = new_value()
-+            except ConflictError:
-+                raise
-+            except Exception:
-+                new_value = ''
-+    if brain_icon != new_value:
-+        rid = brain.getRID()
-+        record = metadata[rid]
-+        new_record = list(record)
-+        new_record[getIconPos] = new_value
-+        metadata[rid] = tuple(new_record)
-+
-+
- def updateIconsInBrains(context, typesToUpdate=None):
-     """Update getIcon metadata column in given types.
+ import json
+@@ -153,9 +157,9 @@ def _toolbar_classes(self):
+         """current toolbar controlling classes
+         """
+         if not self._context_state.is_toolbar_visible():
+-            return []
++            return set()
  
-@@ -286,15 +327,7 @@ def updateIconsInBrains(context, typesToUpdate=None):
-     if _catalog is not None:
-         metadata = _catalog.data
-         getIconPos = _catalog.schema.get('getIcon', None)
--    ttool = getToolByName(context, 'portal_types')
--    empty_icons = []
--    for name in typesToUpdate.keys():
--        fti = ttool.get(name)
--        if fti:
--            icon_expr = fti.getIconExprObject()
--            if not icon_expr:
--                empty_icons.append(name)
--
-+    empty_icons = _types_with_empty_icons(context, typesToUpdate)
-     brains = search(portal_type=empty_icons, sort_on='path')
-     num_objects = len(brains)
-     pghandler = ZLogHandler(1000)
-@@ -305,32 +338,9 @@ def updateIconsInBrains(context, typesToUpdate=None):
-         brain_icon = brain.getIcon
-         if not brain_icon:
-             continue
--        old_icons = typesToUpdate[brain.portal_type]
-         if getIconPos is not None:
--            # if the old icon is a standard icon, we assume no customization
--            # has taken place and we can simply empty the getIcon metadata
--            # without loading the object
--            new_value = ''
--            if brain_icon not in old_icons:
--                # Otherwise we need to ask the object
--                new_value = ''
--                obj = brain.getObject()
--                method = getattr(aq_base(obj), 'getIcon', None)
--                if method is not None:
--                    try:
--                        new_value = obj.getIcon
--                        if callable(new_value):
--                            new_value = new_value()
--                    except ConflictError:
--                        raise
--                    except Exception:
--                        new_value = ''
--            if brain_icon != new_value:
--                rid = brain.getRID()
--                record = metadata[rid]
--                new_record = list(record)
--                new_record[getIconPos] = new_value
--                metadata[rid] = tuple(new_record)
-+            _update_icon_in_single_brain(
-+                brain, typesToUpdate, getIconPos, metadata)
+-        toolbar_classes = []
++        toolbar_classes = set()
+         registry = getUtility(IRegistry)
+         site_settings = registry.forInterface(
+             ISiteSchema,
+@@ -167,25 +171,25 @@ def _toolbar_classes(self):
+         except KeyError:
+             left = True
+         if left:
+-            toolbar_classes.append('plone-toolbar-left')
++            toolbar_classes.add('plone-toolbar-left')
          else:
-             # If we don't have a standard catalog tool, fall back to the
-             # official API
-diff --git a/plone/app/upgrade/v40/alphas.py b/plone/app/upgrade/v40/alphas.py
-index 707fa173..91f1bf39 100644
---- a/plone/app/upgrade/v40/alphas.py
-+++ b/plone/app/upgrade/v40/alphas.py
-@@ -176,6 +176,26 @@ def setupReferencebrowser(context):
-         sels[skinname] = new_layers
- 
- 
-+def _fix_expression(portal, expr):
-+    try:
-+        expr = str(expr)
-+    except UnicodeEncodeError:
-+        pass
-+    if not expr.endswith('gif'):
-+        return expr
-+    try:
-+        png_expr = expr[:-4] + '.png'
-+        portal.restrictedTraverse(png_expr)
-+        expr = png_expr
-+    except (AttributeError, KeyError, TypeError, NotFound):
-+        pass
-+    prefix = ''
-+    if ':' not in expr:
-+        prefix = 'string:$portal_url/'
-+    expr = '{0}{1}'.format(prefix, expr)
-+    return expr
-+
-+
- def migrateActionIcons(context):
-     portal = getToolByName(context, 'portal_url').getPortalObject()
-     atool = getToolByName(portal, 'portal_actions', None)
-@@ -191,27 +211,11 @@ def migrateActionIcons(context):
-     for ic in aitool.listActionIcons():
-         cat = ic._category
-         ident = ic._action_id
--        expr = ic._icon_expr_text
--        try:
--            expr = str(expr)
--        except UnicodeEncodeError:
--            pass
--        if expr.endswith('gif'):
--            try:
--                png_expr = expr[:-4] + '.png'
--                portal.restrictedTraverse(png_expr)
--                expr = png_expr
--            except (AttributeError, KeyError, TypeError, NotFound):
--                pass
--        prefix = ''
--
-         if (cat not in _KNOWN_ACTION_ICONS.keys() or
-                 ident not in _KNOWN_ACTION_ICONS[cat]):
-             continue
--
--        prefix = ''
--        if ':' not in expr:
--            prefix = 'string:$portal_url/'
-+        expr = ic._icon_expr_text
-+        expr = _fix_expression(portal, expr)
- 
-         if cat == 'plone':
-             new_cat = 'document_actions'
-@@ -220,18 +224,15 @@ def migrateActionIcons(context):
-         if new_cat in categories:
-             # actions tool
-             action = atool[new_cat].get(ident)
--            if action is not None:
--                if not action.icon_expr:
--                    action._setPropValue(
--                        'icon_expr', '{0}{1}'.format(prefix, expr))
-+            if action is not None and not action.icon_expr:
-+                action._setPropValue('icon_expr', expr)
-         elif cat == 'controlpanel':
-             # control panel tool
-             action_infos = [a for a in cptool.listActions()
-                             if a.getId() == ident]
-             if len(action_infos):
-                 if not action_infos[0].getIconExpression():
--                    action_infos[0].setIconExpression(
--                        '{0}{1}'.format(prefix, expr))
-+                    action_infos[0].setIconExpression(expr)
- 
-         # Remove the action icon
-         aitool.removeActionIcon(cat, ident)
-diff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py
-index 3df9adcb..1442ea93 100644
---- a/plone/app/upgrade/v40/betas.py
-+++ b/plone/app/upgrade/v40/betas.py
-@@ -64,6 +64,12 @@ def updateSafeHTMLConfig(context):
-     if safe_hasattr(kupu_tool_base, 'html_exclusions'):
-         list_conf.append(
-             ('stripped_attributes', kupu_tool.get_stripped_attributes()))
-+        ksc = dict((str(' '.join(k)), str(' '.join(v)))
-+                   for k, v in kupu_tool.get_stripped_combinations())
-+        tsc = transform._config['stripped_combinations']
-+        if tsc != ksc:
-+            tsc.clear()
-+            tsc.update(ksc)
-     for k, v in list_conf:
-         tdata = transform._config[k]
-         if tdata == v:
-@@ -71,13 +77,6 @@ def updateSafeHTMLConfig(context):
-         while tdata:
-             tdata.pop()
-         tdata.extend(v)
--    if safe_hasattr(kupu_tool_base, 'html_exclusions'):
--        ksc = dict((str(' '.join(k)), str(' '.join(v)))
--                   for k, v in kupu_tool.get_stripped_combinations())
--        tsc = transform._config['stripped_combinations']
--        if tsc != ksc:
--            tsc.clear()
--            tsc.update(ksc)
-     transform._p_changed = True
-     transform.reload()
- 
-@@ -224,42 +223,50 @@ def fix_cataloged_interface_names(context):
-     # introduced in Plone 4.1 - but it saves us from walking the index twice
-     catalog = getToolByName(context, 'portal_catalog')
-     index = catalog._catalog.indexes.get('object_provides', None)
--    if index is not None:
--        logger.info('Updating `object_provides` index.')
--        _index = index._index
--        names = list(_index.keys())
--        delete = set()
--        rename = set()
--        for name in names:
--            try:
--                klass = resolve(name)
--            except ImportError:
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--                continue
--            new_name = klass.__identifier__
--            if new_name in BLACKLISTED_INTERFACES:
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--            elif name != new_name:
--                rename.add(new_name)
--                _index[new_name] = _index[name]
--                delete.add(name)
--                del _index[name]
--                index._length.change(-1)
--        if delete or rename:
--            logger.info('Cleaning up `object_provides` _unindex.')
--            _unindex = index._unindex
--            for pos, (docid, value) in enumerate(_unindex.iteritems()):
--                new_value = list(sorted((set(value) - delete).union(rename)))
--                if value != new_value:
--                    _unindex[docid] = new_value
--                # Note: flake8 erroneously complains about module formatter.
--                if pos and pos % 10000 == 0:  # noqa S001
--                    logger.info('Processed %s items.', pos)
--                    transaction.savepoint(optimistic=True)
-+    if index is None:
-+        return
-+    logger.info('Updating `object_provides` index.')
-+    _index = index._index
-+    names = list(_index.keys())
-+    delete = set()
-+    rename = set()
-+    for name in names:
-+        try:
-+            klass = resolve(name)
-+        except ImportError:
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+            continue
-+        new_name = klass.__identifier__
-+        if new_name in BLACKLISTED_INTERFACES:
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+        elif name != new_name:
-+            rename.add(new_name)
-+            _index[new_name] = _index[name]
-+            delete.add(name)
-+            del _index[name]
-+            index._length.change(-1)
-+    if not (delete or rename):
-+        return
-+    # flake8 complained that fix_cataloged_interface_names is too complex (11).
-+    # So we split it in two.
-+    _cleanup_object_provides_index(index, delete, rename)
-+
-+
-+def _cleanup_object_provides_index(index, delete, rename):
-+    logger.info('Cleaning up `object_provides` _unindex.')
-+    _unindex = index._unindex
-+    for pos, (docid, value) in enumerate(_unindex.iteritems()):
-+        new_value = list(sorted((set(value) - delete).union(rename)))
-+        if value != new_value:
-+            _unindex[docid] = new_value
-+        # Note: flake8 erroneously complains about module formatter.
-+        if pos and pos % 10000 == 0:  # noqa S001
-+            logger.info('Processed %s items.', pos)
-+            transaction.savepoint(optimistic=True)
- 
-     transaction.savepoint(optimistic=True)
-     logger.info('Updated `object_provides` index.')
-diff --git a/plone/app/upgrade/v41/alphas.py b/plone/app/upgrade/v41/alphas.py
-index 5b67e3b2..727ab761 100644
---- a/plone/app/upgrade/v41/alphas.py
-+++ b/plone/app/upgrade/v41/alphas.py
-@@ -46,7 +46,12 @@ def add_siteadmin_role(context):
-             title='Site Administrators',
-             roles=['Site Administrator'],
-         )
-+    # add_siteadmin_role was too complex, so we split it.
-+    _update_rolemap_for_siteadmin_role(portal)
-+    _update_workflows_for_siteadmin_role(portal)
- 
-+
-+def _update_rolemap_for_siteadmin_role(portal):
-     # update rolemap:
-     # add Site Administrator role to permissions that have the Manager role,
-     # plus some additional ones that only have Manager as a default role
-@@ -97,6 +102,8 @@ def add_siteadmin_role(context):
-     for permission_id in extra_permissions:
-         portal.manage_permission(permission_id, ['Site Administrator', ], True)
- 
-+
-+def _update_workflows_for_siteadmin_role(portal):
-     # update workflows:
-     # add Site Administrator role where Manager already is;
-     wtool = getToolByName(portal, 'portal_workflow')
-diff --git a/plone/app/upgrade/v43/alphas.py b/plone/app/upgrade/v43/alphas.py
-index 908c7e75..faa911d2 100644
---- a/plone/app/upgrade/v43/alphas.py
-+++ b/plone/app/upgrade/v43/alphas.py
-@@ -39,13 +39,19 @@ def reindex_sortable_title(context):
+-            toolbar_classes.append('plone-toolbar-top')
++            toolbar_classes.add('plone-toolbar-top')
+         try:
+             toolbar_state = {}
+             toolbar_state_cookie = self.request.cookies.get('plone-toolbar')
+             if toolbar_state_cookie:
+                 toolbar_state = json.loads(toolbar_state_cookie)
+             if toolbar_state.get('expanded', True):
+-                toolbar_classes.append('plone-toolbar-expanded')
++                toolbar_classes.add('plone-toolbar-expanded')
+                 if left:
+-                    toolbar_classes.append('plone-toolbar-left-expanded')
++                    toolbar_classes.add('plone-toolbar-left-expanded')
+                 else:
+-                    toolbar_classes.append('plone-toolbar-top-expanded')
++                    toolbar_classes.add('plone-toolbar-top-expanded')
              else:
-                 change.extend(list(keys))
-     pghandler.finish()
--    update_metadata = 'sortable_title' in _catalog.schema
-+    # flake8 complained that reindex_sortable_title is too complex (11).
-+    # So we split it in two.
-+    _update_sortable_title(_catalog, change)
-+
-+
-+def _update_sortable_title(catalog, change):
-+    update_metadata = 'sortable_title' in catalog.schema
-     pghandler = ZLogHandler(1000)
-     logger.info('Updating sortable_title index')
-     pghandler.init('Updating sortable_title index', len(change))
-     for i, rid in enumerate(change):
-         pghandler.report(i)
--        brain = _catalog[rid]
-+        brain = catalog[rid]
-         try:
-             obj = brain.getObject()
-         except (AttributeError, KeyError):
-@@ -134,34 +140,35 @@ def to43alpha1(context):
-     upgradePloneAppJQuery(context)
- 
- 
-+def _getDexterityFolderTypes(portal):
-+    try:
-+        from plone.dexterity.interfaces import IDexterityFTI
-+        from plone.dexterity.utils import resolveDottedName
-+        from Products.CMFPlone.interfaces.syndication import ISyndicatable
-+    except ImportError:
-+        return set([])
-+
-+    portal_types = getToolByName(portal, 'portal_types')
-+    types = [fti for fti in portal_types.listTypeInfo() if
-+             IDexterityFTI.providedBy(fti)]
-+
-+    ftypes = set([])
-+    for _type in types:
-+        klass = resolveDottedName(_type.klass)
-+        if ISyndicatable.implementedBy(klass):
-+            ftypes.add(_type.getId())
-+    return ftypes
-+
-+
- def upgradeSyndication(context):
-     from zope.component import getUtility, getSiteManager
-     from plone.registry.interfaces import IRegistry
-     from Products.CMFCore.interfaces import ISyndicationTool
--    from Products.CMFPlone.interfaces.syndication import ISyndicatable
-     from Products.CMFPlone.interfaces.syndication import (
--        ISiteSyndicationSettings, IFeedSettings)
-+        ISiteSyndicationSettings)
- 
-     portal = getToolByName(context, 'portal_url').getPortalObject()
- 
--    def getDexterityFolderTypes():
--        try:
--            from plone.dexterity.interfaces import IDexterityFTI
--            from plone.dexterity.utils import resolveDottedName
--        except ImportError:
--            return set([])
--
--        portal_types = getToolByName(portal, 'portal_types')
--        types = [fti for fti in portal_types.listTypeInfo() if
--                 IDexterityFTI.providedBy(fti)]
--
--        ftypes = set([])
--        for _type in types:
--            klass = resolveDottedName(_type.klass)
--            if ISyndicatable.implementedBy(klass):
--                ftypes.add(_type.getId())
--        return ftypes
--
-     logger.info('Migrating syndication tool')
-     registry = getUtility(IRegistry)
-     synd_settings = registry.forInterface(ISiteSyndicationSettings)
-@@ -169,6 +176,9 @@ def getDexterityFolderTypes():
-     # available
-     try:
-         old_synd_tool = portal.portal_syndication
-+    except AttributeError:
-+        pass
-+    else:
-         try:
-             synd_settings.allowed = old_synd_tool.isAllowed
-         except AttributeError:
-@@ -178,39 +188,47 @@ def getDexterityFolderTypes():
-         except AttributeError:
+                 if left:
+-                    toolbar_classes.append('plone-toolbar-left-default')
++                    toolbar_classes.add('plone-toolbar-left-default')
+                 else:
+-                    toolbar_classes.append('plone-toolbar-top-default')
++                    toolbar_classes.add('plone-toolbar-top-default')
+         except Exception:
              pass
-         portal.manage_delObjects(['portal_syndication'])
--    except AttributeError:
--        pass
-+
-     sm = getSiteManager()
-     sm.unregisterUtility(provided=ISyndicationTool)
-+    # flake8 complained that upgradeSyndication is too complex (11).
-+    # So we split it in two.
-+    _update_syndication_info(portal)
-+
-+
-+def _update_syndication_info(portal):
-     # now, go through all containers and look for syndication_info
-     # objects
-+    from Products.CMFPlone.interfaces.syndication import IFeedSettings
-+    from Products.CMFPlone.interfaces.syndication import ISyndicatable
-     catalog = getToolByName(portal, 'portal_catalog')
-     # get all folder types from portal_types
-     at_tool = getToolByName(portal, 'archetype_tool')
-     folder_types = set([])
-     for _type in at_tool.listPortalTypesWithInterfaces([ISyndicatable]):
-         folder_types.add(_type.getId())
--    folder_types = folder_types | getDexterityFolderTypes()
-+    folder_types = folder_types | _getDexterityFolderTypes(portal)
-     for brain in catalog(portal_type=tuple(folder_types)):
-         try:
-             obj = brain.getObject()
-         except (AttributeError, KeyError):
-             continue
--        if 'syndication_information' in obj.objectIds():
--            # just having syndication info object means
--            # syndication is enabled
--            info = obj.syndication_information
--            try:
--                settings = IFeedSettings(obj)
--            except TypeError:
--                continue
--            settings.enabled = True
--            try:
--                settings.max_items = info.max_items
--            except AttributeError:
--                pass
--            settings.feed_types = ('RSS',)
--            obj.manage_delObjects(['syndication_information'])
-+        if 'syndication_information' not in obj.objectIds():
-+            return
-+        # just having syndication info object means
-+        # syndication is enabled
-+        info = obj.syndication_information
-+        try:
-+            settings = IFeedSettings(obj)
-+        except TypeError:
-+            continue
-+        settings.enabled = True
-+        try:
-+            settings.max_items = info.max_items
-+        except AttributeError:
-+            pass
-+        settings.feed_types = ('RSS',)
-+        obj.manage_delObjects(['syndication_information'])
+         return toolbar_classes
+@@ -238,21 +242,21 @@ def bodyClass(self, template, view):
+             template_name = view.__name__
+         if template_name:
+             template_name = normalizer.normalize(template_name)
+-            body_classes.append('template-%s' % template_name)
++            body_classes.add('template-%s' % template_name)
  
+         # portal type class (optional)
+         portal_type = normalizer.normalize(self.context.portal_type)
+         if portal_type:
+-            body_classes.append("portaltype-%s" % portal_type)
++            body_classes.add("portaltype-%s" % portal_type)
  
- def to43alpha2(context):
-diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py
-index b8aced8d..d503ecab 100644
---- a/plone/app/upgrade/v43/final.py
-+++ b/plone/app/upgrade/v43/final.py
-@@ -291,6 +291,12 @@ def removeFakeKupu(context):
-         # Note that this does nothing when the configlet is not there.
-         control_panel.unregisterConfiglet('kupu')
-         logger.info('Removed kupu control panel configlet.')
-+
-+    # The function was too complex, so we split it.
-+    _remove_kupu_from_props(portal)
-+
-+
-+def _remove_kupu_from_props(portal):
-     # Remove editor from site_properties.
-     pprops = getToolByName(portal, 'portal_properties', None)
-     available_editors = []
-@@ -315,7 +321,7 @@ def removeFakeKupu(context):
-     # Remove from portal_memberdata.  Note that you can use
-     # collective.setdefaulteditor if you want more options, like
-     # updating the chosen editor for all existing members.
--    member_data = getToolByName(context, 'portal_memberdata')
-+    member_data = getToolByName(portal, 'portal_memberdata')
-     if member_data.getProperty('wysiwyg_editor') == 'Kupu':
-         member_data._updateProperty('wysiwyg_editor', '')
-         logger.info('Changed new member wysiwyg_editor to site default.')
-diff --git a/plone/app/upgrade/v50/betas.py b/plone/app/upgrade/v50/betas.py
-index 9cd42a25..3901ba72 100644
---- a/plone/app/upgrade/v50/betas.py
-+++ b/plone/app/upgrade/v50/betas.py
-@@ -492,6 +492,47 @@ def upgrade_navigation_controlpanel_settings_2(context):
-             navigation_properties._delProperty(p)
+         # section class (optional)
+         navroot = portal_state.navigation_root()
+-        body_classes.append("site-%s" % navroot.getId())
++        body_classes.add("site-%s" % navroot.getId())
  
+         contentPath = self.context.getPhysicalPath()[
+             len(navroot.getPhysicalPath()):]
+         if contentPath:
+-            body_classes.append("section-%s" % contentPath[0])
++            body_classes.add("section-%s" % contentPath[0])
+             # skip first section since we already have that...
+             if len(contentPath) > 1:
+                 depth = registry.get(
+@@ -263,19 +267,19 @@ def bodyClass(self, template, view):
+                     classes = ['subsection-%s' % contentPath[1]]
+                     for section in contentPath[2:depth]:
+                         classes.append('-'.join([classes[-1], section]))
+-                    body_classes.extend(classes)
++                    body_classes.update(classes)
  
-+def _migrate_site_properties(site_properties, registry):
-+    properties_to_migrate = [
-+        'external_links_open_new_window',
-+        'mark_special_links',
-+        'calendar_starting_year',
-+        'calendar_future_years_available',
-+        'redirect_links',
-+        'enable_checkout_workflow',
-+    ]
-+    for p in properties_to_migrate:
-+        if site_properties.hasProperty(p):
-+            value = site_properties.getProperty(p)
-+            if isinstance(value, basestring):
-+                if value.lower() == 'true':
-+                    value = True
-+                elif value.lower() == 'false':
-+                    value = False
-+            try:
-+                registry['plone.{0}'.format(p)] = value
-+                site_properties._delProperty(p)
-+            except KeyError:
-+                logger.warn('could not upgrade %s property', p)
+         # class for hiding icons (optional)
+         if self.icons_visible():
+-            body_classes.append('icons-on')
++            body_classes.add('icons-on')
+         else:
+-            body_classes.append('icons-off')
++            body_classes.add('icons-off')
+ 
+         # class for hiding thumbs (optional)
+         if self.thumb_visible():
+-            body_classes.append('thumbs-on')
++            body_classes.add('thumbs-on')
+         else:
+-            body_classes.append('thumbs-off')
++            body_classes.add('thumbs-off')
+ 
+         # permissions required. Useful to theme frontend and backend
+         # differently
+@@ -285,18 +289,18 @@ def bodyClass(self, template, view):
+         for permission, roles in getattr(view, '__ac_permissions__', tuple()):
+             permissions.append(normalizer.normalize(permission))
+         if 'none' in permissions or 'view' in permissions:
+-            body_classes.append('frontend')
++            body_classes.add('frontend')
+         for permission in permissions:
+-            body_classes.append('viewpermission-' + permission)
++            body_classes.add('viewpermission-' + permission)
+ 
+         # class for user roles
+         membership = getToolByName(self.context, "portal_membership")
+         if membership.isAnonymousUser():
+-            body_classes.append('userrole-anonymous')
++            body_classes.add('userrole-anonymous')
+         else:
+             user = membership.getAuthenticatedMember()
+             for role in user.getRolesInContext(self.context):
+-                body_classes.append(
++                body_classes.add(
+                     'userrole-' + role.lower().replace(' ', '-')
+                 )
+ 
+@@ -309,6 +313,31 @@ def bodyClass(self, template, view):
+         msl = link_settings.mark_special_links
+         elonw = link_settings.external_links_open_new_window
+         if msl or elonw:
+-            body_classes.append('pat-markspeciallinks')
++            body_classes.add('pat-markspeciallinks')
++
++        # Add externally defined extra body classes
++        body_class_adapters = getAdapters(
++            (self.context, self.request),
++            IBodyClassAdapter
++        )
++        for name, body_class_adapter in body_class_adapters:
++            extra_classes = body_class_adapter.get_classes() or []
++            if isinstance(extra_classes, basestring):
++                extra_classes = extra_classes.split(' ')
++            body_classes.update(extra_classes)
+ 
+         return ' '.join(sorted(body_classes))
 +
 +
-+def _migrate_lists(site_properties, registry):
-+    def _migrate_list(original_id, new_id=None):
-+        if new_id is None:
-+            new_id = original_id
-+        if site_properties.hasProperty(original_id):
-+            value = site_properties.getProperty(original_id)
-+            value = [safe_unicode(a) for a in value]
-+            registry['plone.{0}'.format(new_id)] = value
-+            site_properties._delProperty(original_id)
++@adapter(Interface)
++@implementer(IBodyClassAdapter)
++class DefaultBodyClasses(object):
 +
-+    _migrate_list('typesUseViewActionInListings',
-+                  'types_use_view_action_in_listings')
-+    _migrate_list('default_page')
-+    _migrate_list('parentMetaTypesNotToQuery', 'parent_types_not_to_query')
-+    _migrate_list('allowRolesToAddKeywords', 'roles_allowed_to_add_keywords')
++    def __init__(self, context, request):
++        self.context = context
++        self.request = request
 +
-+
- def to50rc3(context):
-     """5.0rc2 -> 5.0rc3"""
-     loadMigrationProfile(context, 'profile-plone.app.upgrade.v50:to50rc3')
-@@ -511,25 +552,7 @@ def to50rc3(context):
-         if site_properties.hasProperty(p):
-             site_properties._delProperty(p)
- 
--    properties_to_migrate = ['external_links_open_new_window',
--                             'mark_special_links',
--                             'calendar_starting_year',
--                             'calendar_future_years_available',
--                             'redirect_links',
--                             'enable_checkout_workflow']
--    for p in properties_to_migrate:
--        if site_properties.hasProperty(p):
--            value = site_properties.getProperty(p)
--            if isinstance(value, basestring):
--                if value.lower() == 'true':
--                    value = True
--                elif value.lower() == 'false':
--                    value = False
--            try:
--                registry['plone.{0}'.format(p)] = value
--                site_properties._delProperty(p)
--            except KeyError:
--                logger.warn('could not upgrade %s property', p)
-+    _migrate_site_properties(site_properties, registry)
- 
-     if site_properties.hasProperty('checkout_workflow_policy'):
-         value = site_properties.getProperty('checkout_workflow_policy')
-@@ -555,20 +578,7 @@ def to50rc3(context):
-         registry['plone.sitemap_depth'] = value
-         site_properties._delProperty('sitemapDepth')
- 
--    def _migrate_list(original_id, new_id=None):
--        if new_id is None:
--            new_id = original_id
--        if site_properties.hasProperty(original_id):
--            value = site_properties.getProperty(original_id)
--            value = [safe_unicode(a) for a in value]
--            registry['plone.{0}'.format(new_id)] = value
--            site_properties._delProperty(original_id)
--
--    _migrate_list('typesUseViewActionInListings',
--                  'types_use_view_action_in_listings')
--    _migrate_list('default_page')
--    _migrate_list('parentMetaTypesNotToQuery', 'parent_types_not_to_query')
--    _migrate_list('allowRolesToAddKeywords', 'roles_allowed_to_add_keywords')
-+    _migrate_lists(site_properties, registry)
- 
-     # migrate navtree properties
-     upgrade_navigation_controlpanel_settings_2(context)
++    def get_classes(self):
++        """Default body classes adapter.
++        """
++        return []
 
 
