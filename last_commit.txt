@@ -1,98 +1,1072 @@
-Repository: collective.monkeypatcher
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2018-05-09T21:29:55+02:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/collective.monkeypatcher/commit/007cdd1b81ab9b41e6f03197c339d3a3b197dab0
+Date: 2018-05-07T23:18:32-04:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/1456de3f908c753fcfe6fb4ae0df5f216385144d
 
-Fix import for Python 3 in the tests module
+Only test migration if AT is installed
 
 Files changed:
-M CHANGES.rst
-M collective/monkeypatcher/tests/test_monkeypatcher.py
+M plone/app/contenttypes/testing.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_browser.py
+M plone/app/contenttypes/tests/test_migration_custom.py
+M plone/app/contenttypes/tests/test_migration_topic.py
+M plone/app/contenttypes/upgrades.zcml
+M setup.py
 
-diff --git a/CHANGES.rst b/CHANGES.rst
-index b462244..5dded4b 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+diff --git a/plone/app/contenttypes/testing.py b/plone/app/contenttypes/testing.py
+index 3c11a39c..e78c1683 100644
+--- a/plone/app/contenttypes/testing.py
++++ b/plone/app/contenttypes/testing.py
+@@ -15,6 +15,7 @@
+ from zope.interface import alsoProvides
  
- Bug fixes:
- 
--- *add item here*
-+- Fix import for Python 3 in the tests module
-+  [ale-rt]
+ import pkg_resources
++import unittest
  
  
- 1.1.4 (2018-04-08)
-diff --git a/collective/monkeypatcher/tests/test_monkeypatcher.py b/collective/monkeypatcher/tests/test_monkeypatcher.py
-index 2468c6f..761dbc4 100644
---- a/collective/monkeypatcher/tests/test_monkeypatcher.py
-+++ b/collective/monkeypatcher/tests/test_monkeypatcher.py
-@@ -1,11 +1,10 @@
- # -*- coding: utf-8
- """Test cases"""
+ def set_browserlayer(request):
+@@ -64,6 +65,14 @@ def tearDownPloneSite(self, portal):
+         super(PloneAppContenttypesRobot, self).tearDownPloneSite(portal)
  
-+from . import common
-+from . import dummypatch
- from collective.monkeypatcher.interfaces import IMonkeyPatchEvent
  
--import common
--import dummypatch
++try:
++    import Products.ATContentTypes
++except ImportError:
++    TEST_MIGRATION = False
++else:
++    TEST_MIGRATION = True
++
++
+ class PloneAppContenttypesMigration(PloneSandboxLayer):
+     """ A setup that installs the old default AT-Types to migrate them to
+     Dexterity. The profile of pac is not only in the individual tests.
+@@ -72,6 +81,8 @@ class PloneAppContenttypesMigration(PloneSandboxLayer):
+     defaultBases = (PLONE_FIXTURE,)
+ 
+     def setUpZope(self, app, configurationContext):
++        if not TEST_MIGRATION:
++            return
+ 
+         # prepare installing Products.ATContentTypes
+         import Products.ATContentTypes
+@@ -96,6 +107,9 @@ def setUpZope(self, app, configurationContext):
+         self.loadZCML(package=plone.app.referenceablebehavior)
+ 
+     def setUpPloneSite(self, portal):
++        if not TEST_MIGRATION:
++            return
++
+         # install Products.ATContentTypes manually if profile is available
+         # (this is only needed for Plone >= 5)
+         profiles = [x['id'] for x in portal.portal_setup.listProfileInfo()]
+@@ -113,9 +127,15 @@ def setUpPloneSite(self, portal):
+         applyProfile(portal, 'plone.app.referenceablebehavior:default')
+ 
+     def tearDownPloneSite(self, portal):
++        if not TEST_MIGRATION:
++            return
++
+         applyProfile(portal, 'plone.app.contenttypes:uninstall')
+ 
+     def tearDownZope(self, app):
++        if not TEST_MIGRATION:
++            return
++
+         try:
+             pkg_resources.get_distribution('plone.app.collection')
+             z2.uninstallProduct(app, 'plone.app.collection')
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index 2eaa9a78..f28cac21 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -1,56 +1,63 @@
+ # -*- coding: utf-8 -*-
+-from lxml import etree
+-from persistent.list import PersistentList
+-from plone.app.contenttypes.migration.migration import migrate_documents
+-from plone.app.contenttypes.migration.migration import migrate_folders
+-from plone.app.contenttypes.migration.migration import migrate_newsitems
+-from plone.app.contenttypes.migration.utils import add_portlet
+-from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+-from plone.app.contenttypes.migration.utils import is_referenceable
+-from plone.app.contenttypes.migration.utils import restore_references
+-from plone.app.contenttypes.migration.utils import store_references
++
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.contenttypes.testing import set_browserlayer
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.app.testing import SITE_OWNER_NAME
+-from plone.app.testing import SITE_OWNER_PASSWORD
+-from plone.app.uuid.utils import uuidToObject
+-from plone.app.z3cform.interfaces import IPloneFormLayer
+-from plone.dexterity.content import Container
+-from plone.dexterity.interfaces import IDexterityContent
+-from plone.dexterity.interfaces import IDexterityFTI
+-from plone.event.interfaces import IEventAccessor
+-from plone.namedfile.file import NamedBlobImage
+-from plone.testing.z2 import Browser
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import get_installer
+-from z3c.relationfield import RelationValue
+-from z3c.relationfield.index import dump
+-from zc.relation.interfaces import ICatalog
+-from zope.annotation.interfaces import IAnnotations
+-from zope.component import getMultiAdapter
+-from zope.component import getUtility
+-from zope.component import queryUtility
+-from zope.interface import alsoProvides
+-from zope.intid.interfaces import IIntIds
+-from zope.lifecycleevent import modified
+-from zope.schema.interfaces import IVocabularyFactory
 -
+-import json
+-import os.path
+-import time
+-import transaction
+ import unittest
  
- class TestMonkeyPatcher(common.MonkeypatcherTestCase):
-     """We test all in this class"""
++if TEST_MIGRATION:
++    from lxml import etree
++    from persistent.list import PersistentList
++    from plone.app.contenttypes.migration.migration import migrate_documents
++    from plone.app.contenttypes.migration.migration import migrate_folders
++    from plone.app.contenttypes.migration.migration import migrate_newsitems
++    from plone.app.contenttypes.migration.utils import add_portlet
++    from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++    from plone.app.contenttypes.migration.utils import is_referenceable
++    from plone.app.contenttypes.migration.utils import restore_references
++    from plone.app.contenttypes.migration.utils import store_references
++    from plone.app.contenttypes.testing import set_browserlayer
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.app.testing import SITE_OWNER_NAME
++    from plone.app.testing import SITE_OWNER_PASSWORD
++    from plone.app.uuid.utils import uuidToObject
++    from plone.app.z3cform.interfaces import IPloneFormLayer
++    from plone.dexterity.content import Container
++    from plone.dexterity.interfaces import IDexterityContent
++    from plone.dexterity.interfaces import IDexterityFTI
++    from plone.event.interfaces import IEventAccessor
++    from plone.namedfile.file import NamedBlobImage
++    from plone.testing.z2 import Browser
++    from Products.CMFCore.utils import getToolByName
++    from Products.CMFPlone.utils import get_installer
++    from z3c.relationfield import RelationValue
++    from z3c.relationfield.index import dump
++    from zc.relation.interfaces import ICatalog
++    from zope.annotation.interfaces import IAnnotations
++    from zope.component import getMultiAdapter
++    from zope.component import getUtility
++    from zope.component import queryUtility
++    from zope.interface import alsoProvides
++    from zope.intid.interfaces import IIntIds
++    from zope.lifecycleevent import modified
++    from zope.schema.interfaces import IVocabularyFactory
++
++    import json
++    import os.path
++    import time
++    import transaction
++
+ 
+ class MigrateFromATContentTypesTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+@@ -197,13 +204,13 @@ def test_patct_event_is_migrated(self):
+             str(dx_event.__class__),
+         )
+         self.assertEqual(2013, dx_event.start.year)
+-        self.assertEqual(02, dx_event.start.month)
+-        self.assertEqual(03, dx_event.start.day)
++        self.assertEqual(2, dx_event.start.month)
++        self.assertEqual(3, dx_event.start.day)
+         self.assertEqual(12, dx_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(dx_event.start.tzinfo))
+         self.assertEqual(2013, dx_event.end.year)
+-        self.assertEqual(04, dx_event.end.month)
+-        self.assertEqual(05, dx_event.end.day)
++        self.assertEqual(4, dx_event.end.month)
++        self.assertEqual(5, dx_event.end.day)
+         self.assertEqual(13, dx_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(dx_event.end.tzinfo))
+         self.assertEqual('123456789', dx_event.contact_phone)
+@@ -269,13 +276,13 @@ def test_pae_atevent_is_migrated(self):
+         )
+         self.assertEqual('Event', new_event.portal_type)
+         self.assertEqual(2013, new_event.start.year)
+-        self.assertEqual(01, new_event.start.month)
+-        self.assertEqual(01, new_event.start.day)
++        self.assertEqual(1, new_event.start.month)
++        self.assertEqual(1, new_event.start.day)
+         self.assertEqual(12, new_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.start.tzinfo))
+         self.assertEqual(2013, new_event.end.year)
+-        self.assertEqual(02, new_event.end.month)
+-        self.assertEqual(01, new_event.end.day)
++        self.assertEqual(2, new_event.end.month)
++        self.assertEqual(1, new_event.end.day)
+         self.assertEqual(13, new_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.end.tzinfo))
+         self.assertEqual(u'Name', new_event.contact_name)
+@@ -358,8 +365,8 @@ def test_pact_1_0_dxevent_is_migrated(self):
+             'Event',
+             'dx-event',
+             location='Newbraska',
+-            start_date=timezone.localize(datetime(2019, 04, 02, 15, 20)),
+-            end_date=timezone.localize(datetime(2019, 04, 02, 16, 20)),
++            start_date=timezone.localize(datetime(2019, 4, 2, 15, 20)),
++            end_date=timezone.localize(datetime(2019, 4, 2, 16, 20)),
+             attendees='Me & You',
+             event_url='http://woo.com',
+             contact_name='Frank',
+@@ -381,13 +388,13 @@ def test_pact_1_0_dxevent_is_migrated(self):
+         self.assertEqual(False, old_event.exclude_from_nav)
+         self.assertEqual('Event', new_event.portal_type)
+         self.assertEqual(2019, new_event.start.year)
+-        self.assertEqual(04, new_event.start.month)
+-        self.assertEqual(02, new_event.start.day)
++        self.assertEqual(4, new_event.start.month)
++        self.assertEqual(2, new_event.start.day)
+         self.assertEqual(15, new_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.start.tzinfo))
+         self.assertEqual(2019, new_event.end.year)
+-        self.assertEqual(04, new_event.end.month)
+-        self.assertEqual(02, new_event.end.day)
++        self.assertEqual(4, new_event.end.month)
++        self.assertEqual(2, new_event.end.day)
+         self.assertEqual(16, new_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.end.tzinfo))
+         self.assertEqual(u'Frank', new_event.contact_name)
+@@ -1900,6 +1907,9 @@ class MigrateDexterityBaseClassIntegrationTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+ 
+         applyProfile(self.portal, 'plone.app.dexterity:testing')
+@@ -1966,6 +1976,9 @@ class MigrateDexterityBaseClassFunctionalTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+@@ -2024,6 +2037,9 @@ class MigrationFunctionalTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+diff --git a/plone/app/contenttypes/tests/test_migration_browser.py b/plone/app/contenttypes/tests/test_migration_browser.py
+index b51c2a9b..d98d7c70 100644
+--- a/plone/app/contenttypes/tests/test_migration_browser.py
++++ b/plone/app/contenttypes/tests/test_migration_browser.py
+@@ -1,29 +1,34 @@
+ # -*- coding: utf-8 -*-
+-from plone.app.contenttypes.interfaces import IDocument
+-from plone.app.contenttypes.interfaces import IFile
+-from plone.app.contenttypes.interfaces import IFolder
+-from plone.app.contenttypes.interfaces import IImage
+-from plone.app.contenttypes.interfaces import ILink
+-from plone.app.contenttypes.interfaces import INewsItem
+-from plone.app.contenttypes.interfaces import IPloneAppContenttypesLayer
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_INTEGRATION_TESTING  # noqa
+-from plone.app.testing import applyProfile
+-from plone.app.testing import setRoles
+-from plone.app.testing import TEST_USER_ID
+-from plone.dexterity.fti import DexterityFTI
+-from plone.dexterity.interfaces import IDexterityFTI
+-from plone.event.interfaces import IEvent
+-from Products.CMFCore.utils import getToolByName
+-from zope.interface import directlyProvides
+-
+ import unittest
+ 
++if TEST_MIGRATION:
++    from plone.app.contenttypes.interfaces import IDocument
++    from plone.app.contenttypes.interfaces import IFile
++    from plone.app.contenttypes.interfaces import IFolder
++    from plone.app.contenttypes.interfaces import IImage
++    from plone.app.contenttypes.interfaces import ILink
++    from plone.app.contenttypes.interfaces import INewsItem
++    from plone.app.contenttypes.interfaces import IPloneAppContenttypesLayer
++    from plone.app.testing import applyProfile
++    from plone.app.testing import setRoles
++    from plone.app.testing import TEST_USER_ID
++    from plone.dexterity.fti import DexterityFTI
++    from plone.dexterity.interfaces import IDexterityFTI
++    from plone.event.interfaces import IEvent
++    from Products.CMFCore.utils import getToolByName
++    from zope.interface import directlyProvides
++
+ 
+ class FixBaseclassesTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_INTEGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index 32246de4..0e9a93f6 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -1,32 +1,39 @@
+ # -*- coding: utf-8 -*-
+-from datetime import datetime
+-from plone.app.contenttypes.migration.field_migrators import migrate_filefield
+-from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
+-from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
+-from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.app.testing import setRoles
+-from plone.app.testing import SITE_OWNER_NAME
+-from plone.app.testing import SITE_OWNER_PASSWORD
+-from plone.app.testing import TEST_USER_ID
+-from plone.testing.z2 import Browser
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import safe_unicode
+-
+-import os.path
+-import pytz
+-import transaction
+ import unittest
+ 
++if TEST_MIGRATION:
++    from datetime import datetime
++    from plone.app.contenttypes.migration.field_migrators import migrate_filefield
++    from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
++    from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
++    from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.app.testing import setRoles
++    from plone.app.testing import SITE_OWNER_NAME
++    from plone.app.testing import SITE_OWNER_PASSWORD
++    from plone.app.testing import TEST_USER_ID
++    from plone.testing.z2 import Browser
++    from Products.CMFCore.utils import getToolByName
++    from Products.CMFPlone.utils import safe_unicode
++
++    import os.path
++    import pytz
++    import transaction
++
+ 
+ class MigrateFieldsTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+@@ -158,6 +165,9 @@ class MigrateCustomATTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+@@ -471,6 +481,9 @@ class CustomMigrationFunctionalTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+diff --git a/plone/app/contenttypes/tests/test_migration_topic.py b/plone/app/contenttypes/tests/test_migration_topic.py
+index 6a1dfafc..c7ac2c8a 100644
+--- a/plone/app/contenttypes/tests/test_migration_topic.py
++++ b/plone/app/contenttypes/tests/test_migration_topic.py
+@@ -1,24 +1,26 @@
+ # -*- coding: utf-8 -*-
+-from DateTime import DateTime
+-from plone.app.contenttypes.behaviors.collection import ICollection
+-from plone.app.contenttypes.migration.topics import migrate_topics
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.querystring.queryparser import parseFormquery
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.dexterity.content import Container
+-from plone.dexterity.interfaces import IDexterityFTI
+-from Products.CMFCore.utils import getToolByName
+-from zope.component import queryUtility
+-from zope.interface import implementer
+-
+ import unittest
+ 
++if TEST_MIGRATION:
++    from DateTime import DateTime
++    from plone.app.contenttypes.behaviors.collection import ICollection
++    from plone.app.contenttypes.migration.topics import migrate_topics
++    from plone.app.querystring.queryparser import parseFormquery
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.dexterity.content import Container
++    from plone.dexterity.interfaces import IDexterityFTI
++    from Products.CMFCore.utils import getToolByName
++    from zope.component import queryUtility
++    from zope.interface import implementer
++
+ 
+-@implementer(ICollection)
+-class FolderishCollection(Container):
+-    """Test subclass for folderish ``Collections``.
+-    """
++    @implementer(ICollection)
++    class FolderishCollection(Container):
++        """Test subclass for folderish ``Collections``.
++        """
+ 
+ 
+ class MigrateTopicsIntegrationTest(unittest.TestCase):
+@@ -26,6 +28,9 @@ class MigrateTopicsIntegrationTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+diff --git a/plone/app/contenttypes/upgrades.zcml b/plone/app/contenttypes/upgrades.zcml
+index bd7687c9..0ad9f2ac 100644
+--- a/plone/app/contenttypes/upgrades.zcml
++++ b/plone/app/contenttypes/upgrades.zcml
+@@ -21,7 +21,7 @@
+       handler=".upgrades.enable_collection_behavior"
+       />
+ 
+-  <!-- We still need Archetypes to use Products.contentmigrator -->
++  <!-- We still need Archetypes to use Products.contentmigration -->
+   <configure zcml:condition="installed Products.Archetypes">
+   <configure zcml:condition="installed archetypes.schemaextender">
+   <genericsetup:upgradeStep
+diff --git a/setup.py b/setup.py
+index 5a294ff1..1f08481e 100644
+--- a/setup.py
++++ b/setup.py
+@@ -58,11 +58,12 @@ def read(*rnames):
+       ],
+       extras_require={
+           'test': [
+-              'archetypes.schemaextender',
+               'lxml',
+               'plone.app.robotframework [debug] > 0.9.8',  # create image and file content for Image, File and News Item if not given.  # noqa
+               'plone.app.testing [robot] >= 4.2.4',  # we need ROBOT_TEST_LEVEL
+-              # 'plone.dexterity >= 2.3.0',  # fixes setting default values # NOT RELEASED YET. # noqa
++          ],
++          'archetypes': [
++              'archetypes.schemaextender',
+               'Products.ATContentTypes',
+               'Products.contentmigration >= 2.1.8.dev0',
+               'plone.app.referenceablebehavior',
 
 
-Repository: collective.monkeypatcher
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2018-05-10T12:24:53-04:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/collective.monkeypatcher/commit/7e4d06e4cbc6b2fdb460c737af3818bcc57aae89
+Date: 2018-05-10T12:43:45-04:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/a8f8058b283fdc878c1984636ac9b47660d4e04e
 
-Merge pull request #9 from plone/python3-tests
-
-Fix import for Python 3 in the tests module
+changelog
 
 Files changed:
 M CHANGES.rst
-M collective/monkeypatcher/tests/test_monkeypatcher.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index b462244..5dded4b 100644
+index e3fde7b3..7eab5a15 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ New features:
+@@ -17,6 +17,9 @@ Bug fixes:
+ - Fix SearchableText in Python 3
+   [pbauer]
  
- Bug fixes:
++- Skip migration tests if ATContentTypes is not installed.
++  [davisagli]
++
  
--- *add item here*
-+- Fix import for Python 3 in the tests module
-+  [ale-rt]
+ 1.4.10 (2018-04-03)
+ -------------------
+
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2018-05-11T00:04:59+02:00
+Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/6c3cdb76cf95a8c1a399b8d84bb0e89f3132fdf9
+
+Merge pull request #469 from plone/optional-migration-tests
+
+Only test migration if AT is installed
+
+Files changed:
+M CHANGES.rst
+M plone/app/contenttypes/testing.py
+M plone/app/contenttypes/tests/test_migration.py
+M plone/app/contenttypes/tests/test_migration_browser.py
+M plone/app/contenttypes/tests/test_migration_custom.py
+M plone/app/contenttypes/tests/test_migration_topic.py
+M plone/app/contenttypes/upgrades.zcml
+M setup.py
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index e3fde7b3..7eab5a15 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -17,6 +17,9 @@ Bug fixes:
+ - Fix SearchableText in Python 3
+   [pbauer]
+ 
++- Skip migration tests if ATContentTypes is not installed.
++  [davisagli]
++
+ 
+ 1.4.10 (2018-04-03)
+ -------------------
+diff --git a/plone/app/contenttypes/testing.py b/plone/app/contenttypes/testing.py
+index 3c11a39c..e78c1683 100644
+--- a/plone/app/contenttypes/testing.py
++++ b/plone/app/contenttypes/testing.py
+@@ -15,6 +15,7 @@
+ from zope.interface import alsoProvides
+ 
+ import pkg_resources
++import unittest
  
  
- 1.1.4 (2018-04-08)
-diff --git a/collective/monkeypatcher/tests/test_monkeypatcher.py b/collective/monkeypatcher/tests/test_monkeypatcher.py
-index 2468c6f..761dbc4 100644
---- a/collective/monkeypatcher/tests/test_monkeypatcher.py
-+++ b/collective/monkeypatcher/tests/test_monkeypatcher.py
-@@ -1,11 +1,10 @@
- # -*- coding: utf-8
- """Test cases"""
+ def set_browserlayer(request):
+@@ -64,6 +65,14 @@ def tearDownPloneSite(self, portal):
+         super(PloneAppContenttypesRobot, self).tearDownPloneSite(portal)
  
-+from . import common
-+from . import dummypatch
- from collective.monkeypatcher.interfaces import IMonkeyPatchEvent
  
--import common
--import dummypatch
++try:
++    import Products.ATContentTypes
++except ImportError:
++    TEST_MIGRATION = False
++else:
++    TEST_MIGRATION = True
++
++
+ class PloneAppContenttypesMigration(PloneSandboxLayer):
+     """ A setup that installs the old default AT-Types to migrate them to
+     Dexterity. The profile of pac is not only in the individual tests.
+@@ -72,6 +81,8 @@ class PloneAppContenttypesMigration(PloneSandboxLayer):
+     defaultBases = (PLONE_FIXTURE,)
+ 
+     def setUpZope(self, app, configurationContext):
++        if not TEST_MIGRATION:
++            return
+ 
+         # prepare installing Products.ATContentTypes
+         import Products.ATContentTypes
+@@ -96,6 +107,9 @@ def setUpZope(self, app, configurationContext):
+         self.loadZCML(package=plone.app.referenceablebehavior)
+ 
+     def setUpPloneSite(self, portal):
++        if not TEST_MIGRATION:
++            return
++
+         # install Products.ATContentTypes manually if profile is available
+         # (this is only needed for Plone >= 5)
+         profiles = [x['id'] for x in portal.portal_setup.listProfileInfo()]
+@@ -113,9 +127,15 @@ def setUpPloneSite(self, portal):
+         applyProfile(portal, 'plone.app.referenceablebehavior:default')
+ 
+     def tearDownPloneSite(self, portal):
++        if not TEST_MIGRATION:
++            return
++
+         applyProfile(portal, 'plone.app.contenttypes:uninstall')
+ 
+     def tearDownZope(self, app):
++        if not TEST_MIGRATION:
++            return
++
+         try:
+             pkg_resources.get_distribution('plone.app.collection')
+             z2.uninstallProduct(app, 'plone.app.collection')
+diff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py
+index 2eaa9a78..f28cac21 100644
+--- a/plone/app/contenttypes/tests/test_migration.py
++++ b/plone/app/contenttypes/tests/test_migration.py
+@@ -1,56 +1,63 @@
+ # -*- coding: utf-8 -*-
+-from lxml import etree
+-from persistent.list import PersistentList
+-from plone.app.contenttypes.migration.migration import migrate_documents
+-from plone.app.contenttypes.migration.migration import migrate_folders
+-from plone.app.contenttypes.migration.migration import migrate_newsitems
+-from plone.app.contenttypes.migration.utils import add_portlet
+-from plone.app.contenttypes.migration.utils import installTypeIfNeeded
+-from plone.app.contenttypes.migration.utils import is_referenceable
+-from plone.app.contenttypes.migration.utils import restore_references
+-from plone.app.contenttypes.migration.utils import store_references
++
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.contenttypes.testing import set_browserlayer
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.app.testing import SITE_OWNER_NAME
+-from plone.app.testing import SITE_OWNER_PASSWORD
+-from plone.app.uuid.utils import uuidToObject
+-from plone.app.z3cform.interfaces import IPloneFormLayer
+-from plone.dexterity.content import Container
+-from plone.dexterity.interfaces import IDexterityContent
+-from plone.dexterity.interfaces import IDexterityFTI
+-from plone.event.interfaces import IEventAccessor
+-from plone.namedfile.file import NamedBlobImage
+-from plone.testing.z2 import Browser
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import get_installer
+-from z3c.relationfield import RelationValue
+-from z3c.relationfield.index import dump
+-from zc.relation.interfaces import ICatalog
+-from zope.annotation.interfaces import IAnnotations
+-from zope.component import getMultiAdapter
+-from zope.component import getUtility
+-from zope.component import queryUtility
+-from zope.interface import alsoProvides
+-from zope.intid.interfaces import IIntIds
+-from zope.lifecycleevent import modified
+-from zope.schema.interfaces import IVocabularyFactory
 -
+-import json
+-import os.path
+-import time
+-import transaction
+ import unittest
  
- class TestMonkeyPatcher(common.MonkeypatcherTestCase):
-     """We test all in this class"""
++if TEST_MIGRATION:
++    from lxml import etree
++    from persistent.list import PersistentList
++    from plone.app.contenttypes.migration.migration import migrate_documents
++    from plone.app.contenttypes.migration.migration import migrate_folders
++    from plone.app.contenttypes.migration.migration import migrate_newsitems
++    from plone.app.contenttypes.migration.utils import add_portlet
++    from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++    from plone.app.contenttypes.migration.utils import is_referenceable
++    from plone.app.contenttypes.migration.utils import restore_references
++    from plone.app.contenttypes.migration.utils import store_references
++    from plone.app.contenttypes.testing import set_browserlayer
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.app.testing import SITE_OWNER_NAME
++    from plone.app.testing import SITE_OWNER_PASSWORD
++    from plone.app.uuid.utils import uuidToObject
++    from plone.app.z3cform.interfaces import IPloneFormLayer
++    from plone.dexterity.content import Container
++    from plone.dexterity.interfaces import IDexterityContent
++    from plone.dexterity.interfaces import IDexterityFTI
++    from plone.event.interfaces import IEventAccessor
++    from plone.namedfile.file import NamedBlobImage
++    from plone.testing.z2 import Browser
++    from Products.CMFCore.utils import getToolByName
++    from Products.CMFPlone.utils import get_installer
++    from z3c.relationfield import RelationValue
++    from z3c.relationfield.index import dump
++    from zc.relation.interfaces import ICatalog
++    from zope.annotation.interfaces import IAnnotations
++    from zope.component import getMultiAdapter
++    from zope.component import getUtility
++    from zope.component import queryUtility
++    from zope.interface import alsoProvides
++    from zope.intid.interfaces import IIntIds
++    from zope.lifecycleevent import modified
++    from zope.schema.interfaces import IVocabularyFactory
++
++    import json
++    import os.path
++    import time
++    import transaction
++
+ 
+ class MigrateFromATContentTypesTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+@@ -197,13 +204,13 @@ def test_patct_event_is_migrated(self):
+             str(dx_event.__class__),
+         )
+         self.assertEqual(2013, dx_event.start.year)
+-        self.assertEqual(02, dx_event.start.month)
+-        self.assertEqual(03, dx_event.start.day)
++        self.assertEqual(2, dx_event.start.month)
++        self.assertEqual(3, dx_event.start.day)
+         self.assertEqual(12, dx_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(dx_event.start.tzinfo))
+         self.assertEqual(2013, dx_event.end.year)
+-        self.assertEqual(04, dx_event.end.month)
+-        self.assertEqual(05, dx_event.end.day)
++        self.assertEqual(4, dx_event.end.month)
++        self.assertEqual(5, dx_event.end.day)
+         self.assertEqual(13, dx_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(dx_event.end.tzinfo))
+         self.assertEqual('123456789', dx_event.contact_phone)
+@@ -269,13 +276,13 @@ def test_pae_atevent_is_migrated(self):
+         )
+         self.assertEqual('Event', new_event.portal_type)
+         self.assertEqual(2013, new_event.start.year)
+-        self.assertEqual(01, new_event.start.month)
+-        self.assertEqual(01, new_event.start.day)
++        self.assertEqual(1, new_event.start.month)
++        self.assertEqual(1, new_event.start.day)
+         self.assertEqual(12, new_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.start.tzinfo))
+         self.assertEqual(2013, new_event.end.year)
+-        self.assertEqual(02, new_event.end.month)
+-        self.assertEqual(01, new_event.end.day)
++        self.assertEqual(2, new_event.end.month)
++        self.assertEqual(1, new_event.end.day)
+         self.assertEqual(13, new_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.end.tzinfo))
+         self.assertEqual(u'Name', new_event.contact_name)
+@@ -358,8 +365,8 @@ def test_pact_1_0_dxevent_is_migrated(self):
+             'Event',
+             'dx-event',
+             location='Newbraska',
+-            start_date=timezone.localize(datetime(2019, 04, 02, 15, 20)),
+-            end_date=timezone.localize(datetime(2019, 04, 02, 16, 20)),
++            start_date=timezone.localize(datetime(2019, 4, 2, 15, 20)),
++            end_date=timezone.localize(datetime(2019, 4, 2, 16, 20)),
+             attendees='Me & You',
+             event_url='http://woo.com',
+             contact_name='Frank',
+@@ -381,13 +388,13 @@ def test_pact_1_0_dxevent_is_migrated(self):
+         self.assertEqual(False, old_event.exclude_from_nav)
+         self.assertEqual('Event', new_event.portal_type)
+         self.assertEqual(2019, new_event.start.year)
+-        self.assertEqual(04, new_event.start.month)
+-        self.assertEqual(02, new_event.start.day)
++        self.assertEqual(4, new_event.start.month)
++        self.assertEqual(2, new_event.start.day)
+         self.assertEqual(15, new_event.start.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.start.tzinfo))
+         self.assertEqual(2019, new_event.end.year)
+-        self.assertEqual(04, new_event.end.month)
+-        self.assertEqual(02, new_event.end.day)
++        self.assertEqual(4, new_event.end.month)
++        self.assertEqual(2, new_event.end.day)
+         self.assertEqual(16, new_event.end.hour)
+         self.assertEqual('Asia/Tbilisi', str(new_event.end.tzinfo))
+         self.assertEqual(u'Frank', new_event.contact_name)
+@@ -1900,6 +1907,9 @@ class MigrateDexterityBaseClassIntegrationTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+ 
+         applyProfile(self.portal, 'plone.app.dexterity:testing')
+@@ -1966,6 +1976,9 @@ class MigrateDexterityBaseClassFunctionalTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+@@ -2024,6 +2037,9 @@ class MigrationFunctionalTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+diff --git a/plone/app/contenttypes/tests/test_migration_browser.py b/plone/app/contenttypes/tests/test_migration_browser.py
+index b51c2a9b..d98d7c70 100644
+--- a/plone/app/contenttypes/tests/test_migration_browser.py
++++ b/plone/app/contenttypes/tests/test_migration_browser.py
+@@ -1,29 +1,34 @@
+ # -*- coding: utf-8 -*-
+-from plone.app.contenttypes.interfaces import IDocument
+-from plone.app.contenttypes.interfaces import IFile
+-from plone.app.contenttypes.interfaces import IFolder
+-from plone.app.contenttypes.interfaces import IImage
+-from plone.app.contenttypes.interfaces import ILink
+-from plone.app.contenttypes.interfaces import INewsItem
+-from plone.app.contenttypes.interfaces import IPloneAppContenttypesLayer
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_INTEGRATION_TESTING  # noqa
+-from plone.app.testing import applyProfile
+-from plone.app.testing import setRoles
+-from plone.app.testing import TEST_USER_ID
+-from plone.dexterity.fti import DexterityFTI
+-from plone.dexterity.interfaces import IDexterityFTI
+-from plone.event.interfaces import IEvent
+-from Products.CMFCore.utils import getToolByName
+-from zope.interface import directlyProvides
+-
+ import unittest
+ 
++if TEST_MIGRATION:
++    from plone.app.contenttypes.interfaces import IDocument
++    from plone.app.contenttypes.interfaces import IFile
++    from plone.app.contenttypes.interfaces import IFolder
++    from plone.app.contenttypes.interfaces import IImage
++    from plone.app.contenttypes.interfaces import ILink
++    from plone.app.contenttypes.interfaces import INewsItem
++    from plone.app.contenttypes.interfaces import IPloneAppContenttypesLayer
++    from plone.app.testing import applyProfile
++    from plone.app.testing import setRoles
++    from plone.app.testing import TEST_USER_ID
++    from plone.dexterity.fti import DexterityFTI
++    from plone.dexterity.interfaces import IDexterityFTI
++    from plone.event.interfaces import IEvent
++    from Products.CMFCore.utils import getToolByName
++    from zope.interface import directlyProvides
++
+ 
+ class FixBaseclassesTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_INTEGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+diff --git a/plone/app/contenttypes/tests/test_migration_custom.py b/plone/app/contenttypes/tests/test_migration_custom.py
+index 32246de4..0e9a93f6 100644
+--- a/plone/app/contenttypes/tests/test_migration_custom.py
++++ b/plone/app/contenttypes/tests/test_migration_custom.py
+@@ -1,32 +1,39 @@
+ # -*- coding: utf-8 -*-
+-from datetime import datetime
+-from plone.app.contenttypes.migration.field_migrators import migrate_filefield
+-from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
+-from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
+-from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING  # noqa
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.app.testing import setRoles
+-from plone.app.testing import SITE_OWNER_NAME
+-from plone.app.testing import SITE_OWNER_PASSWORD
+-from plone.app.testing import TEST_USER_ID
+-from plone.testing.z2 import Browser
+-from Products.CMFCore.utils import getToolByName
+-from Products.CMFPlone.utils import safe_unicode
+-
+-import os.path
+-import pytz
+-import transaction
+ import unittest
+ 
++if TEST_MIGRATION:
++    from datetime import datetime
++    from plone.app.contenttypes.migration.field_migrators import migrate_filefield
++    from plone.app.contenttypes.migration.field_migrators import migrate_imagefield
++    from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa
++    from plone.app.contenttypes.migration.utils import installTypeIfNeeded
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.app.testing import setRoles
++    from plone.app.testing import SITE_OWNER_NAME
++    from plone.app.testing import SITE_OWNER_PASSWORD
++    from plone.app.testing import TEST_USER_ID
++    from plone.testing.z2 import Browser
++    from Products.CMFCore.utils import getToolByName
++    from Products.CMFPlone.utils import safe_unicode
++
++    import os.path
++    import pytz
++    import transaction
++
+ 
+ class MigrateFieldsTest(unittest.TestCase):
+ 
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+@@ -158,6 +165,9 @@ class MigrateCustomATTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         setRoles(self.portal, TEST_USER_ID, ['Manager'])
+@@ -471,6 +481,9 @@ class CustomMigrationFunctionalTests(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_FUNCTIONAL_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         app = self.layer['app']
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+diff --git a/plone/app/contenttypes/tests/test_migration_topic.py b/plone/app/contenttypes/tests/test_migration_topic.py
+index 6a1dfafc..c7ac2c8a 100644
+--- a/plone/app/contenttypes/tests/test_migration_topic.py
++++ b/plone/app/contenttypes/tests/test_migration_topic.py
+@@ -1,24 +1,26 @@
+ # -*- coding: utf-8 -*-
+-from DateTime import DateTime
+-from plone.app.contenttypes.behaviors.collection import ICollection
+-from plone.app.contenttypes.migration.topics import migrate_topics
++from plone.app.contenttypes.testing import TEST_MIGRATION
+ from plone.app.contenttypes.testing import PLONE_APP_CONTENTTYPES_MIGRATION_TESTING  # noqa
+-from plone.app.querystring.queryparser import parseFormquery
+-from plone.app.testing import applyProfile
+-from plone.app.testing import login
+-from plone.dexterity.content import Container
+-from plone.dexterity.interfaces import IDexterityFTI
+-from Products.CMFCore.utils import getToolByName
+-from zope.component import queryUtility
+-from zope.interface import implementer
+-
+ import unittest
+ 
++if TEST_MIGRATION:
++    from DateTime import DateTime
++    from plone.app.contenttypes.behaviors.collection import ICollection
++    from plone.app.contenttypes.migration.topics import migrate_topics
++    from plone.app.querystring.queryparser import parseFormquery
++    from plone.app.testing import applyProfile
++    from plone.app.testing import login
++    from plone.dexterity.content import Container
++    from plone.dexterity.interfaces import IDexterityFTI
++    from Products.CMFCore.utils import getToolByName
++    from zope.component import queryUtility
++    from zope.interface import implementer
++
+ 
+-@implementer(ICollection)
+-class FolderishCollection(Container):
+-    """Test subclass for folderish ``Collections``.
+-    """
++    @implementer(ICollection)
++    class FolderishCollection(Container):
++        """Test subclass for folderish ``Collections``.
++        """
+ 
+ 
+ class MigrateTopicsIntegrationTest(unittest.TestCase):
+@@ -26,6 +28,9 @@ class MigrateTopicsIntegrationTest(unittest.TestCase):
+     layer = PLONE_APP_CONTENTTYPES_MIGRATION_TESTING
+ 
+     def setUp(self):
++        if not TEST_MIGRATION:
++            raise unittest.SkipTest('Migration tests require ATContentTypes')
++
+         self.portal = self.layer['portal']
+         self.request = self.layer['request']
+         self.request['ACTUAL_URL'] = self.portal.absolute_url()
+diff --git a/plone/app/contenttypes/upgrades.zcml b/plone/app/contenttypes/upgrades.zcml
+index bd7687c9..0ad9f2ac 100644
+--- a/plone/app/contenttypes/upgrades.zcml
++++ b/plone/app/contenttypes/upgrades.zcml
+@@ -21,7 +21,7 @@
+       handler=".upgrades.enable_collection_behavior"
+       />
+ 
+-  <!-- We still need Archetypes to use Products.contentmigrator -->
++  <!-- We still need Archetypes to use Products.contentmigration -->
+   <configure zcml:condition="installed Products.Archetypes">
+   <configure zcml:condition="installed archetypes.schemaextender">
+   <genericsetup:upgradeStep
+diff --git a/setup.py b/setup.py
+index 5a294ff1..1f08481e 100644
+--- a/setup.py
++++ b/setup.py
+@@ -58,11 +58,12 @@ def read(*rnames):
+       ],
+       extras_require={
+           'test': [
+-              'archetypes.schemaextender',
+               'lxml',
+               'plone.app.robotframework [debug] > 0.9.8',  # create image and file content for Image, File and News Item if not given.  # noqa
+               'plone.app.testing [robot] >= 4.2.4',  # we need ROBOT_TEST_LEVEL
+-              # 'plone.dexterity >= 2.3.0',  # fixes setting default values # NOT RELEASED YET. # noqa
++          ],
++          'archetypes': [
++              'archetypes.schemaextender',
+               'Products.ATContentTypes',
+               'Products.contentmigration >= 2.1.8.dev0',
+               'plone.app.referenceablebehavior',
 
 
