@@ -9,7 +9,7 @@ to notify them of regressions in Plone core code.
 
 Build breakages are a normal and expected part of the development process.
 Our aim is to find errors and eliminate them as quickly as possible, without expecting perfection and zero errors.
-Though, there are some essential rules that needs to be followed in order to achieve a stable build.
+Though, there are some essential rules that need to be followed in order to achieve a stable build.
 
 1) Don’t Check In on a Broken Build
 ===================================
@@ -35,7 +35,7 @@ or just revert the commit in order to be able to continue to work.
     Sometimes there are changes or tests that depend on changes in other packages.
     If this is the case,
     there is no way around breaking a single build for a certain period of time.
-    In this case run the all tests locally with all the changes and commit them within a time frame of 10 minutes.
+    In this case run all the tests locally with all the changes and commit them within a time frame of 10 minutes.
 
 
 2) Always Run All Commit Tests Locally before Committing
@@ -61,7 +61,7 @@ Always monitor the build’s progress and fix the problem right away if it fails
 
 You have a far better chance of fixing the build, if you just introduced a regression than later.
 Also another developer might have committed in the meantime (by breaking rule 1)
-making things more complicated for your.
+making things more complicated for you.
 
 
 4) Never Go Home on a Broken Build

@@ -11,7 +11,7 @@ Second, please ask for help setting up your environment, in the forum or in chat
 
 Most of our developers work there and you will get the best advice there.
 
-For chat, browse to the `Plone Gitter channel <https://gitter.im/plone/public/>`_. To send any messages, you will have to log in using a `GitHub <https://GitHub.com>`_ or `Twitter <https://Twitter.com>`_ account.
+For chat, browse to the `Plone Gitter channel <https://gitter.im/plone/public/>`_. To send any messages, you will have to log in using a `GitLab <https://about.gitlab.com>`_ `GitHub <https://GitHub.com>`_ or `Twitter <https://Twitter.com>`_ account.
 
 The people there have mostly been using Plone for a very long time and are happy to help you get going and make the right decisions.
 

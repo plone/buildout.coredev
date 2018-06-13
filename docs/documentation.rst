@@ -15,7 +15,7 @@ others are included:
 * :doc:`Theme Reference </adapt-and-extend/theming/index>`
 * :doc:`Developer Manual </develop/index>`
 
-The documentation is hosted on `GitHub <https://github.com/plone/documentation>`_ and information how to contribute can be found at :doc:`Contributing to the documentation </about/contributing>`.
+The documentation is hosted on `GitHub <https://github.com/plone/documentation>`_ and information on how to contribute can be found at :doc:`Contributing to the documentation </about/contributing>`.
 
 Documenting a package
 =====================
@@ -79,7 +79,7 @@ At the very least, your package should include the following forms of documentat
   :file:`CHANGES.rst`
     The changelog is a record of all the changes made to the package and who made them,
     with the most recent changes at the top.
-    This is maintained separately from the git commit history to give a chance for more user-friendly messages and to and record when releases were made.
+    This is maintained separately from the git commit history to give a chance for more user-friendly messages and to record when releases were made.
 
     A changelog looks something like::
 
@@ -107,6 +107,5 @@ Using Sphinx
 ------------
 
 reST References:
- * `Plone documenttion style guide <http://docs.plone.org/about/rst-styleguide.html>`_
+ * `Plone documentation style guide <https://docs.plone.org/about/contributing/rst-styleguide.html>`_
  * `Sphinx reST Primer <http://sphinx.pocoo.org/rest.html>`_
-
