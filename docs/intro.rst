@@ -10,7 +10,7 @@ For more information on writing PLIPS, please :doc:`go here <plips>`.
 Version Support Policy
 ======================
 
-If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <http://plone.org/support/version-support-policy>`_.
+If you are triaging or fixing bugs, keep in mind that Plone has a `version support policy <https://plone.org/security/update-policy>`_.
 
 Dependencies
 ============
@@ -135,7 +135,7 @@ See :doc:`Essential Continuous Integration Practices <continous-integration>` fo
 Since it can be burdensome to check this manually,
 install yourself the tools to always see the current state of the Plone CI Server:
 
-- For (Ubuntu?) Linux there is `BuildNotify <https://bitbucket.org/Anay/buildnotify/wiki/Home>`_.
+- For (Ubuntu?) Linux there is `BuildNotify <https://anaynayak.github.io/buildnotify/>`_.
 - For Mac there is `CCMenu <http://ccmenu.org/>`_.
 - For windows there is `CCTray <http://cruisecontrolnet.org/projects/ccnet/wiki/CCTray_Download_Plugin>`_.
 - For Firefox there is `CruiseControl Monitor <https://addons.mozilla.org/en-US/firefox/addon/cruisecontrol-monitor/>`_ and many other jenkins specific plugins.

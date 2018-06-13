@@ -11,9 +11,9 @@ The Plone Git workflow & branching model
 Our repository on GitHub has the following layout:
 
 * **feature branches**: all development for new features must be done in
-  dedicated branches, normally one branch per feature,
+  dedicated branches, normally one branch per feature
 * **master branch**: when features get completed they are merged into the
-  master branch; bugfixes are commited directly on the master branch,
+  master branch; bug fixes are committed directly on the master branch
 * **tags**: whenever we create a new release we tag the repository so we can
   later re-trace our steps, re-release versions, etc.
 
@@ -70,7 +70,7 @@ The index
 
 Working tree
   Your current modified files.
-  This is the only place where you can loose your changes.
+  This is the only place where you can lose your changes.
   If your Git output is colored,
   red filenames are those in the working tree.
 
@@ -219,7 +219,7 @@ reflog
    When things go bad you will **love** this command.
 
    It effectively shows you a histogram of what happened on the repository,
-   allowing you to rollback you repository to a previous stage.
+   allowing you to rollback your repository to a previous stage.
 
    Extremely useful once a bad interactive rebase has happened.
 
@@ -233,7 +233,7 @@ General Guidelines
 Pulling Code
 ------------
 
-Let's compare this two histories::
+Let's compare these two histories::
 
     *   3333333 (HEAD, master) Merge branch 'feature-branch' into master
     |\
@@ -603,7 +603,7 @@ Enhanced Git Prompt
 Do one (or more) of the following:
 
 * http://clalance.blogspot.com/2011/10/git-bash-prompts-and-tab-completion.html
-* http://en.newinstance.it/2010/05/23/git-autocompletion-and-enhanced-bash-prompt/
+* https://web.archive.org/web/20171012024628/http://en.newinstance.it/2010/05/23/git-autocompletion-and-enhanced-bash-prompt/
 * http://gitready.com/advanced/2009/02/05/bash-auto-completion.html
 
 
@@ -624,4 +624,3 @@ A few good further resources are listed here (contributions welcome):
 
 - official online Git book: `Pro Git <http://git-scm.com/book/en/v2>`_
 - PyCon 2015 talk: `Advanced Git by David Baumgold <https://www.youtube.com/watch?v=4EOZvow1mk4>`_
-
