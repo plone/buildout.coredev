@@ -1,464 +1,88 @@
-Repository: Products.CMFPlone
+Repository: plone.app.linkintegrity
 
 
-Branch: refs/heads/5.1.x
-Date: 2018-05-03T15:10:08+02:00
+Branch: refs/heads/master
+Date: 2018-06-14T13:50:12+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a1bf5e876508e6f69e4e62118a7c0b1c82b699fb
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/9d7b25690d8c6665e325e492636d1d7ffd8e2c19
 
-Optional auto-login after passwort (re-)set.
+Fix test to work with merged plone.login.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/browser/password_reset.py
+M plone/app/linkintegrity/tests/test_functional.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 41bb0601f..984dcaa4f 100644
+index 481be56..e03ff57 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,8 @@ Breaking changes:
+@@ -14,6 +14,9 @@ New features:
  
- New features:
+ Bug fixes:
  
--- *add item here*
-+- Optional auto-login after passwort (re-)set.
++- Fix test to work with merged plone.login.
 +  [jensens]
- 
- Bug fixes:
- 
-diff --git a/Products/CMFPlone/browser/password_reset.py b/Products/CMFPlone/browser/password_reset.py
-index dea053914..8cd4fa242 100644
---- a/Products/CMFPlone/browser/password_reset.py
-+++ b/Products/CMFPlone/browser/password_reset.py
-@@ -1,25 +1,26 @@
--from zope.interface import implementer
--from zope.component import getMultiAdapter
--from Products.Five import BrowserView
--from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+# -*- coding: utf-8 -*-
-+from email.Header import Header
-+from plone.app.layout.navigation.interfaces import INavigationRoot
- from plone.memoize import view
-+from plone.registry.interfaces import IRegistry
- from Products.CMFCore.utils import getToolByName
--from Products.CMFPlone.utils import safe_unicode
--from Products.CMFPlone.utils import safeToInt
-+from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPasswordResetToolView
-+from Products.CMFPlone.interfaces.controlpanel import IMailSchema
- from Products.CMFPlone.PasswordResetTool import ExpiredRequestError
- from Products.CMFPlone.PasswordResetTool import InvalidRequestError
-+from Products.CMFPlone.utils import safe_unicode
-+from Products.CMFPlone.utils import safeToInt
-+from Products.Five import BrowserView
-+from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from Products.PluggableAuthService.interfaces.plugins import ICredentialsUpdatePlugin  # noqa
-+from Products.statusmessages.interfaces import IStatusMessage
-+from zope.component import getMultiAdapter
-+from zope.component import getUtility
- from zope.i18n import translate
-+from zope.interface import implementer
- from zope.publisher.interfaces import IPublishTraverse
- 
--from Products.CMFPlone.interfaces import IPasswordResetToolView
--from Products.CMFPlone import PloneMessageFactory as _
--from email.Header import Header
--
--from plone.registry.interfaces import IRegistry
--from zope.component import getUtility
--
--from Products.CMFPlone.interfaces.controlpanel import IMailSchema
--
- 
- @implementer(IPasswordResetToolView)
- class PasswordResetToolView(BrowserView):
-@@ -45,15 +46,23 @@ def encoded_mail_sender(self):
- 
-     def registered_notify_subject(self):
-         portal_name = self.portal_state().portal_title()
--        return translate(_(u"mailtemplate_user_account_info",
--                           default=u"User Account Information for ${portal_name}",
--                           mapping={'portal_name': safe_unicode(portal_name)}),
--                           context=self.request)
-+        return translate(
-+            _(
-+                u"mailtemplate_user_account_info",
-+                default=u"User Account Information for ${portal_name}",
-+                mapping={'portal_name': safe_unicode(portal_name)},
-+            ),
-+            context=self.request
-+        )
- 
-     def mail_password_subject(self):
--        return translate(_(u"mailtemplate_subject_resetpasswordrequest",
--                           default=u"Password reset request"),
--                           context=self.request)
-+        return translate(
-+            _(
-+                u'mailtemplate_subject_resetpasswordrequest',
-+                default=u'Password reset request',
-+            ),
-+            context=self.request,
-+        )
- 
-     def construct_url(self, randomstring):
-         return "%s/passwordreset/%s" % (
-@@ -75,6 +84,40 @@ class PasswordResetView(BrowserView):
-     form = ViewPageTemplateFile('templates/pwreset_form.pt')
-     subpath = None
- 
-+    def _reset_password(self, pw_tool, randomstring):
-+        userid = self.request.form.get('userid')
-+        password = self.request.form.get('password')
-+        try:
-+            pw_tool.resetPassword(userid, randomstring, password)
-+        except ExpiredRequestError:
-+            return self.expired()
-+        except InvalidRequestError:
-+            return self.invalid()
-+        except RuntimeError:
-+            return self.invalid()
-+        if True:  # TODO: get value from registry if we really want this
-+            aclu = getToolByName(self.context, 'acl_users')
-+            cups = aclu.plugins.listPlugins(ICredentialsUpdatePlugin)
-+            for name, plugin in cups:
-+                plugin.updateCredentials(
-+                    self.request,
-+                    self.request.response,
-+                    userid,
-+                    password
-+                )
-+            IStatusMessage(self.request).addStatusMessage(
-+                _(
-+                    'password_reset_successful',
-+                    default='Password reset successful, '
-+                            'you are logged in now!',
-+                ),
-+                'info',
-+            )
-+            url = INavigationRoot(self.context).absolute_url()
-+            self.request.response.redirect(url)
-+            return
-+        return self.finish()
 +
-     def __call__(self):
-         if self.subpath:
-             # Try traverse subpath first:
-@@ -84,25 +127,14 @@ def __call__(self):
+ - Python 3 compatibility.
+   [pbauer]
  
-         pw_tool = getToolByName(self.context, 'portal_password_reset')
-         if self.request.method == 'POST':
--            userid = self.request.form.get('userid')
--            password = self.request.form.get('password')
--            try:
--                pw_tool.resetPassword(userid, randomstring, password)
--            except ExpiredRequestError:
--                return self.expired()
--            except InvalidRequestError:
--                return self.invalid()
--            except RuntimeError:
--                return self.invalid()
--            return self.finish()
--        else:
--            try:
--                pw_tool.verifyKey(randomstring)
--            except InvalidRequestError:
--                return self.invalid()
--            except ExpiredRequestError:
--                return self.expired()
--            return self.form()
-+            return self._reset_password(pw_tool, randomstring)
-+        try:
-+            pw_tool.verifyKey(randomstring)
-+        except InvalidRequestError:
-+            return self.invalid()
-+        except ExpiredRequestError:
-+            return self.expired()
-+        return self.form()
+diff --git a/plone/app/linkintegrity/tests/test_functional.py b/plone/app/linkintegrity/tests/test_functional.py
+index 3880e9d..2bef8af 100644
+--- a/plone/app/linkintegrity/tests/test_functional.py
++++ b/plone/app/linkintegrity/tests/test_functional.py
+@@ -174,7 +174,7 @@ def test_removal_with_cookie_auth(self):
  
-     def publishTraverse(self, request, name):
-         if self.subpath is None:
-@@ -128,10 +160,14 @@ def getErrors(self):
-             return state
+         # At this point we shouldn't be able to look at the folder
+         # contents (as an anonymous user):
+-        self.assertIn('require_login?came_from', browser.url)
++        self.assertIn('login?came_from', browser.url)
  
-         if not userid:
--            state['userid'] = _('This field is required, please provide some information.')
-+            state['userid'] = _(
-+                'This field is required, please provide some information.',
-+            )
-         if state:
-             state['status'] = 'failure'
--            state['portal_status_message'] = _('Please correct the indicated errors.')
-+            state['portal_status_message'] = _(
-+                'Please correct the indicated errors.',
-+            )
-         return state
- 
-     def login_url(self):
-@@ -173,5 +209,7 @@ def __call__(self):
-         if self.request.method == 'POST':
-             timeout_days = safeToInt(self.request.get('timeout_days'), 7)
-             self.context.setExpirationTimeout(timeout_days)
--            self.context._user_check = bool(self.request.get('user_check', False))
-+            self.context._user_check = bool(
-+                self.request.get('user_check', False),
-+            )
-         return self.index()
+         # So we log in via the regular plone login form and additionally check
+         # that there is no 'authorization' header set afterwards:
 
 
-Repository: Products.CMFPlone
+Repository: plone.app.linkintegrity
 
 
-Branch: refs/heads/5.1.x
-Date: 2018-06-12T11:59:22+02:00
-Author: Peter Holzer (agitator) <peter.holzer@agitator.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/0f6c740a1dc820430a2aa12b33c3a35518743ee1
-
-check for registry key
-
-Files changed:
-M CHANGES.rst
-M Products/CMFPlone/browser/password_reset.py
-
-diff --git a/CHANGES.rst b/CHANGES.rst
-index 984dcaa4f..2ceab9bb4 100644
---- a/CHANGES.rst
-+++ b/CHANGES.rst
-@@ -15,7 +15,8 @@ Breaking changes:
- New features:
- 
- - Optional auto-login after passwort (re-)set.
--  [jensens]
-+  Active if registry key `plone.autologin_after_password_reset` is `True`.
-+  [jensens, agitator]
- 
- Bug fixes:
- 
-diff --git a/Products/CMFPlone/browser/password_reset.py b/Products/CMFPlone/browser/password_reset.py
-index 8cd4fa242..d359c401c 100644
---- a/Products/CMFPlone/browser/password_reset.py
-+++ b/Products/CMFPlone/browser/password_reset.py
-@@ -95,7 +95,8 @@ def _reset_password(self, pw_tool, randomstring):
-             return self.invalid()
-         except RuntimeError:
-             return self.invalid()
--        if True:  # TODO: get value from registry if we really want this
-+        registry = getUtility(IRegistry)
-+        if registry.get('plone.autologin_after_password_reset', False):
-             aclu = getToolByName(self.context, 'acl_users')
-             cups = aclu.plugins.listPlugins(ICredentialsUpdatePlugin)
-             for name, plugin in cups:
-
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/5.1.x
-Date: 2018-06-12T23:41:34+02:00
+Branch: refs/heads/master
+Date: 2018-06-14T16:38:56+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/3dbe23f6ad266429075bdc24262a0401f090211f
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/489d01688c0b055edc92eb2769ec6508db34388a
 
-Merge pull request #2401 from plone/jensens/autologin-after-reset
+Merge pull request #67 from plone/merge-plone-login
 
-Optional auto-login after passwort (re-)set.
+Fix test to work with merged plone.login.
 
 Files changed:
 M CHANGES.rst
-M Products/CMFPlone/browser/password_reset.py
+M plone/app/linkintegrity/tests/test_functional.py
 
 diff --git a/CHANGES.rst b/CHANGES.rst
-index 7873e001a..7e54e93e9 100644
+index 481be56..e03ff57 100644
 --- a/CHANGES.rst
 +++ b/CHANGES.rst
-@@ -14,7 +14,9 @@ Breaking changes:
- 
- New features:
- 
--- *add item here*
-+- Optional auto-login after passwort (re-)set.
-+  Active if registry key `plone.autologin_after_password_reset` is `True`.
-+  [jensens, agitator]
+@@ -14,6 +14,9 @@ New features:
  
  Bug fixes:
  
-diff --git a/Products/CMFPlone/browser/password_reset.py b/Products/CMFPlone/browser/password_reset.py
-index dea053914..d359c401c 100644
---- a/Products/CMFPlone/browser/password_reset.py
-+++ b/Products/CMFPlone/browser/password_reset.py
-@@ -1,25 +1,26 @@
--from zope.interface import implementer
--from zope.component import getMultiAdapter
--from Products.Five import BrowserView
--from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+# -*- coding: utf-8 -*-
-+from email.Header import Header
-+from plone.app.layout.navigation.interfaces import INavigationRoot
- from plone.memoize import view
-+from plone.registry.interfaces import IRegistry
- from Products.CMFCore.utils import getToolByName
--from Products.CMFPlone.utils import safe_unicode
--from Products.CMFPlone.utils import safeToInt
-+from Products.CMFPlone import PloneMessageFactory as _
-+from Products.CMFPlone.interfaces import IPasswordResetToolView
-+from Products.CMFPlone.interfaces.controlpanel import IMailSchema
- from Products.CMFPlone.PasswordResetTool import ExpiredRequestError
- from Products.CMFPlone.PasswordResetTool import InvalidRequestError
-+from Products.CMFPlone.utils import safe_unicode
-+from Products.CMFPlone.utils import safeToInt
-+from Products.Five import BrowserView
-+from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
-+from Products.PluggableAuthService.interfaces.plugins import ICredentialsUpdatePlugin  # noqa
-+from Products.statusmessages.interfaces import IStatusMessage
-+from zope.component import getMultiAdapter
-+from zope.component import getUtility
- from zope.i18n import translate
-+from zope.interface import implementer
- from zope.publisher.interfaces import IPublishTraverse
- 
--from Products.CMFPlone.interfaces import IPasswordResetToolView
--from Products.CMFPlone import PloneMessageFactory as _
--from email.Header import Header
--
--from plone.registry.interfaces import IRegistry
--from zope.component import getUtility
--
--from Products.CMFPlone.interfaces.controlpanel import IMailSchema
--
- 
- @implementer(IPasswordResetToolView)
- class PasswordResetToolView(BrowserView):
-@@ -45,15 +46,23 @@ def encoded_mail_sender(self):
- 
-     def registered_notify_subject(self):
-         portal_name = self.portal_state().portal_title()
--        return translate(_(u"mailtemplate_user_account_info",
--                           default=u"User Account Information for ${portal_name}",
--                           mapping={'portal_name': safe_unicode(portal_name)}),
--                           context=self.request)
-+        return translate(
-+            _(
-+                u"mailtemplate_user_account_info",
-+                default=u"User Account Information for ${portal_name}",
-+                mapping={'portal_name': safe_unicode(portal_name)},
-+            ),
-+            context=self.request
-+        )
- 
-     def mail_password_subject(self):
--        return translate(_(u"mailtemplate_subject_resetpasswordrequest",
--                           default=u"Password reset request"),
--                           context=self.request)
-+        return translate(
-+            _(
-+                u'mailtemplate_subject_resetpasswordrequest',
-+                default=u'Password reset request',
-+            ),
-+            context=self.request,
-+        )
- 
-     def construct_url(self, randomstring):
-         return "%s/passwordreset/%s" % (
-@@ -75,6 +84,41 @@ class PasswordResetView(BrowserView):
-     form = ViewPageTemplateFile('templates/pwreset_form.pt')
-     subpath = None
- 
-+    def _reset_password(self, pw_tool, randomstring):
-+        userid = self.request.form.get('userid')
-+        password = self.request.form.get('password')
-+        try:
-+            pw_tool.resetPassword(userid, randomstring, password)
-+        except ExpiredRequestError:
-+            return self.expired()
-+        except InvalidRequestError:
-+            return self.invalid()
-+        except RuntimeError:
-+            return self.invalid()
-+        registry = getUtility(IRegistry)
-+        if registry.get('plone.autologin_after_password_reset', False):
-+            aclu = getToolByName(self.context, 'acl_users')
-+            cups = aclu.plugins.listPlugins(ICredentialsUpdatePlugin)
-+            for name, plugin in cups:
-+                plugin.updateCredentials(
-+                    self.request,
-+                    self.request.response,
-+                    userid,
-+                    password
-+                )
-+            IStatusMessage(self.request).addStatusMessage(
-+                _(
-+                    'password_reset_successful',
-+                    default='Password reset successful, '
-+                            'you are logged in now!',
-+                ),
-+                'info',
-+            )
-+            url = INavigationRoot(self.context).absolute_url()
-+            self.request.response.redirect(url)
-+            return
-+        return self.finish()
++- Fix test to work with merged plone.login.
++  [jensens]
 +
-     def __call__(self):
-         if self.subpath:
-             # Try traverse subpath first:
-@@ -84,25 +128,14 @@ def __call__(self):
+ - Python 3 compatibility.
+   [pbauer]
  
-         pw_tool = getToolByName(self.context, 'portal_password_reset')
-         if self.request.method == 'POST':
--            userid = self.request.form.get('userid')
--            password = self.request.form.get('password')
--            try:
--                pw_tool.resetPassword(userid, randomstring, password)
--            except ExpiredRequestError:
--                return self.expired()
--            except InvalidRequestError:
--                return self.invalid()
--            except RuntimeError:
--                return self.invalid()
--            return self.finish()
--        else:
--            try:
--                pw_tool.verifyKey(randomstring)
--            except InvalidRequestError:
--                return self.invalid()
--            except ExpiredRequestError:
--                return self.expired()
--            return self.form()
-+            return self._reset_password(pw_tool, randomstring)
-+        try:
-+            pw_tool.verifyKey(randomstring)
-+        except InvalidRequestError:
-+            return self.invalid()
-+        except ExpiredRequestError:
-+            return self.expired()
-+        return self.form()
+diff --git a/plone/app/linkintegrity/tests/test_functional.py b/plone/app/linkintegrity/tests/test_functional.py
+index 3880e9d..2bef8af 100644
+--- a/plone/app/linkintegrity/tests/test_functional.py
++++ b/plone/app/linkintegrity/tests/test_functional.py
+@@ -174,7 +174,7 @@ def test_removal_with_cookie_auth(self):
  
-     def publishTraverse(self, request, name):
-         if self.subpath is None:
-@@ -128,10 +161,14 @@ def getErrors(self):
-             return state
+         # At this point we shouldn't be able to look at the folder
+         # contents (as an anonymous user):
+-        self.assertIn('require_login?came_from', browser.url)
++        self.assertIn('login?came_from', browser.url)
  
-         if not userid:
--            state['userid'] = _('This field is required, please provide some information.')
-+            state['userid'] = _(
-+                'This field is required, please provide some information.',
-+            )
-         if state:
-             state['status'] = 'failure'
--            state['portal_status_message'] = _('Please correct the indicated errors.')
-+            state['portal_status_message'] = _(
-+                'Please correct the indicated errors.',
-+            )
-         return state
- 
-     def login_url(self):
-@@ -173,5 +210,7 @@ def __call__(self):
-         if self.request.method == 'POST':
-             timeout_days = safeToInt(self.request.get('timeout_days'), 7)
-             self.context.setExpirationTimeout(timeout_days)
--            self.context._user_check = bool(self.request.get('user_check', False))
-+            self.context._user_check = bool(
-+                self.request.get('user_check', False),
-+            )
-         return self.index()
+         # So we log in via the regular plone login form and additionally check
+         # that there is no 'authorization' header set afterwards:
 
 
