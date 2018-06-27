@@ -23,7 +23,7 @@ pipeline {
         deleteDir()
         checkout scm
         // Create virtual Python environment
-        sh 'virtualenv .'
+        sh 'virtualenv --clear .'
         // Install setuptools and zc.buildout
         sh 'bin/pip install -r requirements.txt'
         // Build Plone
