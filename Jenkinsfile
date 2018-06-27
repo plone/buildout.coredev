@@ -74,11 +74,6 @@ pipeline {
           sh 'bin/pybot test1.robot'
         }*/
       }
-      post {
-        always {
-          // stash includes: 'output.xml', name: 'acceptance-tests'
-        }
-      }
     }
 
   }
