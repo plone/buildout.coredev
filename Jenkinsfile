@@ -70,13 +70,13 @@ pipeline {
         checkout scm
         sh 'virtualenv .'
         sh 'bin/pip install -r requirements.txt'
-        wrap([$class: 'Xvfb']) {
+        /*wrap([$class: 'Xvfb']) {
           sh 'bin/pybot test1.robot'
-        }
+        }*/
       }
       post {
         always {
-          stash includes: 'output.xml', name: 'acceptance-tests'
+          // stash includes: 'output.xml', name: 'acceptance-tests'
         }
       }
     }
