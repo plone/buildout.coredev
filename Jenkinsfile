@@ -2,7 +2,7 @@
 
 pipeline {
 
-  agent master
+  agent any
 
   environment {
     git_commit_message = ''
@@ -81,13 +81,5 @@ pipeline {
       }
     }
 
-  }
-  post {
-    success {
-      // mail to:"me@example.com", subject:"SUCCESS: ${currentBuild.fullDisplayName}", body: "Yay, we passed."
-    }
-    failure {
-      // mail to:"me@example.com", subject:"FAILURE: ${currentBuild.fullDisplayName}", body: "Boo, we failed."
-    }
   }
 }
