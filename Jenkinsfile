@@ -61,6 +61,14 @@ pipeline {
         sh 'tar xfz backend.tgz'
         sh 'bin/alltests'
       }
+      post {
+        always {
+          step([
+            $class: 'JUnitResultArchiver',
+            testResults: 'parts/test/testreports/*.xml'
+          ])
+        }
+      }
     }
 
     // Acceptance Tests
@@ -79,6 +87,14 @@ pipeline {
         /*wrap([$class: 'Xvfb']) {
           sh 'bin/pybot test1.robot'
         }*/
+      }
+      post {
+        always {
+          step([
+            $class: 'JUnitResultArchiver',
+            testResults: 'parts/test/*.xml'
+          ])
+        }
       }
     }
 
