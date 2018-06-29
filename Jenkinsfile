@@ -70,8 +70,12 @@ pipeline {
       }
       steps {
         deleteDir()
+        sh "sed -i 's/    mr.developer/    mr.developer\ngit-clone-depth = 100/' core.cfg"
         sh 'virtualenv .'
         sh 'bin/pip install -r requirements.txt'
+        sh 'bin/buildout -c core.cfg'
+        sh 'export ROBOTSUITE_PREFIX=ONLYROBOT'
+        sh 'bin/alltests -t ONLYROBOT --all --xml'
         /*wrap([$class: 'Xvfb']) {
           sh 'bin/pybot test1.robot'
         }*/
