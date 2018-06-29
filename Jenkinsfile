@@ -45,6 +45,8 @@ pipeline {
         deleteDir()
         unstash 'backend.tgz'
         sh 'tar xfz backend.tgz'
+        sh 'ls -al'
+        sh 'ls -al bin'
         sh 'bin/code-analysis'
         sh "echo 'Run Static Code Analysis'"
       }
