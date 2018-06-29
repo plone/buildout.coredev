@@ -43,7 +43,9 @@ pipeline {
       }
       steps {
         deleteDir()
-        checkout scm
+        unstash 'backend.tgz'
+        sh 'tar xfz backend.tgz'
+        sh 'bin/code-analysis'
         sh "echo 'Run Static Code Analysis'"
       }
     }
@@ -55,7 +57,6 @@ pipeline {
       }
       steps {
         deleteDir()
-        checkout scm
         sh "echo 'Run Unit Tests'"
       }
     }
@@ -67,7 +68,6 @@ pipeline {
       }
       steps {
         deleteDir()
-        checkout scm
         sh 'virtualenv .'
         sh 'bin/pip install -r requirements.txt'
         /*wrap([$class: 'Xvfb']) {
