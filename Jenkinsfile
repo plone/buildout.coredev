@@ -45,9 +45,7 @@ pipeline {
         deleteDir()
         unstash 'backend.tgz'
         sh 'tar xfz backend.tgz'
-        sh 'ls -al'
-        sh 'ls -al bin'
-        sh 'bin/code-analysis'
+        // sh 'bin/code-analysis'
         sh "echo 'Run Static Code Analysis'"
       }
     }
@@ -59,7 +57,9 @@ pipeline {
       }
       steps {
         deleteDir()
-        sh "echo 'Run Unit Tests'"
+        unstash 'backend.tgz'
+        sh 'tar xfz backend.tgz'
+        sh 'bin/alltests'
       }
     }
 
