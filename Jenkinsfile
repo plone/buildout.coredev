@@ -4,14 +4,6 @@ pipeline {
 
   agent any
 
-  environment {
-    git_commit_message = ''
-    git_commit_diff = ''
-    git_commit_author = ''
-    git_commit_author_name = ''
-    git_commit_author_email = ''
-  }
-
   stages {
 
     // Build
@@ -22,17 +14,9 @@ pipeline {
       steps {
         deleteDir()
         checkout scm
-        // Create virtual Python environment
-        sh 'virtualenv --clear .'
-        // Install setuptools and zc.buildout
-        sh 'bin/pip install -r requirements.txt'
-        // Build Plone
-        sh 'bin/buildout'
-        // Create a tar archive with the Plone build
-        // (passing around too many files makes the build slow)
-        sh 'tar cfz backend.tgz bin develop-eggs include lib parts src *.cfg requirements.txt'
-        // Stash the tar archive for later stages
-        stash includes: 'backend.tgz', name: 'backend.tgz'
+        sh 'make build'
+        sh 'tar cfz backend.tgz bin develop-eggs include lib parts src *.cfg Makefile requirements.txt'
+        stash includes: 'build.tgz', name: 'build.tgz'
       }
     }
 
@@ -43,9 +27,9 @@ pipeline {
       }
       steps {
         deleteDir()
-        unstash 'backend.tgz'
-        sh 'tar xfz backend.tgz'
-        // sh 'bin/code-analysis'
+        unstash 'build.tgz'
+        sh 'tar xfz build.tgz'
+        // sh 'make code-analysis'
         sh "echo 'Run Static Code Analysis'"
       }
     }
@@ -57,9 +41,9 @@ pipeline {
       }
       steps {
         deleteDir()
-        unstash 'backend.tgz'
-        sh 'tar xfz backend.tgz'
-        sh 'bin/alltests'
+        unstash 'build.tgz'
+        sh 'tar xfz build.tgz'
+        sh 'make test'
       }
       post {
         always {
@@ -78,24 +62,27 @@ pipeline {
       }
       steps {
         deleteDir()
-        sh "sed -i 's/    mr.developer/    mr.developer\ngit-clone-depth = 100/' core.cfg"
-        sh 'virtualenv .'
-        sh 'bin/pip install -r requirements.txt'
-        sh 'bin/buildout -c core.cfg'
-        sh 'export ROBOTSUITE_PREFIX=ONLYROBOT'
-        sh 'bin/alltests -t ONLYROBOT --all --xml'
-        /*wrap([$class: 'Xvfb']) {
-          sh 'bin/pybot test1.robot'
-        }*/
+        unstash 'build.tgz'
+        sh 'tar xfz build.tgz'
+        wrap([$class: 'Xvfb']) {
+          sh 'make test-acceptance'
+        }
       }
       post {
         always {
           step([
-            $class: 'JUnitResultArchiver',
-            testResults: 'parts/test/*.xml'
-          ])
+            $class: 'RobotPublisher',
+            disableArchiveOutput: false,
+            logFileName: 'parts/test/robot_log.html',
+            onlyCritical: true,
+            otherFiles: '**/*.png',
+            outputFileName: 'parts/test/robot_output.xml',
+            outputPath: '.',
+            passThreshold: 100,
+            reportFileName: 'parts/test/robot_report.html',
+            unstableThreshold: 0
+          ]);
         }
-      }
     }
 
   }
