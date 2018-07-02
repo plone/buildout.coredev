@@ -21,6 +21,7 @@ pipeline {
     }
 
     // Static Code Analysis
+    /*
     stage('Static Code Analysis') {
       agent {
         label 'virtualenv'
@@ -29,10 +30,9 @@ pipeline {
         deleteDir()
         unstash 'build.tgz'
         sh 'tar xfz build.tgz'
-        // sh 'make code-analysis'
-        sh "echo 'Run Static Code Analysis'"
+        sh 'make code-analysis'
       }
-    }
+    }*/
 
     // Unit Tests
     stage('Unit Tests') {
