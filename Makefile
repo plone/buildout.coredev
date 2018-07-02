@@ -39,7 +39,7 @@ code-analysis: ## Run static code analysis
 .PHONY: test
 test: ## Run tests
 	@echo "$(GREEN)==> Run Tests$(RESET)"
-	bin/alltests
+	bin/alltests --xml
 
 .PHONY: test-acceptance
 test-acceptance: ## Run acceptance tests
