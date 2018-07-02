@@ -15,7 +15,7 @@ pipeline {
         deleteDir()
         checkout scm
         sh 'make build'
-        sh 'tar cfz backend.tgz bin develop-eggs include lib parts src *.cfg Makefile requirements.txt'
+        sh 'tar cfz build.tgz bin develop-eggs include lib parts src *.cfg Makefile requirements.txt'
         stash includes: 'build.tgz', name: 'build.tgz'
       }
     }
