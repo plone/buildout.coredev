@@ -44,4 +44,4 @@ test: ## Run tests
 .PHONY: test-acceptance
 test-acceptance: ## Run acceptance tests
 	@echo "$(GREEN)==> Run Acceptance Tests$(RESET)"
-	export ROBOTSUITE_PREFIX=ONLYROBOT' && bin/alltests -t ONLYROBOT --all --xml
+	export ROBOTSUITE_PREFIX=ONLYROBOT && bin/alltests -t ONLYROBOT --all --xml
