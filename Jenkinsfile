@@ -44,6 +44,7 @@ pipeline {
         unstash 'build.tgz'
         sh 'tar xfz build.tgz'
         sh 'make test'
+        sh 'ls -al parts/test/testreports'
       }
       post {
         always {
