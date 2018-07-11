@@ -1,41 +1,34 @@
-Repository: plone.indexer
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/master
-Date: 2018-07-11T11:00:47+02:00
+Branch: refs/heads/5.1.x
+Date: 2018-07-10T18:17:53+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.indexer/commit/e467d4c098082548cdfe0201ad1c41eb7cf43ab4
+Commit: https://github.com/plone/Products.CMFPlone/commit/121436f37a7aaa6cbff84ee5b0222095d296ea73
 
-fix https://github.com/plone/Products.CMFPlone/issues/2469
-
-Subobjects are indexing attributes of parent
-also make code-analysis happy
+add test to show problem of #2469, Subobjects are indexing attributes of parent
 
 Files changed:
 M CHANGES.rst
-M plone/indexer/decorator.py
-M plone/indexer/tests.py
-M plone/indexer/wrapper.py
+M Products/CMFPlone/tests/testCatalogTool.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 021fe5f..187f018 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -15,7 +15,13 @@ New:\n \n Fixes:\n \n-- *add item here*\n+- fix https://github.com/plone/Products.CMFPlone/issues/2469:\n+  "Subobjects are indexing attributes of parent".\n+  Allow only direct attributes and acquired PythonScripts,\n+  but not aqcquired attributes.\n+  Indexers and PythonScripts are able to handle this explicitly,\n+  because they get the acquisition-wrapped object.\n+  [jensens]\n \n \n 1.0.4 (2016-02-25)\ndiff --git a/plone/indexer/decorator.py b/plone/indexer/decorator.py\nindex 2536ee5..994131e 100644\n--- a/plone/indexer/decorator.py\n+++ b/plone/indexer/decorator.py\n@@ -41,7 +41,7 @@ def __init__(self, *interfaces):\n         elif len(interfaces) > 2:\n             raise ValueError(\n                 u\'The @indexer decorator takes at most two interfaces as \'\n-                u\'arguments.\'\n+                u\'arguments.\',\n             )\n         adapter.__init__(self, *interfaces)\n \ndiff --git a/plone/indexer/tests.py b/plone/indexer/tests.py\nindex f8aadfa..d0d5f08 100644\n--- a/plone/indexer/tests.py\n+++ b/plone/indexer/tests.py\n@@ -28,5 +28,6 @@ def test_suite():\n         unittest.makeSuite(TestWrapperUpdate),\n     ])\n \n+\n if __name__ == \'__main__\':\n     unittest.main(defaultTest=\'test_suite\')\ndiff --git a/plone/indexer/wrapper.py b/plone/indexer/wrapper.py\nindex 6188ff9..376c175 100644\n--- a/plone/indexer/wrapper.py\n+++ b/plone/indexer/wrapper.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from Acquisition import aq_base\n from plone.indexer.interfaces import IIndexableObject\n from plone.indexer.interfaces import IIndexableObjectWrapper\n from plone.indexer.interfaces import IIndexer\n@@ -57,7 +58,8 @@ def __str__(self):\n     def __getattr__(self, name):\n         # First, try to look up an indexer adapter\n         indexer = queryMultiAdapter(\n-            (self.__object, self.__catalog), IIndexer, name=name\n+            (self.__object, self.__catalog),\n+            IIndexer, name=name,\n         )\n         if indexer is not None:\n             return indexer()\n@@ -66,6 +68,27 @@ def __getattr__(self, name):\n         if name in self.__vars:\n             return self.__vars[name]\n \n-        # Finally see if the object provides the attribute directly. This\n-        # is allowed to raise AttributeError.\n-        return getattr(self.__object, name)\n+        # first lets see if there is an attribute at all,\n+        # here we may already raise an AttributeError, which is fine\n+        value_or_callable = getattr(self.__object, name)\n+        try:\n+            # then lets see if the object provides the attribute directly,\n+            # w/o acquisition.\n+            getattr(aq_base(self.__object), name)\n+        except AttributeError:\n+            # it does not!\n+            # PythonScripts are the only way to add indexers TTW.\n+            # If there is a PythonScript acquired, thats fine:\n+            if (\n+                getattr(\n+                    value_or_callable,\n+                    \'meta_type\',\n+                    None,\n+                ) == \'Script (Python)\'\n+            ):\n+                return value_or_callable\n+            raise\n+        # here we know it is a direct attribute.\n+        # we return the attribute acquistion wrapped in order to enable\n+        # callables to use acquisition.\n+        return value_or_callable\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 19fa7b337..692e26ff7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,7 +18,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Add test for issue #2469.\n+  [jensens]\n \n \n 5.1.3 (2018-06-22)\ndiff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py\nindex c64e08ff4..fdf695cc8 100644\n--- a/Products/CMFPlone/tests/testCatalogTool.py\n+++ b/Products/CMFPlone/tests/testCatalogTool.py\n@@ -339,6 +339,20 @@ def testClearFindAndRebuildKeepsModificationDate(self):\n         self.assertEqual(self.folder.doc.modified(), DateTime(0))\n         self.assertEqual(len(self.catalog(modified=DateTime(0))), 1)\n \n+    def test_acquired_attributes_are_not_indexed(self):\n+        # create an index for foo:\n+        # from Products.PluginIndexes.FieldIndex.FieldIndex import FieldIndex\n+        self.catalog.addIndex('foo', 'FieldIndex')\n+\n+        # create attribute foo on folder and index on both, folder and\n+        # contained\n+        self.folder.foo = 'FOO'\n+        self.catalog.clearFindAndRebuild()\n+\n+        # lets see if we have one result for folder, but nothing for doc:\n+        brains = self.catalog(foo='FOO')\n+        self.assertEqual(len(brains), 1)\n+\n \n class TestCatalogSearching(PloneTestCase):\n \n"
 
-Repository: plone.indexer
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/master
-Date: 2018-07-11T12:00:29+02:00
+Branch: refs/heads/5.1.x
+Date: 2018-07-11T12:01:04+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.indexer/commit/09e850cc2d56a011286244df5c14f42f5c57c62b
+Commit: https://github.com/plone/Products.CMFPlone/commit/064c6a78d0fa7ecb9ff1ba0750aa281476601667
 
-Merge pull request #6 from plone/fix-Products.CMFPlone-2469
+Merge pull request #2470 from plone/fix-2469
 
-fix plone/Products.CMFPlone #2469
+Add test for #2469
 
 Files changed:
 M CHANGES.rst
-M plone/indexer/decorator.py
-M plone/indexer/tests.py
-M plone/indexer/wrapper.py
+M Products/CMFPlone/tests/testCatalogTool.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 021fe5f..187f018 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -15,7 +15,13 @@ New:\n \n Fixes:\n \n-- *add item here*\n+- fix https://github.com/plone/Products.CMFPlone/issues/2469:\n+  "Subobjects are indexing attributes of parent".\n+  Allow only direct attributes and acquired PythonScripts,\n+  but not aqcquired attributes.\n+  Indexers and PythonScripts are able to handle this explicitly,\n+  because they get the acquisition-wrapped object.\n+  [jensens]\n \n \n 1.0.4 (2016-02-25)\ndiff --git a/plone/indexer/decorator.py b/plone/indexer/decorator.py\nindex 2536ee5..994131e 100644\n--- a/plone/indexer/decorator.py\n+++ b/plone/indexer/decorator.py\n@@ -41,7 +41,7 @@ def __init__(self, *interfaces):\n         elif len(interfaces) > 2:\n             raise ValueError(\n                 u\'The @indexer decorator takes at most two interfaces as \'\n-                u\'arguments.\'\n+                u\'arguments.\',\n             )\n         adapter.__init__(self, *interfaces)\n \ndiff --git a/plone/indexer/tests.py b/plone/indexer/tests.py\nindex f8aadfa..d0d5f08 100644\n--- a/plone/indexer/tests.py\n+++ b/plone/indexer/tests.py\n@@ -28,5 +28,6 @@ def test_suite():\n         unittest.makeSuite(TestWrapperUpdate),\n     ])\n \n+\n if __name__ == \'__main__\':\n     unittest.main(defaultTest=\'test_suite\')\ndiff --git a/plone/indexer/wrapper.py b/plone/indexer/wrapper.py\nindex 6188ff9..376c175 100644\n--- a/plone/indexer/wrapper.py\n+++ b/plone/indexer/wrapper.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from Acquisition import aq_base\n from plone.indexer.interfaces import IIndexableObject\n from plone.indexer.interfaces import IIndexableObjectWrapper\n from plone.indexer.interfaces import IIndexer\n@@ -57,7 +58,8 @@ def __str__(self):\n     def __getattr__(self, name):\n         # First, try to look up an indexer adapter\n         indexer = queryMultiAdapter(\n-            (self.__object, self.__catalog), IIndexer, name=name\n+            (self.__object, self.__catalog),\n+            IIndexer, name=name,\n         )\n         if indexer is not None:\n             return indexer()\n@@ -66,6 +68,27 @@ def __getattr__(self, name):\n         if name in self.__vars:\n             return self.__vars[name]\n \n-        # Finally see if the object provides the attribute directly. This\n-        # is allowed to raise AttributeError.\n-        return getattr(self.__object, name)\n+        # first lets see if there is an attribute at all,\n+        # here we may already raise an AttributeError, which is fine\n+        value_or_callable = getattr(self.__object, name)\n+        try:\n+            # then lets see if the object provides the attribute directly,\n+            # w/o acquisition.\n+            getattr(aq_base(self.__object), name)\n+        except AttributeError:\n+            # it does not!\n+            # PythonScripts are the only way to add indexers TTW.\n+            # If there is a PythonScript acquired, thats fine:\n+            if (\n+                getattr(\n+                    value_or_callable,\n+                    \'meta_type\',\n+                    None,\n+                ) == \'Script (Python)\'\n+            ):\n+                return value_or_callable\n+            raise\n+        # here we know it is a direct attribute.\n+        # we return the attribute acquistion wrapped in order to enable\n+        # callables to use acquisition.\n+        return value_or_callable\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 19fa7b337..692e26ff7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,7 +18,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Add test for issue #2469.\n+  [jensens]\n \n \n 5.1.3 (2018-06-22)\ndiff --git a/Products/CMFPlone/tests/testCatalogTool.py b/Products/CMFPlone/tests/testCatalogTool.py\nindex c64e08ff4..fdf695cc8 100644\n--- a/Products/CMFPlone/tests/testCatalogTool.py\n+++ b/Products/CMFPlone/tests/testCatalogTool.py\n@@ -339,6 +339,20 @@ def testClearFindAndRebuildKeepsModificationDate(self):\n         self.assertEqual(self.folder.doc.modified(), DateTime(0))\n         self.assertEqual(len(self.catalog(modified=DateTime(0))), 1)\n \n+    def test_acquired_attributes_are_not_indexed(self):\n+        # create an index for foo:\n+        # from Products.PluginIndexes.FieldIndex.FieldIndex import FieldIndex\n+        self.catalog.addIndex('foo', 'FieldIndex')\n+\n+        # create attribute foo on folder and index on both, folder and\n+        # contained\n+        self.folder.foo = 'FOO'\n+        self.catalog.clearFindAndRebuild()\n+\n+        # lets see if we have one result for folder, but nothing for doc:\n+        brains = self.catalog(foo='FOO')\n+        self.assertEqual(len(brains), 1)\n+\n \n class TestCatalogSearching(PloneTestCase):\n \n"
 
