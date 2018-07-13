@@ -20,6 +20,7 @@ def is_report_fine():
         content = deps_file.read()
         lines = content.split('\n')
 
+    print('File deps.txt is {0} lines long'.format(len(lines)))
     return len(lines) > 5
 
 
