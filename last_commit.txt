@@ -1,41 +1,34 @@
-Repository: plone.indexer
+Repository: plone.cachepurging
 
 
 Branch: refs/heads/master
-Date: 2018-07-11T11:00:47+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.indexer/commit/e467d4c098082548cdfe0201ad1c41eb7cf43ab4
+Date: 2018-06-06T20:59:37+03:00
+Author: Alin Voinea (avoinea) <alin.voinea@eaudeweb.ro>
+Commit: https://github.com/plone/plone.cachepurging/commit/b2321116a3fe9af8d04aebb811ebf13cb5929c6c
 
-fix https://github.com/plone/Products.CMFPlone/issues/2469
-
-Subobjects are indexing attributes of parent
-also make code-analysis happy
+Refs #11 - Set default purger backlog size to 0 (infinity)
 
 Files changed:
 M CHANGES.rst
-M plone/indexer/decorator.py
-M plone/indexer/tests.py
-M plone/indexer/wrapper.py
+M plone/cachepurging/purger.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 021fe5f..187f018 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -15,7 +15,13 @@ New:\n \n Fixes:\n \n-- *add item here*\n+- fix https://github.com/plone/Products.CMFPlone/issues/2469:\n+  "Subobjects are indexing attributes of parent".\n+  Allow only direct attributes and acquired PythonScripts,\n+  but not aqcquired attributes.\n+  Indexers and PythonScripts are able to handle this explicitly,\n+  because they get the acquisition-wrapped object.\n+  [jensens]\n \n \n 1.0.4 (2016-02-25)\ndiff --git a/plone/indexer/decorator.py b/plone/indexer/decorator.py\nindex 2536ee5..994131e 100644\n--- a/plone/indexer/decorator.py\n+++ b/plone/indexer/decorator.py\n@@ -41,7 +41,7 @@ def __init__(self, *interfaces):\n         elif len(interfaces) > 2:\n             raise ValueError(\n                 u\'The @indexer decorator takes at most two interfaces as \'\n-                u\'arguments.\'\n+                u\'arguments.\',\n             )\n         adapter.__init__(self, *interfaces)\n \ndiff --git a/plone/indexer/tests.py b/plone/indexer/tests.py\nindex f8aadfa..d0d5f08 100644\n--- a/plone/indexer/tests.py\n+++ b/plone/indexer/tests.py\n@@ -28,5 +28,6 @@ def test_suite():\n         unittest.makeSuite(TestWrapperUpdate),\n     ])\n \n+\n if __name__ == \'__main__\':\n     unittest.main(defaultTest=\'test_suite\')\ndiff --git a/plone/indexer/wrapper.py b/plone/indexer/wrapper.py\nindex 6188ff9..376c175 100644\n--- a/plone/indexer/wrapper.py\n+++ b/plone/indexer/wrapper.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from Acquisition import aq_base\n from plone.indexer.interfaces import IIndexableObject\n from plone.indexer.interfaces import IIndexableObjectWrapper\n from plone.indexer.interfaces import IIndexer\n@@ -57,7 +58,8 @@ def __str__(self):\n     def __getattr__(self, name):\n         # First, try to look up an indexer adapter\n         indexer = queryMultiAdapter(\n-            (self.__object, self.__catalog), IIndexer, name=name\n+            (self.__object, self.__catalog),\n+            IIndexer, name=name,\n         )\n         if indexer is not None:\n             return indexer()\n@@ -66,6 +68,27 @@ def __getattr__(self, name):\n         if name in self.__vars:\n             return self.__vars[name]\n \n-        # Finally see if the object provides the attribute directly. This\n-        # is allowed to raise AttributeError.\n-        return getattr(self.__object, name)\n+        # first lets see if there is an attribute at all,\n+        # here we may already raise an AttributeError, which is fine\n+        value_or_callable = getattr(self.__object, name)\n+        try:\n+            # then lets see if the object provides the attribute directly,\n+            # w/o acquisition.\n+            getattr(aq_base(self.__object), name)\n+        except AttributeError:\n+            # it does not!\n+            # PythonScripts are the only way to add indexers TTW.\n+            # If there is a PythonScript acquired, thats fine:\n+            if (\n+                getattr(\n+                    value_or_callable,\n+                    \'meta_type\',\n+                    None,\n+                ) == \'Script (Python)\'\n+            ):\n+                return value_or_callable\n+            raise\n+        # here we know it is a direct attribute.\n+        # we return the attribute acquistion wrapped in order to enable\n+        # callables to use acquisition.\n+        return value_or_callable\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex a6d1a25..219d961 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Set default purger backlog size to 0 (infinity) in order to fully invalidate Varnish cache\n+  [avoinea refs #11]\n \n \n 1.0.15 (2018-04-24)\ndiff --git a/plone/cachepurging/purger.py b/plone/cachepurging/purger.py\nindex 3f673bc..1b042f9 100644\n--- a/plone/cachepurging/purger.py\n+++ b/plone/cachepurging/purger.py\n@@ -66,7 +66,7 @@ def connect(self):\n @implementer(IPurger)\n class DefaultPurger(object):\n \n-    def __init__(self, factory=Connection, timeout=30, backlog=200,\n+    def __init__(self, factory=Connection, timeout=30, backlog=0,\n                  errorHeaders=('x-squid-error', ), http_1_1=True):\n         self.factory = factory\n         self.timeout = timeout\n"
 
-Repository: plone.indexer
+Repository: plone.cachepurging
 
 
 Branch: refs/heads/master
-Date: 2018-07-11T12:00:29+02:00
+Date: 2018-07-16T14:03:35+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.indexer/commit/09e850cc2d56a011286244df5c14f42f5c57c62b
+Commit: https://github.com/plone/plone.cachepurging/commit/b04190a3dcefa67892048c283da81833963462a1
 
-Merge pull request #6 from plone/fix-Products.CMFPlone-2469
+Merge pull request #12 from eea/master
 
-fix plone/Products.CMFPlone #2469
+Refs #11 - Set default purger backlog size to 0 (infinity)
 
 Files changed:
 M CHANGES.rst
-M plone/indexer/decorator.py
-M plone/indexer/tests.py
-M plone/indexer/wrapper.py
+M plone/cachepurging/purger.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 021fe5f..187f018 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -15,7 +15,13 @@ New:\n \n Fixes:\n \n-- *add item here*\n+- fix https://github.com/plone/Products.CMFPlone/issues/2469:\n+  "Subobjects are indexing attributes of parent".\n+  Allow only direct attributes and acquired PythonScripts,\n+  but not aqcquired attributes.\n+  Indexers and PythonScripts are able to handle this explicitly,\n+  because they get the acquisition-wrapped object.\n+  [jensens]\n \n \n 1.0.4 (2016-02-25)\ndiff --git a/plone/indexer/decorator.py b/plone/indexer/decorator.py\nindex 2536ee5..994131e 100644\n--- a/plone/indexer/decorator.py\n+++ b/plone/indexer/decorator.py\n@@ -41,7 +41,7 @@ def __init__(self, *interfaces):\n         elif len(interfaces) > 2:\n             raise ValueError(\n                 u\'The @indexer decorator takes at most two interfaces as \'\n-                u\'arguments.\'\n+                u\'arguments.\',\n             )\n         adapter.__init__(self, *interfaces)\n \ndiff --git a/plone/indexer/tests.py b/plone/indexer/tests.py\nindex f8aadfa..d0d5f08 100644\n--- a/plone/indexer/tests.py\n+++ b/plone/indexer/tests.py\n@@ -28,5 +28,6 @@ def test_suite():\n         unittest.makeSuite(TestWrapperUpdate),\n     ])\n \n+\n if __name__ == \'__main__\':\n     unittest.main(defaultTest=\'test_suite\')\ndiff --git a/plone/indexer/wrapper.py b/plone/indexer/wrapper.py\nindex 6188ff9..376c175 100644\n--- a/plone/indexer/wrapper.py\n+++ b/plone/indexer/wrapper.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from Acquisition import aq_base\n from plone.indexer.interfaces import IIndexableObject\n from plone.indexer.interfaces import IIndexableObjectWrapper\n from plone.indexer.interfaces import IIndexer\n@@ -57,7 +58,8 @@ def __str__(self):\n     def __getattr__(self, name):\n         # First, try to look up an indexer adapter\n         indexer = queryMultiAdapter(\n-            (self.__object, self.__catalog), IIndexer, name=name\n+            (self.__object, self.__catalog),\n+            IIndexer, name=name,\n         )\n         if indexer is not None:\n             return indexer()\n@@ -66,6 +68,27 @@ def __getattr__(self, name):\n         if name in self.__vars:\n             return self.__vars[name]\n \n-        # Finally see if the object provides the attribute directly. This\n-        # is allowed to raise AttributeError.\n-        return getattr(self.__object, name)\n+        # first lets see if there is an attribute at all,\n+        # here we may already raise an AttributeError, which is fine\n+        value_or_callable = getattr(self.__object, name)\n+        try:\n+            # then lets see if the object provides the attribute directly,\n+            # w/o acquisition.\n+            getattr(aq_base(self.__object), name)\n+        except AttributeError:\n+            # it does not!\n+            # PythonScripts are the only way to add indexers TTW.\n+            # If there is a PythonScript acquired, thats fine:\n+            if (\n+                getattr(\n+                    value_or_callable,\n+                    \'meta_type\',\n+                    None,\n+                ) == \'Script (Python)\'\n+            ):\n+                return value_or_callable\n+            raise\n+        # here we know it is a direct attribute.\n+        # we return the attribute acquistion wrapped in order to enable\n+        # callables to use acquisition.\n+        return value_or_callable\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex a6d1a25..219d961 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Set default purger backlog size to 0 (infinity) in order to fully invalidate Varnish cache\n+  [avoinea refs #11]\n \n \n 1.0.15 (2018-04-24)\ndiff --git a/plone/cachepurging/purger.py b/plone/cachepurging/purger.py\nindex 3f673bc..1b042f9 100644\n--- a/plone/cachepurging/purger.py\n+++ b/plone/cachepurging/purger.py\n@@ -66,7 +66,7 @@ def connect(self):\n @implementer(IPurger)\n class DefaultPurger(object):\n \n-    def __init__(self, factory=Connection, timeout=30, backlog=200,\n+    def __init__(self, factory=Connection, timeout=30, backlog=0,\n                  errorHeaders=('x-squid-error', ), http_1_1=True):\n         self.factory = factory\n         self.timeout = timeout\n"
 
