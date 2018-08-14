@@ -1,65 +1,34 @@
-Repository: plone.app.content
+Repository: plone.schemaeditor
 
 
 Branch: refs/heads/master
-Date: 2018-07-31T10:46:07+02:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.app.content/commit/4d2d0c2d355b0e41b614ebad172318696ee1fe2a
+Date: 2018-08-14T16:53:42+12:00
+Author: ezvirtual (ezvirtual) <ezvirtual@thevirtual.co.nz>
+Commit: https://github.com/plone/plone.schemaeditor/commit/b294102f852b0f21b01119b8891bae23b00d4c85
 
-fc_workflow view now reindex the object after state change
-
-Files changed:
-M plone/app/content/browser/contents/workflow.py
-M plone/app/content/tests/test_folder.py
-
-b'diff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py\nindex a0b14a2..709c4f0 100644\n--- a/plone/app/content/browser/contents/workflow.py\n+++ b/plone/app/content/browser/contents/workflow.py\n@@ -83,6 +83,7 @@ def action(self, obj, bypass_recurse=False):\n                 if recurse and IFolderish.providedBy(obj):\n                     for sub in obj.values():\n                         self.action(sub)\n+                obj.reindexObject()\n             except ConflictError:\n                 raise\n             except Exception:\ndiff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py\nindex 914e071..2f705b3 100644\n--- a/plone/app/content/tests/test_folder.py\n+++ b/plone/app/content/tests/test_folder.py\n@@ -1,5 +1,6 @@\n # -*- coding: utf-8 -*-\n from DateTime import DateTime\n+from plone import api\n from plone.app.content.testing import PLONE_APP_CONTENT_AT_INTEGRATION_TESTING\n from plone.app.content.testing import PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING\n@@ -14,6 +15,7 @@\n from Products.CMFCore.utils import getToolByName\n from six.moves.urllib.parse import urlparse\n from Testing.makerequest import makerequest\n+from transaction import commit\n from zope.annotation.interfaces import IAttributeAnnotatable\n from zope.interface import alsoProvides\n from zope.publisher.browser import TestRequest\n@@ -168,15 +170,45 @@ class WorkflowTest(BaseTest):\n \n     layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING\n \n+    def convertDateTimeToIndexRepr(self, date):\n+        t_tup = date.toZone(\'UTC\').parts()\n+        yr = t_tup[0]\n+        mo = t_tup[1]\n+        dy = t_tup[2]\n+        hr = t_tup[3]\n+        mn = t_tup[4]\n+\n+        return ((((yr * 12 + mo) * 31 + dy) * 24 + hr) * 60 + mn)\n+\n     def testStateChange(self):\n         from plone.app.content.browser.contents.workflow import WorkflowActionView  # noqa\n         self.request.form[\'transition\'] = \'publish\'\n+        default_effective = DateTime(\'1969/12/31 00:00:00 {0}\'.format(\n+            DateTime().timezone()\n+        ))\n+        default_effective_index = self.convertDateTimeToIndexRepr(\n+            default_effective\n+        )\n+        pc = api.portal.get_tool(name=\'portal_catalog\')\n+        # i need to call it, to populate catalog indexes\n+        pc()\n+        self.assertEquals(\n+            pc.uniqueValuesFor(\'effective\'),\n+            (default_effective_index,))\n         view = WorkflowActionView(self.portal.page, self.request)\n         view()\n         workflowTool = getToolByName(self.portal, "portal_workflow")\n         self.assertEquals(\n             workflowTool.getInfoFor(self.portal.page, \'review_state\'),\n             \'published\')\n+        # commit to update indexes in catalog\n+        commit()\n+        effective_index = self.convertDateTimeToIndexRepr(\n+            self.portal.page.effective_date\n+        )\n+        self.assertEquals(\n+            pc.uniqueValuesFor(\'effective\'),\n+            (effective_index,))\n \n \n class RenameTest(BaseTest):\n'
-
-Repository: plone.app.content
-
-
-Branch: refs/heads/master
-Date: 2018-07-31T10:46:16+02:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.app.content/commit/7ce6b3c40fd941f3a50a77dc94827b2851fa397d
-
-update changelog
+Allow defaults to be set on dexterity type fields via the web UI
 
 Files changed:
 M CHANGES.rst
+M plone/schemaeditor/browser/schema/listing.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex e1c6871..7817548 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,8 +14,10 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n-\n+- fc_workflow view now reindex the object after state change.\n+  This fix the problem that some index dates (effective and modified for example) was\n+  updated only when the state was changed from the toolbar.\n+  [cekk]\n \n 3.5.3 (2018-06-18)\n ------------------\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex e9f4d9e..70afae8 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Allow defaults to be set on dexterity type fields via the web UI (@@fields)\n+  [ezvirtual]\n \n \n 2.0.19 (2018-02-02)\ndiff --git a/plone/schemaeditor/browser/schema/listing.py b/plone/schemaeditor/browser/schema/listing.py\nindex 3030ab1..ac05e85 100644\n--- a/plone/schemaeditor/browser/schema/listing.py\n+++ b/plone/schemaeditor/browser/schema/listing.py\n@@ -114,8 +114,11 @@ def handleSaveDefaults(self, action):\n             self.status = self.formErrorsMessage\n             return\n \n-        for fname, value in data.items():\n-            self.context.schema[fname].default = value\n+        for widget in self._iterateOverWidgets():\n+            widget_name = widget.field.getName()\n+            if (widget.field.interface is self.context.schema and\n+                    widget_name in data):\n+                self.context.schema[widget_name].default = data[widget_name]\n         notify(SchemaModifiedEvent(self.context))\n \n         # update widgets to take the new defaults into account\n'
 
-Repository: plone.app.content
-
-
-Branch: refs/heads/master
-Date: 2018-08-13T09:48:33+02:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.app.content/commit/06c9a65608aa850075d76a49971c419b12ecca01
-
-fix test layer and remove plone.api usage
-
-Files changed:
-M plone/app/content/tests/test_folder.py
-
-b'diff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py\nindex 2f705b3..9f77b45 100644\n--- a/plone/app/content/tests/test_folder.py\n+++ b/plone/app/content/tests/test_folder.py\n@@ -1,6 +1,5 @@\n # -*- coding: utf-8 -*-\n from DateTime import DateTime\n-from plone import api\n from plone.app.content.testing import PLONE_APP_CONTENT_AT_INTEGRATION_TESTING\n from plone.app.content.testing import PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n from plone.app.content.testing import PLONE_APP_CONTENT_DX_INTEGRATION_TESTING\n@@ -168,7 +167,7 @@ def testCreators(self):\n \n class WorkflowTest(BaseTest):\n \n-    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING\n+    layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n \n     def convertDateTimeToIndexRepr(self, date):\n         t_tup = date.toZone(\'UTC\').parts()\n@@ -189,7 +188,7 @@ def testStateChange(self):\n         default_effective_index = self.convertDateTimeToIndexRepr(\n             default_effective\n         )\n-        pc = api.portal.get_tool(name=\'portal_catalog\')\n+        pc = getToolByName(self.portal, "portal_catalog")\n         # i need to call it, to populate catalog indexes\n         pc()\n         self.assertEquals(\n'
-
-Repository: plone.app.content
+Repository: plone.schemaeditor
 
 
 Branch: refs/heads/master
-Date: 2018-08-13T11:15:50+02:00
+Date: 2018-08-14T09:46:21+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.content/commit/09354627376e32859e8df9398140fb4c353125c1
+Commit: https://github.com/plone/plone.schemaeditor/commit/0bd2d1e9877914493142d8cc90a96c61d0dab6c8
 
-Merge pull request #158 from plone/fix_fc_workflow_reindex
+Merge pull request #62 from TheVirtualLtd/master
 
-ReindexObject when change state
+Allow defaults to be set on dexterity type fields via the web UI
 
 Files changed:
 M CHANGES.rst
-M plone/app/content/browser/contents/workflow.py
-M plone/app/content/tests/test_folder.py
+M plone/schemaeditor/browser/schema/listing.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex e1c6871..7817548 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,8 +14,10 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n-\n+- fc_workflow view now reindex the object after state change.\n+  This fix the problem that some index dates (effective and modified for example) was\n+  updated only when the state was changed from the toolbar.\n+  [cekk]\n \n 3.5.3 (2018-06-18)\n ------------------\ndiff --git a/plone/app/content/browser/contents/workflow.py b/plone/app/content/browser/contents/workflow.py\nindex a0b14a2..709c4f0 100644\n--- a/plone/app/content/browser/contents/workflow.py\n+++ b/plone/app/content/browser/contents/workflow.py\n@@ -83,6 +83,7 @@ def action(self, obj, bypass_recurse=False):\n                 if recurse and IFolderish.providedBy(obj):\n                     for sub in obj.values():\n                         self.action(sub)\n+                obj.reindexObject()\n             except ConflictError:\n                 raise\n             except Exception:\ndiff --git a/plone/app/content/tests/test_folder.py b/plone/app/content/tests/test_folder.py\nindex 914e071..9f77b45 100644\n--- a/plone/app/content/tests/test_folder.py\n+++ b/plone/app/content/tests/test_folder.py\n@@ -14,6 +14,7 @@\n from Products.CMFCore.utils import getToolByName\n from six.moves.urllib.parse import urlparse\n from Testing.makerequest import makerequest\n+from transaction import commit\n from zope.annotation.interfaces import IAttributeAnnotatable\n from zope.interface import alsoProvides\n from zope.publisher.browser import TestRequest\n@@ -166,17 +167,47 @@ def testCreators(self):\n \n class WorkflowTest(BaseTest):\n \n-    layer = PLONE_APP_CONTENT_DX_INTEGRATION_TESTING\n+    layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n+\n+    def convertDateTimeToIndexRepr(self, date):\n+        t_tup = date.toZone(\'UTC\').parts()\n+        yr = t_tup[0]\n+        mo = t_tup[1]\n+        dy = t_tup[2]\n+        hr = t_tup[3]\n+        mn = t_tup[4]\n+\n+        return ((((yr * 12 + mo) * 31 + dy) * 24 + hr) * 60 + mn)\n \n     def testStateChange(self):\n         from plone.app.content.browser.contents.workflow import WorkflowActionView  # noqa\n         self.request.form[\'transition\'] = \'publish\'\n+        default_effective = DateTime(\'1969/12/31 00:00:00 {0}\'.format(\n+            DateTime().timezone()\n+        ))\n+        default_effective_index = self.convertDateTimeToIndexRepr(\n+            default_effective\n+        )\n+        pc = getToolByName(self.portal, "portal_catalog")\n+        # i need to call it, to populate catalog indexes\n+        pc()\n+        self.assertEquals(\n+            pc.uniqueValuesFor(\'effective\'),\n+            (default_effective_index,))\n         view = WorkflowActionView(self.portal.page, self.request)\n         view()\n         workflowTool = getToolByName(self.portal, "portal_workflow")\n         self.assertEquals(\n             workflowTool.getInfoFor(self.portal.page, \'review_state\'),\n             \'published\')\n+        # commit to update indexes in catalog\n+        commit()\n+        effective_index = self.convertDateTimeToIndexRepr(\n+            self.portal.page.effective_date\n+        )\n+        self.assertEquals(\n+            pc.uniqueValuesFor(\'effective\'),\n+            (effective_index,))\n \n \n class RenameTest(BaseTest):\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex e9f4d9e..70afae8 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Allow defaults to be set on dexterity type fields via the web UI (@@fields)\n+  [ezvirtual]\n \n \n 2.0.19 (2018-02-02)\ndiff --git a/plone/schemaeditor/browser/schema/listing.py b/plone/schemaeditor/browser/schema/listing.py\nindex 3030ab1..ac05e85 100644\n--- a/plone/schemaeditor/browser/schema/listing.py\n+++ b/plone/schemaeditor/browser/schema/listing.py\n@@ -114,8 +114,11 @@ def handleSaveDefaults(self, action):\n             self.status = self.formErrorsMessage\n             return\n \n-        for fname, value in data.items():\n-            self.context.schema[fname].default = value\n+        for widget in self._iterateOverWidgets():\n+            widget_name = widget.field.getName()\n+            if (widget.field.interface is self.context.schema and\n+                    widget_name in data):\n+                self.context.schema[widget_name].default = data[widget_name]\n         notify(SchemaModifiedEvent(self.context))\n \n         # update widgets to take the new defaults into account\n'
 
