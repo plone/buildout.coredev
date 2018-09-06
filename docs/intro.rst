@@ -35,7 +35,7 @@ Dependencies
   including development headers.
 
 
-.. _setup-development-environment
+.. _setup-development-environment:
 
 Setting up Your Development Environment
 =======================================
