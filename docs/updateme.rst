@@ -7,11 +7,11 @@ How to Update these Docs
 These documents are currently stored with the coredev buildout in GitHub in :file:`/docs`.
 To update them,
 please checkout the coredev buildout and update there.
-Make the changes on the latest version branch (as of this writing ``5.0``)::
+Make the changes on the latest version branch (as of this writing ``5.2``)::
 
   > git clone git@github.com:plone/buildout.coredev.git
   > cd buildout.coredev
-  > git checkout 5.0
+  > git checkout 5.2
 
 To test your changes locally, re-run buildout and then::
 
@@ -26,7 +26,7 @@ Once everything is ready to go, commit and push changes.
 Cherry pick commits on the latest branch to the currently released branch (as of this writing ``5.1``).
 If these changes apply to that version (you can get the SHA hash from :command:`git log`)::
 
-  > git checkout 4.3
+  > git checkout 5.1
   > git cherry-pick b6ff4309
 
 There may be conflicts; if so, resolve them and then follow the directions git gives you to complete
