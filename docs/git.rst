@@ -560,6 +560,28 @@ Again this applies:
 http://www.osnews.com/story/19266/WTFs_m
 
 
+The review-change-push-review cycle
+-----------------------------------
+
+After you have made a pull request,
+you should ask for a review via the GitHub interface.
+
+After the review you will frequently have to do some changes of your PR,
+perhaps add a missing changelog entry, and so on.
+
+When the changes are done, rebase your branch again
+and squash any fixup-commits, all as described above.
+
+Finally you should force push your feature branch to GitHub.
+Only force push on your own feature branches!
+Never on branches shared with other people.
+
+After the update of your branch,
+the GitHub PR interface will pick up the changes,
+ready for returning to the reviewer,
+and hopefully get a final go for the merge.
+
+
 Recipes
 =======
 

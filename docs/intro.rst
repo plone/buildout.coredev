@@ -35,7 +35,7 @@ Dependencies
   including development headers.
 
 
-.. _setup-development-environment
+.. _setup-development-environment:
 
 Setting up Your Development Environment
 =======================================
@@ -47,12 +47,9 @@ More information on switching release branches is below.
 To set up a plone 5 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 5.0 https://github.com/plone/buildout.coredev ./plone5devel
-  > virtualenv --no-site-packages plone5devpy
-  > cd plone5devel
-  > ../plone5devpy/bin/pip install -r requirements.txt
-  > ../plone5devpy/bin/buildout bootstrap
-  > bin/buildout -v
+  > git clone -b 5.2 https://github.com/plone/buildout.coredev ./plone5devel
+  > cd ./plone5devel
+  > ./bootstrap.sh
 
 If you run into issues in this process,
 please see the doc :doc:`issues`.
