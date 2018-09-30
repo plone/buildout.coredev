@@ -1,32 +1,85 @@
-Repository: plone.protect
+Repository: plone.app.theming
 
 
 Branch: refs/heads/master
-Date: 2018-09-30T20:12:33+02:00
+Date: 2018-09-30T15:26:45+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.protect/commit/e67c39c969fee4b24dce78effc36a293feb9ea92
+Commit: https://github.com/plone/plone.app.theming/commit/7c2eea7ba6d4c03b38e28c93fb3ad9229ac6530f
 
-fix test that fails with new ZMI (that has 2 forms)
+fix creating a new theme from a template in py3
 
 Files changed:
-M plone/protect/tests/testPatches.py
+M src/plone/app/theming/tests/test_transform.py
+M src/plone/app/theming/tests/test_utils.py
+M src/plone/app/theming/utils.py
 
-b"diff --git a/plone/protect/tests/testPatches.py b/plone/protect/tests/testPatches.py\nindex fe59ae2..410d31e 100644\n--- a/plone/protect/tests/testPatches.py\n+++ b/plone/protect/tests/testPatches.py\n@@ -29,7 +29,7 @@ def test_change_password_on_root_does_not_throw_other_csrf_protection(\n         )\n         self.browser.getControl(name='password').value = SITE_OWNER_PASSWORD\n         self.browser.getControl(name='confirm').value = SITE_OWNER_PASSWORD\n-        self.browser.getForm().submit()\n+        self.browser.getForm(action='manage_updateUserPassword').submit()\n         self.assertEquals(\n             self.browser.url,\n             '%s/acl_users/users/manage_users?'\n"
+b'diff --git a/src/plone/app/theming/tests/test_transform.py b/src/plone/app/theming/tests/test_transform.py\nindex 65d0412..d5ab11c 100644\n--- a/src/plone/app/theming/tests/test_transform.py\n+++ b/src/plone/app/theming/tests/test_transform.py\n@@ -433,7 +433,7 @@ def test_non_html_content(self):\n         browser = Browser(app)\n         browser.open(portal.absolute_url() + \'/document_icon.png\')\n         # The theme\n-        self.assertFalse("This is the theme" in browser.contents)\n+        self.assertFalse(b"This is the theme" in browser.contents)\n \n     # XXX: This relies on a _v_ attribute; the test is too brittle\n     #\ndiff --git a/src/plone/app/theming/tests/test_utils.py b/src/plone/app/theming/tests/test_utils.py\nindex 9a33785..4ab1d88 100644\n--- a/src/plone/app/theming/tests/test_utils.py\n+++ b/src/plone/app/theming/tests/test_utils.py\n@@ -59,14 +59,9 @@ def test_getZODBThemes(self):\n         import os.path\n         from plone.app.theming.utils import getOrCreatePersistentResourceDirectory  # noqa\n         from plone.app.theming.utils import getZODBThemes\n-\n-        with open(\n-            os.path.join(\n-                os.path.dirname(__file__),\n-                \'zipfiles\',\n-                \'default_rules.zip\'\n-            )\n-        ) as fp:\n+        path = os.path.join(\n+            os.path.dirname(__file__), \'zipfiles\', \'default_rules.zip\')\n+        with open(path, \'rb\') as fp:\n             zf = zipfile.ZipFile(fp)\n \n             themeContainer = getOrCreatePersistentResourceDirectory()\ndiff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py\nindex 4d61e6c..188c3ae 100644\n--- a/src/plone/app/theming/utils.py\n+++ b/src/plone/app/theming/utils.py\n@@ -25,7 +25,6 @@\n from Products.CMFCore.interfaces import ISiteRoot\n from Products.CMFPlone.utils import safe_unicode\n from Products.PageTemplates.Expressions import getEngine\n-from six import StringIO\n from six.moves.configparser import SafeConfigParser\n from six.moves.urllib.parse import urlsplit\n from zope.component import getUtility\n@@ -495,7 +494,7 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n         raise KeyError("Theme {0:s} not found".format(baseOn))\n \n     themeName = getUtility(IURLNormalizer).normalize(title)\n-    if isinstance(themeName, six.text_type):\n+    if six.PY2 and isinstance(themeName, six.text_type):\n         themeName = themeName.encode(\'utf-8\')\n \n     resources = getOrCreatePersistentResourceDirectory()\n@@ -508,18 +507,29 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n     manifest = SafeConfigParser()\n \n     if MANIFEST_FILENAME in target:\n-        fp = target.openFile(MANIFEST_FILENAME)\n-        try:\n-            manifest.readfp(fp)\n-        finally:\n-            fp.close()\n+        if six.PY2:\n+            fp = target.openFile(MANIFEST_FILENAME)\n+            try:\n+                manifest.readfp(fp)\n+            finally:\n+                fp.close()\n+\n+        else:\n+            # configparser can only read/write text\n+            # but in py3 plone.resource objects are BytesIO objects.\n+            fp = target.openFile(MANIFEST_FILENAME)\n+            try:\n+                data = fp.read()\n+            finally:\n+                fp.close()\n+            manifest.read_string(safe_unicode(data))\n \n     if not manifest.has_section(\'theme\'):\n         manifest.add_section(\'theme\')\n \n-    if not isinstance(title, str):\n+    if six.PY2 and isinstance(title, six.text_type):\n         title = title.encode(\'utf-8\')\n-    if not isinstance(description, str):\n+    if six.PY2 and isinstance(description, six.text_type):\n         description = description.encode(\'utf-8\')\n     manifest.set(\'theme\', \'title\', title)\n     manifest.set(\'theme\', \'description\', description)\n@@ -549,10 +559,22 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n             val = val.replace(template_prefix, \'++%s++%s/\' % (THEME_RESOURCE_NAME, themeName))\n             manifest.set(\'theme\', var_path, val)\n \n-    manifestContents = StringIO()\n-    manifest.write(manifestContents)\n-    target.writeFile(MANIFEST_FILENAME, manifestContents)\n+    if six.PY2:\n+        manifestContents = six.StringIO()\n+        manifest.write(manifestContents)\n \n+    else:\n+        # in py3 plone.resource is BytesIO objects\n+        # but configparser can only deal with text (StringIO).\n+        # So we need to do this stupid dance to write manifest.cfg\n+        tempfile = six.StringIO()\n+        manifest.write(tempfile)\n+        tempfile.seek(0)\n+        data = tempfile.read()\n+        tempfile.close()\n+        manifestContents = six.BytesIO(data.encode(\'utf8\'))\n+\n+    target.writeFile(MANIFEST_FILENAME, manifestContents)\n     return themeName\n \n \n'
 
-Repository: plone.protect
+Repository: plone.app.theming
 
 
 Branch: refs/heads/master
-Date: 2018-09-30T23:45:49+02:00
+Date: 2018-09-30T15:26:45+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.protect/commit/07fd4889ecf041fac2413e2dddc0239911505f3b
+Commit: https://github.com/plone/plone.app.theming/commit/aa6502c90a2188b7a151a752bce75e39919ab9ae
 
-Merge pull request #83 from plone/fix_zmi_test
-
-fix test that fails with new ZMI (that has 2 forms)
+fix zmi-patch with new bootstrap-style ZMI
 
 Files changed:
-M plone/protect/tests/testPatches.py
+M src/plone/app/theming/zmi.py
 
-b"diff --git a/plone/protect/tests/testPatches.py b/plone/protect/tests/testPatches.py\nindex fe59ae2..410d31e 100644\n--- a/plone/protect/tests/testPatches.py\n+++ b/plone/protect/tests/testPatches.py\n@@ -29,7 +29,7 @@ def test_change_password_on_root_does_not_throw_other_csrf_protection(\n         )\n         self.browser.getControl(name='password').value = SITE_OWNER_PASSWORD\n         self.browser.getControl(name='confirm').value = SITE_OWNER_PASSWORD\n-        self.browser.getForm().submit()\n+        self.browser.getForm(action='manage_updateUserPassword').submit()\n         self.assertEquals(\n             self.browser.url,\n             '%s/acl_users/users/manage_users?'\n"
+b"diff --git a/src/plone/app/theming/zmi.py b/src/plone/app/theming/zmi.py\nindex afcb834..72859e6 100644\n--- a/src/plone/app/theming/zmi.py\n+++ b/src/plone/app/theming/zmi.py\n@@ -38,7 +38,7 @@ def patch_zmi():\n     from App.Management import Navigation\n     for name in NO_THEME_DTML:\n         dtml = getattr(Navigation, name, None)\n-        if dtml:\n+        if dtml and isinstance(dtml, DTMLFile):\n             dtml.__class__ = NoThemeDTMLFile\n \n     LOGGER.debug('Patched Zope Management Interface to disable theming.')\n"
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2018-09-30T15:26:45+02:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.theming/commit/b5a470b84eb93b84db23ed27641d3597cf47a8f5
+
+Process internally resolved files as native strings
+
+Files changed:
+M src/plone/app/theming/utils.py
+
+b"diff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py\nindex 188c3ae..93fe249 100644\n--- a/src/plone/app/theming/utils.py\n+++ b/src/plone/app/theming/utils.py\n@@ -138,7 +138,9 @@ def resolve(self, system_url, public_id, context):\n         else:\n             # e.g. charset=utf-8\n             encoding = encoding.split('=', 1)[1].strip()\n-        result = result.decode(encoding).encode('ascii', 'xmlcharrefreplace')\n+        result = result.decode(encoding)\n+        if six.PY2:\n+            result = result.encode('ascii', 'xmlcharrefreplace')\n \n         if content_type in ('text/javascript', 'application/x-javascript'):\n             result = ''.join([\n"
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2018-09-30T15:29:24+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/c40aba58f7b93bcce75d5a0f4e2c448aa9338bd7
+
+Trove classifiers, Changelog
+
+Files changed:
+M CHANGES.rst
+M setup.py
+
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 31b6b0b..353b724 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -22,21 +22,8 @@ Bug fixes:\n - Fix tests for merged plone.login.\n   [jensens]\n \n-\n-2.0.4 (unreleased)\n-------------------\n-\n-Breaking changes:\n-\n-- *add item here*\n-\n-New features:\n-\n-- *add item here*\n-\n-Bug fixes:\n-\n-- More Python 3 fixes [ale-rt, pbauer]\n+- More Python 3 fixes\n+  [ale-rt, pbauer, davisagli]\n \n \n 2.0.3 (2018-04-04)\ndiff --git a/setup.py b/setup.py\nindex 974ba22..93a35a3 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -30,11 +30,12 @@\n     long_description=longdescription,\n     classifiers=[\n         "Framework :: Plone",\n-        "Framework :: Plone :: 5.1",\n         "Framework :: Plone :: 5.2",\n         "License :: OSI Approved :: GNU General Public License (GPL)",\n         "Programming Language :: Python",\n         "Programming Language :: Python :: 2.7",\n+        "Programming Language :: Python :: 3.6",\n+        "Programming Language :: Python :: 3.7",\n         "Topic :: Software Development :: Libraries :: Python Modules",\n     ],\n     keywords=\'plone diazo xdv deliverance theme transform xslt\',\n'
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2018-10-01T00:16:41+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/1532e747b9fc7b816923eb1b3675c71fae6cdf19
+
+Merge pull request #146 from plone/python3
+
+Fix creating a new theme in Python 3
+
+Files changed:
+M CHANGES.rst
+M setup.py
+M src/plone/app/theming/tests/test_transform.py
+M src/plone/app/theming/tests/test_utils.py
+M src/plone/app/theming/utils.py
+M src/plone/app/theming/zmi.py
+
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 31b6b0b..353b724 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -22,21 +22,8 @@ Bug fixes:\n - Fix tests for merged plone.login.\n   [jensens]\n \n-\n-2.0.4 (unreleased)\n-------------------\n-\n-Breaking changes:\n-\n-- *add item here*\n-\n-New features:\n-\n-- *add item here*\n-\n-Bug fixes:\n-\n-- More Python 3 fixes [ale-rt, pbauer]\n+- More Python 3 fixes\n+  [ale-rt, pbauer, davisagli]\n \n \n 2.0.3 (2018-04-04)\ndiff --git a/setup.py b/setup.py\nindex 974ba22..93a35a3 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -30,11 +30,12 @@\n     long_description=longdescription,\n     classifiers=[\n         "Framework :: Plone",\n-        "Framework :: Plone :: 5.1",\n         "Framework :: Plone :: 5.2",\n         "License :: OSI Approved :: GNU General Public License (GPL)",\n         "Programming Language :: Python",\n         "Programming Language :: Python :: 2.7",\n+        "Programming Language :: Python :: 3.6",\n+        "Programming Language :: Python :: 3.7",\n         "Topic :: Software Development :: Libraries :: Python Modules",\n     ],\n     keywords=\'plone diazo xdv deliverance theme transform xslt\',\ndiff --git a/src/plone/app/theming/tests/test_transform.py b/src/plone/app/theming/tests/test_transform.py\nindex 65d0412..d5ab11c 100644\n--- a/src/plone/app/theming/tests/test_transform.py\n+++ b/src/plone/app/theming/tests/test_transform.py\n@@ -433,7 +433,7 @@ def test_non_html_content(self):\n         browser = Browser(app)\n         browser.open(portal.absolute_url() + \'/document_icon.png\')\n         # The theme\n-        self.assertFalse("This is the theme" in browser.contents)\n+        self.assertFalse(b"This is the theme" in browser.contents)\n \n     # XXX: This relies on a _v_ attribute; the test is too brittle\n     #\ndiff --git a/src/plone/app/theming/tests/test_utils.py b/src/plone/app/theming/tests/test_utils.py\nindex 9a33785..4ab1d88 100644\n--- a/src/plone/app/theming/tests/test_utils.py\n+++ b/src/plone/app/theming/tests/test_utils.py\n@@ -59,14 +59,9 @@ def test_getZODBThemes(self):\n         import os.path\n         from plone.app.theming.utils import getOrCreatePersistentResourceDirectory  # noqa\n         from plone.app.theming.utils import getZODBThemes\n-\n-        with open(\n-            os.path.join(\n-                os.path.dirname(__file__),\n-                \'zipfiles\',\n-                \'default_rules.zip\'\n-            )\n-        ) as fp:\n+        path = os.path.join(\n+            os.path.dirname(__file__), \'zipfiles\', \'default_rules.zip\')\n+        with open(path, \'rb\') as fp:\n             zf = zipfile.ZipFile(fp)\n \n             themeContainer = getOrCreatePersistentResourceDirectory()\ndiff --git a/src/plone/app/theming/utils.py b/src/plone/app/theming/utils.py\nindex 4d61e6c..93fe249 100644\n--- a/src/plone/app/theming/utils.py\n+++ b/src/plone/app/theming/utils.py\n@@ -25,7 +25,6 @@\n from Products.CMFCore.interfaces import ISiteRoot\n from Products.CMFPlone.utils import safe_unicode\n from Products.PageTemplates.Expressions import getEngine\n-from six import StringIO\n from six.moves.configparser import SafeConfigParser\n from six.moves.urllib.parse import urlsplit\n from zope.component import getUtility\n@@ -139,7 +138,9 @@ def resolve(self, system_url, public_id, context):\n         else:\n             # e.g. charset=utf-8\n             encoding = encoding.split(\'=\', 1)[1].strip()\n-        result = result.decode(encoding).encode(\'ascii\', \'xmlcharrefreplace\')\n+        result = result.decode(encoding)\n+        if six.PY2:\n+            result = result.encode(\'ascii\', \'xmlcharrefreplace\')\n \n         if content_type in (\'text/javascript\', \'application/x-javascript\'):\n             result = \'\'.join([\n@@ -495,7 +496,7 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n         raise KeyError("Theme {0:s} not found".format(baseOn))\n \n     themeName = getUtility(IURLNormalizer).normalize(title)\n-    if isinstance(themeName, six.text_type):\n+    if six.PY2 and isinstance(themeName, six.text_type):\n         themeName = themeName.encode(\'utf-8\')\n \n     resources = getOrCreatePersistentResourceDirectory()\n@@ -508,18 +509,29 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n     manifest = SafeConfigParser()\n \n     if MANIFEST_FILENAME in target:\n-        fp = target.openFile(MANIFEST_FILENAME)\n-        try:\n-            manifest.readfp(fp)\n-        finally:\n-            fp.close()\n+        if six.PY2:\n+            fp = target.openFile(MANIFEST_FILENAME)\n+            try:\n+                manifest.readfp(fp)\n+            finally:\n+                fp.close()\n+\n+        else:\n+            # configparser can only read/write text\n+            # but in py3 plone.resource objects are BytesIO objects.\n+            fp = target.openFile(MANIFEST_FILENAME)\n+            try:\n+                data = fp.read()\n+            finally:\n+                fp.close()\n+            manifest.read_string(safe_unicode(data))\n \n     if not manifest.has_section(\'theme\'):\n         manifest.add_section(\'theme\')\n \n-    if not isinstance(title, str):\n+    if six.PY2 and isinstance(title, six.text_type):\n         title = title.encode(\'utf-8\')\n-    if not isinstance(description, str):\n+    if six.PY2 and isinstance(description, six.text_type):\n         description = description.encode(\'utf-8\')\n     manifest.set(\'theme\', \'title\', title)\n     manifest.set(\'theme\', \'description\', description)\n@@ -549,10 +561,22 @@ def createThemeFromTemplate(title, description, baseOn=\'template\'):\n             val = val.replace(template_prefix, \'++%s++%s/\' % (THEME_RESOURCE_NAME, themeName))\n             manifest.set(\'theme\', var_path, val)\n \n-    manifestContents = StringIO()\n-    manifest.write(manifestContents)\n-    target.writeFile(MANIFEST_FILENAME, manifestContents)\n+    if six.PY2:\n+        manifestContents = six.StringIO()\n+        manifest.write(manifestContents)\n \n+    else:\n+        # in py3 plone.resource is BytesIO objects\n+        # but configparser can only deal with text (StringIO).\n+        # So we need to do this stupid dance to write manifest.cfg\n+        tempfile = six.StringIO()\n+        manifest.write(tempfile)\n+        tempfile.seek(0)\n+        data = tempfile.read()\n+        tempfile.close()\n+        manifestContents = six.BytesIO(data.encode(\'utf8\'))\n+\n+    target.writeFile(MANIFEST_FILENAME, manifestContents)\n     return themeName\n \n \ndiff --git a/src/plone/app/theming/zmi.py b/src/plone/app/theming/zmi.py\nindex afcb834..72859e6 100644\n--- a/src/plone/app/theming/zmi.py\n+++ b/src/plone/app/theming/zmi.py\n@@ -38,7 +38,7 @@ def patch_zmi():\n     from App.Management import Navigation\n     for name in NO_THEME_DTML:\n         dtml = getattr(Navigation, name, None)\n-        if dtml:\n+        if dtml and isinstance(dtml, DTMLFile):\n             dtml.__class__ = NoThemeDTMLFile\n \n     LOGGER.debug(\'Patched Zope Management Interface to disable theming.\')\n'
 
