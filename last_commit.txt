@@ -1,33 +1,48 @@
-Repository: plone.dexterity
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/master
-Date: 2018-10-01T13:24:43+02:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.dexterity/commit/6e3e7d85d50c4bb782821a6a32db724c0a06a696
+Branch: refs/heads/5.1.x
+Date: 2018-10-01T13:14:48+02:00
+Author: Andreas JungÂ (zopyx) <info@zopyx.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/92badba745f2cc44c47f0e4ead22ec23c92490d6
 
-implement getSize so that default ISized adapter works
+Issue #723: added browser-based CSS hyphenation support for toolbar
+
+Files changed:
+M Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less
+
+b'diff --git a/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less b/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\nindex d2a0ddbbf..7975bc641 100644\n--- a/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\n+++ b/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\n@@ -12,6 +12,7 @@\n   left: 0;\n   width: @plone-left-toolbar;\n   height: 100%;\n+  hyphens: auto;\n   color: @plone-toolbar-text-color;\n   background: @plone-toolbar-bg;\n \n'
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/5.1.x
+Date: 2018-10-01T13:15:50+02:00
+Author: Thomas Massmann (tmassman) <thomas.massmann@it-spir.it>
+Commit: https://github.com/plone/Products.CMFPlone/commit/2d0fda0a61168413f3aa173ea321e0c9e0cff8b8
+
+Update changelog after cherry picking commit from ajung.
 
 Files changed:
 M CHANGES.rst
-M plone/dexterity/configure.zcml
-M plone/dexterity/filerepresentation.py
-M plone/dexterity/tests/test_content.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 8ba0d26..2f29ecd 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -11,7 +11,9 @@ Breaking changes:\n \n New features:\n \n-- *add item here*\n+- Implement getSize method to sum the size of all\n+  field values that have a getSize method.\n+  [davisagli]\n \n Bug fixes:\n \ndiff --git a/plone/dexterity/configure.zcml b/plone/dexterity/configure.zcml\nindex d09faa0..7655844 100644\n--- a/plone/dexterity/configure.zcml\n+++ b/plone/dexterity/configure.zcml\n@@ -12,6 +12,7 @@\n     <include package="plone.rfc822" />\n     <include package="plone.uuid" />\n     <include package="plone.z3cform" />\n+    <include package="zope.size" />\n \n     <include package=".browser" />\n     <include package=".fti" />\ndiff --git a/plone/dexterity/filerepresentation.py b/plone/dexterity/filerepresentation.py\nindex 827479d..d6c12e4 100644\n--- a/plone/dexterity/filerepresentation.py\n+++ b/plone/dexterity/filerepresentation.py\n@@ -17,6 +17,7 @@\n from zExceptions import MethodNotAllowed\n from zExceptions import Unauthorized\n from zope.component import adapter\n+from zope.component import getAdapter\n from zope.component import createObject\n from zope.event import notify\n from zope.filerepresentation.interfaces import IDirectoryFactory\n@@ -63,10 +64,26 @@ def get_size(self):\n         if sized is None:\n             return 0\n         unit, size = sized.sizeForSorting()\n-        if unit == \'bytes\':\n+        if unit in (\'byte\', \'bytes\'):\n             return size\n         return 0\n \n+    @security.protected(permissions.View)\n+    def getSize(self):\n+        # Get the size of the content item in bytes.\n+        # Unlike get_size, this method returns the size\n+        # by looking at the actual values. The getObjSize catalog\n+        # indexer uses get_size(), which looks up an ISized adapter,\n+        # and the default adapter uses getSize().\n+        size = 0\n+        for schema in iterSchemata(self):\n+            adapter = schema(self)\n+            for name, field in getFieldsInOrder(schema):\n+                value = getattr(adapter, name, None)\n+                if hasattr(value, \'getSize\'):\n+                    size += value.getSize()\n+        return size\n+\n     @security.protected(permissions.View)\n     def content_type(self):\n         # Return the content type (MIME type) of the item.\ndiff --git a/plone/dexterity/tests/test_content.py b/plone/dexterity/tests/test_content.py\nindex 14ccddd..6f2dd32 100644\n--- a/plone/dexterity/tests/test_content.py\n+++ b/plone/dexterity/tests/test_content.py\n@@ -3,6 +3,7 @@\n from Products.CMFPlone.interfaces import IConstrainTypes\n from datetime import date, datetime\n from mock import Mock\n+from plone.autoform.interfaces import IFormFieldProvider\n from plone.behavior.interfaces import IBehavior\n from plone.behavior.interfaces import IBehaviorAssignable\n from plone.behavior.registration import BehaviorRegistration\n@@ -1105,3 +1106,42 @@ def test_verifyObjectPaste_fti_does_allow_content(self):\n         self.mock_utility(mock_pt, ITypesTool)\n \n         container._verifyObjectPaste(content, True)\n+\n+    def test_getSize(self):\n+        class SizedValue(str):\n+            def getSize(self):\n+                return len(self)\n+\n+        class ITest(Interface):\n+            field1 = zope.schema.TextLine()\n+\n+        class ITestBehavior(Interface):\n+            field2 = zope.schema.TextLine()\n+        alsoProvides(ITestBehavior, IFormFieldProvider)\n+\n+        self.mock_adapter(\n+            DexterityBehaviorAssignable,\n+            IBehaviorAssignable,\n+            (IDexterityContent,)\n+        )\n+\n+        fti_mock = DexterityFTI(u\'testtype\')\n+        fti_mock.lookupSchema = Mock(return_value=ITest)\n+        fti_mock.behaviors = [\'test_behavior\']\n+        self.mock_utility(fti_mock, IDexterityFTI, name=u"testtype")\n+\n+        behavior_reg = BehaviorRegistration(\n+            u"Test Behavior",\n+            "",\n+            ITestBehavior,\n+            ITestBehavior,\n+            None\n+        )\n+        self.mock_utility(behavior_reg, IBehavior, name="test_behavior")\n+\n+        item = Item(\'item\')\n+        item.portal_type = \'testtype\'\n+        item.field1 = SizedValue(\'1\')\n+        item.field2 = SizedValue(\'22\')\n+\n+        self.assertEqual(3, item.getSize())\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 0119eb29d..9b0e494b7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,7 +18,9 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- added CSS hyphenation support for toolbar for avoiding ugly text wrapping\n+  Fixes `issue 723 <https://github.com/plone/Products.CMFPlone/issues/723>`_.\n+  [ajung]\n \n \n 5.1.4.rc1 (2018-09-30)\n'
 
-Repository: plone.dexterity
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/master
-Date: 2018-10-01T13:24:43+02:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.dexterity/commit/58c601e98575350f51104aed4e3ff7bab148a301
+Branch: refs/heads/5.1.x
+Date: 2018-10-01T13:33:35+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/95662e94352c47180242b967e41e9ed745e04483
 
-fix zcml
+Merge pull request #2539 from plone/tmassman-hyphens
+
+Backport changes from PR #2202 into Plone 5.1
 
 Files changed:
-M plone/dexterity/configure.zcml
+M CHANGES.rst
+M Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less
 
-b'diff --git a/plone/dexterity/configure.zcml b/plone/dexterity/configure.zcml\nindex 7655844..1add73a 100644\n--- a/plone/dexterity/configure.zcml\n+++ b/plone/dexterity/configure.zcml\n@@ -12,7 +12,6 @@\n     <include package="plone.rfc822" />\n     <include package="plone.uuid" />\n     <include package="plone.z3cform" />\n-    <include package="zope.size" />\n \n     <include package=".browser" />\n     <include package=".fti" />\n@@ -129,4 +128,12 @@\n \n     <!-- PrimaryFieldInfo -->\n     <adapter factory=".primary.PrimaryFieldInfo"/>\n+\n+    <!-- ISized -->\n+    <adapter\n+        for="*"\n+        factory="zope.size.DefaultSized"\n+        provides="zope.size.interfaces.ISized"\n+        />\n+\n </configure>\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 0119eb29d..9b0e494b7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,7 +18,9 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- added CSS hyphenation support for toolbar for avoiding ugly text wrapping\n+  Fixes `issue 723 <https://github.com/plone/Products.CMFPlone/issues/723>`_.\n+  [ajung]\n \n \n 5.1.4.rc1 (2018-09-30)\ndiff --git a/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less b/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\nindex d2a0ddbbf..7975bc641 100644\n--- a/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\n+++ b/Products/CMFPlone/static/patterns/toolbar/src/css/toolbar.plone.less\n@@ -12,6 +12,7 @@\n   left: 0;\n   width: @plone-left-toolbar;\n   height: 100%;\n+  hyphens: auto;\n   color: @plone-toolbar-text-color;\n   background: @plone-toolbar-bg;\n \n'
 
