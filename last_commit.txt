@@ -1,85 +1,36 @@
-Repository: plone.app.upgrade
+Repository: Products.PlonePAS
 
 
 Branch: refs/heads/master
-Date: 2018-10-03T10:19:41+02:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/78fb4ae59ddd40903f6065609e5dc8e582ac9cba
+Date: 2018-10-03T16:56:45+02:00
+Author: Thomas Lotze (tlotze) <thomas@thomas-lotze.net>
+Commit: https://github.com/plone/Products.PlonePAS/commit/3ac1bdabc5e402697accddb3069f9addfdd2745b
 
-Do not break if archetypes are not available
-
-Fixes #178
+re #1801: remove lookup of setAuthCookie script as a hook
 
 Files changed:
-A news/178.bugfix
-M plone/app/upgrade/v40/betas.py
-D plone/app/upgrade/v40/profiles/to_beta4/types/File.xml
-D plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml
+M CHANGES.rst
+M setup.py
+M src/Products/PlonePAS/plugins/cookie_handler.py
 
-b'diff --git a/news/178.bugfix b/news/178.bugfix\nnew file mode 100644\nindex 00000000..cd1da0be\n--- /dev/null\n+++ b/news/178.bugfix\n@@ -0,0 +1 @@\n+Do not break if archetypes are not available\ndiff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py\nindex 1442ea93..5222dcf0 100644\n--- a/plone/app/upgrade/v40/betas.py\n+++ b/plone/app/upgrade/v40/betas.py\n@@ -3,6 +3,7 @@\n from plone.app.upgrade.utils import loadMigrationProfile\n from plone.app.upgrade.utils import logger\n from plone.app.upgrade.utils import updateIconsInBrains\n+from plone.dexterity.fti import DexterityFTI\n from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.CatalogTool import BLACKLISTED_INTERFACES\n from Products.CMFPlone.utils import safe_hasattr\n@@ -109,6 +110,15 @@ def beta3_beta4(context):\n     loadMigrationProfile(\n         context, \'profile-plone.app.upgrade.v40:4beta3-4beta4\')\n \n+    # Prepare for blob support\n+    pt = getToolByName(context, \'portal_types\')\n+    for portal_type in (\'Image\', \'File\'):\n+        fti = pt.get(portal_type)\n+        if fti and not isinstance(fti, DexterityFTI):\n+            fti.content_meta_type = \'ATBlob\'\n+            fti.product = \'plone.app.blob\'\n+            fti.factory = \'addATBlob{}\'.format(portal_type)\n+\n     pprop = getToolByName(context, \'portal_properties\')\n     site_properties = pprop.site_properties\n     if site_properties.hasProperty(\'typesLinkToFolderContentsInFC\'):\ndiff --git a/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml b/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml\ndeleted file mode 100644\nindex f1a29db7..00000000\n--- a/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-<?xml version="1.0"?>\n-<object name="File"\n-   meta_type="Factory-based Type Information with dynamic views">\n- <property name="content_meta_type">ATBlob</property>\n- <property name="product">plone.app.blob</property>\n- <property name="factory">addATBlobFile</property>\n-</object>\ndiff --git a/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml b/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml\ndeleted file mode 100644\nindex 0358ddfa..00000000\n--- a/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-<?xml version="1.0"?>\n-<object name="Image"\n-   meta_type="Factory-based Type Information with dynamic views">\n- <property name="content_meta_type">ATBlob</property>\n- <property name="product">plone.app.blob</property>\n- <property name="factory">addATBlobImage</property>\n-</object>\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex f7f3733..9cc89e8 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -40,6 +40,11 @@ Bug fixes:\n   Part of PloneHotfix20171128.\n   [maurits]\n \n+- Remove setAuthCookie script. #1801\n+  This used to be a hook to allow overriding the credentials update. The\n+  default override has been used as the new implementation.\n+  [tlotze]\n+\n \n 5.0.14 (2017-05-09)\n -------------------\ndiff --git a/setup.py b/setup.py\nindex b9c0785..267ad54 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -10,15 +10,18 @@\n longdescription += open("CHANGES.rst").read()\n \n install_requires = [\n+        \'DateTime\',\n         \'plone.i18n\',\n         \'plone.memoize\',\n         \'plone.protect>=2.0.3\',\n+        \'plone.registry\',\n         \'plone.session\',\n         \'Products.CMFCore\',\n         \'Products.GenericSetup\',\n-        \'Products.PluggableAuthService\',\n+        \'Products.PluggableAuthService>=2.0b2.dev0\',\n         \'setuptools\',\n         \'six\',\n+        \'zope.component\',\n         \'zope.deprecation\',\n         \'Zope\',\n     ]\ndiff --git a/src/Products/PlonePAS/plugins/cookie_handler.py b/src/Products/PlonePAS/plugins/cookie_handler.py\nindex e3103c3..2ff7b3c 100644\n--- a/src/Products/PlonePAS/plugins/cookie_handler.py\n+++ b/src/Products/PlonePAS/plugins/cookie_handler.py\n@@ -12,7 +12,8 @@\n from Acquisition import aq_parent\n from AccessControl.class_init import InitializeClass\n from App.special_dtml import DTMLFile\n-from base64 import encodestring\n+from DateTime import DateTime\n+from plone.registry.interfaces import IRegistry\n from Products.PluggableAuthService.interfaces.authservice import \\\n     IPluggableAuthService\n from Products.PluggableAuthService.interfaces.plugins \\\n@@ -27,6 +28,7 @@\n     import CookieAuthHelper as BasePlugin\n from six.moves.urllib.parse import quote\n from zope.interface import implementer\n+from zope.component import getUtility\n \n \n def manage_addExtendedCookieAuthHelper(self, id, title=\'\',\n@@ -67,19 +69,16 @@ class ExtendedCookieAuthHelper(BasePlugin):\n     def updateCredentials(self, request, response, login, new_password):\n         """Override standard updateCredentials method\n         """\n-\n-        setAuthCookie = getattr(self, \'setAuthCookie\', None)\n-        if setAuthCookie:\n-            cookie_str = b\':\'.join([\n-                login.encode(\'utf-8\'),\n-                new_password.encode(\'utf-8\'),\n-            ])\n-            cookie_val = encodestring(cookie_str)\n-            cookie_val = cookie_val.rstrip()\n-            setAuthCookie(response, self.cookie_name, quote(cookie_val))\n-        else:\n-            BasePlugin.updateCredentials(self, request, response, login,\n-                                         new_password)\n+        cookie_val = self.get_cookie_value(login, new_password)\n+        registry = getUtility(IRegistry)\n+        length = registry.get(\'plone.auth_cookie_length\', \'0\')\n+        try:\n+            length = int(length)\n+        except ValueError:\n+            length = 0\n+        expires = (DateTime() + length).toZone(\'GMT\').rfc822()\n+        response.setCookie(\n+            self.cookie_name, quote(cookie_val), path=\'/\', expires=expires)\n \n     @security.public\n     def login(self):\n'
 
-Repository: plone.app.upgrade
+Repository: Products.PlonePAS
 
 
 Branch: refs/heads/master
-Date: 2018-10-03T13:47:16+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.upgrade/commit/1323207231f3a84044178a09cfe3efa8fae8b35b
+Date: 2018-10-03T17:43:30+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.PlonePAS/commit/6af644702ed49174197dec9cd123ecf17a7d401a
 
-skip upgrade-step removeLargePloneFolder when there is no portal_factory
+Merge pull request #40 from plone/1801-remove-setAuthCookie
 
-Files changed:
-M plone/app/upgrade/v40/betas.py
-
-b'diff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py\nindex 5222dcf0..d45456f5 100644\n--- a/plone/app/upgrade/v40/betas.py\n+++ b/plone/app/upgrade/v40/betas.py\n@@ -143,7 +143,9 @@ def removeLargePloneFolder(context):\n     """Complete removal of Large Plone Folder\n     (Most of it is accomplished by the profile.)\n     """\n-    ftool = getToolByName(context, \'portal_factory\')\n+    ftool = getToolByName(context, \'portal_factory\', None)\n+    if not ftool:\n+        return\n     l = set(ftool.getFactoryTypes())\n     if \'Large Plone Folder\' in l:\n         l.remove(\'Large Plone Folder\')\n'
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2018-10-03T16:13:16+02:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/46d325ccb271645e5297d79a51d5732c0021ad62
-
-Gracefully fail if plone.app.blobs is missing
+re #1801: remove lookup of setAuthCookie script as a hook
 
 Files changed:
-M plone/app/upgrade/v40/betas.py
+M CHANGES.rst
+M setup.py
+M src/Products/PlonePAS/plugins/cookie_handler.py
 
-b'diff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py\nindex d45456f5..37049d00 100644\n--- a/plone/app/upgrade/v40/betas.py\n+++ b/plone/app/upgrade/v40/betas.py\n@@ -159,8 +159,14 @@ def convertToBlobs(context):\n     removes objects to recreate them fresh, so in the end nothing is\n     permanently removed.\n     """\n+    try:\n+        from plone.app.blob.migrations import migrateATBlobFiles\n+    except ImportError:\n+        logger.info(\n+            \'Cannot migrate files to blobs because plone.app.blob is missing.\'\n+        )\n+        return\n     logger.info(\'Started migration of files to blobs.\')\n-    from plone.app.blob.migrations import migrateATBlobFiles\n     sprop = getToolByName(context, \'portal_properties\').site_properties\n     if sprop.hasProperty(\'enable_link_integrity_checks\'):\n         ori_enable_link_integrity_checks = sprop.getProperty(\n'
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2018-10-03T16:14:07+02:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/dc8d48b5666f84f7a016c3a576e95203cf5a0bfe
-
-Update changelog
-
-Files changed:
-M news/178.bugfix
-
-b'diff --git a/news/178.bugfix b/news/178.bugfix\nindex cd1da0be..5045bd16 100644\n--- a/news/178.bugfix\n+++ b/news/178.bugfix\n@@ -1 +1,2 @@\n-Do not break if archetypes are not available\n+Do not break if archetypes related code is not available\n+[ale-rt, pbauer]\n'
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2018-10-03T17:12:12+02:00
-Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/a90a0fed3551eff14fbe3d7786a4577da862c9d1
-
-Merge pull request #179 from plone/python3
-
-Do not break if archetypes are not available
-
-Files changed:
-A news/178.bugfix
-M plone/app/upgrade/v40/betas.py
-D plone/app/upgrade/v40/profiles/to_beta4/types/File.xml
-D plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml
-
-b'diff --git a/news/178.bugfix b/news/178.bugfix\nnew file mode 100644\nindex 00000000..5045bd16\n--- /dev/null\n+++ b/news/178.bugfix\n@@ -0,0 +1,2 @@\n+Do not break if archetypes related code is not available\n+[ale-rt, pbauer]\ndiff --git a/plone/app/upgrade/v40/betas.py b/plone/app/upgrade/v40/betas.py\nindex 1442ea93..37049d00 100644\n--- a/plone/app/upgrade/v40/betas.py\n+++ b/plone/app/upgrade/v40/betas.py\n@@ -3,6 +3,7 @@\n from plone.app.upgrade.utils import loadMigrationProfile\n from plone.app.upgrade.utils import logger\n from plone.app.upgrade.utils import updateIconsInBrains\n+from plone.dexterity.fti import DexterityFTI\n from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.CatalogTool import BLACKLISTED_INTERFACES\n from Products.CMFPlone.utils import safe_hasattr\n@@ -109,6 +110,15 @@ def beta3_beta4(context):\n     loadMigrationProfile(\n         context, \'profile-plone.app.upgrade.v40:4beta3-4beta4\')\n \n+    # Prepare for blob support\n+    pt = getToolByName(context, \'portal_types\')\n+    for portal_type in (\'Image\', \'File\'):\n+        fti = pt.get(portal_type)\n+        if fti and not isinstance(fti, DexterityFTI):\n+            fti.content_meta_type = \'ATBlob\'\n+            fti.product = \'plone.app.blob\'\n+            fti.factory = \'addATBlob{}\'.format(portal_type)\n+\n     pprop = getToolByName(context, \'portal_properties\')\n     site_properties = pprop.site_properties\n     if site_properties.hasProperty(\'typesLinkToFolderContentsInFC\'):\n@@ -133,7 +143,9 @@ def removeLargePloneFolder(context):\n     """Complete removal of Large Plone Folder\n     (Most of it is accomplished by the profile.)\n     """\n-    ftool = getToolByName(context, \'portal_factory\')\n+    ftool = getToolByName(context, \'portal_factory\', None)\n+    if not ftool:\n+        return\n     l = set(ftool.getFactoryTypes())\n     if \'Large Plone Folder\' in l:\n         l.remove(\'Large Plone Folder\')\n@@ -147,8 +159,14 @@ def convertToBlobs(context):\n     removes objects to recreate them fresh, so in the end nothing is\n     permanently removed.\n     """\n+    try:\n+        from plone.app.blob.migrations import migrateATBlobFiles\n+    except ImportError:\n+        logger.info(\n+            \'Cannot migrate files to blobs because plone.app.blob is missing.\'\n+        )\n+        return\n     logger.info(\'Started migration of files to blobs.\')\n-    from plone.app.blob.migrations import migrateATBlobFiles\n     sprop = getToolByName(context, \'portal_properties\').site_properties\n     if sprop.hasProperty(\'enable_link_integrity_checks\'):\n         ori_enable_link_integrity_checks = sprop.getProperty(\ndiff --git a/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml b/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml\ndeleted file mode 100644\nindex f1a29db7..00000000\n--- a/plone/app/upgrade/v40/profiles/to_beta4/types/File.xml\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-<?xml version="1.0"?>\n-<object name="File"\n-   meta_type="Factory-based Type Information with dynamic views">\n- <property name="content_meta_type">ATBlob</property>\n- <property name="product">plone.app.blob</property>\n- <property name="factory">addATBlobFile</property>\n-</object>\ndiff --git a/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml b/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml\ndeleted file mode 100644\nindex 0358ddfa..00000000\n--- a/plone/app/upgrade/v40/profiles/to_beta4/types/Image.xml\n+++ /dev/null\n@@ -1,7 +0,0 @@\n-<?xml version="1.0"?>\n-<object name="Image"\n-   meta_type="Factory-based Type Information with dynamic views">\n- <property name="content_meta_type">ATBlob</property>\n- <property name="product">plone.app.blob</property>\n- <property name="factory">addATBlobImage</property>\n-</object>\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex f7f3733..9cc89e8 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -40,6 +40,11 @@ Bug fixes:\n   Part of PloneHotfix20171128.\n   [maurits]\n \n+- Remove setAuthCookie script. #1801\n+  This used to be a hook to allow overriding the credentials update. The\n+  default override has been used as the new implementation.\n+  [tlotze]\n+\n \n 5.0.14 (2017-05-09)\n -------------------\ndiff --git a/setup.py b/setup.py\nindex b9c0785..267ad54 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -10,15 +10,18 @@\n longdescription += open("CHANGES.rst").read()\n \n install_requires = [\n+        \'DateTime\',\n         \'plone.i18n\',\n         \'plone.memoize\',\n         \'plone.protect>=2.0.3\',\n+        \'plone.registry\',\n         \'plone.session\',\n         \'Products.CMFCore\',\n         \'Products.GenericSetup\',\n-        \'Products.PluggableAuthService\',\n+        \'Products.PluggableAuthService>=2.0b2.dev0\',\n         \'setuptools\',\n         \'six\',\n+        \'zope.component\',\n         \'zope.deprecation\',\n         \'Zope\',\n     ]\ndiff --git a/src/Products/PlonePAS/plugins/cookie_handler.py b/src/Products/PlonePAS/plugins/cookie_handler.py\nindex e3103c3..2ff7b3c 100644\n--- a/src/Products/PlonePAS/plugins/cookie_handler.py\n+++ b/src/Products/PlonePAS/plugins/cookie_handler.py\n@@ -12,7 +12,8 @@\n from Acquisition import aq_parent\n from AccessControl.class_init import InitializeClass\n from App.special_dtml import DTMLFile\n-from base64 import encodestring\n+from DateTime import DateTime\n+from plone.registry.interfaces import IRegistry\n from Products.PluggableAuthService.interfaces.authservice import \\\n     IPluggableAuthService\n from Products.PluggableAuthService.interfaces.plugins \\\n@@ -27,6 +28,7 @@\n     import CookieAuthHelper as BasePlugin\n from six.moves.urllib.parse import quote\n from zope.interface import implementer\n+from zope.component import getUtility\n \n \n def manage_addExtendedCookieAuthHelper(self, id, title=\'\',\n@@ -67,19 +69,16 @@ class ExtendedCookieAuthHelper(BasePlugin):\n     def updateCredentials(self, request, response, login, new_password):\n         """Override standard updateCredentials method\n         """\n-\n-        setAuthCookie = getattr(self, \'setAuthCookie\', None)\n-        if setAuthCookie:\n-            cookie_str = b\':\'.join([\n-                login.encode(\'utf-8\'),\n-                new_password.encode(\'utf-8\'),\n-            ])\n-            cookie_val = encodestring(cookie_str)\n-            cookie_val = cookie_val.rstrip()\n-            setAuthCookie(response, self.cookie_name, quote(cookie_val))\n-        else:\n-            BasePlugin.updateCredentials(self, request, response, login,\n-                                         new_password)\n+        cookie_val = self.get_cookie_value(login, new_password)\n+        registry = getUtility(IRegistry)\n+        length = registry.get(\'plone.auth_cookie_length\', \'0\')\n+        try:\n+            length = int(length)\n+        except ValueError:\n+            length = 0\n+        expires = (DateTime() + length).toZone(\'GMT\').rfc822()\n+        response.setCookie(\n+            self.cookie_name, quote(cookie_val), path=\'/\', expires=expires)\n \n     @security.public\n     def login(self):\n'
 
