@@ -1,52 +1,32 @@
-Repository: plone.app.event
+Repository: plone.app.iterate
 
 
 Branch: refs/heads/master
-Date: 2018-10-09T08:58:09-04:00
+Date: 2018-10-05T18:16:06-04:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.event/commit/3fb3bfc20b2e81b866271949dd9cc86abb4861ab
+Commit: https://github.com/plone/plone.app.iterate/commit/3591f213a0fe4d6b8edaf32c4ef7d6955ef40bdd
 
-Avoid breaking when text is None
+Avoid test setup error for layer that uses AT when it's not installed
 
 Files changed:
-M CHANGES.rst
-M plone/app/event/dx/behaviors.py
+M plone/app/iterate/testing.py
 
-b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex bcc90161..6b113d30 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Fixed searchable text indexer to avoid breaking when there is no text.\n+  [davisagli]\n \n \n 3.2.0 (2018-09-23)\ndiff --git a/plone/app/event/dx/behaviors.py b/plone/app/event/dx/behaviors.py\nindex f11704b0..26055374 100644\n--- a/plone/app/event/dx/behaviors.py\n+++ b/plone/app/event/dx/behaviors.py\n@@ -378,6 +378,8 @@ def searchable_text_indexer(obj):\n     text += u'%s\\n' % acc.title\n     text += u'%s\\n' % acc.description\n     textvalue = acc.text\n+    if textvalue is None:\n+        raise AttributeError\n     transforms = getToolByName(obj, 'portal_transforms')\n     if six.PY2:\n         textvalue = textvalue.encode('utf8')\n"
+b'diff --git a/plone/app/iterate/testing.py b/plone/app/iterate/testing.py\nindex 055f5eb..d645ced 100644\n--- a/plone/app/iterate/testing.py\n+++ b/plone/app/iterate/testing.py\n@@ -52,27 +52,31 @@ class PloneAppIterateLayer(PloneSandboxLayer):\n \n     def setUpZope(self, app, configurationContext):\n         """Setup Zope with Addons."""\n-        if HAS_AT:\n-            import Products.ATContentTypes\n-            self.loadZCML(package=Products.ATContentTypes)\n-            z2.installProduct(app, \'Products.ATContentTypes\')\n+        if not HAS_AT:\n+            return\n \n-            z2.installProduct(app, \'Products.Archetypes\')\n-            z2.installProduct(app, \'Products.ATContentTypes\')\n-            z2.installProduct(app, \'plone.app.blob\')\n-            z2.installProduct(app, \'plone.app.collection\')\n+        import Products.ATContentTypes\n+        self.loadZCML(package=Products.ATContentTypes)\n+        z2.installProduct(app, \'Products.ATContentTypes\')\n+\n+        z2.installProduct(app, \'Products.Archetypes\')\n+        z2.installProduct(app, \'Products.ATContentTypes\')\n+        z2.installProduct(app, \'plone.app.blob\')\n+        z2.installProduct(app, \'plone.app.collection\')\n \n         import plone.app.iterate\n         self.loadZCML(package=plone.app.iterate)\n \n     def setUpPloneSite(self, portal):\n         """Setup Plone Site with Addons."""\n+        if not HAS_AT:\n+            return\n+\n         # restore default workflow\n         applyProfile(portal, \'Products.CMFPlone:testfixture\')\n \n-        if HAS_AT:\n-            # add default content\n-            applyProfile(portal, \'Products.ATContentTypes:content\')\n+        # add default content\n+        applyProfile(portal, \'Products.ATContentTypes:content\')\n         applyProfile(portal, \'plone.app.iterate:default\')\n         applyProfile(portal, \'plone.app.iterate:test\')\n \n'
 
-Repository: plone.app.event
+Repository: plone.app.iterate
 
 
 Branch: refs/heads/master
-Date: 2018-10-10T16:00:00+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.event/commit/db8b987da0949d101593a5eb6ce5963345fcb4ed
-
-Merge branch 'master' into fix-indexer
-
-Files changed:
-M CHANGES.rst
-M plone/app/event/ical/exporter.py
-M plone/app/event/tests/test_icalendar.py
-M setup.py
-
-b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 6b113d30..ef4220f0 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -16,6 +16,10 @@ Bug fixes:\n \n - Fixed searchable text indexer to avoid breaking when there is no text.\n   [davisagli]\n+- iCalendar categories are exepected as a comma separated string, not as multiple entries.\n+  See https://www.kanzaki.com/docs/ical/categories.html\n+  Needs fixed iCalendar >4.0.2\n+  [jensens]\n \n \n 3.2.0 (2018-09-23)\ndiff --git a/plone/app/event/ical/exporter.py b/plone/app/event/ical/exporter.py\nindex 0cfc3d01..573c6a69 100644\n--- a/plone/app/event/ical/exporter.py\n+++ b/plone/app/event/ical/exporter.py\n@@ -360,8 +360,9 @@ def contact(self):\n     def categories(self):\n         ret = []\n         for cat in self.event.subjects or []:\n-            ret.append({'value': cat})\n-        return ret or None\n+            ret.append(cat)\n+        if ret:\n+            return {'value': ret}\n \n     @property\n     def geo(self):\ndiff --git a/plone/app/event/tests/test_icalendar.py b/plone/app/event/tests/test_icalendar.py\nindex f0ec703f..a479bc93 100644\n--- a/plone/app/event/tests/test_icalendar.py\n+++ b/plone/app/event/tests/test_icalendar.py\n@@ -49,7 +49,6 @@ def test_event_ical(self):\n         if six.PY3:\n             output = [i.decode('utf8') for i in output]\n         icalstr = ''.join(output)\n-\n         self.checkOrder(\n             icalstr,\n             'BEGIN:VCALENDAR',\n@@ -65,8 +64,7 @@ def test_event_ical(self):\n             'RRULE:FREQ=DAILY;COUNT=3;INTERVAL=1',\n             'RDATE;TZID=Europe/Vienna:20130509T000000',\n             'EXDATE;TZID=Europe/Vienna:20130506T000000,20140404T000000',\n-            'CATEGORIES:plone',\n-            'CATEGORIES:testing',\n+            'CATEGORIES:plone,testing',\n             'CONTACT:Auto Testdriver\\\\, +123456789\\\\, testdriver@plone.org\\\\, http://plone',  # noqa\n             ' .org',  # line longer than max length spec by icalendar\n             'CREATED;VALUE=DATE-TIME:',\n@@ -118,7 +116,6 @@ def test_portal_ical(self):\n \n         # No occurrences in export. Otherwise count would be 8.\n         self.assertEqual(icalstr.count('BEGIN:VEVENT'), 4)\n-\n         self.checkOrder(\n             icalstr,\n             'BEGIN:VCALENDAR',\n@@ -160,8 +157,7 @@ def test_portal_ical(self):\n             'RRULE:FREQ=DAILY;COUNT=3;INTERVAL=1',\n             'RDATE;TZID=Europe/Vienna:20130509T000000',\n             'EXDATE;TZID=Europe/Vienna:20130506T000000,20140404T000000',\n-            'CATEGORIES:plone',\n-            'CATEGORIES:testing',\n+            'CATEGORIES:plone,testing',\n             'CONTACT:Auto Testdriver\\\\, +123456789\\\\, testdriver@plone.org\\\\, http://plone',  # noqa\n             ' .org',\n             'CREATED;VALUE=DATE-TIME:',\ndiff --git a/setup.py b/setup.py\nindex f940c90f..2965f48d 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -51,7 +51,7 @@\n         'Products.ZCatalog',\n         'Products.statusmessages',\n         'Zope2',\n-        'icalendar > 3.0',\n+        'icalendar',  # >4.0.2\n         'plone.app.contentlisting',\n         'plone.app.dexterity',\n         'plone.app.layout',\n"
-
-Repository: plone.app.event
-
-
-Branch: refs/heads/master
-Date: 2018-10-12T22:36:19-04:00
+Date: 2018-10-12T22:36:36-04:00
 Author: David Glick (davisagli) <dglick@salesforce.com>
-Commit: https://github.com/plone/plone.app.event/commit/d4a5e2353ddb76aa746f75076f68a199bd74e500
+Commit: https://github.com/plone/plone.app.iterate/commit/1de02d08051e92541bd7ccad42b9888c54065c2a
 
-Merge pull request #294 from plone/fix-indexer
+Merge pull request #66 from plone/python3
 
-Fix indexer when text is None
+Avoid test setup error for AT layer when it's not installed
 
 Files changed:
-M CHANGES.rst
-M plone/app/event/dx/behaviors.py
+M plone/app/iterate/testing.py
 
-b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 90e2c183..ef4220f0 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,6 +14,8 @@ New features:\n \n Bug fixes:\n \n+- Fixed searchable text indexer to avoid breaking when there is no text.\n+  [davisagli]\n - iCalendar categories are exepected as a comma separated string, not as multiple entries.\n   See https://www.kanzaki.com/docs/ical/categories.html\n   Needs fixed iCalendar >4.0.2\ndiff --git a/plone/app/event/dx/behaviors.py b/plone/app/event/dx/behaviors.py\nindex f11704b0..26055374 100644\n--- a/plone/app/event/dx/behaviors.py\n+++ b/plone/app/event/dx/behaviors.py\n@@ -378,6 +378,8 @@ def searchable_text_indexer(obj):\n     text += u'%s\\n' % acc.title\n     text += u'%s\\n' % acc.description\n     textvalue = acc.text\n+    if textvalue is None:\n+        raise AttributeError\n     transforms = getToolByName(obj, 'portal_transforms')\n     if six.PY2:\n         textvalue = textvalue.encode('utf8')\n"
+b'diff --git a/plone/app/iterate/testing.py b/plone/app/iterate/testing.py\nindex 055f5eb..d645ced 100644\n--- a/plone/app/iterate/testing.py\n+++ b/plone/app/iterate/testing.py\n@@ -52,27 +52,31 @@ class PloneAppIterateLayer(PloneSandboxLayer):\n \n     def setUpZope(self, app, configurationContext):\n         """Setup Zope with Addons."""\n-        if HAS_AT:\n-            import Products.ATContentTypes\n-            self.loadZCML(package=Products.ATContentTypes)\n-            z2.installProduct(app, \'Products.ATContentTypes\')\n+        if not HAS_AT:\n+            return\n \n-            z2.installProduct(app, \'Products.Archetypes\')\n-            z2.installProduct(app, \'Products.ATContentTypes\')\n-            z2.installProduct(app, \'plone.app.blob\')\n-            z2.installProduct(app, \'plone.app.collection\')\n+        import Products.ATContentTypes\n+        self.loadZCML(package=Products.ATContentTypes)\n+        z2.installProduct(app, \'Products.ATContentTypes\')\n+\n+        z2.installProduct(app, \'Products.Archetypes\')\n+        z2.installProduct(app, \'Products.ATContentTypes\')\n+        z2.installProduct(app, \'plone.app.blob\')\n+        z2.installProduct(app, \'plone.app.collection\')\n \n         import plone.app.iterate\n         self.loadZCML(package=plone.app.iterate)\n \n     def setUpPloneSite(self, portal):\n         """Setup Plone Site with Addons."""\n+        if not HAS_AT:\n+            return\n+\n         # restore default workflow\n         applyProfile(portal, \'Products.CMFPlone:testfixture\')\n \n-        if HAS_AT:\n-            # add default content\n-            applyProfile(portal, \'Products.ATContentTypes:content\')\n+        # add default content\n+        applyProfile(portal, \'Products.ATContentTypes:content\')\n         applyProfile(portal, \'plone.app.iterate:default\')\n         applyProfile(portal, \'plone.app.iterate:test\')\n \n'
 
