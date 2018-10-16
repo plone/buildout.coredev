@@ -1,6 +1,7 @@
 #/bin/sh
-python3.6 -m venv .
+`which python3.6` -m venv .
 ./bin/pip install -r requirements.txt
-./bin/buildout -c py3.cfg
+ln -sf buildout-py3.cfg buildout.cfg
+./bin/buildout $*
 echo "run plone with: ./bin/wsgi"
 
