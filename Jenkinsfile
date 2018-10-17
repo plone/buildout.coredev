@@ -1,91 +1,59 @@
 #!groovy
+def layers
 
 pipeline {
-
   agent any
-
   stages {
-
-    // Build
-    stage('Build') {
-      agent {
-        label 'virtualenv'
-      }
+    stage('Buildout') {
       steps {
         deleteDir()
-        checkout scm
-        sh 'make build'
-        sh 'tar cfz build.tgz bin develop-eggs include lib parts src *.cfg Makefile requirements.txt'
-        stash includes: 'build.tgz', name: 'build.tgz'
-      }
-    }
-
-    // Static Code Analysis
-    /*
-    stage('Static Code Analysis') {
-      agent {
-        label 'virtualenv'
-      }
-      steps {
-        deleteDir()
-        unstash 'build.tgz'
-        sh 'tar xfz build.tgz'
-        sh 'make code-analysis'
-      }
-    }*/
-
-    // Unit Tests
-    stage('Unit Tests') {
-      agent {
-        label 'virtualenv'
-      }
-      steps {
-        deleteDir()
-        unstash 'build.tgz'
-        sh 'tar xfz build.tgz'
-        sh 'make test'
-        sh 'ls -al parts/test/testreports'
-      }
-      post {
-        always {
-          step([
-            $class: 'JUnitResultArchiver',
-            testResults: 'parts/test/testreports/*.xml'
-          ])
+        withPythonEnv('Python2.7') {
+          sh """
+          git clone --branch ${branch} --depth 1 https://github.com/plone/buildout.coredev.git
+          (
+          cd buildout.coredev
+          pip install -r requirements.txt
+          buildout buildout:git-clone-depth=1 -c core.cfg install test
+          bin/test --all --list-tests 2>/dev/null | grep -E '^Listing' | awk '{print \$2}' | sort -u | tee layers.txt
+          )
+          tar cf src.tar buildout.coredev/src
+          """
+          stash includes: 'src.tar', name: 'src.tar'
+        }
+        script {
+          layers = readFile("${env.WORKSPACE}/buildout.coredev/layers.txt").trim().split('\n')
         }
       }
     }
-
-    // Acceptance Tests
-    stage('Acceptance Tests') {
-      agent {
-        label 'virtualenv'
-      }
+    stage('Dispatch') {
       steps {
-        deleteDir()
-        unstash 'build.tgz'
-        sh 'tar xfz build.tgz'
-        wrap([$class: 'Xvfb']) {
-          sh 'make test-acceptance'
-        }
-      }
-      post {
-        always {
-          step([
-            $class: 'RobotPublisher',
-            disableArchiveOutput: false,
-            logFileName: 'parts/test/robot_log.html',
-            onlyCritical: true,
-            otherFiles: '**/*.png',
-            outputFileName: 'parts/test/robot_output.xml',
-            outputPath: '.',
-            passThreshold: 100,
-            reportFileName: 'parts/test/robot_report.html',
-            unstableThreshold: 0
-          ]);
+        script {
+          def tests = [:]
+          for (int i = 0; i < layers.length -1; i++) {
+            def layername = "${layers[i]}"
+            tests["${i}"] = {
+              node {
+                stage("Test ${layername}") {
+                  deleteDir()
+                  unstash 'src.tar'
+                  withPythonEnv('Python2.7') {
+                    sh """
+                    git clone --branch ${branch} --depth 1 https://github.com/plone/buildout.coredev.git
+                    tar xf src.tar
+                    cd buildout.coredev
+                    pip install -r requirements.txt
+                    buildout buildout:git-clone-depth=1 buildout:always-checkout=false -c core.cfg install test
+                    export ROBOT_BROWSER='chrome'
+                    xvfb-run -a --server-args='-screen 0 1920x1200x24' bin/test --all --xml --layer '${layername}'
+                    """
+                  }
+                }
+              }
+            }
+          }
+          parallel tests
         }
       }
     }
-
   }
 }
