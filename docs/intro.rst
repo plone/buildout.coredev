@@ -16,9 +16,8 @@ keep in mind that Plone has a `version support policy <http://plone.org/support/
 
 Dependencies
 ============
-* `Git <http://help.github.com/mac-set-up-git/>`_
-* `Subversion <http://subversion.apache.org/>`_
-* `Python <http://python.org/>`_ 2.7 including development headers.
+* git, `how to setup <https://help.github.com/articles/set-up-git/>`_
+* `Python <http://python.org/>`_ versions 2.7 and 3.6 including development headers.
 * If you are on Mac OSX,
   you will need to install `XCode <https://developer.apple.com/xcode/>`_.
   You can do this through the app store or several other soul-selling methods.
@@ -28,8 +27,10 @@ Dependencies
   you'll come back to it later.
   They always do...
 * `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_.
-  Make sure to install this into the proper python environment.
-* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper python environment.
+  Make sure to install it or its dependencies.
+  This depends on the your operating system.
+* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper Python 2.7 environment.
+  Python 3.6 comes with `venv` in its standard libraries and no additional installation is needed.
 * `GCC <http://gcc.gnu.org/>`_ in order to compile ZODB, Zope and lxml.
 * `libxml2 and libxslt <http://xmlsoft.org/XSLT/downloads.html>`_,
   including development headers.
@@ -42,6 +43,8 @@ Setting up Your Development Environment
 The first step in fixing a bug is getting this `buildout <https://github.com/plone/buildout.coredev>`_ running.
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
 `GitHub <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
+Dependent on the current development cycle there may exist a future branch.
+I.e. 5.1 is the activly maintained stable branch and 5.2 is the future, currently unstable, active development branch.
 More information on switching release branches is below.
 
 To set up a plone 5 development environment::
@@ -49,16 +52,28 @@ To set up a plone 5 development environment::
   > cd ~/buildouts # or wherever you want to put things
   > git clone -b 5.2 https://github.com/plone/buildout.coredev ./plone5devel
   > cd ./plone5devel
+
+For Python 2.7::
+
   > ./bootstrap.sh
+
+For Python 3.6::
+
+  > ./bootstrap-py3.sh
+
 
 If you run into issues in this process,
 please see the doc :doc:`issues`.
 
 This will run for a long time if it is your first pull (~20 mins).
 Once that is done pulling down eggs,
-you can start your new instance with::
+you can start your new instance (on python 2.7) with::
 
   > ./bin/instance fg
+
+or with Python 2.7 and 3.6 as WSGI service with::
+
+  > ./bin/wsgi
 
 The default username/password for a dev instance is **admin/admin**.
 
@@ -67,12 +82,12 @@ Switching Branches
 If your bug is specific to one branch or you think it should be `backported <http://en.wikipedia.org/wiki/Backporting>`_,
 you can easily switch branches. The first time you get a branch, you must do::
 
-  > git checkout -t origin/4.1
+  > git checkout -t origin/4.3
 
-This should set up a local 4.1 branch tracking the one on GitHub.
+This should set up a local 4.3 branch tracking the one on GitHub.
 From then on you can just do::
 
-  > git checkout 4.1
+  > git checkout 4.3
 
 To see what branch you are currently on,
 just do::
@@ -186,9 +201,9 @@ Please don't check in anything that doesn't!
 Now write a test case for the bug you are fixing and make sure everything is running as it should.
 
 After the module level tests run with your change,
-please make sure other modules aren't affected by the change by running the full suite::
+please make sure other modules aren't affected by the change by running the full suite, including robot-tests (remove the `--all` to run without robot tests)::
 
-  > ./bin/alltests
+  > ./bin/tests --all
 
 .. note::
     Tests take a long time to run.
@@ -198,6 +213,7 @@ please make sure other modules aren't affected by the change by running the full
 
 Updating CHANGES.rst and checkouts.cfg
 ======================================
+
 Once all the tests are running locally on your machine,
 you are **ALMOST** ready to commit the changes.
 A couple housekeeping things before moving on.
@@ -206,6 +222,8 @@ First,
 please edit :file:`CHANGES.rst` (or :file:`CHANGES.txt`, or :file:`HISTORY.txt`) in each package you have modified and add a summary of the change.
 This change note will be collated for the next Plone release and is important for integrators and developers to be able to see what they will get if they upgrade.
 New changelog entries should be added at the very top of :file:`CHANGES.rst`.
+Some packages already switched to use `towncrier <https://pypi.org/project/towncrier/>`_.
+If this is the case you'll find a note at the top of the `CHANGES.rst` file.
 
 *Most importantly*,
 if you didn't do it earlier,
@@ -327,6 +345,12 @@ Let's do that now::
 
 Branches and Forks and Direct Commits - Oh My!
 ----------------------------------------------
+
+.. note::
+
+    This section needs a rewrite.
+    Meanwhile we do not allow direct commits, except in very rare cases.
+
 Plone used to be in an svn repository,
 so everyone is familiar and accustomed to committing directly to the branches.
 After the migration to GitHub,
