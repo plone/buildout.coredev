@@ -1,155 +1,21 @@
-Repository: Products.validation
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2018-10-06T12:32:28+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/06eb5f3dd0645f8a286e90e7ca5325d764e1f247
+Date: 2018-10-22T22:15:19+02:00
+Author: Mike Metcalfe (mikejmets) <mike@webtide.co.za>
+Commit: https://github.com/plone/plone.app.dexterity/commit/e871c34803e6e4c1a36a8e4900b43ad246af8e03
 
-Use check_id function from Plone.
+Dexterity Import Type Profile fails (#278)
 
-About to be introduced in Plone 5.1, replacing the check_id skin script.
+* Added missing StringIO import
 
-Files changed:
-A news/4.bugfix
-M Products/validation/validators/IdValidator.py
-
-b"diff --git a/Products/validation/validators/IdValidator.py b/Products/validation/validators/IdValidator.py\nindex 0fb1f75..a691185 100644\n--- a/Products/validation/validators/IdValidator.py\n+++ b/Products/validation/validators/IdValidator.py\n@@ -22,11 +22,11 @@ def __init__( self, name, title='', description=''):\n     def __call__(self, id, instance, *args, **kwargs):\n         try:\n             # try to use the check_id script of CMFPlone\n-            check_id = aq_get(instance, 'check_id', None, 1)\n-            if check_id is None:\n-                raise AttributeError('check_id script not found')\n-            return check_id(id, required=kwargs.get('required', 0)) or 1\n-        except AttributeError:\n+            # Import here to avoid hard dependency and possible cyclic imports.\n+            from Products.CMFPlone.utils import check_id\n+            result = check_id(instance, id, required=kwargs.get('required', 0))\n+            return result or 1\n+        except ImportError:\n             # space test\n             if ' ' in id:\n                 msg =  _(u'Spaces are not allowed in ids')\ndiff --git a/news/4.bugfix b/news/4.bugfix\nnew file mode 100644\nindex 0000000..95463ae\n--- /dev/null\n+++ b/news/4.bugfix\n@@ -0,0 +1 @@\n+Use new utils.check_id from CMFPlone.  [maurits]\n"
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-06T12:32:28+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/5a988e3463f75f2ef65cfc577dcf4a043797f8a4
-
-Factor out a fallback_check_id function from the IdValidator.
+* Corrected import_types fix to use BytesIO instead of StringIO
+Added bugfix news item
 
 Files changed:
-M Products/validation/validators/IdValidator.py
+A news/279.bugfix
+M plone/app/dexterity/browser/import_types.py
 
-b"diff --git a/Products/validation/validators/IdValidator.py b/Products/validation/validators/IdValidator.py\nindex a691185..e5233e1 100644\n--- a/Products/validation/validators/IdValidator.py\n+++ b/Products/validation/validators/IdValidator.py\n@@ -11,6 +11,31 @@\n from Products.validation.i18n import safe_unicode\n \n \n+def fallback_check_id(instance, id, **kwargs):\n+    # space test\n+    if ' ' in id:\n+        msg =  _(u'Spaces are not allowed in ids')\n+        return recursiveTranslate(msg, **kwargs)\n+\n+    # in parent test\n+    parent = aq_parent(aq_inner(instance))\n+    # If the id is given to a different object already\n+    if (id in parent.objectIds() and\n+            getattr(aq_base(parent), id) is not aq_base(instance)):\n+        msg = _(u'Id $id is already in use',\n+                mapping = {'id': safe_unicode(id)})\n+        return recursiveTranslate(msg, **kwargs)\n+\n+    # object manager test\n+    try:\n+        # Note: we used to pass 'self' (the validator) instead of 'instance',\n+        # which makes no sense.\n+        ObjectManager.checkValidId(instance, id, allow_dup=1)\n+    except BadRequest as m:\n+        return str(m)\n+    return 1\n+\n+\n @implementer(IValidator)\n class IdValidator:\n \n@@ -24,29 +49,11 @@ def __call__(self, id, instance, *args, **kwargs):\n             # try to use the check_id script of CMFPlone\n             # Import here to avoid hard dependency and possible cyclic imports.\n             from Products.CMFPlone.utils import check_id\n-            result = check_id(instance, id, required=kwargs.get('required', 0))\n-            return result or 1\n         except ImportError:\n-            # space test\n-            if ' ' in id:\n-                msg =  _(u'Spaces are not allowed in ids')\n-                return recursiveTranslate(msg, **kwargs)\n-\n-            # in parent test\n-            parent = aq_parent(aq_inner(instance))\n-            # If the id is given to a different object already\n-            if id in parent.objectIds() and getattr(aq_base(parent), id) is not aq_base(instance):\n-                msg = _(u'Id $id is already in use',\n-                        mapping = {'id': safe_unicode(id)})\n-                return recursiveTranslate(msg, **kwargs)\n-\n-            # object manager test\n-            # XXX: This is f***ed\n-            try:\n-                ObjectManager.checkValidId(self, id, allow_dup=1)\n-            except BadRequest as m:\n-                return str(m)\n-            return 1\n+            check_id = fallback_check_id\n+        result = check_id(instance, id, **kwargs)\n+        return result or 1\n+\n \n validatorList = [\n     IdValidator('isValidId', title='', description=''),\n"
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-06T12:32:28+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/bde3272a209dfdd75311234bb4bcfdda55402cf3
-
-Use check_id method if it exists.
-
-Mostly done because this makes it easier to test.
-But this should help for cases where someone has overriden the check_id script,
-or is really using a custom check_id method.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-M Products/validation/validators/IdValidator.py
-
-b'diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 245e924..610c4fa 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -6,6 +6,37 @@\n import unittest\n \n \n+class Dummy(object):\n+    """Dummy object with basic zope-like containment."""\n+\n+    def __init__(self, _id=None):\n+        self.id = _id\n+        self._ids = []\n+        self._items = []\n+\n+    def add(self, item):\n+        self._ids.append(item.id)\n+        self._items.append(item)\n+        item.__parent__ = self\n+\n+    def getId(self):\n+        return self.id\n+\n+    def getParentNode(self):\n+        return self.__parent__\n+\n+    def objectIds(self):\n+        return self._ids\n+\n+    def __getattr__(self, name, default=None):\n+        if name in self._ids:\n+            for obj in self._items:\n+                if obj.getId() == name:\n+                    return obj\n+            return default\n+        return super(Dummy, self).__getattr__(name, default)\n+\n+\n class TestValidation(unittest.TestCase):\n \n     def test_inNumericRange(self):\n@@ -87,8 +118,45 @@ def test_isUnixLikeName(self):\n         self.assertNotEqual(v(\'aaaaaaaab\'), 1) # too long\n \n     def test_isValidId(self):\n-        v = validation.validatorFor("isValidId")\n-        self.assertEqual(v("a b", object()), u"Spaces are not allowed in ids")\n+        from Products.validation.validators import IdValidator\n+\n+        def dummy_checker(instance, _id):\n+            if _id == \'good\':\n+                return 1\n+            return \'bad id\'\n+\n+        v = validation.validatorFor(\'isValidId\')\n+        obj = Dummy(\'foo\')\n+        parent = Dummy(\'parent\')\n+        parent.add(obj)\n+\n+        # Use a specific checker.\n+        obj.check_id = dummy_checker\n+        self.assertEqual(v(\'good\', obj), 1)\n+        self.assertEqual(v(\'a b\', obj), \'bad id\')\n+\n+        # Use the fallback_check_id.\n+        obj.check_id = IdValidator.fallback_check_id\n+        v = validation.validatorFor(\'isValidId\')\n+        self.assertEqual(v(\'good\', obj), 1)\n+        self.assertEqual(v(\'foo\', obj), 1)\n+        self.assertEqual(v(\'a b\', obj), u\'Spaces are not allowed in ids\')\n+\n+        # Use no explicit checker, falling back to check_id from Plone,\n+        # if available.\n+        try:\n+            from Products.CMFPlone.utils import check_id\n+        except ImportError:\n+            return\n+\n+        obj.check_id = None\n+        v = validation.validatorFor(\'isValidId\')\n+        self.assertEqual(v(\'good\', obj), 1)\n+        self.assertEqual(v(\'foo\', obj), 1)\n+        # Plone seems to allow spaces.\n+        self.assertEqual(v(\'a b\', obj), 1)\n+        # Some ids are forbidden in Plone.  We get an i18n message back.\n+        self.assertEqual(v(\'layout\', obj), \'${name} is reserved.\')\n \n \n def test_suite():\ndiff --git a/Products/validation/validators/IdValidator.py b/Products/validation/validators/IdValidator.py\nindex e5233e1..e6ed2e2 100644\n--- a/Products/validation/validators/IdValidator.py\n+++ b/Products/validation/validators/IdValidator.py\n@@ -45,12 +45,20 @@ def __init__( self, name, title=\'\', description=\'\'):\n         self.description = description\n \n     def __call__(self, id, instance, *args, **kwargs):\n-        try:\n-            # try to use the check_id script of CMFPlone\n-            # Import here to avoid hard dependency and possible cyclic imports.\n-            from Products.CMFPlone.utils import check_id\n-        except ImportError:\n-            check_id = fallback_check_id\n+        # Try to get a check_id from the instance,\n+        # for example a Python skin script or a method,\n+        # like Products/CMFPlone/skins/plone_scripts/check_id.py\n+        # until Plone 5.1.\n+        check_id = aq_get(instance, \'check_id\', None, 1)\n+        if check_id is None:\n+            try:\n+                # try to use the check_id script of CMFPlone\n+                # Import here to avoid a hard dependency and\n+                # possible cyclic imports.\n+                from Products.CMFPlone.utils import check_id\n+            except ImportError:\n+                # Use our own fallback function.\n+                check_id = fallback_check_id\n         result = check_id(instance, id, **kwargs)\n         return result or 1\n \n'
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-06T15:54:11+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/3eda4629c756fe8d7ee988e7edaf1657bc264e5d
-
-Do not explicitly test CMFPlone.utils.check_id on 5.1.
-
-On 5.1, the context will always have a check_id attribute (the script), so this situation should not happen.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-
-b"diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 610c4fa..85ccf77 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -150,6 +150,13 @@ def dummy_checker(instance, _id):\n             return\n \n         obj.check_id = None\n+        # Problem: on Plone 5.1, utils.check_id simply calls the script,\n+        # which we have just set to None for testing purposes, so it will fail.\n+        # So only test this in Plone 5.2+, not on 5.1.\n+        import pkg_resources\n+        version = pkg_resources.get_distribution('Products.CMFPlone').version\n+        if version.startswith('5.1'):\n+            return\n         v = validation.validatorFor('isValidId')\n         self.assertEqual(v('good', obj), 1)\n         self.assertEqual(v('foo', obj), 1)\n"
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-06T16:11:32+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/1b454520e670a480b7c73e7f2b36533405c31d88
-
-Fixed calling check_id.
-
-When check_id is an attribute, the instance is already implicitly passed as 'self'.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-M Products/validation/validators/IdValidator.py
-
-b"diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 85ccf77..ec08091 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -36,6 +36,11 @@ def __getattr__(self, name, default=None):\n             return default\n         return super(Dummy, self).__getattr__(name, default)\n \n+    def dummy_checker(self, _id, **kwargs):\n+        if _id == 'good':\n+            return 1\n+        return 'bad id'\n+\n \n class TestValidation(unittest.TestCase):\n \n@@ -120,18 +125,13 @@ def test_isUnixLikeName(self):\n     def test_isValidId(self):\n         from Products.validation.validators import IdValidator\n \n-        def dummy_checker(instance, _id):\n-            if _id == 'good':\n-                return 1\n-            return 'bad id'\n-\n         v = validation.validatorFor('isValidId')\n         obj = Dummy('foo')\n         parent = Dummy('parent')\n         parent.add(obj)\n \n         # Use a specific checker.\n-        obj.check_id = dummy_checker\n+        obj.check_id = obj.dummy_checker\n         self.assertEqual(v('good', obj), 1)\n         self.assertEqual(v('a b', obj), 'bad id')\n \ndiff --git a/Products/validation/validators/IdValidator.py b/Products/validation/validators/IdValidator.py\nindex e6ed2e2..1e80a6c 100644\n--- a/Products/validation/validators/IdValidator.py\n+++ b/Products/validation/validators/IdValidator.py\n@@ -50,7 +50,10 @@ def __call__(self, id, instance, *args, **kwargs):\n         # like Products/CMFPlone/skins/plone_scripts/check_id.py\n         # until Plone 5.1.\n         check_id = aq_get(instance, 'check_id', None, 1)\n-        if check_id is None:\n+        if check_id is not None:\n+            # instance is passed implicitly: it is 'self'\n+            result = check_id(id, required=kwargs.get('required'))\n+        else:\n             try:\n                 # try to use the check_id script of CMFPlone\n                 # Import here to avoid a hard dependency and\n@@ -59,7 +62,11 @@ def __call__(self, id, instance, *args, **kwargs):\n             except ImportError:\n                 # Use our own fallback function.\n                 check_id = fallback_check_id\n-        result = check_id(instance, id, **kwargs)\n+                # Pass all keywords.  We may need the request.\n+                result = check_id(instance, id, **kwargs)\n+            else:\n+                # Only the 'required' keyword is accepted.\n+                result = check_id(instance, id, required=kwargs.get('required'))\n         return result or 1\n \n \n"
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-06T16:22:57+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/3335c24eb9bca997d4e5ec94e61065b54a3dd5ba
-
-Test the IdValidator better.
-
-Test all three scenarios in their own test function:
-basic check_id attribute/script, new Plone utils.check_id function, fallback function.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-
-b'diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex ec08091..6a5f31e 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -122,42 +122,36 @@ def test_isUnixLikeName(self):\n         self.assertEqual(v(\'ab,c\'), u"Validation failed(isUnixLikeName): \'ab,c\' this name is not a valid identifier")\n         self.assertNotEqual(v(\'aaaaaaaab\'), 1) # too long\n \n-    def test_isValidId(self):\n+    def test_isValidId_basic(self):\n         from Products.validation.validators import IdValidator\n \n         v = validation.validatorFor(\'isValidId\')\n         obj = Dummy(\'foo\')\n-        parent = Dummy(\'parent\')\n-        parent.add(obj)\n \n         # Use a specific checker.\n         obj.check_id = obj.dummy_checker\n         self.assertEqual(v(\'good\', obj), 1)\n         self.assertEqual(v(\'a b\', obj), \'bad id\')\n \n-        # Use the fallback_check_id.\n-        obj.check_id = IdValidator.fallback_check_id\n-        v = validation.validatorFor(\'isValidId\')\n-        self.assertEqual(v(\'good\', obj), 1)\n-        self.assertEqual(v(\'foo\', obj), 1)\n-        self.assertEqual(v(\'a b\', obj), u\'Spaces are not allowed in ids\')\n-\n-        # Use no explicit checker, falling back to check_id from Plone,\n-        # if available.\n+    def test_isValidId_plone(self):\n+        from Products.validation.validators import IdValidator\n         try:\n             from Products.CMFPlone.utils import check_id\n         except ImportError:\n             return\n-\n-        obj.check_id = None\n-        # Problem: on Plone 5.1, utils.check_id simply calls the script,\n-        # which we have just set to None for testing purposes, so it will fail.\n+        # Problem: on Plone 5.1, utils.check_id simply looks for a\n+        # check_id script/attribute on the context.  This will fail.\n         # So only test this in Plone 5.2+, not on 5.1.\n         import pkg_resources\n         version = pkg_resources.get_distribution(\'Products.CMFPlone\').version\n         if version.startswith(\'5.1\'):\n             return\n+\n         v = validation.validatorFor(\'isValidId\')\n+        obj = Dummy(\'foo\')\n+        parent = Dummy(\'parent\')\n+        parent.add(obj)\n+\n         self.assertEqual(v(\'good\', obj), 1)\n         self.assertEqual(v(\'foo\', obj), 1)\n         # Plone seems to allow spaces.\n@@ -165,6 +159,29 @@ def test_isValidId(self):\n         # Some ids are forbidden in Plone.  We get an i18n message back.\n         self.assertEqual(v(\'layout\', obj), \'${name} is reserved.\')\n \n+    def test_isValidId_fallback(self):\n+        from Products.validation.validators import IdValidator\n+        # We can only check this if utils.check_id gives an ImportError.\n+        try:\n+            from Products.CMFPlone.utils import check_id as plone_check_id\n+        except ImportError:\n+            plone_check_id = None\n+        else:\n+            import Products.CMFPlone.utils\n+            del Products.CMFPlone.utils.check_id\n+\n+        try:\n+            v = validation.validatorFor(\'isValidId\')\n+            obj = Dummy(\'foo\')\n+            parent = Dummy(\'parent\')\n+            parent.add(obj)\n+            self.assertEqual(v(\'good\', obj), 1)\n+            self.assertEqual(v(\'foo\', obj), 1)\n+            self.assertEqual(v(\'a b\', obj), u\'Spaces are not allowed in ids\')\n+        finally:\n+            if plone_check_id:\n+                Products.CMFPlone.utils.check_id = plone_check_id\n+\n \n def test_suite():\n     from unittest import TestSuite, makeSuite\n'
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-08T10:53:08+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/ee99081f60b5102c16b893388c8e1092a0fb304e
-
-Do more checks on Plone 5.1, and check for renaming an item.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-
-b"diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 6a5f31e..32f2886 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -139,24 +139,28 @@ def test_isValidId_plone(self):\n             from Products.CMFPlone.utils import check_id\n         except ImportError:\n             return\n-        # Problem: on Plone 5.1, utils.check_id simply looks for a\n-        # check_id script/attribute on the context.  This will fail.\n-        # So only test this in Plone 5.2+, not on 5.1.\n-        import pkg_resources\n-        version = pkg_resources.get_distribution('Products.CMFPlone').version\n-        if version.startswith('5.1'):\n-            return\n \n         v = validation.validatorFor('isValidId')\n         obj = Dummy('foo')\n+        obj2 = Dummy('foo2')\n         parent = Dummy('parent')\n         parent.add(obj)\n+        parent.add(obj2)\n \n         self.assertEqual(v('good', obj), 1)\n         self.assertEqual(v('foo', obj), 1)\n+        self.assertEqual(\n+            v('foo', obj2), 'Id foo conflicts with an existing item.')\n         # Plone seems to allow spaces.\n         self.assertEqual(v('a b', obj), 1)\n         # Some ids are forbidden in Plone.  We get an i18n message back.\n+        # Problem: on Plone 5.1, utils.check_id simply looks for a\n+        # check_id script/attribute on the context.  This will fail.\n+        # So only test this in Plone 5.2+, not on 5.1.\n+        import pkg_resources\n+        version = pkg_resources.get_distribution('Products.CMFPlone').version\n+        if version.startswith('5.1'):\n+            return\n         self.assertEqual(v('layout', obj), '${name} is reserved.')\n \n     def test_isValidId_fallback(self):\n"
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-08T18:06:03+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/e657c2a94c2905ca712b35487fee8bfb56198225
-
-IdValidator: fix tests on Plone 5.2.
-
-Files changed:
-M Products/validation/tests/test_validation.py
-
-b'diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 32f2886..ddfb7dc 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -8,6 +8,7 @@\n \n class Dummy(object):\n     """Dummy object with basic zope-like containment."""\n+    portal_type = \'dummy\'  # needed in Plone 5.2 test\n \n     def __init__(self, _id=None):\n         self.id = _id\n@@ -28,6 +29,9 @@ def getParentNode(self):\n     def objectIds(self):\n         return self._ids\n \n+    def __contains__(self, id):\n+        return id in self._ids\n+\n     def __getattr__(self, name, default=None):\n         if name in self._ids:\n             for obj in self._items:\n@@ -149,8 +153,10 @@ def test_isValidId_plone(self):\n \n         self.assertEqual(v(\'good\', obj), 1)\n         self.assertEqual(v(\'foo\', obj), 1)\n+        # This error message would be translated usually, but we do not care.\n         self.assertEqual(\n-            v(\'foo\', obj2), \'Id foo conflicts with an existing item.\')\n+            v(\'foo\', obj2),\n+            u\'There is already an item named ${name} in this folder.\')\n         # Plone seems to allow spaces.\n         self.assertEqual(v(\'a b\', obj), 1)\n         # Some ids are forbidden in Plone.  We get an i18n message back.\n'
-
-Repository: Products.validation
-
-
-Branch: refs/heads/master
-Date: 2018-10-22T21:22:24+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.validation/commit/4fd8af0a987aa0e5e844378be65bc3bc4d5e0b4c
-
-Merge pull request #5 from plone/use-check-id-function-from-plone
-
-Use check id function from plone
-
-Files changed:
-A news/4.bugfix
-M Products/validation/tests/test_validation.py
-M Products/validation/validators/IdValidator.py
-
-b'diff --git a/Products/validation/tests/test_validation.py b/Products/validation/tests/test_validation.py\nindex 245e924..ddfb7dc 100644\n--- a/Products/validation/tests/test_validation.py\n+++ b/Products/validation/tests/test_validation.py\n@@ -6,6 +6,46 @@\n import unittest\n \n \n+class Dummy(object):\n+    """Dummy object with basic zope-like containment."""\n+    portal_type = \'dummy\'  # needed in Plone 5.2 test\n+\n+    def __init__(self, _id=None):\n+        self.id = _id\n+        self._ids = []\n+        self._items = []\n+\n+    def add(self, item):\n+        self._ids.append(item.id)\n+        self._items.append(item)\n+        item.__parent__ = self\n+\n+    def getId(self):\n+        return self.id\n+\n+    def getParentNode(self):\n+        return self.__parent__\n+\n+    def objectIds(self):\n+        return self._ids\n+\n+    def __contains__(self, id):\n+        return id in self._ids\n+\n+    def __getattr__(self, name, default=None):\n+        if name in self._ids:\n+            for obj in self._items:\n+                if obj.getId() == name:\n+                    return obj\n+            return default\n+        return super(Dummy, self).__getattr__(name, default)\n+\n+    def dummy_checker(self, _id, **kwargs):\n+        if _id == \'good\':\n+            return 1\n+        return \'bad id\'\n+\n+\n class TestValidation(unittest.TestCase):\n \n     def test_inNumericRange(self):\n@@ -86,9 +126,71 @@ def test_isUnixLikeName(self):\n         self.assertEqual(v(\'ab,c\'), u"Validation failed(isUnixLikeName): \'ab,c\' this name is not a valid identifier")\n         self.assertNotEqual(v(\'aaaaaaaab\'), 1) # too long\n \n-    def test_isValidId(self):\n-        v = validation.validatorFor("isValidId")\n-        self.assertEqual(v("a b", object()), u"Spaces are not allowed in ids")\n+    def test_isValidId_basic(self):\n+        from Products.validation.validators import IdValidator\n+\n+        v = validation.validatorFor(\'isValidId\')\n+        obj = Dummy(\'foo\')\n+\n+        # Use a specific checker.\n+        obj.check_id = obj.dummy_checker\n+        self.assertEqual(v(\'good\', obj), 1)\n+        self.assertEqual(v(\'a b\', obj), \'bad id\')\n+\n+    def test_isValidId_plone(self):\n+        from Products.validation.validators import IdValidator\n+        try:\n+            from Products.CMFPlone.utils import check_id\n+        except ImportError:\n+            return\n+\n+        v = validation.validatorFor(\'isValidId\')\n+        obj = Dummy(\'foo\')\n+        obj2 = Dummy(\'foo2\')\n+        parent = Dummy(\'parent\')\n+        parent.add(obj)\n+        parent.add(obj2)\n+\n+        self.assertEqual(v(\'good\', obj), 1)\n+        self.assertEqual(v(\'foo\', obj), 1)\n+        # This error message would be translated usually, but we do not care.\n+        self.assertEqual(\n+            v(\'foo\', obj2),\n+            u\'There is already an item named ${name} in this folder.\')\n+        # Plone seems to allow spaces.\n+        self.assertEqual(v(\'a b\', obj), 1)\n+        # Some ids are forbidden in Plone.  We get an i18n message back.\n+        # Problem: on Plone 5.1, utils.check_id simply looks for a\n+        # check_id script/attribute on the context.  This will fail.\n+        # So only test this in Plone 5.2+, not on 5.1.\n+        import pkg_resources\n+        version = pkg_resources.get_distribution(\'Products.CMFPlone\').version\n+        if version.startswith(\'5.1\'):\n+            return\n+        self.assertEqual(v(\'layout\', obj), \'${name} is reserved.\')\n+\n+    def test_isValidId_fallback(self):\n+        from Products.validation.validators import IdValidator\n+        # We can only check this if utils.check_id gives an ImportError.\n+        try:\n+            from Products.CMFPlone.utils import check_id as plone_check_id\n+        except ImportError:\n+            plone_check_id = None\n+        else:\n+            import Products.CMFPlone.utils\n+            del Products.CMFPlone.utils.check_id\n+\n+        try:\n+            v = validation.validatorFor(\'isValidId\')\n+            obj = Dummy(\'foo\')\n+            parent = Dummy(\'parent\')\n+            parent.add(obj)\n+            self.assertEqual(v(\'good\', obj), 1)\n+            self.assertEqual(v(\'foo\', obj), 1)\n+            self.assertEqual(v(\'a b\', obj), u\'Spaces are not allowed in ids\')\n+        finally:\n+            if plone_check_id:\n+                Products.CMFPlone.utils.check_id = plone_check_id\n \n \n def test_suite():\ndiff --git a/Products/validation/validators/IdValidator.py b/Products/validation/validators/IdValidator.py\nindex 0fb1f75..1e80a6c 100644\n--- a/Products/validation/validators/IdValidator.py\n+++ b/Products/validation/validators/IdValidator.py\n@@ -11,6 +11,31 @@\n from Products.validation.i18n import safe_unicode\n \n \n+def fallback_check_id(instance, id, **kwargs):\n+    # space test\n+    if \' \' in id:\n+        msg =  _(u\'Spaces are not allowed in ids\')\n+        return recursiveTranslate(msg, **kwargs)\n+\n+    # in parent test\n+    parent = aq_parent(aq_inner(instance))\n+    # If the id is given to a different object already\n+    if (id in parent.objectIds() and\n+            getattr(aq_base(parent), id) is not aq_base(instance)):\n+        msg = _(u\'Id $id is already in use\',\n+                mapping = {\'id\': safe_unicode(id)})\n+        return recursiveTranslate(msg, **kwargs)\n+\n+    # object manager test\n+    try:\n+        # Note: we used to pass \'self\' (the validator) instead of \'instance\',\n+        # which makes no sense.\n+        ObjectManager.checkValidId(instance, id, allow_dup=1)\n+    except BadRequest as m:\n+        return str(m)\n+    return 1\n+\n+\n @implementer(IValidator)\n class IdValidator:\n \n@@ -20,33 +45,30 @@ def __init__( self, name, title=\'\', description=\'\'):\n         self.description = description\n \n     def __call__(self, id, instance, *args, **kwargs):\n-        try:\n-            # try to use the check_id script of CMFPlone\n-            check_id = aq_get(instance, \'check_id\', None, 1)\n-            if check_id is None:\n-                raise AttributeError(\'check_id script not found\')\n-            return check_id(id, required=kwargs.get(\'required\', 0)) or 1\n-        except AttributeError:\n-            # space test\n-            if \' \' in id:\n-                msg =  _(u\'Spaces are not allowed in ids\')\n-                return recursiveTranslate(msg, **kwargs)\n-\n-            # in parent test\n-            parent = aq_parent(aq_inner(instance))\n-            # If the id is given to a different object already\n-            if id in parent.objectIds() and getattr(aq_base(parent), id) is not aq_base(instance):\n-                msg = _(u\'Id $id is already in use\',\n-                        mapping = {\'id\': safe_unicode(id)})\n-                return recursiveTranslate(msg, **kwargs)\n-\n-            # object manager test\n-            # XXX: This is f***ed\n+        # Try to get a check_id from the instance,\n+        # for example a Python skin script or a method,\n+        # like Products/CMFPlone/skins/plone_scripts/check_id.py\n+        # until Plone 5.1.\n+        check_id = aq_get(instance, \'check_id\', None, 1)\n+        if check_id is not None:\n+            # instance is passed implicitly: it is \'self\'\n+            result = check_id(id, required=kwargs.get(\'required\'))\n+        else:\n             try:\n-                ObjectManager.checkValidId(self, id, allow_dup=1)\n-            except BadRequest as m:\n-                return str(m)\n-            return 1\n+                # try to use the check_id script of CMFPlone\n+                # Import here to avoid a hard dependency and\n+                # possible cyclic imports.\n+                from Products.CMFPlone.utils import check_id\n+            except ImportError:\n+                # Use our own fallback function.\n+                check_id = fallback_check_id\n+                # Pass all keywords.  We may need the request.\n+                result = check_id(instance, id, **kwargs)\n+            else:\n+                # Only the \'required\' keyword is accepted.\n+                result = check_id(instance, id, required=kwargs.get(\'required\'))\n+        return result or 1\n+\n \n validatorList = [\n     IdValidator(\'isValidId\', title=\'\', description=\'\'),\ndiff --git a/news/4.bugfix b/news/4.bugfix\nnew file mode 100644\nindex 0000000..95463ae\n--- /dev/null\n+++ b/news/4.bugfix\n@@ -0,0 +1 @@\n+Use new utils.check_id from CMFPlone.  [maurits]\n'
+b"diff --git a/news/279.bugfix b/news/279.bugfix\nnew file mode 100644\nindex 0000000..d095bcb\n--- /dev/null\n+++ b/news/279.bugfix\n@@ -0,0 +1 @@\n+Import Type Profile fails because code was using StringIO instead of ByteIO\ndiff --git a/plone/app/dexterity/browser/import_types.py b/plone/app/dexterity/browser/import_types.py\nindex 434af41..1310ad7 100644\n--- a/plone/app/dexterity/browser/import_types.py\n+++ b/plone/app/dexterity/browser/import_types.py\n@@ -115,7 +115,7 @@ def add(self, profile_import):\n         types_tool = getToolByName(self.context, 'portal_types')\n         import_context = ZipFileImportContext(\n             types_tool,\n-            StringIO(profile_import.profile_file.data)\n+            BytesIO(profile_import.profile_file.data)\n         )\n         # run the profile\n         setup_tool = getToolByName(self.context, 'portal_setup')\n@@ -127,6 +127,7 @@ def nextURL(self):\n         url = self.context.absolute_url()\n         return url\n \n+\n TypeProfileImportFormPage = wrap_form(TypeProfileImportForm)\n \n \n"
 
