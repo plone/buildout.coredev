@@ -1,15 +1,17 @@
-Repository: plone.restapi
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2018-11-06T18:54:57+09:00
-Author: Timo Stollenwerk (tisto) <tisto@plone.org>
-Commit: https://github.com/plone/plone.restapi/commit/0ea92762e6d56ee99e4250a02465b5a12b34bacf
+Date: 2018-11-08T06:24:23+09:00
+Author: David Glick (davisagli) <dglick@salesforce.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/c6c3c1e06bb502a979345ac8a5c29fbc4b4c49f1
 
-Add missing sys import to setup.py.
+Add bin/instance verifydb command to validate pickles (#2611)
 
 Files changed:
+A Products/CMFPlone/_scripts/verifydb.py
+M CHANGES.rst
 M setup.py
 
-b"diff --git a/setup.py b/setup.py\nindex 1878a076..4e6a8ae6 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,5 +1,7 @@\n from setuptools import setup, find_packages\n \n+import sys\n+\n version = '3.4.6-dev.0'\n \n long_description = (\n"
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 754f13efa..53a0691cb 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -79,6 +79,11 @@ New features:\n \n - Rename safe_unicode to safe_text and safe_encode to safe_bytes. Keep old aliases.\n   [pbauer]\n+- Add a ``bin/instance verifydb`` command which can be used to check\n+  that all records in the database can be successfully loaded.\n+  This is intended to help with verifying a database conversion\n+  from Python 2 to Python 3.\n+  [davisagli]\n \n Bug fixes:\n \ndiff --git a/Products/CMFPlone/_scripts/verifydb.py b/Products/CMFPlone/_scripts/verifydb.py\nnew file mode 100644\nindex 000000000..9f2766d96\n--- /dev/null\n+++ b/Products/CMFPlone/_scripts/verifydb.py\n@@ -0,0 +1,88 @@\n+from Zope2.Startup.run import make_wsgi_app\n+from ZODB.interfaces import IStorageCurrentRecordIteration\n+from ZODB.serialize import PersistentUnpickler\n+import argparse\n+import io\n+import logging\n+import pdb\n+import pickletools\n+import sys\n+import traceback\n+import Zope2\n+\n+logger = logging.getLogger(\'zodbverify\')\n+\n+\n+def zopectl_entry(self, arg):\n+    parser = argparse.ArgumentParser(\n+        prog=sys.argv[0] + \' verifydb\',\n+        description=\'Verifies that all records in the database can be loaded.\',\n+    )\n+    parser.add_argument(\n+        \'-D\', \'--debug\', action=\'store_true\', dest=\'debug\',\n+        help=\'pause to debug broken pickles\')\n+    options = parser.parse_args(arg.split(\' \') if arg else [])\n+\n+    logging.basicConfig(level=logging.INFO)\n+    make_wsgi_app({}, self.options.configfile)\n+    app = Zope2.app()\n+    verify_zodb(app, debug=options.debug)\n+\n+\n+def verify_zodb(obj, debug=False):\n+    storage = obj._p_jar._db._storage\n+    if not IStorageCurrentRecordIteration.providedBy(storage):\n+        raise TypeError(\n+            \'ZODB storage {} does not implement record_iternext\'.format(\n+                storage))\n+\n+    logger.info(\'Scanning ZODB...\')\n+\n+    next_ = None\n+    count = 0\n+    errors = 0\n+    while True:\n+        count += 1\n+        oid, tid, data, next_ = storage.record_iternext(next_)\n+        logger.debug(\'Verifying {}\'.format(oid))\n+        success = verify_record(oid, data, debug)\n+        if not success:\n+            errors += 1\n+        if next_ is None:\n+            break\n+\n+    logger.info(\n+        \'Done! Scanned {} records. \'\n+        \'Found {} records that could not be loaded.\'.format(\n+            count, errors)\n+    )\n+\n+\n+def verify_record(oid, data, debug=False):\n+    input_file = io.BytesIO(data)\n+    unpickler = PersistentUnpickler(None, persistent_load, input_file)\n+    class_info = \'unknown\'\n+    try:\n+        class_info = unpickler.load()\n+        pos = input_file.tell()\n+        unpickler.load()\n+    except Exception:\n+        input_file.seek(0)\n+        pickle = input_file.read()\n+        logger.info(\'\\nCould not process {} record {}:\'.format(\n+            class_info,\n+            repr(oid),\n+        ))\n+        logger.info(repr(pickle))\n+        logger.info(traceback.format_exc())\n+        if debug:\n+            try:\n+                pickletools.dis(pickle[pos:])\n+            finally:\n+                pdb.set_trace()\n+        return False\n+    return True\n+\n+\n+def persistent_load(ref):\n+    pass\ndiff --git a/setup.py b/setup.py\nindex 9f9f1067c..8c752dd71 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -155,5 +155,7 @@\n     entry_points="""\\\n       [console_scripts]\n       plone-compile-resources = Products.CMFPlone._scripts.compile_resources:main\n+      [plone.recipe.zope2instance.ctl]\n+      verifydb = Products.CMFPlone._scripts.verifydb:zopectl_entry\n     """  # noqa\n )\n'
 
