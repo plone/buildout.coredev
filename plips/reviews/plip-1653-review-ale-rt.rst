@@ -10,7 +10,7 @@ Review by
 Environment
     The PLIP was reviewed using:
 
-    - Kubuntu 18.10 64-bitusing
+    - Kubuntu 18.10 64-bit
     - Python 2.7.15
     - Chrome 70.0.3538.110 (64-bit)
     - yarn 1.12.3
