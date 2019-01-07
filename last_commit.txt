@@ -1,36 +1,87 @@
-Repository: plone.formwidget.namedfile
+Repository: plone.resource
 
 
 Branch: refs/heads/master
-Date: 2019-01-02T01:27:59+01:00
+Date: 2019-01-02T00:56:52+01:00
 Author: Gil Forcada (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/adfd490db2432b048b32a6992e6bb20bde609670
+Commit: https://github.com/plone/plone.resource/commit/8cc5a20512012c93fb801cc5d424587a7fd13563
 
-fix: close files on tests
-
-This avoids resource warnings while running the tests.
+chore: fix import warnings
 
 Files changed:
-A news/36.bugfix
-M plone/formwidget/namedfile/widget.rst
+M plone/resource/directory.py
+M plone/resource/events.py
+M plone/resource/testing.py
+M plone/resource/tests/test_traversal.py
 
-b"diff --git a/news/36.bugfix b/news/36.bugfix\nnew file mode 100644\nindex 0000000..3c3c087\n--- /dev/null\n+++ b/news/36.bugfix\n@@ -0,0 +1,2 @@\n+Close files, so no resource warnings are shown.\n+[gforcada]\ndiff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst\nindex 29aba65..6253aa1 100644\n--- a/plone/formwidget/namedfile/widget.rst\n+++ b/plone/formwidget/namedfile/widget.rst\n@@ -262,10 +262,13 @@ characters::\n \n   >>> from plone.namedfile import NamedFile, NamedImage\n   >>> from plone.formwidget.namedfile.testing import get_file\n-  >>> image_data = get_file('image.jpg').read()\n+  >>> open_files = []\n+  >>> with get_file('image.jpg') as image_file:\n+  ...     image_data = image_file.read()\n   >>> file_widget.value = NamedFile(data=b'My file data',\n   ...                               filename=u'data_\xe6\xb7\xb1.txt')\n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n   >>> image_widget.request = make_request(form={'widget.name.image': myUpload})\n   >>> file_widget.update()\n@@ -303,7 +306,8 @@ Set the current image, which is shown as thumb on the page, and then\n setup the widget with a new value::\n \n   >>> content.image_field = NamedImage(data=image_data, filename=u'faux.jpg')\n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux2.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux2.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n   >>> image_widget.request = make_request(form={'widget.name.image': myUpload})\n   >>> image_widget.update()\n@@ -343,7 +347,8 @@ stored in the field::\n   >>> file_widget.extract() is content.file_field\n   True\n \n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux2.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux2.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n \n   >>> image_widget.request = make_request(form={'widget.name.image': '', 'widget.name.image.action': 'nochange'})\n@@ -459,7 +464,8 @@ Content type from headers sent by browser should be ignored::\n   >>> file_obj.contentType != 'text/x-dummy'\n   True\n \n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='random.png', headers={'Content-Type': 'image/x-dummy'})\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='random.png', headers={'Content-Type': 'image/x-dummy'})\n   >>> image_obj = image_converter.toFieldValue(FileUpload(aFieldStorage))\n   >>> image_obj.data == image_data\n   True\n@@ -671,9 +677,11 @@ Let's upload data::\n Check that we have a good image that PIL can handle::\n \n   >>> import PIL.Image\n-  >>> PIL.Image.open(get_file('image.jpg'))\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> PIL.Image.open(open_files[-1])\n   <PIL.JpegImagePlugin.JpegImageFile image mode=RGB size=500x200 at ...>\n-  >>> field_storage = FieldStorageStub(get_file('image.jpg'), filename='image.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> field_storage = FieldStorageStub(open_files[-1], filename='image.jpg')\n   >>> upload = FileUpload(field_storage)\n \n   >>> image_widget.request = make_request(form={'widget.name.image': upload})\n@@ -1010,3 +1018,7 @@ If we change the name of the widget the download URL will reflect that::\n   >>> file_widget.name = 'my_widget'\n   >>> file_widget.download_url\n   'http://127.0.0.1/some/path/++widget++my_widget/@@download/data.txt'\n+\n+Close all open file handlers:\n+\n+  >>> ignore = [x.close() for x in open_files]\n"
+b"diff --git a/plone/resource/directory.py b/plone/resource/directory.py\nindex f9c1ac5..c724c5e 100644\n--- a/plone/resource/directory.py\n+++ b/plone/resource/directory.py\n@@ -12,9 +12,9 @@\n from Products.CMFCore.utils import getToolByName\n from zExceptions import Forbidden\n from zExceptions import NotFound\n+from zope.component.hooks import getSite\n from zope.event import notify\n from zope.interface import implementer\n-from zope.site.hooks import getSite\n \n import os.path\n import re\ndiff --git a/plone/resource/events.py b/plone/resource/events.py\nindex d475052..b8decb5 100644\n--- a/plone/resource/events.py\n+++ b/plone/resource/events.py\n@@ -1,6 +1,6 @@\n from plone.resource.interfaces import IPloneResourceCreatedEvent\n from plone.resource.interfaces import IPloneResourceModifiedEvent\n-from zope.component.interfaces import ObjectEvent\n+from zope.interface.interfaces import ObjectEvent\n from zope.interface import implementer\n \n \ndiff --git a/plone/resource/testing.py b/plone/resource/testing.py\nindex b1f6be2..0938270 100644\n--- a/plone/resource/testing.py\n+++ b/plone/resource/testing.py\n@@ -7,8 +7,8 @@\n from plone.testing import Layer\n from plone.testing import publisher\n from plone.testing import zca\n-from plone.testing.z2 import FunctionalTesting\n-from plone.testing.z2 import STARTUP\n+from plone.testing.zope import FunctionalTesting\n+from plone.testing.zope import STARTUP\n from zope.configuration import xmlconfig\n \n \ndiff --git a/plone/resource/tests/test_traversal.py b/plone/resource/tests/test_traversal.py\nindex 963e34d..50bb3d8 100644\n--- a/plone/resource/tests/test_traversal.py\n+++ b/plone/resource/tests/test_traversal.py\n@@ -5,7 +5,7 @@\n from plone.resource.interfaces import IResourceDirectory\n from plone.resource.interfaces import IUniqueResourceRequest\n from plone.resource.testing import DEMO_TRAVERSER_FUNCTIONAL_TESTING\n-from plone.testing import z2\n+from plone.testing import zope\n from plone.testing import zca\n from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2\n from zExceptions import Forbidden\n@@ -83,7 +83,7 @@ def test_publish_resource(self):\n         dire = FilesystemResourceDirectory(test_dir_path)\n         provideUtility(dire, provides=IResourceDirectory, name=u'')\n \n-        browser = z2.Browser(self.app)\n+        browser = zope.Browser(self.app)\n         browser.handleErrors = False\n \n         browser.open(self.app.absolute_url() + '/++demo++foo/test.html')\n@@ -102,7 +102,7 @@ def test_publish_unique_resource(self):\n         dire = FilesystemResourceDirectory(test_dir_path)\n         provideUtility(dire, provides=IResourceDirectory, name=u'')\n \n-        browser = z2.Browser(self.app)\n+        browser = zope.Browser(self.app)\n         browser.handleErrors = False\n \n         browser.open(\n"
 
-Repository: plone.formwidget.namedfile
+Repository: plone.resource
 
 
 Branch: refs/heads/master
-Date: 2019-01-07T11:05:08+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/54b6d4ab6d1d7ccad32f472422c967eb551bf1db
+Date: 2019-01-02T00:57:39+01:00
+Author: Gil Forcada (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.resource/commit/20c1cc81f8e3e932ad598947923f7794b460cd6f
 
-Merge pull request #37 from plone/warnings
-
-fix: close files on tests
+feat: close iterator to avoid a ResourceWarning
 
 Files changed:
-A news/36.bugfix
-M plone/formwidget/namedfile/widget.rst
+M plone/resource/tests/test_file.py
 
-b"diff --git a/news/36.bugfix b/news/36.bugfix\nnew file mode 100644\nindex 0000000..3c3c087\n--- /dev/null\n+++ b/news/36.bugfix\n@@ -0,0 +1,2 @@\n+Close files, so no resource warnings are shown.\n+[gforcada]\ndiff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst\nindex 29aba65..6253aa1 100644\n--- a/plone/formwidget/namedfile/widget.rst\n+++ b/plone/formwidget/namedfile/widget.rst\n@@ -262,10 +262,13 @@ characters::\n \n   >>> from plone.namedfile import NamedFile, NamedImage\n   >>> from plone.formwidget.namedfile.testing import get_file\n-  >>> image_data = get_file('image.jpg').read()\n+  >>> open_files = []\n+  >>> with get_file('image.jpg') as image_file:\n+  ...     image_data = image_file.read()\n   >>> file_widget.value = NamedFile(data=b'My file data',\n   ...                               filename=u'data_\xe6\xb7\xb1.txt')\n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n   >>> image_widget.request = make_request(form={'widget.name.image': myUpload})\n   >>> file_widget.update()\n@@ -303,7 +306,8 @@ Set the current image, which is shown as thumb on the page, and then\n setup the widget with a new value::\n \n   >>> content.image_field = NamedImage(data=image_data, filename=u'faux.jpg')\n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux2.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux2.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n   >>> image_widget.request = make_request(form={'widget.name.image': myUpload})\n   >>> image_widget.update()\n@@ -343,7 +347,8 @@ stored in the field::\n   >>> file_widget.extract() is content.file_field\n   True\n \n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='faux2.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='faux2.jpg')\n   >>> myUpload = FileUpload(aFieldStorage)\n \n   >>> image_widget.request = make_request(form={'widget.name.image': '', 'widget.name.image.action': 'nochange'})\n@@ -459,7 +464,8 @@ Content type from headers sent by browser should be ignored::\n   >>> file_obj.contentType != 'text/x-dummy'\n   True\n \n-  >>> aFieldStorage = FieldStorageStub(get_file('image.jpg'), filename='random.png', headers={'Content-Type': 'image/x-dummy'})\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> aFieldStorage = FieldStorageStub(open_files[-1], filename='random.png', headers={'Content-Type': 'image/x-dummy'})\n   >>> image_obj = image_converter.toFieldValue(FileUpload(aFieldStorage))\n   >>> image_obj.data == image_data\n   True\n@@ -671,9 +677,11 @@ Let's upload data::\n Check that we have a good image that PIL can handle::\n \n   >>> import PIL.Image\n-  >>> PIL.Image.open(get_file('image.jpg'))\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> PIL.Image.open(open_files[-1])\n   <PIL.JpegImagePlugin.JpegImageFile image mode=RGB size=500x200 at ...>\n-  >>> field_storage = FieldStorageStub(get_file('image.jpg'), filename='image.jpg')\n+  >>> open_files.append(get_file('image.jpg'))\n+  >>> field_storage = FieldStorageStub(open_files[-1], filename='image.jpg')\n   >>> upload = FileUpload(field_storage)\n \n   >>> image_widget.request = make_request(form={'widget.name.image': upload})\n@@ -1010,3 +1018,7 @@ If we change the name of the widget the download URL will reflect that::\n   >>> file_widget.name = 'my_widget'\n   >>> file_widget.download_url\n   'http://127.0.0.1/some/path/++widget++my_widget/@@download/data.txt'\n+\n+Close all open file handlers:\n+\n+  >>> ignore = [x.close() for x in open_files]\n"
+b"diff --git a/plone/resource/tests/test_file.py b/plone/resource/tests/test_file.py\nindex c44eed8..bcd05ed 100644\n--- a/plone/resource/tests/test_file.py\n+++ b/plone/resource/tests/test_file.py\n@@ -29,13 +29,12 @@ def test_render(self):\n         request = TestRequest()\n \n         f = FilesystemFile(None, request, path, name)\n-        iterator = f()\n-\n-        data = b''.join(iterator)\n-        self.assertEqual(data, b'asdf')\n-        self.assertEqual(request.response.getHeader('Content-Type'), 'text/html')\n-        self.assertEqual(request.response.getHeader('Content-Length'), '4')\n-        self.assertEqual(request.response.getHeader('Last-Modified'), formatdate(mtime, usegmt=True))\n+        with f() as iterator:\n+            data = b''.join(iterator)\n+            self.assertEqual(data, b'asdf')\n+            self.assertEqual(request.response.getHeader('Content-Type'), 'text/html')\n+            self.assertEqual(request.response.getHeader('Content-Length'), '4')\n+            self.assertEqual(request.response.getHeader('Last-Modified'), formatdate(mtime, usegmt=True))\n \n     def test_last_modified(self):\n         provideAdapter(FileLastModified)\n"
+
+Repository: plone.resource
+
+
+Branch: refs/heads/master
+Date: 2019-01-02T00:58:22+01:00
+Author: Gil Forcada (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.resource/commit/1750b8e6a82d29e0b8fae52d0c6e64d0e4733c62
+
+chore: use a context manager
+
+Rather than explicitly closing the object.
+
+Files changed:
+M plone/resource/tests/test_file.py
+
+b"diff --git a/plone/resource/tests/test_file.py b/plone/resource/tests/test_file.py\nindex bcd05ed..df48acb 100644\n--- a/plone/resource/tests/test_file.py\n+++ b/plone/resource/tests/test_file.py\n@@ -62,12 +62,9 @@ def test_raw_read_file(self):\n \n         f = FilesystemFile(None, request, path, name)\n \n-        rf = IRawReadFile(f)\n-\n-        if six.PY2:\n-            self.assertTrue(isinstance(rf, file))\n-        else:\n-            self.assertTrue(isinstance(rf, io.IOBase))\n-        self.assertEqual(rf.read(), b'asdf')\n-\n-        rf.close()\n+        with IRawReadFile(f) as rf:\n+            if six.PY2:\n+                self.assertTrue(isinstance(rf, file))\n+            else:\n+                self.assertTrue(isinstance(rf, io.IOBase))\n+            self.assertEqual(rf.read(), b'asdf')\n"
+
+Repository: plone.resource
+
+
+Branch: refs/heads/master
+Date: 2019-01-02T00:59:10+01:00
+Author: Gil Forcada (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.resource/commit/aae53296da756039125d5fb017f0e341602c713c
+
+Update CHANGES
+
+Files changed:
+M CHANGES.rst
+
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 259d815..f69d17b 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,8 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n-\n+- Fix deprecation and resource warnings.\n+  [gforcada]\n \n 2.1.0 (2018-11-02)\n ------------------\n'
+
+Repository: plone.resource
+
+
+Branch: refs/heads/master
+Date: 2019-01-07T11:05:31+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.resource/commit/4fff2e00d2330682b08d05f69f7782b645576b92
+
+Merge pull request #29 from plone/fix-warnings
+
+Fix warnings
+
+Files changed:
+M CHANGES.rst
+M plone/resource/directory.py
+M plone/resource/events.py
+M plone/resource/testing.py
+M plone/resource/tests/test_file.py
+M plone/resource/tests/test_traversal.py
+
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 259d815..f69d17b 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,8 +14,8 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n-\n+- Fix deprecation and resource warnings.\n+  [gforcada]\n \n 2.1.0 (2018-11-02)\n ------------------\ndiff --git a/plone/resource/directory.py b/plone/resource/directory.py\nindex f9c1ac5..c724c5e 100644\n--- a/plone/resource/directory.py\n+++ b/plone/resource/directory.py\n@@ -12,9 +12,9 @@\n from Products.CMFCore.utils import getToolByName\n from zExceptions import Forbidden\n from zExceptions import NotFound\n+from zope.component.hooks import getSite\n from zope.event import notify\n from zope.interface import implementer\n-from zope.site.hooks import getSite\n \n import os.path\n import re\ndiff --git a/plone/resource/events.py b/plone/resource/events.py\nindex d475052..b8decb5 100644\n--- a/plone/resource/events.py\n+++ b/plone/resource/events.py\n@@ -1,6 +1,6 @@\n from plone.resource.interfaces import IPloneResourceCreatedEvent\n from plone.resource.interfaces import IPloneResourceModifiedEvent\n-from zope.component.interfaces import ObjectEvent\n+from zope.interface.interfaces import ObjectEvent\n from zope.interface import implementer\n \n \ndiff --git a/plone/resource/testing.py b/plone/resource/testing.py\nindex b1f6be2..0938270 100644\n--- a/plone/resource/testing.py\n+++ b/plone/resource/testing.py\n@@ -7,8 +7,8 @@\n from plone.testing import Layer\n from plone.testing import publisher\n from plone.testing import zca\n-from plone.testing.z2 import FunctionalTesting\n-from plone.testing.z2 import STARTUP\n+from plone.testing.zope import FunctionalTesting\n+from plone.testing.zope import STARTUP\n from zope.configuration import xmlconfig\n \n \ndiff --git a/plone/resource/tests/test_file.py b/plone/resource/tests/test_file.py\nindex c44eed8..df48acb 100644\n--- a/plone/resource/tests/test_file.py\n+++ b/plone/resource/tests/test_file.py\n@@ -29,13 +29,12 @@ def test_render(self):\n         request = TestRequest()\n \n         f = FilesystemFile(None, request, path, name)\n-        iterator = f()\n-\n-        data = b''.join(iterator)\n-        self.assertEqual(data, b'asdf')\n-        self.assertEqual(request.response.getHeader('Content-Type'), 'text/html')\n-        self.assertEqual(request.response.getHeader('Content-Length'), '4')\n-        self.assertEqual(request.response.getHeader('Last-Modified'), formatdate(mtime, usegmt=True))\n+        with f() as iterator:\n+            data = b''.join(iterator)\n+            self.assertEqual(data, b'asdf')\n+            self.assertEqual(request.response.getHeader('Content-Type'), 'text/html')\n+            self.assertEqual(request.response.getHeader('Content-Length'), '4')\n+            self.assertEqual(request.response.getHeader('Last-Modified'), formatdate(mtime, usegmt=True))\n \n     def test_last_modified(self):\n         provideAdapter(FileLastModified)\n@@ -63,12 +62,9 @@ def test_raw_read_file(self):\n \n         f = FilesystemFile(None, request, path, name)\n \n-        rf = IRawReadFile(f)\n-\n-        if six.PY2:\n-            self.assertTrue(isinstance(rf, file))\n-        else:\n-            self.assertTrue(isinstance(rf, io.IOBase))\n-        self.assertEqual(rf.read(), b'asdf')\n-\n-        rf.close()\n+        with IRawReadFile(f) as rf:\n+            if six.PY2:\n+                self.assertTrue(isinstance(rf, file))\n+            else:\n+                self.assertTrue(isinstance(rf, io.IOBase))\n+            self.assertEqual(rf.read(), b'asdf')\ndiff --git a/plone/resource/tests/test_traversal.py b/plone/resource/tests/test_traversal.py\nindex 963e34d..50bb3d8 100644\n--- a/plone/resource/tests/test_traversal.py\n+++ b/plone/resource/tests/test_traversal.py\n@@ -5,7 +5,7 @@\n from plone.resource.interfaces import IResourceDirectory\n from plone.resource.interfaces import IUniqueResourceRequest\n from plone.resource.testing import DEMO_TRAVERSER_FUNCTIONAL_TESTING\n-from plone.testing import z2\n+from plone.testing import zope\n from plone.testing import zca\n from Products.BTreeFolder2.BTreeFolder2 import BTreeFolder2\n from zExceptions import Forbidden\n@@ -83,7 +83,7 @@ def test_publish_resource(self):\n         dire = FilesystemResourceDirectory(test_dir_path)\n         provideUtility(dire, provides=IResourceDirectory, name=u'')\n \n-        browser = z2.Browser(self.app)\n+        browser = zope.Browser(self.app)\n         browser.handleErrors = False\n \n         browser.open(self.app.absolute_url() + '/++demo++foo/test.html')\n@@ -102,7 +102,7 @@ def test_publish_unique_resource(self):\n         dire = FilesystemResourceDirectory(test_dir_path)\n         provideUtility(dire, provides=IResourceDirectory, name=u'')\n \n-        browser = z2.Browser(self.app)\n+        browser = zope.Browser(self.app)\n         browser.handleErrors = False\n \n         browser.open(\n"
 
