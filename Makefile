@@ -29,7 +29,7 @@ build: ## Create virtualenv and run buildout
 .PHONY: clean
 clean: ## Remove old virtualenv and creates a new one
 	@echo "Clean"
-	rm -rf bin lib include share .Python
+	rm -rf develop-eggs eggs bin lib include share .Python .installed.cfg .mr.developer.cfg
 
 .PHONY: code-analysis
 code-analysis: ## Run static code analysis
