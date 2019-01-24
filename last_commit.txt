@@ -1,84 +1,38 @@
-Repository: plone.recipe.zope2instance
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2019-01-23T10:15:08+01:00
-Author: Michael Howitz (icemac) <mh@gocept.com>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/599224df27b3a17a6240a0cfa3c62413ea107459
+Date: 2019-01-24T11:51:53+01:00
+Author: Manuel Reinhardt (reinhardt) <reinhardt@syslab.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/3ccb72543cb063a7fcf721d4ec762870b7b1b9bb
 
-Improve readability.
-
-Files changed:
-M src/plone/recipe/zope2instance/ctl.py
-
-b'diff --git a/src/plone/recipe/zope2instance/ctl.py b/src/plone/recipe/zope2instance/ctl.py\nindex c333207..d62c83a 100644\n--- a/src/plone/recipe/zope2instance/ctl.py\n+++ b/src/plone/recipe/zope2instance/ctl.py\n@@ -739,14 +739,21 @@ def do_run(self, arg):\n \n         # Remove -c and add script as sys.argv[0]\n         script = tup[0]\n-        cmd = \'import sys; sys.argv.pop(); sys.argv.append(%r); \' % script\n+        cmd = [\n+            "import sys",\n+            "sys.argv.pop()",\n+            "sys.argv.append(%r)" % script,\n+        ]\n         if len(tup) > 1:\n             argv = tup[1:]\n-            cmd += \'[sys.argv.append(x) for x in %s]; \' % argv\n-        cmd += (\n-            "f = open(%r); src = f.read(); f.close(); exec(src)"\n-        ) % script\n-        cmdline = self.get_startup_cmd(self.options.python, cmd)\n+            cmd.append(\'[sys.argv.append(x) for x in %s]\' % argv)\n+        cmd.extend([\n+            "f = open(%r)" % script,\n+            "src = f.read()",\n+            "f.close()",\n+            "exec(src)",\n+        ])\n+        cmdline = self.get_startup_cmd(self.options.python, "; ".join(cmd))\n \n         self._exitstatus = os.system(cmdline)\n \n'
-
-Repository: plone.recipe.zope2instance
-
-
-Branch: refs/heads/master
-Date: 2019-01-23T10:19:54+01:00
-Author: Michael Howitz (icemac) <mh@gocept.com>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/b6f5986c199ebbe3a4001c9697a4fc8f036aaeea
-
-Improve debugging of run scripts by providing the source code for the debugger.
+Let folderListing know about the orphan parameter.
+Fixes folder view when there is one item more than the batch size.
+See https://github.com/plone/plone.app.contenttypes/issues/500
 
 Files changed:
 M CHANGES.rst
-M src/plone/recipe/zope2instance/ctl.py
+M plone/app/contenttypes/browser/folder.py
+M plone/app/contenttypes/tests/test_folder.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 8c97a0a..1b22b4d 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -4,7 +4,9 @@ Changelog\n 6.1.1 (unreleased)\n ------------------\n \n-- Nothing changed yet.\n+- Improve debugging of run scripts by providing the source code for the\n+  debugger.\n+  [icemac]\n \n \n 6.1.0 (2018-12-28)\ndiff --git a/src/plone/recipe/zope2instance/ctl.py b/src/plone/recipe/zope2instance/ctl.py\nindex d62c83a..6fce5f9 100644\n--- a/src/plone/recipe/zope2instance/ctl.py\n+++ b/src/plone/recipe/zope2instance/ctl.py\n@@ -751,7 +751,8 @@ def do_run(self, arg):\n             "f = open(%r)" % script,\n             "src = f.read()",\n             "f.close()",\n-            "exec(src)",\n+            "code = compile(src, filename=%r, mode=\'exec\')" % script,\n+            "exec(code)",\n         ])\n         cmdline = self.get_startup_cmd(self.options.python, "; ".join(cmd))\n \n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 8fa02b7f..eedd7c63 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -17,6 +17,9 @@ Bug fixes:\n - Fixed sorting error after Changing the base class for existing objects.\n   see `issue <https://github.com/plone/plone.app.contenttypes/issues/487>`\n   [jianaijun]\n+- Fix for folder view when there is one item more than the batch size.\n+  see `issue <https://github.com/plone/plone.app.contenttypes/issues/500>`\n+  [reinhardt]\n \n \n 2.0.0 (2018-10-30)\ndiff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py\nindex 3e1f7541..9b77f6b7 100644\n--- a/plone/app/contenttypes/browser/folder.py\n+++ b/plone/app/contenttypes/browser/folder.py\n@@ -89,6 +89,7 @@ def results(self, **kwargs):\n         kwargs.setdefault('batch', True)\n         kwargs.setdefault('b_size', self.b_size)\n         kwargs.setdefault('b_start', self.b_start)\n+        kwargs.setdefault('orphan', 1)\n \n         listing = aq_inner(self.context).restrictedTraverse(\n             '@@folderListing', None)\ndiff --git a/plone/app/contenttypes/tests/test_folder.py b/plone/app/contenttypes/tests/test_folder.py\nindex f8566534..a883bead 100644\n--- a/plone/app/contenttypes/tests/test_folder.py\n+++ b/plone/app/contenttypes/tests/test_folder.py\n@@ -98,6 +98,33 @@ def test_result_filtering(self):\n         )\n         self.assertEqual(len(res), 1)\n \n+    def test_result_batching(self):\n+        for idx in range(5):\n+            self.portal.invokeFactory('Document', 'document{}'.format(idx))\n+        request = self.request.clone()\n+        request.form['b_size'] = 5\n+        view = FolderView(self.portal, request)\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 5)\n+        self.assertEqual(len([item for item in batch]), 5)\n+        self.assertFalse(batch.has_next)\n+\n+        self.portal.invokeFactory('Document', 'document5')\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 6)\n+        self.assertEqual(len([item for item in batch]), 6)\n+        self.assertFalse(batch.has_next)\n+\n+        self.portal.invokeFactory('Document', 'document6')\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 5)\n+        self.assertEqual(len([item for item in batch]), 5)\n+        self.assertTrue(batch.has_next)\n+        self.assertEqual(batch.next_item_count, 2)\n+\n \n class FolderFunctionalTest(unittest.TestCase):\n \n"
 
-Repository: plone.recipe.zope2instance
-
-
-Branch: refs/heads/master
-Date: 2019-01-23T10:26:26+01:00
-Author: Michael Howitz (icemac) <mh@gocept.com>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/ad6c0b9393f2df7c4b04e6c9e0f752ef412a5817
-
-No longer ignore configuration options given on command line, e. g.
-
-by calling `tox -- -vv`  to get a verbose output.
-
-Files changed:
-M tox.ini
-
-b'diff --git a/tox.ini b/tox.ini\nindex f5ee1e8..c718129 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -11,7 +11,7 @@ skip_missing_interpreters = False\n [testenv]\n usedevelop = true\n commands =\n-    coverage run {envbindir}/zope-testrunner --test-path=src\n+    coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n deps =\n     -r https://zopefoundation.github.io/Zope/releases/4.0b7/requirements-full.txt\n'
-
-Repository: plone.recipe.zope2instance
+Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2019-01-23T10:34:21+01:00
-Author: Michael Howitz (icemac) <mh@gocept.com>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/fe6972e334bd7734001c21d773f8da822ccf4648
+Date: 2019-01-24T14:42:01+01:00
+Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/89c94e65654e60310945359a3ce2bc5ff1af5e3b
 
-Merge branch 'master' into improve-pdb-experience
+Merge pull request #501 from plone/500-folder-view-fix-orphan
+
+Let folderListing know about the orphan parameter
 
 Files changed:
 M CHANGES.rst
-M src/plone/recipe/zope2instance/recipe.py
-M src/plone/recipe/zope2instance/tests/wsgi.txt
+M plone/app/contenttypes/browser/folder.py
+M plone/app/contenttypes/tests/test_folder.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 1b22b4d..aa19c51 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,10 @@ Changelog\n   debugger.\n   [icemac]\n \n+- log level for Plone WSGI logger changed to INFO making the logging less\n+  verbose\n+  [ajung]\n+\n \n 6.1.0 (2018-12-28)\n ------------------\ndiff --git a/src/plone/recipe/zope2instance/recipe.py b/src/plone/recipe/zope2instance/recipe.py\nindex 45cb8a1..720f28f 100644\n--- a/src/plone/recipe/zope2instance/recipe.py\n+++ b/src/plone/recipe/zope2instance/recipe.py\n@@ -1194,7 +1194,7 @@ def render_file_storage(self, file_storage, blob_storage,\n handlers = console\n \n [logger_plone]\n-level = DEBUG\n+level = INFO\n handlers =\n qualname = plone\n \ndiff --git a/src/plone/recipe/zope2instance/tests/wsgi.txt b/src/plone/recipe/zope2instance/tests/wsgi.txt\nindex dc91892..ec3fdbd 100644\n--- a/src/plone/recipe/zope2instance/tests/wsgi.txt\n+++ b/src/plone/recipe/zope2instance/tests/wsgi.txt\n@@ -103,7 +103,7 @@ The buildout has also created an INI file containing the waitress configuration:\n     handlers = console\n     <BLANKLINE>\n     [logger_plone]\n-    level = DEBUG\n+    level = INFO\n     handlers =\n     qualname = plone\n     <BLANKLINE>\n'
-
-Repository: plone.recipe.zope2instance
-
-
-Branch: refs/heads/master
-Date: 2019-01-23T12:03:29+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.recipe.zope2instance/commit/9c3ec8ae6c27cd8c05e724a2fd742cfb204aa584
-
-Merge pull request #68 from plone/improve-pdb-experience
-
-Improve debugging of run scripts
-
-Files changed:
-M CHANGES.rst
-M src/plone/recipe/zope2instance/ctl.py
-M tox.ini
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex ce7989d..aa19c51 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -4,6 +4,10 @@ Changelog\n 6.1.1 (unreleased)\n ------------------\n \n+- Improve debugging of run scripts by providing the source code for the\n+  debugger.\n+  [icemac]\n+\n - log level for Plone WSGI logger changed to INFO making the logging less\n   verbose\n   [ajung]\ndiff --git a/src/plone/recipe/zope2instance/ctl.py b/src/plone/recipe/zope2instance/ctl.py\nindex c333207..6fce5f9 100644\n--- a/src/plone/recipe/zope2instance/ctl.py\n+++ b/src/plone/recipe/zope2instance/ctl.py\n@@ -739,14 +739,22 @@ def do_run(self, arg):\n \n         # Remove -c and add script as sys.argv[0]\n         script = tup[0]\n-        cmd = \'import sys; sys.argv.pop(); sys.argv.append(%r); \' % script\n+        cmd = [\n+            "import sys",\n+            "sys.argv.pop()",\n+            "sys.argv.append(%r)" % script,\n+        ]\n         if len(tup) > 1:\n             argv = tup[1:]\n-            cmd += \'[sys.argv.append(x) for x in %s]; \' % argv\n-        cmd += (\n-            "f = open(%r); src = f.read(); f.close(); exec(src)"\n-        ) % script\n-        cmdline = self.get_startup_cmd(self.options.python, cmd)\n+            cmd.append(\'[sys.argv.append(x) for x in %s]\' % argv)\n+        cmd.extend([\n+            "f = open(%r)" % script,\n+            "src = f.read()",\n+            "f.close()",\n+            "code = compile(src, filename=%r, mode=\'exec\')" % script,\n+            "exec(code)",\n+        ])\n+        cmdline = self.get_startup_cmd(self.options.python, "; ".join(cmd))\n \n         self._exitstatus = os.system(cmdline)\n \ndiff --git a/tox.ini b/tox.ini\nindex f5ee1e8..c718129 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -11,7 +11,7 @@ skip_missing_interpreters = False\n [testenv]\n usedevelop = true\n commands =\n-    coverage run {envbindir}/zope-testrunner --test-path=src\n+    coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n deps =\n     -r https://zopefoundation.github.io/Zope/releases/4.0b7/requirements-full.txt\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 8fa02b7f..eedd7c63 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -17,6 +17,9 @@ Bug fixes:\n - Fixed sorting error after Changing the base class for existing objects.\n   see `issue <https://github.com/plone/plone.app.contenttypes/issues/487>`\n   [jianaijun]\n+- Fix for folder view when there is one item more than the batch size.\n+  see `issue <https://github.com/plone/plone.app.contenttypes/issues/500>`\n+  [reinhardt]\n \n \n 2.0.0 (2018-10-30)\ndiff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py\nindex 3e1f7541..9b77f6b7 100644\n--- a/plone/app/contenttypes/browser/folder.py\n+++ b/plone/app/contenttypes/browser/folder.py\n@@ -89,6 +89,7 @@ def results(self, **kwargs):\n         kwargs.setdefault('batch', True)\n         kwargs.setdefault('b_size', self.b_size)\n         kwargs.setdefault('b_start', self.b_start)\n+        kwargs.setdefault('orphan', 1)\n \n         listing = aq_inner(self.context).restrictedTraverse(\n             '@@folderListing', None)\ndiff --git a/plone/app/contenttypes/tests/test_folder.py b/plone/app/contenttypes/tests/test_folder.py\nindex f8566534..a883bead 100644\n--- a/plone/app/contenttypes/tests/test_folder.py\n+++ b/plone/app/contenttypes/tests/test_folder.py\n@@ -98,6 +98,33 @@ def test_result_filtering(self):\n         )\n         self.assertEqual(len(res), 1)\n \n+    def test_result_batching(self):\n+        for idx in range(5):\n+            self.portal.invokeFactory('Document', 'document{}'.format(idx))\n+        request = self.request.clone()\n+        request.form['b_size'] = 5\n+        view = FolderView(self.portal, request)\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 5)\n+        self.assertEqual(len([item for item in batch]), 5)\n+        self.assertFalse(batch.has_next)\n+\n+        self.portal.invokeFactory('Document', 'document5')\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 6)\n+        self.assertEqual(len([item for item in batch]), 6)\n+        self.assertFalse(batch.has_next)\n+\n+        self.portal.invokeFactory('Document', 'document6')\n+\n+        batch = view.batch()\n+        self.assertEqual(batch.length, 5)\n+        self.assertEqual(len([item for item in batch]), 5)\n+        self.assertTrue(batch.has_next)\n+        self.assertEqual(batch.next_item_count, 2)\n+\n \n class FolderFunctionalTest(unittest.TestCase):\n \n"
 
