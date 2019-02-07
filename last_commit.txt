@@ -1,66 +1,55 @@
-Repository: plone.app.layout
+Repository: plone.app.robotframework
 
 
 Branch: refs/heads/master
-Date: 2019-02-06T21:39:24+01:00
+Date: 2019-02-03T12:47:19+01:00
 Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/0c90d14a59d9177f009d8784abf070658b6f0e05
+Commit: https://github.com/plone/plone.app.robotframework/commit/1e03a07de04d7ce2f05cdddd59f4766b9a26a74b
 
-Remove unnecessary line
+Modernize signal handling
 
-Refs. #2516
+Use the standard library signal module instead of the ZServer Signal module
 
-Files changed:
-M plone/app/layout/navigation/navtree.py
-
-b"diff --git a/plone/app/layout/navigation/navtree.py b/plone/app/layout/navigation/navtree.py\nindex e391a4d..01435b6 100644\n--- a/plone/app/layout/navigation/navtree.py\n+++ b/plone/app/layout/navigation/navtree.py\n@@ -488,7 +488,6 @@ def build_tree(self, path, first_run=True):\n         out = u''\n         for item in self.navtree.get(path, []):\n             out += self.render_item(item, path)\n-            self._item_markup_template.format(**item)\n \n         if not first_run and out:\n             out = self._subtree_markup_wrapper.format(out=out)\n"
-
-Repository: plone.app.layout
-
-
-Branch: refs/heads/master
-Date: 2019-02-07T12:11:48+01:00
-Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/d059d3d1d893455228ed720ef1bda3e585b7f99e
-
-Merge branch 'master' into 2516-fixup-2
+Fixes #97
 
 Files changed:
 M CHANGES.rst
-M plone/app/layout/navigation/navtree.py
-M plone/app/layout/viewlets/tests/test_common.py
+M src/plone/app/robotframework/reload.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 819af74..39166c7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,6 +18,9 @@ Bug fixes:\n - fix python3 compatibility\n   [petschki]\n \n+- Fix some issues with the new navigation. (Fixes https://github.com/plone/Products.CMFPlone/issues/2731 and https://github.com/plone/Products.CMFPlone/issues/2730)\n+  [pbauer]\n+\n \n 3.0.0 (2018-10-30)\n ------------------\ndiff --git a/plone/app/layout/navigation/navtree.py b/plone/app/layout/navigation/navtree.py\nindex 01435b6..e6386bf 100644\n--- a/plone/app/layout/navigation/navtree.py\n+++ b/plone/app/layout/navigation/navtree.py\n@@ -12,6 +12,7 @@\n from Products.CMFPlone import utils\n from Products.CMFPlone.interfaces.controlpanel import ILanguageSchema\n from Products.CMFPlone.interfaces.controlpanel import INavigationSchema\n+from Products.CMFPlone.utils import safe_unicode\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n from zope.contentprovider.provider import ContentProviderBase\n@@ -430,15 +431,21 @@ def navtree(self):\n             }\n             portal_catalog = getToolByName(self.context, \'portal_catalog\')\n \n+            registry = getUtility(IRegistry)\n+            types_using_view = registry.get(\n+                \'plone.types_use_view_action_in_listings\', [])\n             res = portal_catalog.searchResults(**query)\n \n             for it in res:\n                 pathkey = \'/\'.join(it.getPath().split(\'/\')[:-1])\n+                url = it.getURL()\n+                if it.portal_type in types_using_view:\n+                    url += \'/view\'\n                 entry = {\n                     \'id\': it.id,\n                     \'uid\': it.UID,\n-                    \'url\': it.getURL(),\n-                    \'title\': it.Title,\n+                    \'url\': url,\n+                    \'title\': safe_unicode(it.Title),\n                     \'review_state\': it.review_state,\n                 }\n                 ret.setdefault(pathkey, []).append(entry)\ndiff --git a/plone/app/layout/viewlets/tests/test_common.py b/plone/app/layout/viewlets/tests/test_common.py\nindex 9fd85e5..08402fe 100644\n--- a/plone/app/layout/viewlets/tests/test_common.py\n+++ b/plone/app/layout/viewlets/tests/test_common.py\n@@ -12,8 +12,10 @@\n from plone.registry.interfaces import IRegistry\n from Products.CMFPlone.interfaces import INonStructuralFolder\n from Products.CMFPlone.interfaces import ISiteSchema\n+from zope.component import getMultiAdapter\n from zope.component import getUtility\n from zope.component.hooks import setSite\n+from zope.contentprovider.interfaces import IContentProvider\n from zope.interface import alsoProvides\n from zope.interface import directlyProvides\n from zope.interface import noLongerProvides\n@@ -253,3 +255,46 @@ def test_selectedtabs_navroot(self):\n         gsv.update()\n         self.assertEqual(gsv.selected_tabs, {\'portal\': \'abc\'})\n         self.assertEqual(gsv.selected_portal_tab, \'abc\')\n+\n+    def test_globalnav_respects_types_use_view_action_in_listings(self):\n+        """ Test selected tabs with a INavigationroot folder involved\n+        """\n+        setRoles(self.portal, TEST_USER_ID, [\'Manager\'])\n+        self.portal.invokeFactory(\'Image\', \'image\', title=u\'S\xc3\xb6me Image\')\n+        self.portal.invokeFactory(\'File\', \'file\', title=u\'Some File\')\n+        self.portal.invokeFactory(\'Document\', \'doc\', title=u\'Some D\xc3\xb6cument\')\n+        request = self.layer[\'request\']\n+        gsv = GlobalSectionsViewlet(self.portal, request, None)\n+        gsv.update()\n+        html = gsv.render()\n+        self.assertIn(\'href="http://nohost/plone/image/view"\', html)\n+        self.assertIn(\'href="http://nohost/plone/file/view"\', html)\n+        self.assertIn(\'href="http://nohost/plone/doc"\', html)\n+\n+    def test_globalnav_navigation_depth(self):\n+        """ Test selected tabs with a INavigationroot folder involved\n+        """\n+        setRoles(self.portal, TEST_USER_ID, [\'Manager\'])\n+        registry = getUtility(IRegistry)\n+        registry[\'plone.navigation_depth\'] = 3\n+        self.portal.invokeFactory(\'Folder\', \'folder\', title=u\'F\xc3\xb6lder\')\n+        self.portal.invokeFactory(\'Folder\', \'folder2\', title=u\'Folder 2\')\n+        self.portal.invokeFactory(\'Folder\', \'folder3\', title=u\'Folder 3\')\n+        folder = self.portal.folder\n+        folder.invokeFactory(\'Folder\', \'subfolder\', title=u\'Subfolder\')\n+        folder.invokeFactory(\'Folder\', \'subfolder2\', title=u\'S\xc3\xbcbfolder 2\')\n+        subfolder = folder.subfolder\n+        subfolder.invokeFactory(\'Folder\', \'subsubfolder\', title=u\'Sub2folder\')\n+\n+        request = self.layer[\'request\']\n+        nav_tree_provider = getMultiAdapter(\n+            (self.portal, request, None), IContentProvider, \'plone.navtree\')\n+        navtree = nav_tree_provider.navtree\n+        self.assertEqual(len(navtree), 3)\n+        self.assertEqual(len(navtree[\'/plone\']), 3)\n+        self.assertEqual(len(navtree[\'/plone/folder\']), 2)\n+        self.assertEqual(len(navtree[\'/plone/folder/subfolder\']), 1)\n+\n+        gsv = GlobalSectionsViewlet(self.portal, request, None)\n+        gsv.update()\n+        self.assertTrue(gsv.render())\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex dd9f948..94e2c7d 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,6 +14,10 @@ New features:\n \n Bug fixes:\n \n+- Use the standard library signal module instead of the ZServer Signal module\n+  (Fixes #97)\n+  [ale-rt]\n+\n - Remove five.globalrequest dependency.\n   It has been deprecated upstream (Zope 4).\n   [gforcada]\ndiff --git a/src/plone/app/robotframework/reload.py b/src/plone/app/robotframework/reload.py\nindex 418b653..9a57feb 100644\n--- a/src/plone/app/robotframework/reload.py\n+++ b/src/plone/app/robotframework/reload.py\n@@ -1,20 +1,23 @@\n # -*- coding: utf-8 -*-\n \n+from watchdog.events import FileSystemEventHandler\n+from watchdog.observers import Observer\n+\n import os\n import signal\n import time\n \n-from Signals.SignalHandler import SignalHandler\n-from watchdog.events import FileSystemEventHandler\n-from watchdog.observers import Observer\n+\n+def TIME():\n+    return time.strftime(\'%H:%M:%S\')\n \n \n-registerHandler = SignalHandler.registerHandler\n+def WAIT(msg):\n+    return \'{0} [\\033[33m wait \\033[0m] {1}\'.format(TIME(), msg)\n \n \n-TIME = lambda: time.strftime(\'%H:%M:%S\')\n-WAIT = lambda msg:  \'{0} [\\033[33m wait \\033[0m] {1}\'.format(TIME(), msg)\n-ERROR = lambda msg: \'{0} [\\033[31m ERROR \\033[0m] {1}\'.format(TIME(), msg)\n+def ERROR(msg):\n+    return \'{0} [\\033[31m ERROR \\033[0m] {1}\'.format(TIME(), msg)\n \n \n class Watcher(FileSystemEventHandler):\n@@ -33,8 +36,8 @@ def start(self):\n         """Start file monitoring thread\n         """\n \n-        registerHandler(signal.SIGINT, self._exitHandler)\n-        registerHandler(signal.SIGTERM, self._exitHandler)\n+        signal.signal(signal.SIGINT, self._exitHandler)\n+        signal.signal(signal.SIGTERM, self._exitHandler)\n \n         for path in self.paths:\n             print(WAIT("Watchdog is watching for changes in %s" % path))\n@@ -116,23 +119,24 @@ def start(self):\n         """\n         # SIGCHLD tells us that child process has really died and we can spawn\n         # new child\n-        registerHandler(signal.SIGCHLD, self._waitChildToDieAndScheduleNew)\n+        signal.signal(signal.SIGCHLD, self._waitChildToDieAndScheduleNew)\n \n         # With SIGUSR1 child can tell that it dies by request, not by exception\n         # etc.\n-        registerHandler(signal.SIGUSR1, self._childIsGoingToDie)\n+        signal.signal(signal.SIGUSR1, self._childIsGoingToDie)\n \n         self.loop()\n \n     def loop(self):\n         """Magic happens\n         """\n-        registerHandler(signal.SIGINT, self._parentExitHandler)\n-        registerHandler(signal.SIGTERM, self._parentExitHandler)\n+        signal.signal(signal.SIGINT, self._parentExitHandler)\n+        signal.signal(signal.SIGTERM, self._parentExitHandler)\n \n         self.active = True\n \n-        print(WAIT("Fork loop now starting on parent process %i" % os.getpid()))\n+        msg = "Fork loop now starting on parent process %i" % os.getpid()\n+        print(WAIT(msg))\n         while True:\n             self.forking = False\n \n'
 
-Repository: plone.app.layout
+Repository: plone.app.robotframework
 
 
 Branch: refs/heads/master
-Date: 2019-02-07T12:16:24+01:00
+Date: 2019-02-07T14:19:54+01:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.robotframework/commit/1c25bb251bf8cf11d45433d1f17922ae1bc8d9df
+
+Merge remote-tracking branch 'origin/master' into use-std-library-signal-handlers
+
+Files changed:
+M .travis.yml
+M CHANGES.rst
+M setup.cfg
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex 7557833..8eaa806 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -1,10 +1,9 @@\n+dist: xenial\n language: python\n python: 2.7\n sudo: false\n addons:\n-  sauce_connect:\n-    username: $SAUCE_USERNAME\n-    access_key: $SAUCE_ACCESS_KEY\n+  sauce_connect: true\n cache:\n   pip: true\n   directories:\n@@ -19,6 +18,7 @@ env:\n     - ARTIFACTS_S3_BUCKET=plone.app.robotframework\n     - ROBOT_BUILD_NUMBER=travis-$TRAVIS_BUILD_NUMBER\n     - ROBOT_REMOTE_URL=http://$SAUCE_USERNAME:$SAUCE_ACCESS_KEY@ondemand.saucelabs.com:80/wd/hub\n+    - ZSERVER_PORT=55001\n   matrix:\n     - ROBOT_BROWSER=firefox ROBOT_DESIRED_CAPABILITIES=tunnel-identifier:$TRAVIS_JOB_NUMBER\n     - ROBOT_BROWSER=chrome ROBOT_DESIRED_CAPABILITIES=tunnel-identifier:$TRAVIS_JOB_NUMBER\ndiff --git a/CHANGES.rst b/CHANGES.rst\nindex 94e2c7d..0f52f21 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -18,6 +18,10 @@ Bug fixes:\n   (Fixes #97)\n   [ale-rt]\n \n+- Fix the travis build which is broken since we are picking a random port\n+  (fixes #100)\n+  [ale-rt]\n+\n - Remove five.globalrequest dependency.\n   It has been deprecated upstream (Zope 4).\n   [gforcada]\ndiff --git a/setup.cfg b/setup.cfg\nindex b1d742e..8782193 100644\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -7,12 +7,7 @@ ignore =\n     templates\n     templates/varnish.vcl.in\n \n-# When Python 2-3 compatible:\n-# [bdist_wheel]\n-# universal = 1\n \n-[zest.releaser]\n-create-wheel = yes\n \n [isort]\n force_alphabetical_sort = True\n@@ -22,3 +17,6 @@ line_length = 79\n not_skip = __init__.py\n use_parentheses = True\n multi_line_output = 3\n+\n+[bdist_wheel]\n+universal = 1\n'
+
+Repository: plone.app.robotframework
+
+
+Branch: refs/heads/master
+Date: 2019-02-07T15:23:31+01:00
 Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/91634f7eabf9a4fcd3f59d072c4eb439d29eed51
+Commit: https://github.com/plone/plone.app.robotframework/commit/23fd5094b5bb2e1bbeafed6a5a3e0a42cc11eb51
 
-Merge branch 'master' into 2516-fixup-2
+Merge pull request #98 from plone/use-std-library-signal-handlers
 
-Files changed:
-M plone/app/layout/navigation/navtree.py
-
-b'diff --git a/plone/app/layout/navigation/navtree.py b/plone/app/layout/navigation/navtree.py\nindex e6386bf..b665683 100644\n--- a/plone/app/layout/navigation/navtree.py\n+++ b/plone/app/layout/navigation/navtree.py\n@@ -406,10 +406,6 @@ def navtree_path(self):\n     def navtree_depth(self):\n         return self.settings.navigation_depth\n \n-    @property\n-    def enableDesc(self):\n-        return True\n-\n     @property\n     @memoize\n     def navtree(self):\n'
-
-Repository: plone.app.layout
-
-
-Branch: refs/heads/master
-Date: 2019-02-07T14:38:57+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.app.layout/commit/138f941786a0874cc4293013b0f35c142ea19bd4
-
-Merge pull request #179 from plone/2516-fixup-2
-
-Remove unnecessary line
+Modernize signal handling
 
 Files changed:
-M plone/app/layout/navigation/navtree.py
+M CHANGES.rst
+M src/plone/app/robotframework/reload.py
 
-b"diff --git a/plone/app/layout/navigation/navtree.py b/plone/app/layout/navigation/navtree.py\nindex 0a4b934..b665683 100644\n--- a/plone/app/layout/navigation/navtree.py\n+++ b/plone/app/layout/navigation/navtree.py\n@@ -491,7 +491,6 @@ def build_tree(self, path, first_run=True):\n         out = u''\n         for item in self.navtree.get(path, []):\n             out += self.render_item(item, path)\n-            self._item_markup_template.format(**item)\n \n         if not first_run and out:\n             out = self._subtree_markup_wrapper.format(out=out)\n"
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex a280d4b..0f52f21 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,6 +14,10 @@ New features:\n \n Bug fixes:\n \n+- Use the standard library signal module instead of the ZServer Signal module\n+  (Fixes #97)\n+  [ale-rt]\n+\n - Fix the travis build which is broken since we are picking a random port\n   (fixes #100)\n   [ale-rt]\ndiff --git a/src/plone/app/robotframework/reload.py b/src/plone/app/robotframework/reload.py\nindex 418b653..9a57feb 100644\n--- a/src/plone/app/robotframework/reload.py\n+++ b/src/plone/app/robotframework/reload.py\n@@ -1,20 +1,23 @@\n # -*- coding: utf-8 -*-\n \n+from watchdog.events import FileSystemEventHandler\n+from watchdog.observers import Observer\n+\n import os\n import signal\n import time\n \n-from Signals.SignalHandler import SignalHandler\n-from watchdog.events import FileSystemEventHandler\n-from watchdog.observers import Observer\n+\n+def TIME():\n+    return time.strftime(\'%H:%M:%S\')\n \n \n-registerHandler = SignalHandler.registerHandler\n+def WAIT(msg):\n+    return \'{0} [\\033[33m wait \\033[0m] {1}\'.format(TIME(), msg)\n \n \n-TIME = lambda: time.strftime(\'%H:%M:%S\')\n-WAIT = lambda msg:  \'{0} [\\033[33m wait \\033[0m] {1}\'.format(TIME(), msg)\n-ERROR = lambda msg: \'{0} [\\033[31m ERROR \\033[0m] {1}\'.format(TIME(), msg)\n+def ERROR(msg):\n+    return \'{0} [\\033[31m ERROR \\033[0m] {1}\'.format(TIME(), msg)\n \n \n class Watcher(FileSystemEventHandler):\n@@ -33,8 +36,8 @@ def start(self):\n         """Start file monitoring thread\n         """\n \n-        registerHandler(signal.SIGINT, self._exitHandler)\n-        registerHandler(signal.SIGTERM, self._exitHandler)\n+        signal.signal(signal.SIGINT, self._exitHandler)\n+        signal.signal(signal.SIGTERM, self._exitHandler)\n \n         for path in self.paths:\n             print(WAIT("Watchdog is watching for changes in %s" % path))\n@@ -116,23 +119,24 @@ def start(self):\n         """\n         # SIGCHLD tells us that child process has really died and we can spawn\n         # new child\n-        registerHandler(signal.SIGCHLD, self._waitChildToDieAndScheduleNew)\n+        signal.signal(signal.SIGCHLD, self._waitChildToDieAndScheduleNew)\n \n         # With SIGUSR1 child can tell that it dies by request, not by exception\n         # etc.\n-        registerHandler(signal.SIGUSR1, self._childIsGoingToDie)\n+        signal.signal(signal.SIGUSR1, self._childIsGoingToDie)\n \n         self.loop()\n \n     def loop(self):\n         """Magic happens\n         """\n-        registerHandler(signal.SIGINT, self._parentExitHandler)\n-        registerHandler(signal.SIGTERM, self._parentExitHandler)\n+        signal.signal(signal.SIGINT, self._parentExitHandler)\n+        signal.signal(signal.SIGTERM, self._parentExitHandler)\n \n         self.active = True\n \n-        print(WAIT("Fork loop now starting on parent process %i" % os.getpid()))\n+        msg = "Fork loop now starting on parent process %i" % os.getpid()\n+        print(WAIT(msg))\n         while True:\n             self.forking = False\n \n'
 
