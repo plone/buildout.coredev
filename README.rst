@@ -1,26 +1,3 @@
-============
-Build Status
-============
-
-Jenkins CI - Plone 5.2 - core:
-
-.. image:: http://jenkins.plone.org/job/plone-5.2-python-2.7/badge/icon
-    :target: http://jenkins.plone.org/job/plone-5.2-python-2.7/
-    :alt: Jenkins CI - Plone 5.2 - core
-
-Jenkins CI - Plone 5.2 - with archetypes:
-
-.. image:: http://jenkins.plone.org/job/plone-5.2-python-2.7-at/badge/icon
-    :target: http://jenkins.plone.org/job/plone-5.2-python-2.7-at/
-    :alt: Jenkins CI - Plone 5.2 - with Archetypes
-
-Jenkins CI - Plone 5.2 - robot framework:
-
-.. image:: http://jenkins.plone.org/job/plone-5.2-python-2.7-robot/badge/icon
-    :target: http://jenkins.plone.org/job/plone-5.2-python-2.7-robot/
-    :alt: Jenkins CI - Plone 5.2 - robot framework
-
-
 Introduction
 ============
 This is the development buildout for Plone Core.
