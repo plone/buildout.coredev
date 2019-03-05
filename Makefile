@@ -26,6 +26,13 @@ build: ## Create virtualenv and run buildout
 	bin/pip install -r requirements.txt --upgrade
 	bin/buildout
 
+.PHONY: build-py3
+build-py3:
+	virtualenv --python=python3 .
+	bin/pip install --upgrade pip
+	bin/pip install -r requirements.txt
+	bin/buildout
+
 .PHONY: clean
 clean: ## Remove old virtualenv and creates a new one
 	@echo "Clean"
