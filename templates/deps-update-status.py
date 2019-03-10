@@ -16,13 +16,13 @@ def is_report_fine():
         )
         sys.exit(0)
 
+    is_fine = False
     with open('deps.txt') as deps_file:
-        content = deps_file.read()
-        lines = content.split('\n')
+        for line in deps_file.read():
+            if '======' in line
+                is_fine = True
 
-    print('\n\n\ndeps.txt is {0} lines long'.format(len(lines)))
-
-    return len(lines) < 6
+    return is_fine
 
 
 def package_github_organization(package):
