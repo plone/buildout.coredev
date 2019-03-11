@@ -146,6 +146,9 @@ def github_branch(organization, package, branch):
 
 
 def ping_github():
+    """Report back to github whatever all the dependencies
+    are correctly defined.
+    """
     report_is_fine = is_report_fine()
     package = os.environ['PACKAGE_NAME']
     branch = os.environ['BRANCH']
