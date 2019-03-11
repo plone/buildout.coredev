@@ -19,7 +19,7 @@ def is_report_fine():
     is_fine = False
     with open('deps.txt') as deps_file:
         for line in deps_file.read():
-            if '======' in line
+            if '======' in line:
                 is_fine = True
 
     return is_fine
