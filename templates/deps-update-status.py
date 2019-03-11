@@ -135,17 +135,23 @@ def _update_branch(g_branch, report_is_fine):
     )
 
 
-def ping_github():
-    report_is_fine = is_report_fine()
-    package = os.environ['PACKAGE_NAME']
-    branch = os.environ['BRANCH']
-    organization = package_github_organization(package)
+def github_branch(organization, package, branch):
     github_api_key = _get_github_api()
 
     g = Github(github_api_key)
     g_org = _get_github_organization(g, organization)
     g_repo = _get_github_repository(g_org, package)
     g_branch = _get_github_branch(g_repo, branch)
+    return g_branch
+
+
+def ping_github():
+    report_is_fine = is_report_fine()
+    package = os.environ['PACKAGE_NAME']
+    branch = os.environ['BRANCH']
+    organization = package_github_organization(package)
+
+    g_branch = github_branch(organization, package, branch)
     _update_branch(g_branch, report_is_fine)
 
 
