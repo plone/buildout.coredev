@@ -1,49 +1,38 @@
-Repository: Products.CMFPlone
+Repository: plone.app.robotframework
 
 
 Branch: refs/heads/master
-Date: 2019-03-15T14:20:40+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/02d59d881f602b242179e1b7e9145b975eb3dab8
+Date: 2019-03-18T13:16:07+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.robotframework/commit/6c080c9bff7783ea3e6270dee86b858358d06eec
 
-Add summary of all errors and how often they happend to verifydb.
+Patch selenium.is_connectable for Python 3 to retry on ConnectionResetError.
+
+Fixes https://github.com/plone/Products.CMFPlone/issues/2786.
 
 Files changed:
-A news/2798.bugfix
-M Products/CMFPlone/_scripts/verifydb.py
+A news/2786.bugfix
+A src/plone/app/robotframework/patches.py
+M src/plone/app/robotframework/__init__.py
 
-b"diff --git a/Products/CMFPlone/_scripts/verifydb.py b/Products/CMFPlone/_scripts/verifydb.py\nindex 02e817cc1..34448e477 100644\n--- a/Products/CMFPlone/_scripts/verifydb.py\n+++ b/Products/CMFPlone/_scripts/verifydb.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from collections import Counter\n from Zope2.Startup.run import make_wsgi_app\n from ZODB.interfaces import IStorageCurrentRecordIteration\n from ZODB.serialize import PersistentUnpickler\n@@ -43,20 +44,28 @@ def verify_zodb(obj, debug=False):\n     next_ = None\n     count = 0\n     errors = 0\n+    issues = []\n     while True:\n         count += 1\n         oid, tid, data, next_ = storage.record_iternext(next_)\n         logger.debug('Verifying {}'.format(oid))\n-        success = verify_record(oid, data, debug)\n+        success, msg = verify_record(oid, data, debug)\n         if not success:\n             errors += 1\n+            issues.append(msg)\n         if next_ is None:\n             break\n \n+    issues = dict(Counter(sorted(issues)))\n+    msg = ''\n+    for value, amount in issues.items():\n+        msg += '{}: {}\\n'.format(value, amount)\n+\n     logger.info(\n-        'Done! Scanned {} records. '\n-        'Found {} records that could not be loaded.'.format(\n-            count, errors)\n+        'Done! Scanned {} records. \\n'\n+        'Found {} records that could not be loaded. \\n'\n+        'Exceptions and how often they happened: \\n'\n+        '{}'.format(count, errors, msg)\n     )\n \n \n@@ -69,7 +78,7 @@ def verify_record(oid, data, debug=False):\n         class_info = unpickler.load()\n         pos = input_file.tell()\n         unpickler.load()\n-    except Exception:\n+    except Exception as e:\n         input_file.seek(0)\n         pickle = input_file.read()\n         logger.info('\\nCould not process {} record {}:'.format(\n@@ -89,8 +98,10 @@ def verify_record(oid, data, debug=False):\n                 pdb.set_trace()\n         elif debug and pos is None:\n             pdb.set_trace()\n-        return False\n-    return True\n+        # The same issues should have the same msg\n+        msg = '{}: {}'.format(e.__class__.__name__, str(e))\n+        return False, msg\n+    return True, None\n \n \n def persistent_load(ref):\ndiff --git a/news/2798.bugfix b/news/2798.bugfix\nnew file mode 100644\nindex 000000000..683a79d0e\n--- /dev/null\n+++ b/news/2798.bugfix\n@@ -0,0 +1,2 @@\n+Add summary of all errors when verifying a DB with ./bin/instance verifydb.\n+[pbauer]\n\\ No newline at end of file\n"
+b'diff --git a/news/2786.bugfix b/news/2786.bugfix\nnew file mode 100644\nindex 0000000..4f6cf35\n--- /dev/null\n+++ b/news/2786.bugfix\n@@ -0,0 +1,3 @@\n+Patch selenium.is_connectable for Python 3 to retry on ConnectionResetError.\n+See `issue 2786 <https://github.com/plone/Products.CMFPlone/issues/2786>`_.\n+[maurits]\ndiff --git a/src/plone/app/robotframework/__init__.py b/src/plone/app/robotframework/__init__.py\nindex 936c19c..06749a1 100644\n--- a/src/plone/app/robotframework/__init__.py\n+++ b/src/plone/app/robotframework/__init__.py\n@@ -25,3 +25,6 @@\n \n # Robot Plone fixture\n from plone.app.robotframework.testing import PLONE_ROBOT_TESTING\n+\n+# Load our patches.  Call it _patches to mark it as private.\n+from plone.app.robotframework import patches as _patches\ndiff --git a/src/plone/app/robotframework/patches.py b/src/plone/app/robotframework/patches.py\nnew file mode 100644\nindex 0000000..791e2ce\n--- /dev/null\n+++ b/src/plone/app/robotframework/patches.py\n@@ -0,0 +1,25 @@\n+# -*- coding: utf-8 -*-\n+# Patch selenium.is_connectable for Python 3.\n+# See https://github.com/SeleniumHQ/selenium/pull/6480\n+# and for Plone: https://github.com/plone/Products.CMFPlone/issues/2786\n+from selenium.webdriver.common import utils\n+\n+try:\n+    # Python 3\n+    ConnectionResetError\n+except NameError:\n+    # Python 2\n+    ConnectionResetError = None\n+\n+\n+if ConnectionResetError is not None:\n+    orig_is_connectable = utils.is_connectable\n+\n+    def patched_is_connectable(port, host="localhost"):\n+        try:\n+            return orig_is_connectable(port, host=host)\n+        except ConnectionResetError:\n+            # Try again once.\n+            return orig_is_connectable(port, host=host)\n+\n+    utils.is_connectable = patched_is_connectable\n'
 
-Repository: Products.CMFPlone
+Repository: plone.app.robotframework
 
 
 Branch: refs/heads/master
-Date: 2019-03-17T21:00:16+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/7fdf9de8f18c95c9a6bb5db381e45a627e69b025
+Date: 2019-03-19T10:41:22+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.robotframework/commit/3d4a1e6a3130db7f5232aa89d783198441615a99
 
-drop the dict
+Merge pull request #108 from plone/maurits-patch-selenium-connectionreseterror
 
-Files changed:
-M Products/CMFPlone/_scripts/verifydb.py
-
-b"diff --git a/Products/CMFPlone/_scripts/verifydb.py b/Products/CMFPlone/_scripts/verifydb.py\nindex 34448e477..8e0fd0a7f 100644\n--- a/Products/CMFPlone/_scripts/verifydb.py\n+++ b/Products/CMFPlone/_scripts/verifydb.py\n@@ -56,7 +56,7 @@ def verify_zodb(obj, debug=False):\n         if next_ is None:\n             break\n \n-    issues = dict(Counter(sorted(issues)))\n+    issues = Counter(sorted(issues))\n     msg = ''\n     for value, amount in issues.items():\n         msg += '{}: {}\\n'.format(value, amount)\n"
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2019-03-17T21:01:28+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/5af6be9100efb06ab07128c12924abaaad5cb86a
-
-Merge pull request #2798 from plone/better_output_verifydb
-
-Add summary of all errors and how often they happend to verifydb
+Patch selenium.is_connectable for Python 3 for ConnectionResetError
 
 Files changed:
-A news/2798.bugfix
-M Products/CMFPlone/_scripts/verifydb.py
+A news/2786.bugfix
+A src/plone/app/robotframework/patches.py
+M src/plone/app/robotframework/__init__.py
 
-b"diff --git a/Products/CMFPlone/_scripts/verifydb.py b/Products/CMFPlone/_scripts/verifydb.py\nindex 02e817cc1..8e0fd0a7f 100644\n--- a/Products/CMFPlone/_scripts/verifydb.py\n+++ b/Products/CMFPlone/_scripts/verifydb.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+from collections import Counter\n from Zope2.Startup.run import make_wsgi_app\n from ZODB.interfaces import IStorageCurrentRecordIteration\n from ZODB.serialize import PersistentUnpickler\n@@ -43,20 +44,28 @@ def verify_zodb(obj, debug=False):\n     next_ = None\n     count = 0\n     errors = 0\n+    issues = []\n     while True:\n         count += 1\n         oid, tid, data, next_ = storage.record_iternext(next_)\n         logger.debug('Verifying {}'.format(oid))\n-        success = verify_record(oid, data, debug)\n+        success, msg = verify_record(oid, data, debug)\n         if not success:\n             errors += 1\n+            issues.append(msg)\n         if next_ is None:\n             break\n \n+    issues = Counter(sorted(issues))\n+    msg = ''\n+    for value, amount in issues.items():\n+        msg += '{}: {}\\n'.format(value, amount)\n+\n     logger.info(\n-        'Done! Scanned {} records. '\n-        'Found {} records that could not be loaded.'.format(\n-            count, errors)\n+        'Done! Scanned {} records. \\n'\n+        'Found {} records that could not be loaded. \\n'\n+        'Exceptions and how often they happened: \\n'\n+        '{}'.format(count, errors, msg)\n     )\n \n \n@@ -69,7 +78,7 @@ def verify_record(oid, data, debug=False):\n         class_info = unpickler.load()\n         pos = input_file.tell()\n         unpickler.load()\n-    except Exception:\n+    except Exception as e:\n         input_file.seek(0)\n         pickle = input_file.read()\n         logger.info('\\nCould not process {} record {}:'.format(\n@@ -89,8 +98,10 @@ def verify_record(oid, data, debug=False):\n                 pdb.set_trace()\n         elif debug and pos is None:\n             pdb.set_trace()\n-        return False\n-    return True\n+        # The same issues should have the same msg\n+        msg = '{}: {}'.format(e.__class__.__name__, str(e))\n+        return False, msg\n+    return True, None\n \n \n def persistent_load(ref):\ndiff --git a/news/2798.bugfix b/news/2798.bugfix\nnew file mode 100644\nindex 000000000..683a79d0e\n--- /dev/null\n+++ b/news/2798.bugfix\n@@ -0,0 +1,2 @@\n+Add summary of all errors when verifying a DB with ./bin/instance verifydb.\n+[pbauer]\n\\ No newline at end of file\n"
+b'diff --git a/news/2786.bugfix b/news/2786.bugfix\nnew file mode 100644\nindex 0000000..4f6cf35\n--- /dev/null\n+++ b/news/2786.bugfix\n@@ -0,0 +1,3 @@\n+Patch selenium.is_connectable for Python 3 to retry on ConnectionResetError.\n+See `issue 2786 <https://github.com/plone/Products.CMFPlone/issues/2786>`_.\n+[maurits]\ndiff --git a/src/plone/app/robotframework/__init__.py b/src/plone/app/robotframework/__init__.py\nindex 936c19c..06749a1 100644\n--- a/src/plone/app/robotframework/__init__.py\n+++ b/src/plone/app/robotframework/__init__.py\n@@ -25,3 +25,6 @@\n \n # Robot Plone fixture\n from plone.app.robotframework.testing import PLONE_ROBOT_TESTING\n+\n+# Load our patches.  Call it _patches to mark it as private.\n+from plone.app.robotframework import patches as _patches\ndiff --git a/src/plone/app/robotframework/patches.py b/src/plone/app/robotframework/patches.py\nnew file mode 100644\nindex 0000000..791e2ce\n--- /dev/null\n+++ b/src/plone/app/robotframework/patches.py\n@@ -0,0 +1,25 @@\n+# -*- coding: utf-8 -*-\n+# Patch selenium.is_connectable for Python 3.\n+# See https://github.com/SeleniumHQ/selenium/pull/6480\n+# and for Plone: https://github.com/plone/Products.CMFPlone/issues/2786\n+from selenium.webdriver.common import utils\n+\n+try:\n+    # Python 3\n+    ConnectionResetError\n+except NameError:\n+    # Python 2\n+    ConnectionResetError = None\n+\n+\n+if ConnectionResetError is not None:\n+    orig_is_connectable = utils.is_connectable\n+\n+    def patched_is_connectable(port, host="localhost"):\n+        try:\n+            return orig_is_connectable(port, host=host)\n+        except ConnectionResetError:\n+            # Try again once.\n+            return orig_is_connectable(port, host=host)\n+\n+    utils.is_connectable = patched_is_connectable\n'
 
