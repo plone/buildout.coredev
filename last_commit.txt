@@ -1,99 +1,17 @@
-Repository: plone.app.caching
+Repository: plone.app.referenceablebehavior
 
 
 Branch: refs/heads/master
-Date: 2019-04-01T22:28:31+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.caching/commit/07fa22e397e8185d33122dd13a414c6db5a6bce1
+Date: 2019-04-08T13:15:01-07:00
+Author: Ross Patterson (rpatterson) <me@rpatterson.net>
+Commit: https://github.com/plone/plone.app.referenceablebehavior/commit/a45f487e0f94effb3992c18c9f416d5cb2cf7234
 
-add failing test
-
-Files changed:
-M plone/app/caching/tests/test_integration.py
-
-b'diff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex fcd58df..d3d6cc3 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -1,12 +1,14 @@\n # -*- coding: utf-8 -*-\n from plone.app.caching.interfaces import IPloneCacheSettings\n-from plone.app.caching.testing import getToken\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n-from plone.app.testing import applyProfile\n-from plone.app.testing import setRoles\n+from plone.app.caching.testing import getToken\n+from plone.app.testing import SITE_OWNER_NAME\n+from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n from plone.app.testing import TEST_USER_NAME\n from plone.app.testing import TEST_USER_PASSWORD\n+from plone.app.testing import applyProfile\n+from plone.app.testing import setRoles\n from plone.app.textfield.value import RichTextValue\n from plone.cachepurging.interfaces import ICachePurgingSettings\n from plone.cachepurging.interfaces import IPurger\n@@ -78,6 +80,18 @@ def setUp(self):\n     def tearDown(self):\n         setRequest(None)\n \n+    def test_controlpanel(self):\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            \'Authorization\',\n+            \'Basic {0}:{1}\'.format(SITE_OWNER_NAME, SITE_OWNER_PASSWORD, ),\n+        )\n+\n+        browser.open("{}/@@caching-controlpanel".format(self.portal.absolute_url()))  # noqa\n+        browser.getControl(name=\'enabled:boolean\').value = \'checked\'\n+        browser.getControl(\'Save\').click()\n+\n     def test_disabled(self):\n         self.cacheSettings.enabled = False\n \n'
-
-Repository: plone.app.caching
-
-
-Branch: refs/heads/master
-Date: 2019-04-02T15:40:06+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.caching/commit/67bb0f583ec19f669dd97bbf999a8f61f485a87a
-
-fix processing controlpanel form inputs
-
-NOTE: this needs https://github.com/zopefoundation/plone.z3cform/pull/25
+Fix references missing from the reference catalog on move/rename
 
 Files changed:
-A news/48.bugfix
-M plone/app/caching/browser/controlpanel.py
-M setup.py
+M CHANGES.rst
+M plone/app/referenceablebehavior/tests/test_basics.py
+M plone/app/referenceablebehavior/uidcatalog.py
 
-b"diff --git a/news/48.bugfix b/news/48.bugfix\nnew file mode 100644\nindex 0000000..520c2b0\n--- /dev/null\n+++ b/news/48.bugfix\n@@ -0,0 +1,2 @@\n+Fix controlpanel for Python 3\n+[petschki]\ndiff --git a/plone/app/caching/browser/controlpanel.py b/plone/app/caching/browser/controlpanel.py\nindex 7cc9b7b..a383038 100644\n--- a/plone/app/caching/browser/controlpanel.py\n+++ b/plone/app/caching/browser/controlpanel.py\n@@ -1,8 +1,13 @@\n # -*- coding: utf-8 -*-\n+from Products.CMFCore.utils import getToolByName\n+from Products.GenericSetup.interfaces import BASE\n+from Products.GenericSetup.interfaces import EXTENSION\n+from Products.statusmessages.interfaces import IStatusMessage\n+from operator import itemgetter\n from plone.app.caching.browser.edit import EditForm\n-from plone.app.caching.interfaces import _\n from plone.app.caching.interfaces import ICacheProfiles\n from plone.app.caching.interfaces import IPloneCacheSettings\n+from plone.app.caching.interfaces import _\n from plone.cachepurging.interfaces import ICachePurgingSettings\n from plone.cachepurging.interfaces import IPurger\n from plone.cachepurging.utils import getPathsToPurge\n@@ -13,10 +18,7 @@\n from plone.memoize.instance import memoize\n from plone.protect import CheckAuthenticator\n from plone.registry.interfaces import IRegistry\n-from Products.CMFCore.utils import getToolByName\n-from Products.GenericSetup.interfaces import BASE\n-from Products.GenericSetup.interfaces import EXTENSION\n-from Products.statusmessages.interfaces import IStatusMessage\n+from plone.z3cform.z2 import processInputs\n from z3c.caching.interfaces import IRulesetType\n from z3c.caching.registry import enumerateTypes\n from zope.component import getUtilitiesFor\n@@ -28,7 +30,6 @@\n from zope.ramcache.interfaces.ram import IRAMCache\n \n import datetime\n-from operator import itemgetter\n import re\n import six\n \n@@ -161,6 +162,9 @@ def publishTraverse(self, request, name):\n     def update(self):\n         if super(ControlPanel, self).update():\n             if 'form.button.Save' in self.request.form:\n+                if six.PY3:\n+                    # decode the inputs recursively to unicode\n+                    processInputs(self.request)\n                 self.processSave()\n             elif 'form.button.Cancel' in self.request.form:\n                 self.request.response.redirect(\n@@ -198,16 +202,9 @@ def processSave(self):\n         # Process mappings and validate\n \n         for ruleset, operation in operations.items():\n-\n             if not ruleset or not operation:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode('utf-8')\n-\n-            if isinstance(operation, six.text_type):  # should be ASCII\n-                operation = operation.encode('utf-8')\n-\n             ruleset = ruleset.replace('-', '.')\n             operationMapping[ruleset] = operation\n \n@@ -215,17 +212,11 @@ def processSave(self):\n             if not ruleset:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode('utf-8')\n-\n             ruleset = ruleset.replace('-', '.')\n             for contentType in contentTypes:\n                 if not contentType:\n                     continue\n \n-                if isinstance(contentType, six.text_type):  # should be ASCII\n-                    contentType = contentType.encode('utf-8')\n-\n                 if contentType in contentTypeRulesetMapping:\n                     self.errors.setdefault(\n                         'contenttypes', {},\n@@ -249,18 +240,12 @@ def processSave(self):\n             if not ruleset:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode('utf-8')\n-\n             ruleset = ruleset.replace('-', '.')\n             for template in templates:\n                 template = template.strip()\n                 if not template:\n                     continue\n \n-                if isinstance(template, six.text_type):  # should be ASCII\n-                    template = template.encode('utf-8')\n-\n                 if template in templateRulesetMapping:\n                     self.errors.setdefault(\n                         'templates', {},\ndiff --git a/setup.py b/setup.py\nindex a9d2190..e260c21 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,6 +55,7 @@\n         'Zope2',\n         'Acquisition',\n         'plone.app.z3cform',\n+        'plone.z3cform >= 1.1.0'\n         'z3c.form',\n         'z3c.zcmlhook',\n     ],\n"
-
-Repository: plone.app.caching
-
-
-Branch: refs/heads/master
-Date: 2019-04-02T15:42:39+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.caching/commit/15bd18b9a60a43f32f98d58d35c893aaa4f0616f
-
-typo in setup
-
-Files changed:
-M setup.py
-
-b"diff --git a/setup.py b/setup.py\nindex e260c21..7f93156 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,7 +55,7 @@\n         'Zope2',\n         'Acquisition',\n         'plone.app.z3cform',\n-        'plone.z3cform >= 1.1.0'\n+        'plone.z3cform >= 1.1.0',\n         'z3c.form',\n         'z3c.zcmlhook',\n     ],\n"
-
-Repository: plone.app.caching
-
-
-Branch: refs/heads/master
-Date: 2019-04-02T15:46:15+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.caching/commit/ac3eeae65e5130617ca945c6446a76f980e48023
-
-fix version pin
-
-Files changed:
-M setup.py
-
-b"diff --git a/setup.py b/setup.py\nindex 7f93156..ff5cc75 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,7 +55,7 @@\n         'Zope2',\n         'Acquisition',\n         'plone.app.z3cform',\n-        'plone.z3cform >= 1.1.0',\n+        'plone.z3cform >= 1.1.0.dev0',\n         'z3c.form',\n         'z3c.zcmlhook',\n     ],\n"
-
-Repository: plone.app.caching
-
-
-Branch: refs/heads/master
-Date: 2019-04-04T20:25:39+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.caching/commit/9a879fa91f9ff060c480f7519deff6b56b1d006e
-
-platform dependent version pin
-
-Files changed:
-M setup.py
-
-b'diff --git a/setup.py b/setup.py\nindex ff5cc75..dcf41ce 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,7 +55,7 @@\n         \'Zope2\',\n         \'Acquisition\',\n         \'plone.app.z3cform\',\n-        \'plone.z3cform >= 1.1.0.dev0\',\n+        \'plone.z3cform >= 1.1.0.dev0;python_version>"3.0"\',\n         \'z3c.form\',\n         \'z3c.zcmlhook\',\n     ],\n'
-
-Repository: plone.app.caching
-
-
-Branch: refs/heads/master
-Date: 2019-04-05T09:19:24+02:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.caching/commit/c6302d32b280cdb5018fec5bdb70c1a37fd15f1b
-
-Merge pull request #49 from plone/issue_48
-
-Fix controlpanel for Python 3
-
-Files changed:
-A news/48.bugfix
-M plone/app/caching/browser/controlpanel.py
-M plone/app/caching/tests/test_integration.py
-M setup.py
-
-b'diff --git a/news/48.bugfix b/news/48.bugfix\nnew file mode 100644\nindex 0000000..520c2b0\n--- /dev/null\n+++ b/news/48.bugfix\n@@ -0,0 +1,2 @@\n+Fix controlpanel for Python 3\n+[petschki]\ndiff --git a/plone/app/caching/browser/controlpanel.py b/plone/app/caching/browser/controlpanel.py\nindex 7cc9b7b..a383038 100644\n--- a/plone/app/caching/browser/controlpanel.py\n+++ b/plone/app/caching/browser/controlpanel.py\n@@ -1,8 +1,13 @@\n # -*- coding: utf-8 -*-\n+from Products.CMFCore.utils import getToolByName\n+from Products.GenericSetup.interfaces import BASE\n+from Products.GenericSetup.interfaces import EXTENSION\n+from Products.statusmessages.interfaces import IStatusMessage\n+from operator import itemgetter\n from plone.app.caching.browser.edit import EditForm\n-from plone.app.caching.interfaces import _\n from plone.app.caching.interfaces import ICacheProfiles\n from plone.app.caching.interfaces import IPloneCacheSettings\n+from plone.app.caching.interfaces import _\n from plone.cachepurging.interfaces import ICachePurgingSettings\n from plone.cachepurging.interfaces import IPurger\n from plone.cachepurging.utils import getPathsToPurge\n@@ -13,10 +18,7 @@\n from plone.memoize.instance import memoize\n from plone.protect import CheckAuthenticator\n from plone.registry.interfaces import IRegistry\n-from Products.CMFCore.utils import getToolByName\n-from Products.GenericSetup.interfaces import BASE\n-from Products.GenericSetup.interfaces import EXTENSION\n-from Products.statusmessages.interfaces import IStatusMessage\n+from plone.z3cform.z2 import processInputs\n from z3c.caching.interfaces import IRulesetType\n from z3c.caching.registry import enumerateTypes\n from zope.component import getUtilitiesFor\n@@ -28,7 +30,6 @@\n from zope.ramcache.interfaces.ram import IRAMCache\n \n import datetime\n-from operator import itemgetter\n import re\n import six\n \n@@ -161,6 +162,9 @@ def publishTraverse(self, request, name):\n     def update(self):\n         if super(ControlPanel, self).update():\n             if \'form.button.Save\' in self.request.form:\n+                if six.PY3:\n+                    # decode the inputs recursively to unicode\n+                    processInputs(self.request)\n                 self.processSave()\n             elif \'form.button.Cancel\' in self.request.form:\n                 self.request.response.redirect(\n@@ -198,16 +202,9 @@ def processSave(self):\n         # Process mappings and validate\n \n         for ruleset, operation in operations.items():\n-\n             if not ruleset or not operation:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode(\'utf-8\')\n-\n-            if isinstance(operation, six.text_type):  # should be ASCII\n-                operation = operation.encode(\'utf-8\')\n-\n             ruleset = ruleset.replace(\'-\', \'.\')\n             operationMapping[ruleset] = operation\n \n@@ -215,17 +212,11 @@ def processSave(self):\n             if not ruleset:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode(\'utf-8\')\n-\n             ruleset = ruleset.replace(\'-\', \'.\')\n             for contentType in contentTypes:\n                 if not contentType:\n                     continue\n \n-                if isinstance(contentType, six.text_type):  # should be ASCII\n-                    contentType = contentType.encode(\'utf-8\')\n-\n                 if contentType in contentTypeRulesetMapping:\n                     self.errors.setdefault(\n                         \'contenttypes\', {},\n@@ -249,18 +240,12 @@ def processSave(self):\n             if not ruleset:\n                 continue\n \n-            if isinstance(ruleset, six.text_type):  # should be ASCII\n-                ruleset = ruleset.encode(\'utf-8\')\n-\n             ruleset = ruleset.replace(\'-\', \'.\')\n             for template in templates:\n                 template = template.strip()\n                 if not template:\n                     continue\n \n-                if isinstance(template, six.text_type):  # should be ASCII\n-                    template = template.encode(\'utf-8\')\n-\n                 if template in templateRulesetMapping:\n                     self.errors.setdefault(\n                         \'templates\', {},\ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex fcd58df..d3d6cc3 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -1,12 +1,14 @@\n # -*- coding: utf-8 -*-\n from plone.app.caching.interfaces import IPloneCacheSettings\n-from plone.app.caching.testing import getToken\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n-from plone.app.testing import applyProfile\n-from plone.app.testing import setRoles\n+from plone.app.caching.testing import getToken\n+from plone.app.testing import SITE_OWNER_NAME\n+from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n from plone.app.testing import TEST_USER_NAME\n from plone.app.testing import TEST_USER_PASSWORD\n+from plone.app.testing import applyProfile\n+from plone.app.testing import setRoles\n from plone.app.textfield.value import RichTextValue\n from plone.cachepurging.interfaces import ICachePurgingSettings\n from plone.cachepurging.interfaces import IPurger\n@@ -78,6 +80,18 @@ def setUp(self):\n     def tearDown(self):\n         setRequest(None)\n \n+    def test_controlpanel(self):\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            \'Authorization\',\n+            \'Basic {0}:{1}\'.format(SITE_OWNER_NAME, SITE_OWNER_PASSWORD, ),\n+        )\n+\n+        browser.open("{}/@@caching-controlpanel".format(self.portal.absolute_url()))  # noqa\n+        browser.getControl(name=\'enabled:boolean\').value = \'checked\'\n+        browser.getControl(\'Save\').click()\n+\n     def test_disabled(self):\n         self.cacheSettings.enabled = False\n \ndiff --git a/setup.py b/setup.py\nindex a9d2190..dcf41ce 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,6 +55,7 @@\n         \'Zope2\',\n         \'Acquisition\',\n         \'plone.app.z3cform\',\n+        \'plone.z3cform >= 1.1.0.dev0;python_version>"3.0"\',\n         \'z3c.form\',\n         \'z3c.zcmlhook\',\n     ],\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex ffa01c0..4856fce 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,9 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- Fix references missing from the reference catalog when an object is\n+  moved/renamed.\n+  [rpatterson]\n \n \n 0.7.7 (2017-02-05)\ndiff --git a/plone/app/referenceablebehavior/tests/test_basics.py b/plone/app/referenceablebehavior/tests/test_basics.py\nindex ccf1263..9cf83ba 100644\n--- a/plone/app/referenceablebehavior/tests/test_basics.py\n+++ b/plone/app/referenceablebehavior/tests/test_basics.py\n@@ -25,35 +25,44 @@ def test_rename_does_not_change_uuid(self):\n         self.portal.manage_renameObject(id=\'doc1\', new_id=\'new_name\')\n         self.assertEquals(old_doc_uuid, IUUID(self.portal[\'new_name\']))\n \n-    @unittest.skip(\'Needs Refactor. Linkintegrity does not use ref_catalog\')\n     def test_rename_updates_ref_catalog(self):\n         doc1 = self.portal[\'doc1\']\n         doc2 = self.portal[\'doc2\']\n+\n+        doc1_refs = IReferenceable(doc1)\n+        doc2_refs = IReferenceable(doc2)\n+        doc1_refs.addReference(doc2_refs, relationship=\'fooRelationship\')\n+\n         ref_catalog = self.portal.reference_catalog\n-        doc1.text = RichTextValue(\'<a href="doc2">doc2</a>\')\n-        modified(doc1)\n         self.assertEquals(1, len(ref_catalog()))\n-\n-        self.assertEquals([doc2], IReferenceable(doc1).getReferences())\n+        self.assertEquals([doc2], doc1_refs.getReferences())\n         ref_brain = ref_catalog()[0]\n         self.assertTrue(ref_brain.getPath().startswith(\'doc1\'))\n+\n         self.portal.manage_renameObject(id=\'doc1\', new_id=\'new_name\')\n-        modified(doc1)\n+        doc1 = self.portal[\'new_name\']\n+        doc1_refs = IReferenceable(doc1)\n+\n         self.assertEquals(1, len(ref_catalog()))\n         ref_brain = ref_catalog()[0]\n         self.assertTrue(ref_brain.getPath().startswith(\'new_name\'))\n-        self.assertEquals([doc2], IReferenceable(doc1).getReferences())\n+        self.assertEquals([doc2], doc1_refs.getReferences())\n \n-    @unittest.skip(\'Needs Refactor. Linkintegrity does not use ref_catalog\')\n     def test_remove_cleans_ref_catalog(self):\n         doc1 = self.portal[\'doc1\']\n-        doc1.text = RichTextValue(\'<a href="doc1">doc1</a>\')\n-        modified(doc1)\n+        doc2 = self.portal[\'doc2\']\n+\n+        doc1_refs = IReferenceable(doc1)\n+        doc2_refs = IReferenceable(doc2)\n+        doc1_refs.addReference(doc2_refs, relationship=\'fooRelationship\')\n+\n         ref_catalog = self.portal.reference_catalog\n         self.assertEquals(1, len(ref_catalog()))\n+        self.assertEquals([doc1], doc2_refs.getBackReferences())\n \n         self.portal.manage_delObjects([\'doc1\'])\n         self.assertEquals(0, len(ref_catalog()))\n+        self.assertEquals([], doc2_refs.getBackReferences())\n \n     def test_referenceable_api(self):\n         doc1 = self.portal[\'doc1\']\ndiff --git a/plone/app/referenceablebehavior/uidcatalog.py b/plone/app/referenceablebehavior/uidcatalog.py\nindex 2580fac..2daabe9 100644\n--- a/plone/app/referenceablebehavior/uidcatalog.py\n+++ b/plone/app/referenceablebehavior/uidcatalog.py\n@@ -77,15 +77,17 @@ def moved_handler(obj, event):\n         return\n \n     for ref in annotations.objectValues():\n-        url = getRelURL(ref_catalog, ref.getPhysicalPath())\n+        new_url = getRelURL(ref_catalog, ref.getPhysicalPath())\n         if event.oldName and event.newName:\n-            url = event.oldName + url[len(event.newName):]\n-        uid_catalog_rid = uid_catalog.getrid(url)\n-        ref_catalog_rid = ref_catalog.getrid(url)\n+            old_url = event.oldName + new_url[len(event.newName):]\n+        uid_catalog_rid = uid_catalog.getrid(old_url)\n+        ref_catalog_rid = ref_catalog.getrid(old_url)\n         if uid_catalog_rid is not None:\n-            uid_catalog.uncatalog_object(url)\n+            uid_catalog.uncatalog_object(old_url)\n+            uid_catalog.catalog_object(ref, new_url)\n         if ref_catalog_rid is not None:\n-            ref_catalog.uncatalog_object(url)\n+            ref_catalog.uncatalog_object(old_url)\n+            ref_catalog.catalog_object(ref, new_url)\n \n \n def removed_handler(obj, event):\n'
 
