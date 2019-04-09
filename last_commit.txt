@@ -1,18 +1,60 @@
-Repository: plone.openid
+Repository: Products.Archetypes
 
 
-Branch: refs/heads/master
-Date: 2019-03-29T15:39:27+01:00
+Branch: refs/heads/1.9.x
+Date: 2019-04-08T23:29:21+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.openid/commit/beeabfb3b9541e192a16df43dfbf3356399d8ec9
+Commit: https://github.com/plone/Products.Archetypes/commit/ca3ae7b41a65357f9f2aeb0a87b70bff46dce96e
 
-Fixed error caused by PAS inserting `login=None` in the openid query.
+Fixed slowness in unicodeTestIn script used by keyword template.
 
-Fixes https://github.com/plone/plone.openid/issues/10
+Fixes https://github.com/plone/Products.Archetypes/issues/125
+
+This contains performance tests, which are ignored by default, but can be activated by exporting a number:
+$ export AT_UNICODETESTIN=3000
+$ bin/test -s Products.Archetypes -m test_widgets -t test_unicodeTestIn
+...
+Testing unicodeTestIn with 3000 items, and 50 selected.
+...
+
+Timings before this fix:
+
+First test part finished in 4.2931 seconds
+Second test part finished in 12.6825 seconds
+
+Timings after this fix:
+
+First test part finished in 0.0373 seconds
+Second test part finished in 0.2010 seconds
+
+And with the fix and 30,000 items:
+
+First test part finished in 0.0374 seconds
+Second test part finished in 2.0301 seconds
 
 Files changed:
-M CHANGES.rst
-M plone/openid/plugins/oid.py
+A news/125.bugfix
+M Products/Archetypes/skins/archetypes/unicodeTestIn.py
+M Products/Archetypes/tests/test_widgets.py
 
-b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 6ddc82f..dbc9738 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -4,7 +4,9 @@ Changelog\n 2.0.5 (unreleased)\n ------------------\n \n-- Nothing changed yet.\n+- Fixed error caused by PAS inserting ``login=None`` in the openid query.\n+  Fixes `issue 10 <https://github.com/plone/plone.openid/issues/10>`_.\n+  [maurits]\n \n \n 2.0.4 (2015-03-21)\ndiff --git a/plone/openid/plugins/oid.py b/plone/openid/plugins/oid.py\nindex 28b586c..4660317 100644\n--- a/plone/openid/plugins/oid.py\n+++ b/plone/openid/plugins/oid.py\n@@ -143,6 +143,12 @@ def authenticateCredentials(self, credentials):\n             # or python-openid will complain\n             query = credentials.copy()\n             del query['extractor']\n+            if 'login' in query and query['login'] is None:\n+                # PAS has tried to lowercase the login, but login was not in\n+                # the credentials, so it is now None.\n+                # This would result in an AttributeError in consumer.complete,\n+                # so we remove it.\n+                del query['login']\n \n             result=consumer.complete(query, self.REQUEST.ACTUAL_URL)\n             identity=result.identity_url\n"
+b"diff --git a/Products/Archetypes/skins/archetypes/unicodeTestIn.py b/Products/Archetypes/skins/archetypes/unicodeTestIn.py\nindex 23b9914e..6879754e 100644\n--- a/Products/Archetypes/skins/archetypes/unicodeTestIn.py\n+++ b/Products/Archetypes/skins/archetypes/unicodeTestIn.py\n@@ -9,10 +9,11 @@\n \n if vocab is None or len(vocab) == 0:\n     return 0\n-\n-value = context.unicodeEncode(value)\n+if not isinstance(value, str):\n+    value = value.encode('utf-8')\n for v in vocab:\n-    if context.unicodeEncode(v) == value:\n+    if not isinstance(v, str):\n+        v = v.encode('utf-8')\n+    if v == value:\n         return True\n-\n return False\ndiff --git a/Products/Archetypes/tests/test_widgets.py b/Products/Archetypes/tests/test_widgets.py\nindex 14d2597c..8903d058 100644\n--- a/Products/Archetypes/tests/test_widgets.py\n+++ b/Products/Archetypes/tests/test_widgets.py\n@@ -143,13 +143,38 @@ def test_unicodeTestIn(self):\n         # The unicodeTestIn script can be called very often on edit\n         # forms when you have lots of keywords (Subject) in your site.\n         # So an interesting test here is: how fast is this?  For a\n-        # speed test, uncomment the next few lines.  It basically\n-        # tests having 3000 keywords, of which 50 are selected on a\n-        # page.  The related change in unicodeTestIn speeds this up\n+        # speed test, run the tests with 'export AT_UNICODETESTIN=3000'.\n+        # It basically tests having 3000 keywords, of which 50 are selected\n+        # on a page.  The related change in unicodeTestIn speeds this up\n         # from 42 to 15 seconds.\n-        #vocab += [str(x) for x in range(3000)]\n-        #for x in range(1000, 1050):\n-        #    self.assertEqual(self.portal.unicodeTestIn(str(x), vocab), True)\n+        # And 9 years later it is 4.4 seconds for only this first part.\n+        # And 0.03 seconds after some simple fixes to the script.\n+        number = int(os.getenv('AT_UNICODETESTIN', 0))\n+        if not number:\n+            return\n+        from time import time\n+        print('\\nTesting unicodeTestIn with {0} items, 50 selected.'.format(\n+            number))\n+        vocab += [str(x) for x in range(number)]\n+        value = [str(x) for x in range(1000, 1050)]\n+        time1 = time()\n+        for v in value:\n+           self.assertEqual(self.portal.unicodeTestIn(v, vocab), True)\n+        time2 = time()\n+        print('First test part finished in {0:.4f} seconds'.format(\n+            time2 - time1))\n+\n+        # This is actually more how it is used:\n+        # a large vocabulary, which is compared with a much smaller\n+        # list of selected items.  Originally took 12.6 seconds for 3000 items.\n+        # And 0.2 seconds after some simple fixes.\n+        for v in vocab:\n+            # Some of these are True, others False, so we don't test the outcome.\n+            # We only call this to test the speed.\n+            self.portal.unicodeTestIn(v, value)\n+        time3 = time()\n+        print('Second test part finished in {0:.4f} seconds'.format(\n+            time3 - time2))\n \n     def _test_widgets(self):\n         doc = makeContent(self.folder, portal_type='ComplexType', id='demodoc')\ndiff --git a/news/125.bugfix b/news/125.bugfix\nnew file mode 100644\nindex 00000000..b992e988\n--- /dev/null\n+++ b/news/125.bugfix\n@@ -0,0 +1,2 @@\n+Fixed slowness in ``unicodeTestIn`` script used by keyword template.\n+[maurits]\n\\ No newline at end of file\n"
+
+Repository: Products.Archetypes
+
+
+Branch: refs/heads/1.9.x
+Date: 2019-04-09T08:09:46+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.Archetypes/commit/4f1e05b5078dfdde163262d7ef5fde211dafe73f
+
+Merge pull request #126 from plone/maurits-issue-125-unicode-test-in-19
+
+Fixed slowness in unicodeTestIn script used by keyword template.
+
+Files changed:
+A news/125.bugfix
+M Products/Archetypes/skins/archetypes/unicodeTestIn.py
+M Products/Archetypes/tests/test_widgets.py
+
+b"diff --git a/Products/Archetypes/skins/archetypes/unicodeTestIn.py b/Products/Archetypes/skins/archetypes/unicodeTestIn.py\nindex 23b9914e..6879754e 100644\n--- a/Products/Archetypes/skins/archetypes/unicodeTestIn.py\n+++ b/Products/Archetypes/skins/archetypes/unicodeTestIn.py\n@@ -9,10 +9,11 @@\n \n if vocab is None or len(vocab) == 0:\n     return 0\n-\n-value = context.unicodeEncode(value)\n+if not isinstance(value, str):\n+    value = value.encode('utf-8')\n for v in vocab:\n-    if context.unicodeEncode(v) == value:\n+    if not isinstance(v, str):\n+        v = v.encode('utf-8')\n+    if v == value:\n         return True\n-\n return False\ndiff --git a/Products/Archetypes/tests/test_widgets.py b/Products/Archetypes/tests/test_widgets.py\nindex 14d2597c..8903d058 100644\n--- a/Products/Archetypes/tests/test_widgets.py\n+++ b/Products/Archetypes/tests/test_widgets.py\n@@ -143,13 +143,38 @@ def test_unicodeTestIn(self):\n         # The unicodeTestIn script can be called very often on edit\n         # forms when you have lots of keywords (Subject) in your site.\n         # So an interesting test here is: how fast is this?  For a\n-        # speed test, uncomment the next few lines.  It basically\n-        # tests having 3000 keywords, of which 50 are selected on a\n-        # page.  The related change in unicodeTestIn speeds this up\n+        # speed test, run the tests with 'export AT_UNICODETESTIN=3000'.\n+        # It basically tests having 3000 keywords, of which 50 are selected\n+        # on a page.  The related change in unicodeTestIn speeds this up\n         # from 42 to 15 seconds.\n-        #vocab += [str(x) for x in range(3000)]\n-        #for x in range(1000, 1050):\n-        #    self.assertEqual(self.portal.unicodeTestIn(str(x), vocab), True)\n+        # And 9 years later it is 4.4 seconds for only this first part.\n+        # And 0.03 seconds after some simple fixes to the script.\n+        number = int(os.getenv('AT_UNICODETESTIN', 0))\n+        if not number:\n+            return\n+        from time import time\n+        print('\\nTesting unicodeTestIn with {0} items, 50 selected.'.format(\n+            number))\n+        vocab += [str(x) for x in range(number)]\n+        value = [str(x) for x in range(1000, 1050)]\n+        time1 = time()\n+        for v in value:\n+           self.assertEqual(self.portal.unicodeTestIn(v, vocab), True)\n+        time2 = time()\n+        print('First test part finished in {0:.4f} seconds'.format(\n+            time2 - time1))\n+\n+        # This is actually more how it is used:\n+        # a large vocabulary, which is compared with a much smaller\n+        # list of selected items.  Originally took 12.6 seconds for 3000 items.\n+        # And 0.2 seconds after some simple fixes.\n+        for v in vocab:\n+            # Some of these are True, others False, so we don't test the outcome.\n+            # We only call this to test the speed.\n+            self.portal.unicodeTestIn(v, value)\n+        time3 = time()\n+        print('Second test part finished in {0:.4f} seconds'.format(\n+            time3 - time2))\n \n     def _test_widgets(self):\n         doc = makeContent(self.folder, portal_type='ComplexType', id='demodoc')\ndiff --git a/news/125.bugfix b/news/125.bugfix\nnew file mode 100644\nindex 00000000..b992e988\n--- /dev/null\n+++ b/news/125.bugfix\n@@ -0,0 +1,2 @@\n+Fixed slowness in ``unicodeTestIn`` script used by keyword template.\n+[maurits]\n\\ No newline at end of file\n"
 
