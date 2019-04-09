@@ -1,7 +1,6 @@
 SHELL := /bin/bash
 CURRENT_DIR:=$(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 
-
 # We like colors
 # From: https://coderwall.com/p/izxssa/colored-makefile-for-golang-projects
 RED=`tput setaf 1`
@@ -11,14 +10,6 @@ YELLOW=`tput setaf 3`
 
 all: build
 
-.PHONY: build
-build: ## Create virtualenv and run buildout
-	@echo "$(GREEN)==> Setup Virtual Env$(RESET)"
-	virtualenv -p python2 --clear .
-	bin/pip install pip --upgrade
-	bin/pip install -r requirements.txt --upgrade
-	bin/buildout
-
 # Add the following 'help' target to your Makefile
 # And add help text after each target name starting with '\#\#'
 .PHONY: help
@@ -27,6 +18,21 @@ help: ## This help message
 
 .PHONY: all
 all: build code-analysis test test-acceptance
+
+.PHONY: build
+build: ## Create virtualenv and run buildout
+	@echo "$(GREEN)==> Setup Virtual Env$(RESET)"
+	virtualenv -p python2 --clear .
+	bin/pip install pip --upgrade
+	bin/pip install -r requirements.txt --upgrade
+	bin/buildout
+
+.PHONY: build-py3
+build-py3:
+	virtualenv --python=python3 .
+	bin/pip install --upgrade pip
+	bin/pip install -r requirements.txt
+	bin/buildout
 
 .PHONY: clean
 clean: ## Remove old virtualenv and creates a new one
