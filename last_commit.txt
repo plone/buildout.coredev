@@ -1,109 +1,48 @@
-Repository: plone.app.contenttypes
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.4.x
-Date: 2019-01-20T17:56:04-02:00
-Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/5923069dac3cbe38f27c253dd8e2b4bdb03f1414
+Branch: refs/heads/master
+Date: 2019-05-22T20:08:55+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/45193ab29e663eb50e7f96d49c88c0884b3b2666
 
-Support ILeadImage behavior when display collections
-
-Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 121ab9f2..e00b9792 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -10,7 +10,8 @@ Breaking changes:\n \n New features:\n \n-- *add item here*\n+- Support ILeadImage behavior when display collection album view.\n+  [rodferosu]\n \n Bug fixes:\n \ndiff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py\nindex fea264b7..8f74ebf8 100644\n--- a/plone/app/contenttypes/browser/collection.py\n+++ b/plone/app/contenttypes/browser/collection.py\n@@ -8,6 +8,14 @@\n from plone.memoize.view import memoize\n \n \n+try:\n+    from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n+except ImportError:\n+    from zope.interface import Interface\n+    class ILeadImage(Interface):\n+        pass\n+\n+\n class CollectionView(FolderView):\n \n     @property\n@@ -56,7 +64,7 @@ def _album_results(self):\n         for it in results:\n             # TODO: potentially expensive!\n             ob = it.getObject()\n-            if IImage.providedBy(ob):\n+            if IImage.providedBy(ob) or ILeadImage.providedBy(ob):\n                 images.append(it)\n             elif IFolder.providedBy(ob):\n                 folders.append(it)\n'
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/1.4.x
-Date: 2019-02-06T22:21:05-02:00
-Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/89ffa3b66bf1cacfecd336a322f57586588889e3
-
-Code review
+fix upgrades from Plone 4.3 to 5.2
 
 Files changed:
-M plone/app/contenttypes/browser/collection.py
-M plone/app/contenttypes/browser/folder.py
-M plone/app/contenttypes/browser/templates/listing_album.pt
+M plone/app/upgrade/v43/final.py
 
-b'diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py\nindex 8f74ebf8..0c292b71 100644\n--- a/plone/app/contenttypes/browser/collection.py\n+++ b/plone/app/contenttypes/browser/collection.py\n@@ -8,12 +8,11 @@\n from plone.memoize.view import memoize\n \n \n+HAS_LEADIMAGE = True\n try:\n     from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n except ImportError:\n-    from zope.interface import Interface\n-    class ILeadImage(Interface):\n-        pass\n+    HAS_LEADIMAGE = False\n \n \n class CollectionView(FolderView):\n@@ -64,10 +63,11 @@ def _album_results(self):\n         for it in results:\n             # TODO: potentially expensive!\n             ob = it.getObject()\n-            if IImage.providedBy(ob) or ILeadImage.providedBy(ob):\n-                images.append(it)\n-            elif IFolder.providedBy(ob):\n+            if IFolder.providedBy(ob):\n                 folders.append(it)\n+            elif IImage.providedBy(ob) or \\\n+                 HAS_LEADIMAGE and ILeadImage.providedBy(ob):\n+                images.append(it)\n         return {\'images\': images, \'folders\': folders}\n \n     @property\ndiff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py\nindex 3e1f7541..62ffec3e 100644\n--- a/plone/app/contenttypes/browser/folder.py\n+++ b/plone/app/contenttypes/browser/folder.py\n@@ -24,6 +24,12 @@\n except ImportError:\n     HAS_SECURITY_SETTINGS = False\n \n+HAS_LEADIMAGE = True\n+try:\n+    from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n+except ImportError:\n+    HAS_LEADIMAGE = False\n+\n \n class FolderView(BrowserView):\n \n@@ -206,9 +212,14 @@ def formatted_date(self, item):\n     def album_images(self):\n         """Get all images within this folder.\n         """\n+        provides = [\n+            IImage.__identifier__\n+        ]\n+        if HAS_LEADIMAGE:\n+            provides.append(ILeadImage.__identifier__)\n         images = self.results(\n             batch=False,\n-            object_provides=IImage.__identifier__\n+            object_provides=provides\n         )\n         return images\n \ndiff --git a/plone/app/contenttypes/browser/templates/listing_album.pt b/plone/app/contenttypes/browser/templates/listing_album.pt\nindex 1f0d6089..1b517bc7 100644\n--- a/plone/app/contenttypes/browser/templates/listing_album.pt\n+++ b/plone/app/contenttypes/browser/templates/listing_album.pt\n@@ -24,11 +24,13 @@\n       tal:define="portal context/@@plone_portal_state/portal;\n                   image_scale portal/@@image_scale">\n   <tal:images tal:repeat="image images">\n-    <div class="photoAlbumEntry">\n+    <div class="photoAlbumEntry"\n+         tal:define="scale python:image_scale.tag(image, \'image\', scale=\'thumb\')"\n+         tal:condition="scale">\n       <a tal:attributes="href string:${image/getURL}/view;\n                          title image/Description">\n         <span class="photoAlbumEntryWrapper">\n-          <img tal:replace="structure python:image_scale.tag(image, \'image\', scale=\'thumb\')" />\n+          <img tal:replace="structure scale" />\n         </span>\n         <span class="photoAlbumEntryTitle" tal:content="image/Title">\n             Title\n'
+b'diff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py\nindex d503ecab..f4b85199 100644\n--- a/plone/app/upgrade/v43/final.py\n+++ b/plone/app/upgrade/v43/final.py\n@@ -272,7 +272,10 @@ def removeFakeKupu(context):\n         tool = getToolByName(portal, tool_id, None)\n         if tool is None:\n             continue\n-        resources = tool.getResourcesDict()\n+        try:\n+            resources = tool.getResourcesDict()\n+        except AttributeError:\n+            continue\n         for resource_id, resource in resources.items():\n             expression = resource.getExpression()\n             if expression.startswith(bad_expr):\n'
 
-Repository: plone.app.contenttypes
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.4.x
-Date: 2019-06-04T03:20:36-03:00
-Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/f4244ce38b95521c3938377fc177c47905086fb6
+Branch: refs/heads/master
+Date: 2019-06-13T12:50:58+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/aa27f74cafab46a23b6f6a49d983c3ba68cf754c
 
-Fix ILeadImage import
+add changenote
 
 Files changed:
-M plone/app/contenttypes/browser/collection.py
+A news/207.bugfix
 
-b"diff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py\nindex 0c292b71..a41b6959 100644\n--- a/plone/app/contenttypes/browser/collection.py\n+++ b/plone/app/contenttypes/browser/collection.py\n@@ -2,19 +2,13 @@\n from Acquisition import aq_inner\n from plone.app.contenttypes import _\n from plone.app.contenttypes.behaviors.collection import ICollection\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n from plone.app.contenttypes.browser.folder import FolderView\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.contenttypes.interfaces import IImage\n from plone.memoize.view import memoize\n \n \n-HAS_LEADIMAGE = True\n-try:\n-    from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n-except ImportError:\n-    HAS_LEADIMAGE = False\n-\n-\n class CollectionView(FolderView):\n \n     @property\n@@ -66,7 +60,7 @@ def _album_results(self):\n             if IFolder.providedBy(ob):\n                 folders.append(it)\n             elif IImage.providedBy(ob) or \\\n-                 HAS_LEADIMAGE and ILeadImage.providedBy(ob):\n+                 ILeadImage.providedBy(ob):\n                 images.append(it)\n         return {'images': images, 'folders': folders}\n \n"
+b'diff --git a/news/207.bugfix b/news/207.bugfix\nnew file mode 100644\nindex 00000000..72a0fe99\n--- /dev/null\n+++ b/news/207.bugfix\n@@ -0,0 +1,2 @@\n+Fix upgrades from Plone 4.3 to 5.2.\n+[pbauer]\n\\ No newline at end of file\n'
 
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/1.4.x
-Date: 2019-06-04T03:21:57-03:00
-Author: Rodrigo Ferreira de Souza (rodfersou) <rodfersou@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/589c5d5a9f45f7d6603302e36c4d2f5493ef1d59
-
-Fix ILeadImage import
-
-Files changed:
-M plone/app/contenttypes/browser/folder.py
-
-b'diff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py\nindex 62ffec3e..6526f9b1 100644\n--- a/plone/app/contenttypes/browser/folder.py\n+++ b/plone/app/contenttypes/browser/folder.py\n@@ -1,13 +1,14 @@\n # -*- coding: utf-8 -*-\n from Acquisition import aq_base\n from Acquisition import aq_inner\n-from Products.CMFPlone.interfaces import ISiteSchema\n from plone.app.contenttypes import _\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.contenttypes.interfaces import IImage\n from plone.event.interfaces import IEvent\n from plone.memoize.view import memoize\n from plone.registry.interfaces import IRegistry\n+from Products.CMFPlone.interfaces import ISiteSchema\n from Products.CMFPlone.PloneBatch import Batch\n from Products.CMFPlone.utils import safe_callable\n from Products.Five import BrowserView\n@@ -24,13 +25,6 @@\n except ImportError:\n     HAS_SECURITY_SETTINGS = False\n \n-HAS_LEADIMAGE = True\n-try:\n-    from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n-except ImportError:\n-    HAS_LEADIMAGE = False\n-\n-\n class FolderView(BrowserView):\n \n     text_class = None\n@@ -213,10 +207,9 @@ def album_images(self):\n         """Get all images within this folder.\n         """\n         provides = [\n-            IImage.__identifier__\n+            IImage.__identifier__,\n+            ILeadImage.__identifier__,\n         ]\n-        if HAS_LEADIMAGE:\n-            provides.append(ILeadImage.__identifier__)\n         images = self.results(\n             batch=False,\n             object_provides=provides\n'
-
-Repository: plone.app.contenttypes
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.4.x
-Date: 2019-06-13T23:15:03+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/4d3bdac6cccb146780fa1b724fcf8067c58d9c3b
+Branch: refs/heads/master
+Date: 2019-06-15T20:06:43+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/2fbe849004773453f0ee23673d7de869d846f95b
 
-Fixed robot test for collection album view.
+Merge pull request #207 from plone/fix_upgrade_from_p4
 
-'Test Image' used to appear three times:
-- in the navigation
-- as its own
-- as image of the Test Folder
-The first two are still there.
-The last usually not, because with our leadimage changes, the Test News Item is usually picked as sample image for the Test Folder.
-Which image is picked for that, does not seem entirely stable, but that is okay.
-We look only for 'Test Image' as image title in a photoAlbumEntry which is not also a photoAlbumFolder.
-That is what we already did for the other images, which also had a chance of being picked as sample image of their folder.
+Fix upgrades from Plone 4.3 to 5.2
 
 Files changed:
-M plone/app/contenttypes/tests/robot/test_folderlisting.robot
+A news/207.bugfix
+M plone/app/upgrade/v43/final.py
 
-b'diff --git a/plone/app/contenttypes/tests/robot/test_folderlisting.robot b/plone/app/contenttypes/tests/robot/test_folderlisting.robot\nindex 76b7a036..7f980e9e 100644\n--- a/plone/app/contenttypes/tests/robot/test_folderlisting.robot\n+++ b/plone/app/contenttypes/tests/robot/test_folderlisting.robot\n@@ -157,7 +157,9 @@ Listing should list all content in detail\n \n Album should list all images and albums\n   Page Should Contain  Test Image\n-  Xpath Should Match X Times  //img[@title="Test Image"]  3\n+  Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Image"]  1\n+  Page Should Contain  Test News Item\n+  Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test News Item"]  1\n   Page Should Contain  Test Album Image 1\n   Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Album Image 1"]  1\n   Page Should Contain  Test Album Image 2\n@@ -172,7 +174,7 @@ Album should list all images and albums\n   Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Sub Album Image 3"]  1\n   Page Should Contain  Test Album\n   Page Should Contain  Test Sub Album\n-\n+  Page Should Contain  Test Folder\n \n \n Setup Testcontent\n'
-
-Repository: plone.app.contenttypes
-
-
-Branch: refs/heads/1.4.x
-Date: 2019-06-14T16:37:12+02:00
-Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/0aeb6da80ae6e8a7c10646bcd40acd253a356624
-
-Merge pull request #499 from plone/rodfersou/collection-lead-image
-
-Support ILeadImage behavior when display collections
-
-Files changed:
-M CHANGES.rst
-M plone/app/contenttypes/browser/collection.py
-M plone/app/contenttypes/browser/folder.py
-M plone/app/contenttypes/browser/templates/listing_album.pt
-M plone/app/contenttypes/tests/robot/test_folderlisting.robot
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 121ab9f2..e00b9792 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -10,7 +10,8 @@ Breaking changes:\n \n New features:\n \n-- *add item here*\n+- Support ILeadImage behavior when display collection album view.\n+  [rodferosu]\n \n Bug fixes:\n \ndiff --git a/plone/app/contenttypes/browser/collection.py b/plone/app/contenttypes/browser/collection.py\nindex fea264b7..a41b6959 100644\n--- a/plone/app/contenttypes/browser/collection.py\n+++ b/plone/app/contenttypes/browser/collection.py\n@@ -2,6 +2,7 @@\n from Acquisition import aq_inner\n from plone.app.contenttypes import _\n from plone.app.contenttypes.behaviors.collection import ICollection\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n from plone.app.contenttypes.browser.folder import FolderView\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.contenttypes.interfaces import IImage\n@@ -56,10 +57,11 @@ def _album_results(self):\n         for it in results:\n             # TODO: potentially expensive!\n             ob = it.getObject()\n-            if IImage.providedBy(ob):\n-                images.append(it)\n-            elif IFolder.providedBy(ob):\n+            if IFolder.providedBy(ob):\n                 folders.append(it)\n+            elif IImage.providedBy(ob) or \\\n+                 ILeadImage.providedBy(ob):\n+                images.append(it)\n         return {\'images\': images, \'folders\': folders}\n \n     @property\ndiff --git a/plone/app/contenttypes/browser/folder.py b/plone/app/contenttypes/browser/folder.py\nindex 3e1f7541..6526f9b1 100644\n--- a/plone/app/contenttypes/browser/folder.py\n+++ b/plone/app/contenttypes/browser/folder.py\n@@ -1,13 +1,14 @@\n # -*- coding: utf-8 -*-\n from Acquisition import aq_base\n from Acquisition import aq_inner\n-from Products.CMFPlone.interfaces import ISiteSchema\n from plone.app.contenttypes import _\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.contenttypes.interfaces import IImage\n from plone.event.interfaces import IEvent\n from plone.memoize.view import memoize\n from plone.registry.interfaces import IRegistry\n+from Products.CMFPlone.interfaces import ISiteSchema\n from Products.CMFPlone.PloneBatch import Batch\n from Products.CMFPlone.utils import safe_callable\n from Products.Five import BrowserView\n@@ -24,7 +25,6 @@\n except ImportError:\n     HAS_SECURITY_SETTINGS = False\n \n-\n class FolderView(BrowserView):\n \n     text_class = None\n@@ -206,9 +206,13 @@ def formatted_date(self, item):\n     def album_images(self):\n         """Get all images within this folder.\n         """\n+        provides = [\n+            IImage.__identifier__,\n+            ILeadImage.__identifier__,\n+        ]\n         images = self.results(\n             batch=False,\n-            object_provides=IImage.__identifier__\n+            object_provides=provides\n         )\n         return images\n \ndiff --git a/plone/app/contenttypes/browser/templates/listing_album.pt b/plone/app/contenttypes/browser/templates/listing_album.pt\nindex 1f0d6089..1b517bc7 100644\n--- a/plone/app/contenttypes/browser/templates/listing_album.pt\n+++ b/plone/app/contenttypes/browser/templates/listing_album.pt\n@@ -24,11 +24,13 @@\n       tal:define="portal context/@@plone_portal_state/portal;\n                   image_scale portal/@@image_scale">\n   <tal:images tal:repeat="image images">\n-    <div class="photoAlbumEntry">\n+    <div class="photoAlbumEntry"\n+         tal:define="scale python:image_scale.tag(image, \'image\', scale=\'thumb\')"\n+         tal:condition="scale">\n       <a tal:attributes="href string:${image/getURL}/view;\n                          title image/Description">\n         <span class="photoAlbumEntryWrapper">\n-          <img tal:replace="structure python:image_scale.tag(image, \'image\', scale=\'thumb\')" />\n+          <img tal:replace="structure scale" />\n         </span>\n         <span class="photoAlbumEntryTitle" tal:content="image/Title">\n             Title\ndiff --git a/plone/app/contenttypes/tests/robot/test_folderlisting.robot b/plone/app/contenttypes/tests/robot/test_folderlisting.robot\nindex 76b7a036..7f980e9e 100644\n--- a/plone/app/contenttypes/tests/robot/test_folderlisting.robot\n+++ b/plone/app/contenttypes/tests/robot/test_folderlisting.robot\n@@ -157,7 +157,9 @@ Listing should list all content in detail\n \n Album should list all images and albums\n   Page Should Contain  Test Image\n-  Xpath Should Match X Times  //img[@title="Test Image"]  3\n+  Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Image"]  1\n+  Page Should Contain  Test News Item\n+  Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test News Item"]  1\n   Page Should Contain  Test Album Image 1\n   Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Album Image 1"]  1\n   Page Should Contain  Test Album Image 2\n@@ -172,7 +174,7 @@ Album should list all images and albums\n   Xpath Should Match X Times  //div[@class="photoAlbumEntry" and not(@class="photoAlbumFolder")]//img[@title="Test Sub Album Image 3"]  1\n   Page Should Contain  Test Album\n   Page Should Contain  Test Sub Album\n-\n+  Page Should Contain  Test Folder\n \n \n Setup Testcontent\n'
+b'diff --git a/news/207.bugfix b/news/207.bugfix\nnew file mode 100644\nindex 00000000..72a0fe99\n--- /dev/null\n+++ b/news/207.bugfix\n@@ -0,0 +1,2 @@\n+Fix upgrades from Plone 4.3 to 5.2.\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/plone/app/upgrade/v43/final.py b/plone/app/upgrade/v43/final.py\nindex d503ecab..f4b85199 100644\n--- a/plone/app/upgrade/v43/final.py\n+++ b/plone/app/upgrade/v43/final.py\n@@ -272,7 +272,10 @@ def removeFakeKupu(context):\n         tool = getToolByName(portal, tool_id, None)\n         if tool is None:\n             continue\n-        resources = tool.getResourcesDict()\n+        try:\n+            resources = tool.getResourcesDict()\n+        except AttributeError:\n+            continue\n         for resource_id, resource in resources.items():\n             expression = resource.getExpression()\n             if expression.startswith(bad_expr):\n'
 
