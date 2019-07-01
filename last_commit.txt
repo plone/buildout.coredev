@@ -1,34 +1,135 @@
-Repository: plone.testing
+Repository: plone.recipe.zope2instance
 
 
 Branch: refs/heads/master
-Date: 2019-07-01T08:47:49+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/b417a74495d488dd8f9eab68f097e111aff3f73a
+Date: 2019-06-28T09:54:07+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/ec51ddde070ca51575c923dd64015598d0eae7c0
 
-Revert "Fix injection of ZopeLite test configuration into the global Zope configuration."
+Enable CHAMELEON_CACHE by default. See https://github.com/plone/Products.CMFPlone/issues/2898
 
 Files changed:
-M src/plone/testing/zope.py
-D news/65.bugfix
+M README.rst
+M src/plone/recipe/zope2instance/recipe.py
+M src/plone/recipe/zope2instance/tests/wsgi.txt
+M src/plone/recipe/zope2instance/tests/zope2instance.txt
+M src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt
 
-b'diff --git a/news/65.bugfix b/news/65.bugfix\ndeleted file mode 100644\nindex 9d5ba42..0000000\n--- a/news/65.bugfix\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Fix injection of ZopeLite test configuration into the global Zope configuration.\n-Fixes #64\n-[thet]\ndiff --git a/src/plone/testing/zope.py b/src/plone/testing/zope.py\nindex b2f6c56..6af2c81 100644\n--- a/src/plone/testing/zope.py\n+++ b/src/plone/testing/zope.py\n@@ -7,6 +7,7 @@\n from plone.testing import zca\n from plone.testing import zodb\n from plone.testing._z2_testbrowser import Browser  # noqa\n+from Testing.ZopeTestCase.ZopeLite import _patched as ZOPETESTCASEALERT\n from webtest.http import StopableWSGIServer\n from Zope2.App.schema import Zope2VocabularyRegistry\n from zope.schema.vocabulary import getVocabularyRegistry\n@@ -460,11 +461,6 @@ def setUpDatabase(self):\n         that the database that is opened by Zope 2 is in fact the top of\n         the resource stack.\n         """\n-\n-        # NOTE: Keep that import here.\n-        #       Having it on module-level has the side effect of injecting the\n-        #       ZopeLite test configuration into the global Zope configuration.\n-        from Testing.ZopeTestCase.ZopeLite import _patched as ZOPETESTCASEALERT\n         if ZOPETESTCASEALERT:\n             raise Exception(\'You try to run plone.testing tests together with \'\n                             \'ZopeTestCase tests. This will result in random \'\n'
+b"diff --git a/README.rst b/README.rst\nindex ec6c3f5..76ca7c1 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -481,6 +481,13 @@ scripts\n   be listed explicitly in the eggs option, even if it is a dependency of an\n   already listed egg.\n \n+template-cache\n+  Used to configure the cache for page-template files. Chameleon will write\n+  compile page-templates into this directory and use it as a cache.\n+  See https://chameleon.readthedocs.io/en/latest/configuration.html for more info.\n+  Valid options are off or on or a directory-location.\n+  Defaults to ${buildout:directory}/var/cache (it also confirms to what var is set to).\n+\n var\n   Used to configure the base directory for all things going into var.\n   Defaults to ${buildout:directory}/var.\ndiff --git a/src/plone/recipe/zope2instance/recipe.py b/src/plone/recipe/zope2instance/recipe.py\nindex c57ca0f..58d87b9 100644\n--- a/src/plone/recipe/zope2instance/recipe.py\n+++ b/src/plone/recipe/zope2instance/recipe.py\n@@ -263,7 +263,46 @@ def build_zope_conf(self):\n         ip_address = options.get('ip-address', '')\n         if ip_address:\n             ip_address = 'ip-address %s' % ip_address\n+\n         environment_vars = options.get('environment-vars', '')\n+\n+        if 'CHAMELEON_CACHE' in environment_vars:\n+            # We do not override a explicitly defined CHAMELEON_CACHE setting!\n+            # Do not create the directory here because this is probably a old\n+            # setting and we don't want to mess with peoples working setup.\n+            chameleon_cache = None\n+        else:\n+            # Use template-cache setting, default to on\n+            chameleon_cache = options.get('template-cache', 'on')\n+\n+        if chameleon_cache:\n+            if chameleon_cache.lower() in ('on', '1', 'true', 'enabled'):\n+                # use default setting var_dir/cache\n+                chameleon_cache = os.path.join(var_dir, 'cache')\n+            elif chameleon_cache.lower() in ('off', '0', 'false', 'disabled'):\n+                # disable cache\n+                chameleon_cache = None\n+            else:\n+                # use the passed directory, cache is enabled\n+                pass\n+\n+        # create the cache dir if cache is enabled\n+        if chameleon_cache and not os.path.exists(chameleon_cache):\n+            os.makedirs(chameleon_cache)\n+\n+        # Inject cache into environment_vars unless it is set there\n+        if chameleon_cache and 'CHAMELEON_CACHE' not in environment_vars:\n+            chameleon_cache = 'CHAMELEON_CACHE {}'.format(chameleon_cache)\n+            if environment_vars and '\\n' in environment_vars:\n+                # default case\n+                environment_vars += '\\n'.format(chameleon_cache)\n+            elif environment_vars:\n+                # handle case of all vars in one line\n+                environment_vars += ' {}'.format(chameleon_cache)\n+            else:\n+                # handle case when there are no environment_vars yet\n+                environment_vars = chameleon_cache\n+\n         if environment_vars:\n             # if the vars are all given on one line we need to do some work\n             if '\\n' not in environment_vars:\ndiff --git a/src/plone/recipe/zope2instance/tests/wsgi.txt b/src/plone/recipe/zope2instance/tests/wsgi.txt\nindex 2159038..86a5ae9 100644\n--- a/src/plone/recipe/zope2instance/tests/wsgi.txt\n+++ b/src/plone/recipe/zope2instance/tests/wsgi.txt\n@@ -46,6 +46,9 @@ We should have an instance part, with a basic zope.conf::\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\ndiff --git a/src/plone/recipe/zope2instance/tests/zope2instance.txt b/src/plone/recipe/zope2instance/tests/zope2instance.txt\nindex d9d2d44..3cbd660 100644\n--- a/src/plone/recipe/zope2instance/tests/zope2instance.txt\n+++ b/src/plone/recipe/zope2instance/tests/zope2instance.txt\n@@ -49,6 +49,9 @@ We should have a zope instance, with a basic zope.conf::\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n@@ -76,6 +79,7 @@ We should have a blobstorage directory.\n \n     >>> ls('var')\n     d  blobstorage\n+    d  cache\n     d  filestorage\n     d  instance\n     d  log\n@@ -134,6 +138,9 @@ The generated configuration has no temporary storage section anymore:\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n@@ -1351,6 +1358,7 @@ Our environment variables should be set now::\n     ...\n     <environment>\n       TZ US/Eastern\n+    CHAMELEON_CACHE .../var/cache\n     </environment>\n     ...\n \n@@ -1402,6 +1410,7 @@ Several all on one line::\n     ... recipe = plone.recipe.zope2instance\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern TMP /var/tmp DISABLE_PTS True\n     ... ''' % options)\n \ndiff --git a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\nindex d50d763..30308d4 100644\n--- a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n+++ b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n@@ -90,6 +90,9 @@ We should have a zope instance, with a basic zope.conf::\n     <BLANKLINE>\n     <BLANKLINE>\n     <BLANKLINE>\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n"
 
-Repository: plone.testing
+Repository: plone.recipe.zope2instance
 
 
 Branch: refs/heads/master
-Date: 2019-07-01T13:13:26+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/364f9782d8914f2787778f732b47c7b8f3d625d5
+Date: 2019-06-28T09:56:27+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/e7d913e59b4a32b0a43439ea3980603316ae59cc
 
-Merge pull request #66 from plone/revert-65-thet-fix-64
-
-Revert "Fix injection of ZopeLite test configuration into the global Zope configuration."
+add changenote
 
 Files changed:
-M src/plone/testing/zope.py
-D news/65.bugfix
+A news/118.feature
 
-b'diff --git a/news/65.bugfix b/news/65.bugfix\ndeleted file mode 100644\nindex 9d5ba42..0000000\n--- a/news/65.bugfix\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Fix injection of ZopeLite test configuration into the global Zope configuration.\n-Fixes #64\n-[thet]\ndiff --git a/src/plone/testing/zope.py b/src/plone/testing/zope.py\nindex b2f6c56..6af2c81 100644\n--- a/src/plone/testing/zope.py\n+++ b/src/plone/testing/zope.py\n@@ -7,6 +7,7 @@\n from plone.testing import zca\n from plone.testing import zodb\n from plone.testing._z2_testbrowser import Browser  # noqa\n+from Testing.ZopeTestCase.ZopeLite import _patched as ZOPETESTCASEALERT\n from webtest.http import StopableWSGIServer\n from Zope2.App.schema import Zope2VocabularyRegistry\n from zope.schema.vocabulary import getVocabularyRegistry\n@@ -460,11 +461,6 @@ def setUpDatabase(self):\n         that the database that is opened by Zope 2 is in fact the top of\n         the resource stack.\n         """\n-\n-        # NOTE: Keep that import here.\n-        #       Having it on module-level has the side effect of injecting the\n-        #       ZopeLite test configuration into the global Zope configuration.\n-        from Testing.ZopeTestCase.ZopeLite import _patched as ZOPETESTCASEALERT\n         if ZOPETESTCASEALERT:\n             raise Exception(\'You try to run plone.testing tests together with \'\n                             \'ZopeTestCase tests. This will result in random \'\n'
+b'diff --git a/news/118.feature b/news/118.feature\nnew file mode 100644\nindex 0000000..bb7e44e\n--- /dev/null\n+++ b/news/118.feature\n@@ -0,0 +1,2 @@\n+Enable CHAMELEON_CACHE by default. See https://github.com/plone/Products.CMFPlone/issues/2898\n+[pbauer]\n\\ No newline at end of file\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-06-28T13:16:15+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/efde85ce4acedb251f99b25718ed2275a8f4cdde
+
+fix test and use Zope 4.1 in tests
+
+Files changed:
+M src/plone/recipe/zope2instance/tests/test_wsgischema.py
+M tox.ini
+
+b'diff --git a/src/plone/recipe/zope2instance/tests/test_wsgischema.py b/src/plone/recipe/zope2instance/tests/test_wsgischema.py\nindex 4ec5d3e..71cb89e 100644\n--- a/src/plone/recipe/zope2instance/tests/test_wsgischema.py\n+++ b/src/plone/recipe/zope2instance/tests/test_wsgischema.py\n@@ -64,7 +64,7 @@ def load_config_text(self, text):\n     def test_load_config_template(self):\n         import Zope2.utilities\n         base = os.path.dirname(Zope2.utilities.__file__)\n-        fn = os.path.join(base, "skel", "etc", "wsgi.conf.in")\n+        fn = os.path.join(base, "skel", "etc", "zope.conf.in")\n         f = open(fn)\n         text = f.read()\n         f.close()\ndiff --git a/tox.ini b/tox.ini\nindex b5e8631..7cdced1 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -15,7 +15,7 @@ commands =\n     coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n deps =\n-    -r https://zopefoundation.github.io/Zope/releases/4.0b7/requirements-full.txt\n+    -r https://zopefoundation.github.io/Zope/releases/4.1/requirements-full.txt\n     coverage\n setenv =\n     COVERAGE_FILE=.coverage.{envname}\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-06-28T13:25:53+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/f73b03c8ca4c5713579b37c51afdd24d5557294b
+
+try to fix tox on travis
+
+Files changed:
+M tox.ini
+
+b'diff --git a/tox.ini b/tox.ini\nindex 7cdced1..8de396e 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -15,7 +15,7 @@ commands =\n     coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n deps =\n-    -r https://zopefoundation.github.io/Zope/releases/4.1/requirements-full.txt\n+    -rhttps://zopefoundation.github.io/Zope/releases/4.1/requirements-full.txt\n     coverage\n setenv =\n     COVERAGE_FILE=.coverage.{envname}\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-06-28T13:28:18+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/3385139bed2afef14e8f22cd25b7519366b1dcf9
+
+try to find out what's wrong here
+
+Files changed:
+M .travis.yml
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex 6b5615a..ac5975f 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -13,6 +13,6 @@ matrix:\n install:\n   - pip install tox-travis\n script:\n-  - tox\n+  - tox -vvvv\n cache:\n   pip: true\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-06-28T13:35:24+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/0c3e501c1602b1c48dbf7a537b7a63aee50f266f
+
+again
+
+Files changed:
+M tox.ini
+
+b'diff --git a/tox.ini b/tox.ini\nindex 8de396e..1f04caa 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -10,7 +10,7 @@ skip_missing_interpreters = False\n \n [testenv]\n usedevelop = true\n-install_command = python -m pip install --no-use-pep517 {opts} {packages}\n+install_command = python -m pip install {opts} {packages}\n commands =\n     coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-06-28T14:05:14+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/4beaca520e6e7084b9e658ef5bd33188a1bfc012
+
+fix py2 tests
+
+Files changed:
+M .travis.yml
+M src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt
+
+b"diff --git a/.travis.yml b/.travis.yml\nindex ac5975f..6b5615a 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -13,6 +13,6 @@ matrix:\n install:\n   - pip install tox-travis\n script:\n-  - tox -vvvv\n+  - tox\n cache:\n   pip: true\ndiff --git a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\nindex 30308d4..caef702 100644\n--- a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n+++ b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n@@ -48,31 +48,22 @@ We should have a zope instance, with a basic zope.conf::\n     instancehome $INSTANCEHOME\n     %define CLIENTHOME .../sample-buildout/var/instance\n     clienthome $CLIENTHOME\n-    <BLANKLINE>\n-    <BLANKLINE>\n     debug-mode off\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n     http-header-max-length 8192\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n     zserver-threads 2\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <eventlog>\n-    <BLANKLINE>\n       level INFO\n       <logfile>\n         path .../sample-buildout/var/log/instance.log\n         level INFO\n       </logfile>\n     </eventlog>\n-    <BLANKLINE>\n     <logger access>\n       level WARN\n       <logfile>\n@@ -80,23 +71,12 @@ We should have a zope instance, with a basic zope.conf::\n         format %(message)s\n       </logfile>\n     </logger>\n-    <BLANKLINE>\n     <http-server>\n       address 8080\n-    <BLANKLINE>\n     </http-server>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <environment>\n-        CHAMELEON_CACHE .../var/cache\n-    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n-    <BLANKLINE>\n     # Blob-enabled FileStorage database\n         <blobstorage>\n           blob-dir .../sample-buildout/var/blobstorage\n@@ -107,7 +87,6 @@ We should have a zope instance, with a basic zope.conf::\n         </blobstorage>\n         mount-point /\n     </zodb_db>\n-    <BLANKLINE>\n     <zodb_db temporary>\n         # Temporary storage database (for sessions)\n         <temporarystorage>\n@@ -116,19 +95,16 @@ We should have a zope instance, with a basic zope.conf::\n         mount-point /temp_folder\n         container-class Products.TemporaryFolder.TemporaryContainer\n     </zodb_db>\n-    <BLANKLINE>\n     pid-filename .../sample-buildout/var/instance.pid\n     lock-filename .../sample-buildout/var/instance.lock\n     python-check-interval 1000\n     enable-product-installation off\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n \n We should have a blobstorage directory.\n \n     >>> ls('var')\n     d  blobstorage\n+    d  cache\n     d  filestorage\n     d  instance\n     d  log\n@@ -1701,6 +1677,7 @@ between several servers::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern\n     ... ''' % options)\n \n@@ -1738,6 +1715,7 @@ Now let's add several environment variables::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars =\n     ...     TZ US/Eastern\n     ...     TMP /var/tmp\n@@ -1775,6 +1753,7 @@ Several all on one line::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern TMP /var/tmp DISABLE_PTS True\n     ... ''' % options)\n \n"
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2019-07-01T14:04:21+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/07c6ea9590c49e6789c3a072e6768cbbe172ca2c
+
+Merge pull request #118 from plone/enable_chameleon_cache_by_default
+
+Enable CHAMELEON_CACHE by default
+
+Files changed:
+A news/118.feature
+M README.rst
+M src/plone/recipe/zope2instance/recipe.py
+M src/plone/recipe/zope2instance/tests/test_wsgischema.py
+M src/plone/recipe/zope2instance/tests/wsgi.txt
+M src/plone/recipe/zope2instance/tests/zope2instance.txt
+M src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt
+M tox.ini
+
+b'diff --git a/README.rst b/README.rst\nindex ec6c3f5..76ca7c1 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -481,6 +481,13 @@ scripts\n   be listed explicitly in the eggs option, even if it is a dependency of an\n   already listed egg.\n \n+template-cache\n+  Used to configure the cache for page-template files. Chameleon will write\n+  compile page-templates into this directory and use it as a cache.\n+  See https://chameleon.readthedocs.io/en/latest/configuration.html for more info.\n+  Valid options are off or on or a directory-location.\n+  Defaults to ${buildout:directory}/var/cache (it also confirms to what var is set to).\n+\n var\n   Used to configure the base directory for all things going into var.\n   Defaults to ${buildout:directory}/var.\ndiff --git a/news/118.feature b/news/118.feature\nnew file mode 100644\nindex 0000000..bb7e44e\n--- /dev/null\n+++ b/news/118.feature\n@@ -0,0 +1,2 @@\n+Enable CHAMELEON_CACHE by default. See https://github.com/plone/Products.CMFPlone/issues/2898\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/src/plone/recipe/zope2instance/recipe.py b/src/plone/recipe/zope2instance/recipe.py\nindex c57ca0f..58d87b9 100644\n--- a/src/plone/recipe/zope2instance/recipe.py\n+++ b/src/plone/recipe/zope2instance/recipe.py\n@@ -263,7 +263,46 @@ def build_zope_conf(self):\n         ip_address = options.get(\'ip-address\', \'\')\n         if ip_address:\n             ip_address = \'ip-address %s\' % ip_address\n+\n         environment_vars = options.get(\'environment-vars\', \'\')\n+\n+        if \'CHAMELEON_CACHE\' in environment_vars:\n+            # We do not override a explicitly defined CHAMELEON_CACHE setting!\n+            # Do not create the directory here because this is probably a old\n+            # setting and we don\'t want to mess with peoples working setup.\n+            chameleon_cache = None\n+        else:\n+            # Use template-cache setting, default to on\n+            chameleon_cache = options.get(\'template-cache\', \'on\')\n+\n+        if chameleon_cache:\n+            if chameleon_cache.lower() in (\'on\', \'1\', \'true\', \'enabled\'):\n+                # use default setting var_dir/cache\n+                chameleon_cache = os.path.join(var_dir, \'cache\')\n+            elif chameleon_cache.lower() in (\'off\', \'0\', \'false\', \'disabled\'):\n+                # disable cache\n+                chameleon_cache = None\n+            else:\n+                # use the passed directory, cache is enabled\n+                pass\n+\n+        # create the cache dir if cache is enabled\n+        if chameleon_cache and not os.path.exists(chameleon_cache):\n+            os.makedirs(chameleon_cache)\n+\n+        # Inject cache into environment_vars unless it is set there\n+        if chameleon_cache and \'CHAMELEON_CACHE\' not in environment_vars:\n+            chameleon_cache = \'CHAMELEON_CACHE {}\'.format(chameleon_cache)\n+            if environment_vars and \'\\n\' in environment_vars:\n+                # default case\n+                environment_vars += \'\\n\'.format(chameleon_cache)\n+            elif environment_vars:\n+                # handle case of all vars in one line\n+                environment_vars += \' {}\'.format(chameleon_cache)\n+            else:\n+                # handle case when there are no environment_vars yet\n+                environment_vars = chameleon_cache\n+\n         if environment_vars:\n             # if the vars are all given on one line we need to do some work\n             if \'\\n\' not in environment_vars:\ndiff --git a/src/plone/recipe/zope2instance/tests/test_wsgischema.py b/src/plone/recipe/zope2instance/tests/test_wsgischema.py\nindex 4ec5d3e..71cb89e 100644\n--- a/src/plone/recipe/zope2instance/tests/test_wsgischema.py\n+++ b/src/plone/recipe/zope2instance/tests/test_wsgischema.py\n@@ -64,7 +64,7 @@ def load_config_text(self, text):\n     def test_load_config_template(self):\n         import Zope2.utilities\n         base = os.path.dirname(Zope2.utilities.__file__)\n-        fn = os.path.join(base, "skel", "etc", "wsgi.conf.in")\n+        fn = os.path.join(base, "skel", "etc", "zope.conf.in")\n         f = open(fn)\n         text = f.read()\n         f.close()\ndiff --git a/src/plone/recipe/zope2instance/tests/wsgi.txt b/src/plone/recipe/zope2instance/tests/wsgi.txt\nindex 2159038..86a5ae9 100644\n--- a/src/plone/recipe/zope2instance/tests/wsgi.txt\n+++ b/src/plone/recipe/zope2instance/tests/wsgi.txt\n@@ -46,6 +46,9 @@ We should have an instance part, with a basic zope.conf::\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\ndiff --git a/src/plone/recipe/zope2instance/tests/zope2instance.txt b/src/plone/recipe/zope2instance/tests/zope2instance.txt\nindex d9d2d44..3cbd660 100644\n--- a/src/plone/recipe/zope2instance/tests/zope2instance.txt\n+++ b/src/plone/recipe/zope2instance/tests/zope2instance.txt\n@@ -49,6 +49,9 @@ We should have a zope instance, with a basic zope.conf::\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n@@ -76,6 +79,7 @@ We should have a blobstorage directory.\n \n     >>> ls(\'var\')\n     d  blobstorage\n+    d  cache\n     d  filestorage\n     d  instance\n     d  log\n@@ -134,6 +138,9 @@ The generated configuration has no temporary storage section anymore:\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n@@ -1351,6 +1358,7 @@ Our environment variables should be set now::\n     ...\n     <environment>\n       TZ US/Eastern\n+    CHAMELEON_CACHE .../var/cache\n     </environment>\n     ...\n \n@@ -1402,6 +1410,7 @@ Several all on one line::\n     ... recipe = plone.recipe.zope2instance\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern TMP /var/tmp DISABLE_PTS True\n     ... \'\'\' % options)\n \ndiff --git a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\nindex d50d763..caef702 100644\n--- a/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n+++ b/src/plone/recipe/zope2instance/tests/zope2instance_zserver.txt\n@@ -48,31 +48,22 @@ We should have a zope instance, with a basic zope.conf::\n     instancehome $INSTANCEHOME\n     %define CLIENTHOME .../sample-buildout/var/instance\n     clienthome $CLIENTHOME\n-    <BLANKLINE>\n-    <BLANKLINE>\n     debug-mode off\n     security-policy-implementation C\n     verbose-security off\n     default-zpublisher-encoding utf-8\n     http-header-max-length 8192\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n     zserver-threads 2\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n+    <environment>\n+        CHAMELEON_CACHE .../var/cache\n+    </environment>\n     <eventlog>\n-    <BLANKLINE>\n       level INFO\n       <logfile>\n         path .../sample-buildout/var/log/instance.log\n         level INFO\n       </logfile>\n     </eventlog>\n-    <BLANKLINE>\n     <logger access>\n       level WARN\n       <logfile>\n@@ -80,20 +71,12 @@ We should have a zope instance, with a basic zope.conf::\n         format %(message)s\n       </logfile>\n     </logger>\n-    <BLANKLINE>\n     <http-server>\n       address 8080\n-    <BLANKLINE>\n     </http-server>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n     <zodb_db main>\n         # Main database\n         cache-size 30000\n-    <BLANKLINE>\n     # Blob-enabled FileStorage database\n         <blobstorage>\n           blob-dir .../sample-buildout/var/blobstorage\n@@ -104,7 +87,6 @@ We should have a zope instance, with a basic zope.conf::\n         </blobstorage>\n         mount-point /\n     </zodb_db>\n-    <BLANKLINE>\n     <zodb_db temporary>\n         # Temporary storage database (for sessions)\n         <temporarystorage>\n@@ -113,19 +95,16 @@ We should have a zope instance, with a basic zope.conf::\n         mount-point /temp_folder\n         container-class Products.TemporaryFolder.TemporaryContainer\n     </zodb_db>\n-    <BLANKLINE>\n     pid-filename .../sample-buildout/var/instance.pid\n     lock-filename .../sample-buildout/var/instance.lock\n     python-check-interval 1000\n     enable-product-installation off\n-    <BLANKLINE>\n-    <BLANKLINE>\n-    <BLANKLINE>\n \n We should have a blobstorage directory.\n \n     >>> ls(\'var\')\n     d  blobstorage\n+    d  cache\n     d  filestorage\n     d  instance\n     d  log\n@@ -1698,6 +1677,7 @@ between several servers::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern\n     ... \'\'\' % options)\n \n@@ -1735,6 +1715,7 @@ Now let\'s add several environment variables::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars =\n     ...     TZ US/Eastern\n     ...     TMP /var/tmp\n@@ -1772,6 +1753,7 @@ Several all on one line::\n     ... wsgi = off\n     ... eggs =\n     ... user = me:me\n+    ... template-cache = off\n     ... environment-vars = TZ US/Eastern TMP /var/tmp DISABLE_PTS True\n     ... \'\'\' % options)\n \ndiff --git a/tox.ini b/tox.ini\nindex b5e8631..1f04caa 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -10,12 +10,12 @@ skip_missing_interpreters = False\n \n [testenv]\n usedevelop = true\n-install_command = python -m pip install --no-use-pep517 {opts} {packages}\n+install_command = python -m pip install {opts} {packages}\n commands =\n     coverage run {envbindir}/zope-testrunner --test-path=src []\n extras = test\n deps =\n-    -r https://zopefoundation.github.io/Zope/releases/4.0b7/requirements-full.txt\n+    -rhttps://zopefoundation.github.io/Zope/releases/4.1/requirements-full.txt\n     coverage\n setenv =\n     COVERAGE_FILE=.coverage.{envname}\n'
 
