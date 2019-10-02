@@ -2,97 +2,33 @@ Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2019-10-01T16:34:39+02:00
+Date: 2019-10-02T12:37:33+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.dexterity/commit/5547ef22994128f2e2bf6ad7e1580c5f1279dfa4
+Commit: https://github.com/plone/plone.dexterity/commit/ea8643c8d49e099911a13669271171612b2cd18e
 
-speedup schema cache by avoiding providedBy call if not necessary
+cache expensive assignable lookup
 
 Files changed:
-A news/113.bugfix
-M plone/dexterity/schema.py
+A news/115.bugfix
+M plone/dexterity/content.py
 
-b'diff --git a/news/113.bugfix b/news/113.bugfix\nnew file mode 100644\nindex 0000000..a6eb4fb\n--- /dev/null\n+++ b/news/113.bugfix\n@@ -0,0 +1,2 @@\n+Performance enhancement in schema cache by factor ~1.5.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/plone/dexterity/schema.py b/plone/dexterity/schema.py\nindex 444f1b7..09f411a 100644\n--- a/plone/dexterity/schema.py\n+++ b/plone/dexterity/schema.py\n@@ -23,6 +23,7 @@\n \n import functools\n import logging\n+import six\n import types\n import warnings\n \n@@ -50,15 +51,30 @@ def volatile(func):\n     @functools.wraps(func)\n     def decorator(self, portal_type):\n         """lookup fti from portal_type and cache\n+\n+        input can be either a portal_type as string or as the utility instance.\n+        return value is always a FTI-ultiliy or None\n         """\n-        if portal_type is not None:\n-            if IDexterityFTI.providedBy(portal_type):\n-                fti = portal_type\n-            else:\n-                fti = queryUtility(IDexterityFTI, name=portal_type)\n+        # this function is called very often\n+\n+        # shortcut None input\n+        if portal_type is None:\n+            return func(self, None)\n+        # if its a string lookup fti\n+        if isinstance(portal_type, six.string_types):\n+            # looking up a utility is expensive\n+            fti = queryUtility(IDexterityFTI, name=portal_type)\n+            if fti is None:\n+                return func(self, None)\n+        elif IDexterityFTI.providedBy(portal_type):\n+            # its already an IDexterityFTI instance\n+            fti = portal_type\n         else:\n-            fti = None\n-        if fti is not None and self.cache_enabled:\n+            raise ValueError(\n+                \'portal_type has to either string or IDexterityFTI instance but is \'\n+                \'{0!r}\'.format(portal_type)\n+            )\n+        if self.cache_enabled:\n             key = \'_v_schema_%s\' % func.__name__\n             cache = getattr(fti, key, _MARKER)\n             if cache is not _MARKER:\n@@ -68,7 +84,7 @@ def decorator(self, portal_type):\n \n         value = func(self, fti)\n \n-        if fti is not None and self.cache_enabled:\n+        if self.cache_enabled:\n             setattr(fti, key, (fti._p_mtime, value))\n \n         return value\n'
+b'diff --git a/news/115.bugfix b/news/115.bugfix\nnew file mode 100644\nindex 0000000..345106e\n--- /dev/null\n+++ b/news/115.bugfix\n@@ -0,0 +1,2 @@\n+Performance enhancement in schema cache and assignable.\n+[jensens]\ndiff --git a/plone/dexterity/content.py b/plone/dexterity/content.py\nindex 72b8a66..75d56c6 100644\n--- a/plone/dexterity/content.py\n+++ b/plone/dexterity/content.py\n@@ -40,6 +40,7 @@\n from zope.annotation import IAttributeAnnotatable\n from zope.component import queryUtility\n from zope.container.contained import Contained\n+from zope.globalrequest import getRequest\n from zope.interface import implementer\n from zope.interface.declarations import getObjectSpecification\n from zope.interface.declarations import implementedBy\n@@ -70,6 +71,8 @@\n     \'translation_service\',\n )\n \n+ASSIGNABLE_CACHE_KEY = \'__plone_dexterity_assignable_cache__\'\n+\n \n def _default_from_schema(context, schema, fieldname):\n     """helper to lookup default value of a field\n@@ -89,6 +92,32 @@ def _default_from_schema(context, schema, fieldname):\n     return deepcopy(field.default)\n \n \n+def get_assignable(context):\n+    """get the BehaviorAssignable for the context.\n+\n+    Read from cache on request if needed (twice as fast as lookup)\n+\n+    returns IBehaviorAssignable providing instance or None\n+    """\n+    request = getRequest()\n+    if not request:\n+        return IBehaviorAssignable(context, None)\n+    cache_key = getattr(context, \'_p_oid\', None)\n+    if not cache_key:\n+        return IBehaviorAssignable(context, None)\n+    assignable_cache = getattr(request, ASSIGNABLE_CACHE_KEY, _marker)\n+    if assignable_cache is _marker:\n+        assignable_cache = dict()\n+        setattr(request, ASSIGNABLE_CACHE_KEY, assignable_cache)\n+    assignable = assignable_cache.get(cache_key, _marker)\n+    if assignable is _marker:\n+        assignable_cache[cache_key] = assignable = IBehaviorAssignable(\n+            context,\n+            None,\n+        )\n+    return assignable\n+\n+\n class FTIAwareSpecification(ObjectSpecificationDescriptor):\n     """A __providedBy__ decorator that returns the interfaces provided by\n     the object, plus the schema interface set in the FTI.\n@@ -148,7 +177,7 @@ def __get__(self, inst, cls=None):\n         # block recursion\n         self.__recursion__ = True\n         try:\n-            assignable = IBehaviorAssignable(inst, None)\n+            assignable = get_assignable(inst)\n             if assignable is not None:\n                 for behavior_registration in assignable.enumerateBehaviors():\n                     if behavior_registration.marker:\n@@ -365,8 +394,8 @@ def __getattr__(self, name):\n         if value is not _marker:\n             return value\n \n-        # do the same for each subtype\n-        assignable = IBehaviorAssignable(self, None)\n+        # do the same for each behavior\n+        assignable = get_assignable(self)\n         if assignable is not None:\n             for behavior_registration in assignable.enumerateBehaviors():\n                 if behavior_registration.interface:\n'
 
 Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2019-10-01T16:34:39+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.dexterity/commit/9ed46253fa7fd1e48ccae1cf67b4608fe6522d4e
+Date: 2019-10-02T14:16:54+02:00
+Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.dexterity/commit/e155797ca1f78a584dcf80f28f38e08bdede0d10
 
-fix travis to test 5.2
+Merge pull request #115 from plone/jensens-performance-assignable-cache
 
-Files changed:
-M .travis.yml
-
-b'diff --git a/.travis.yml b/.travis.yml\nindex 3bc84e3..0502b44 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -1,21 +1,25 @@\n language: python\n+dist: xenial\n python: 2.7\n sudo: false\n cache:\n+  pip: true\n   directories:\n     - eggs\n-env:\n-  - PLONE_VERSION=5.0\n-  - PLONE_VERSION=5.1\n matrix:\n-  allow_failures:\n+  include:\n+    - env: PLONE_VERSION=5.0\n+      python: "2.7"\n     - env: PLONE_VERSION=5.1\n+      python: "2.7"\n+    - env: PLONE_VERSION=5.2\n+      python: "2.7"\n+    - env: PLONE_VERSION=5.2\n+      python: "3.7"\n   fast_finish: true\n install:\n   - sed -ie "s#test-5.0#test-$PLONE_VERSION#" buildout.cfg\n-  - pip install setuptools==33.1.1\n-  - pip install zc.buildout==2.8.0\n-  - buildout bootstrap .\n-  - bin/buildout annotate\n-  - bin/buildout -Nv install test\n+  - pip install -r https://dist.plone.org/release/$PLONE_VERSION-latest/requirements.txt\n+  - buildout annotate\n+  - buildout -Nv install test\n script: bin/test\n'
-
-Repository: plone.dexterity
-
-
-Branch: refs/heads/master
-Date: 2019-10-01T16:34:39+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.dexterity/commit/3403c8a628019e817006bcafa88d47cfcc7a3a7a
-
-queryUtility is expensive, cache the fti on the request
+Performance: Cache expensive assignable lookup
 
 Files changed:
-M plone/dexterity/schema.py
-M setup.py
+A news/115.bugfix
+M plone/dexterity/content.py
 
-b"diff --git a/plone/dexterity/schema.py b/plone/dexterity/schema.py\nindex 09f411a..7a0cfc0 100644\n--- a/plone/dexterity/schema.py\n+++ b/plone/dexterity/schema.py\n@@ -17,6 +17,7 @@\n from zope.component import getUtility\n from zope.component import queryUtility\n from zope.dottedname.resolve import resolve\n+from zope.globalrequest import getRequest\n from zope.interface import alsoProvides\n from zope.interface import implementer\n from zope.interface.interface import InterfaceClass\n@@ -36,6 +37,8 @@\n \n _MARKER = dict()\n \n+FTI_CACHE_KEY = '__plone_dexterity_fti_cache__'\n+\n \n def invalidate_cache(fti):\n     fti._p_activate()\n@@ -62,8 +65,23 @@ def decorator(self, portal_type):\n             return func(self, None)\n         # if its a string lookup fti\n         if isinstance(portal_type, six.string_types):\n-            # looking up a utility is expensive\n-            fti = queryUtility(IDexterityFTI, name=portal_type)\n+            # looking up a utility is expensive, using the global request as\n+            # cache is twice as fast\n+            request = getRequest()\n+            if request:\n+                fti_cache = getattr(request, FTI_CACHE_KEY, None)\n+                if fti_cache is None:\n+                    fti_cache = dict()\n+                    setattr(request, FTI_CACHE_KEY, dict())\n+                if portal_type in fti_cache:\n+                    fti = fti_cache[portal_type]\n+                else:\n+                    fti_cache[portal_type] = fti = queryUtility(\n+                        IDexterityFTI,\n+                        name=portal_type\n+                    )\n+            else:\n+                fti = queryUtility(IDexterityFTI, name=portal_type)\n             if fti is None:\n                 return func(self, None)\n         elif IDexterityFTI.providedBy(portal_type):\ndiff --git a/setup.py b/setup.py\nindex 7df6a86..344aab0 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -62,6 +62,7 @@\n         'zope.component',\n         'zope.container',\n         'zope.dottedname',\n+        'zope.globalrequest',\n         'zope.filerepresentation>=3.6.0',\n         'zope.interface',\n         'zope.lifecycleevent',\n"
-
-Repository: plone.dexterity
-
-
-Branch: refs/heads/master
-Date: 2019-10-01T16:34:39+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.dexterity/commit/87f1db870cc3a411440671fbcebeaf1c31effc81
-
-fix tests deprecation warnings
-
-Files changed:
-M plone/dexterity/tests/test_fti.py
-
-b'diff --git a/plone/dexterity/tests/test_fti.py b/plone/dexterity/tests/test_fti.py\nindex 0d9e0b4..bc0c751 100644\n--- a/plone/dexterity/tests/test_fti.py\n+++ b/plone/dexterity/tests/test_fti.py\n@@ -454,7 +454,7 @@ def test_components_registered_on_add(self):\n         setSite(site_dummy)\n         setHooks()\n \n-        self.assertNotEquals(\n+        self.assertNotEqual(\n             None,\n             queryUtility(IDexterityFTI, name=portal_type)\n         )\n@@ -618,7 +618,7 @@ def test_components_reregistered_on_rename(self):\n         )\n \n         # Then look for re-registration of global components\n-        self.assertEquals(site_manager_mock.registerUtility.call_count, 2)\n+        self.assertEqual(site_manager_mock.registerUtility.call_count, 2)\n \n         site_dummy = self.create_dummy(\n             getSiteManager=lambda: site_manager_mock\n'
-
-Repository: plone.dexterity
-
-
-Branch: refs/heads/master
-Date: 2019-10-01T16:34:39+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.dexterity/commit/290b740811c3fdb3eeb5aac35eb1476351d4f135
-
-on clear, clear also fti cache
-
-Files changed:
-M plone/dexterity/schema.py
-
-b'diff --git a/plone/dexterity/schema.py b/plone/dexterity/schema.py\nindex 7a0cfc0..60edfa4 100644\n--- a/plone/dexterity/schema.py\n+++ b/plone/dexterity/schema.py\n@@ -252,6 +252,10 @@ def schema_interfaces(self, fti):\n     def clear(self):\n         for fti in getAllUtilitiesRegisteredFor(IDexterityFTI):\n             self.invalidate(fti)\n+        request = getRequest()\n+        fti_cache = getattr(request, FTI_CACHE_KEY, None)\n+        if fti_cache is not None:\n+            delattr(request, FTI_CACHE_KEY)\n \n     @synchronized(lock)\n     def invalidate(self, fti):\n'
-
-Repository: plone.dexterity
-
-
-Branch: refs/heads/master
-Date: 2019-10-02T08:36:06+02:00
-Author: agitator (agitator) <agitator@users.noreply.github.com>
-Commit: https://github.com/plone/plone.dexterity/commit/768bc023fe8b76ce55c0b72475f6e2fe70940c61
-
-Merge pull request #114 from plone/jensens-performance-schema-cache-pure
-
-Performance: Schema cache speedup.
-
-Files changed:
-A news/113.bugfix
-M .travis.yml
-M plone/dexterity/schema.py
-M plone/dexterity/tests/test_fti.py
-M setup.py
-
-b'diff --git a/.travis.yml b/.travis.yml\nindex 3bc84e3..0502b44 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -1,21 +1,25 @@\n language: python\n+dist: xenial\n python: 2.7\n sudo: false\n cache:\n+  pip: true\n   directories:\n     - eggs\n-env:\n-  - PLONE_VERSION=5.0\n-  - PLONE_VERSION=5.1\n matrix:\n-  allow_failures:\n+  include:\n+    - env: PLONE_VERSION=5.0\n+      python: "2.7"\n     - env: PLONE_VERSION=5.1\n+      python: "2.7"\n+    - env: PLONE_VERSION=5.2\n+      python: "2.7"\n+    - env: PLONE_VERSION=5.2\n+      python: "3.7"\n   fast_finish: true\n install:\n   - sed -ie "s#test-5.0#test-$PLONE_VERSION#" buildout.cfg\n-  - pip install setuptools==33.1.1\n-  - pip install zc.buildout==2.8.0\n-  - buildout bootstrap .\n-  - bin/buildout annotate\n-  - bin/buildout -Nv install test\n+  - pip install -r https://dist.plone.org/release/$PLONE_VERSION-latest/requirements.txt\n+  - buildout annotate\n+  - buildout -Nv install test\n script: bin/test\ndiff --git a/news/113.bugfix b/news/113.bugfix\nnew file mode 100644\nindex 0000000..a6eb4fb\n--- /dev/null\n+++ b/news/113.bugfix\n@@ -0,0 +1,2 @@\n+Performance enhancement in schema cache by factor ~1.5.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/plone/dexterity/schema.py b/plone/dexterity/schema.py\nindex 444f1b7..60edfa4 100644\n--- a/plone/dexterity/schema.py\n+++ b/plone/dexterity/schema.py\n@@ -17,12 +17,14 @@\n from zope.component import getUtility\n from zope.component import queryUtility\n from zope.dottedname.resolve import resolve\n+from zope.globalrequest import getRequest\n from zope.interface import alsoProvides\n from zope.interface import implementer\n from zope.interface.interface import InterfaceClass\n \n import functools\n import logging\n+import six\n import types\n import warnings\n \n@@ -35,6 +37,8 @@\n \n _MARKER = dict()\n \n+FTI_CACHE_KEY = \'__plone_dexterity_fti_cache__\'\n+\n \n def invalidate_cache(fti):\n     fti._p_activate()\n@@ -50,15 +54,45 @@ def volatile(func):\n     @functools.wraps(func)\n     def decorator(self, portal_type):\n         """lookup fti from portal_type and cache\n+\n+        input can be either a portal_type as string or as the utility instance.\n+        return value is always a FTI-ultiliy or None\n         """\n-        if portal_type is not None:\n-            if IDexterityFTI.providedBy(portal_type):\n-                fti = portal_type\n+        # this function is called very often\n+\n+        # shortcut None input\n+        if portal_type is None:\n+            return func(self, None)\n+        # if its a string lookup fti\n+        if isinstance(portal_type, six.string_types):\n+            # looking up a utility is expensive, using the global request as\n+            # cache is twice as fast\n+            request = getRequest()\n+            if request:\n+                fti_cache = getattr(request, FTI_CACHE_KEY, None)\n+                if fti_cache is None:\n+                    fti_cache = dict()\n+                    setattr(request, FTI_CACHE_KEY, dict())\n+                if portal_type in fti_cache:\n+                    fti = fti_cache[portal_type]\n+                else:\n+                    fti_cache[portal_type] = fti = queryUtility(\n+                        IDexterityFTI,\n+                        name=portal_type\n+                    )\n             else:\n                 fti = queryUtility(IDexterityFTI, name=portal_type)\n+            if fti is None:\n+                return func(self, None)\n+        elif IDexterityFTI.providedBy(portal_type):\n+            # its already an IDexterityFTI instance\n+            fti = portal_type\n         else:\n-            fti = None\n-        if fti is not None and self.cache_enabled:\n+            raise ValueError(\n+                \'portal_type has to either string or IDexterityFTI instance but is \'\n+                \'{0!r}\'.format(portal_type)\n+            )\n+        if self.cache_enabled:\n             key = \'_v_schema_%s\' % func.__name__\n             cache = getattr(fti, key, _MARKER)\n             if cache is not _MARKER:\n@@ -68,7 +102,7 @@ def decorator(self, portal_type):\n \n         value = func(self, fti)\n \n-        if fti is not None and self.cache_enabled:\n+        if self.cache_enabled:\n             setattr(fti, key, (fti._p_mtime, value))\n \n         return value\n@@ -218,6 +252,10 @@ def schema_interfaces(self, fti):\n     def clear(self):\n         for fti in getAllUtilitiesRegisteredFor(IDexterityFTI):\n             self.invalidate(fti)\n+        request = getRequest()\n+        fti_cache = getattr(request, FTI_CACHE_KEY, None)\n+        if fti_cache is not None:\n+            delattr(request, FTI_CACHE_KEY)\n \n     @synchronized(lock)\n     def invalidate(self, fti):\ndiff --git a/plone/dexterity/tests/test_fti.py b/plone/dexterity/tests/test_fti.py\nindex 0d9e0b4..bc0c751 100644\n--- a/plone/dexterity/tests/test_fti.py\n+++ b/plone/dexterity/tests/test_fti.py\n@@ -454,7 +454,7 @@ def test_components_registered_on_add(self):\n         setSite(site_dummy)\n         setHooks()\n \n-        self.assertNotEquals(\n+        self.assertNotEqual(\n             None,\n             queryUtility(IDexterityFTI, name=portal_type)\n         )\n@@ -618,7 +618,7 @@ def test_components_reregistered_on_rename(self):\n         )\n \n         # Then look for re-registration of global components\n-        self.assertEquals(site_manager_mock.registerUtility.call_count, 2)\n+        self.assertEqual(site_manager_mock.registerUtility.call_count, 2)\n \n         site_dummy = self.create_dummy(\n             getSiteManager=lambda: site_manager_mock\ndiff --git a/setup.py b/setup.py\nindex 7df6a86..344aab0 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -62,6 +62,7 @@\n         \'zope.component\',\n         \'zope.container\',\n         \'zope.dottedname\',\n+        \'zope.globalrequest\',\n         \'zope.filerepresentation>=3.6.0\',\n         \'zope.interface\',\n         \'zope.lifecycleevent\',\n'
+b'diff --git a/news/115.bugfix b/news/115.bugfix\nnew file mode 100644\nindex 0000000..345106e\n--- /dev/null\n+++ b/news/115.bugfix\n@@ -0,0 +1,2 @@\n+Performance enhancement in schema cache and assignable.\n+[jensens]\ndiff --git a/plone/dexterity/content.py b/plone/dexterity/content.py\nindex 72b8a66..75d56c6 100644\n--- a/plone/dexterity/content.py\n+++ b/plone/dexterity/content.py\n@@ -40,6 +40,7 @@\n from zope.annotation import IAttributeAnnotatable\n from zope.component import queryUtility\n from zope.container.contained import Contained\n+from zope.globalrequest import getRequest\n from zope.interface import implementer\n from zope.interface.declarations import getObjectSpecification\n from zope.interface.declarations import implementedBy\n@@ -70,6 +71,8 @@\n     \'translation_service\',\n )\n \n+ASSIGNABLE_CACHE_KEY = \'__plone_dexterity_assignable_cache__\'\n+\n \n def _default_from_schema(context, schema, fieldname):\n     """helper to lookup default value of a field\n@@ -89,6 +92,32 @@ def _default_from_schema(context, schema, fieldname):\n     return deepcopy(field.default)\n \n \n+def get_assignable(context):\n+    """get the BehaviorAssignable for the context.\n+\n+    Read from cache on request if needed (twice as fast as lookup)\n+\n+    returns IBehaviorAssignable providing instance or None\n+    """\n+    request = getRequest()\n+    if not request:\n+        return IBehaviorAssignable(context, None)\n+    cache_key = getattr(context, \'_p_oid\', None)\n+    if not cache_key:\n+        return IBehaviorAssignable(context, None)\n+    assignable_cache = getattr(request, ASSIGNABLE_CACHE_KEY, _marker)\n+    if assignable_cache is _marker:\n+        assignable_cache = dict()\n+        setattr(request, ASSIGNABLE_CACHE_KEY, assignable_cache)\n+    assignable = assignable_cache.get(cache_key, _marker)\n+    if assignable is _marker:\n+        assignable_cache[cache_key] = assignable = IBehaviorAssignable(\n+            context,\n+            None,\n+        )\n+    return assignable\n+\n+\n class FTIAwareSpecification(ObjectSpecificationDescriptor):\n     """A __providedBy__ decorator that returns the interfaces provided by\n     the object, plus the schema interface set in the FTI.\n@@ -148,7 +177,7 @@ def __get__(self, inst, cls=None):\n         # block recursion\n         self.__recursion__ = True\n         try:\n-            assignable = IBehaviorAssignable(inst, None)\n+            assignable = get_assignable(inst)\n             if assignable is not None:\n                 for behavior_registration in assignable.enumerateBehaviors():\n                     if behavior_registration.marker:\n@@ -365,8 +394,8 @@ def __getattr__(self, name):\n         if value is not _marker:\n             return value\n \n-        # do the same for each subtype\n-        assignable = IBehaviorAssignable(self, None)\n+        # do the same for each behavior\n+        assignable = get_assignable(self)\n         if assignable is not None:\n             for behavior_registration in assignable.enumerateBehaviors():\n                 if behavior_registration.interface:\n'
 
