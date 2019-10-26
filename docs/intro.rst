@@ -17,7 +17,7 @@ keep in mind that Plone has a `version support policy <http://plone.org/support/
 Dependencies
 ============
 * git, `how to setup <https://help.github.com/articles/set-up-git/>`_
-* `Python <http://python.org/>`_ versions 2.7 and 3.6 including development headers.
+* `Python <http://python.org/>`_ version 3.6 or 3.7 or 3.8 including development headers.
 * If you are on Mac OSX,
   you will need to install `XCode <https://developer.apple.com/xcode/>`_.
   You can do this through the app store or several other soul-selling methods.
@@ -29,8 +29,6 @@ Dependencies
 * `Python Imaging Library (PIL) <http://www.pythonware.com/products/pil/>`_.
   Make sure to install it or its dependencies.
   This depends on the your operating system.
-* `VirtualEnv <http://www.virtualenv.org/en/latest/index.html>`_ in the proper Python 2.7 environment.
-  Python 3.6 comes with `venv` in its standard libraries and no additional installation is needed.
 * `GCC <http://gcc.gnu.org/>`_ in order to compile ZODB, Zope and lxml.
 * `libxml2 and libxslt <http://xmlsoft.org/XSLT/downloads.html>`_,
   including development headers.
@@ -44,22 +42,15 @@ The first step in fixing a bug is getting this `buildout <https://github.com/plo
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
 `GitHub <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
 Dependent on the current development cycle there may exist a future branch.
-I.e. 5.1 is the activly maintained stable branch and 5.2 is the future, currently unstable, active development branch.
+I.e. 5.2 is the actively maintained stable branch and 6.0 is the future, currently unstable, active development branch.
 More information on switching release branches is below.
 
-To set up a plone 5 development environment::
+To set up a plone 6 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 5.2 https://github.com/plone/buildout.coredev ./plone5devel
-  > cd ./plone5devel
-
-For Python 2.7::
-
+  > git clone -b 6.0 https://github.com/plone/buildout.coredev ./plone6devel
+  > cd ./plone6devel
   > ./bootstrap.sh
-
-For Python 3.6::
-
-  > ./bootstrap-py3.sh
 
 
 If you run into issues in this process,
@@ -67,11 +58,11 @@ please see the doc :doc:`issues`.
 
 This will run for a long time if it is your first pull (~20 mins).
 Once that is done pulling down eggs,
-you can start your new instance (on python 2.7) with::
+you can start your new instance with::
 
   > ./bin/instance fg
 
-or with Python 2.7 and 3.6 as WSGI service with::
+or as WSGI service with::
 
   > ./bin/wsgi
 
