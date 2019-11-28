@@ -1,122 +1,48 @@
-Repository: Products.PlonePAS
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2019-11-25T23:49:56+01:00
-Author: ezvirtual () <ezvirtual@thevirtual.co.nz>
-Commit: https://github.com/plone/Products.PlonePAS/commit/ee4f778b022102ff7562622559d323c090431059
+Date: 2019-08-11T09:39:51+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.portlets/commit/00453974c1fc463dfce2041994e6c66866b5f3fe
 
-trigger PropertiesUpdated event when user properties are updated
-
-add simple test for properties updated event
-
-make test imports consistent with existing style &amp; re-order
+fix review portlet when show on the portal-root
 
 Files changed:
-M CHANGES.rst
-M setup.py
-M src/Products/PlonePAS/tests/test_memberdatatool.py
-M src/Products/PlonePAS/tools/memberdata.py
+M plone/app/portlets/portlets/review.pt
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 9c9fd9a7..476b7d20 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,7 @@ Changelog\n \n .. towncrier release notes start\n \n+\n 6.0.2 (2019-04-29)\n ------------------\n \ndiff --git a/setup.py b/setup.py\nindex 13c9ad16..9328cef8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -3,8 +3,10 @@\n from setuptools import find_packages\n import sys\n \n+\n version = \'6.0.3.dev0\'\n \n+\n longdescription = open("README.rst").read()\n longdescription += \'\\n\'\n longdescription += open("CHANGES.rst").read()\ndiff --git a/src/Products/PlonePAS/tests/test_memberdatatool.py b/src/Products/PlonePAS/tests/test_memberdatatool.py\nindex 89ba2267..b5220342 100644\n--- a/src/Products/PlonePAS/tests/test_memberdatatool.py\n+++ b/src/Products/PlonePAS/tests/test_memberdatatool.py\n@@ -4,12 +4,17 @@\n from plone.app.testing import TEST_USER_ID as default_user\n from Products.PlonePAS.tests import dummy\n from Products.PlonePAS.testing import PRODUCTS_PLONEPAS_INTEGRATION_TESTING\n+from zope.component import getGlobalSiteManager\n from zope.component import getMultiAdapter\n from Products.CMFCore.interfaces import IMember\n+from Products.CMFCore.interfaces import IMemberData\n+from Products.PluggableAuthService.interfaces.events import \\\n+        IPropertiesUpdatedEvent\n \n import unittest\n \n \n+\n class TestMemberDataTool(unittest.TestCase):\n \n     layer = PRODUCTS_PLONEPAS_INTEGRATION_TESTING\n@@ -88,3 +93,17 @@ def testMemberDataAdapter(self):\n \n         wrapped_user = self.memberdata.wrapUser(member)\n         self.assertEqual(wrapped_user.__class__, MemberData)\n+\n+    def testPropertiesUpdatedEvent(self):\n+\n+        def event_handler(context, event):\n+            self._properties_updated_handler_called = True\n+\n+        gsm = zope.component.getGlobalSiteManager()\n+        gsm.registerHandler(event_handler,\n+                            (IMemberData, IPropertiesUpdatedEvent))\n+\n+        self._properties_updated_handler_called = False\n+        self.addMember(\'ez\', \'Ez Zy\', \'ez@ezmail.net\',\n+                       [\'Member\'], \'2018-01-01\')\n+        self.assertTrue(self._properties_updated_handler_called)\ndiff --git a/src/Products/PlonePAS/tools/memberdata.py b/src/Products/PlonePAS/tools/memberdata.py\nindex 063f25bd..a3a7c413 100644\n--- a/src/Products/PlonePAS/tools/memberdata.py\n+++ b/src/Products/PlonePAS/tools/memberdata.py\n@@ -19,12 +19,14 @@\n from Products.PlonePAS.interfaces.memberdata import IMemberDataTool\n from Products.PlonePAS.interfaces.plugins import IUserManagement\n from Products.PlonePAS.interfaces.propertysheets import IMutablePropertySheet\n+from Products.PluggableAuthService.events import PropertiesUpdated\n from Products.PluggableAuthService.interfaces.authservice import \\\n     IPluggableAuthService\n from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin\n from Products.PluggableAuthService.interfaces.plugins import \\\n     IRoleAssignerPlugin\n from zope.component import adapter\n+from zope.event import notify\n from zope.interface import implementer\n \n import six\n@@ -275,6 +277,11 @@ def setMemberProperties(self, mapping, force_local=0, force_empty=False):\n         if modified:\n             self.notifyModified()\n \n+        # Trigger PropertiesUpdated event when member properties are updated,\n+        # excluding user login events\n+        if set(mapping.keys()) != set((\'login_time\', \'last_login_time\')):\n+            notify(PropertiesUpdated(self, mapping))\n+\n     def getProperty(self, id, default=_marker):\n         """PAS-specific method to fetch a user\'s properties. Looks\n         through the ordered property sheets.\n'
+b'diff --git a/plone/app/portlets/portlets/review.pt b/plone/app/portlets/portlets/review.pt\nindex e150d5f..89611b0 100644\n--- a/plone/app/portlets/portlets/review.pt\n+++ b/plone/app/portlets/portlets/review.pt\n@@ -15,10 +15,7 @@\n            tal:content="view/title" />\n   </header>\n   <div class="portletContent"\n-       tal:define="plone_layout context/@@plone_layout;\n-                   portal context/@@plone_portal_state/portal;\n-                   \n-                   supress_icon    view/data/no_icons;\n+       tal:define="supress_icon    view/data/no_icons;\n                    supress_thumb   view/data/no_thumbs;\n                    thumb_scale python:view.thumb_scale();\n                    ">\n@@ -26,7 +23,6 @@\n       <tal:items tal:repeat="obj view/review_items">\n           <li class="portletItem"\n               tal:define="oddrow repeat/obj/odd;\n-                          imagescale context/@@images;\n                           review_state_class obj/review_state_class;\n                           image obj/images;\n                           hasImage obj/hasImage;\n@@ -37,9 +33,9 @@\n                  tal:attributes="href string:${obj/path}/view;\n                                  title obj/description;\n                                  class string:$review_state_class tile $item_class">\n-                                 \n-            <img  tal:condition="python:hasImage and thumb_scale!=\'none\' and imagescale is not None"\n-                   tal:replace="structure python:image.scale(\'image\', scale=thumb_scale).tag(css_class=\'pull-right thumb-\'+thumb_scale)"/>\n+\n+            <img tal:condition="python:not supress_thumb and hasImage and thumb_scale"\n+                 tal:replace="structure python:image.scale(\'image\', scale=thumb_scale).tag(css_class=\'pull-right thumb-\'+thumb_scale)"/>\n \n                   <span tal:replace="obj/title">\n                       Title\n'
 
-Repository: Products.PlonePAS
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2019-11-25T23:51:46+01:00
-Author: ezvirtual () <ezvirtual@thevirtual.co.nz>
-Commit: https://github.com/plone/Products.PlonePAS/commit/3ebea02a19e62008af5c5b2d63ab2746a30db7a4
+Date: 2019-08-11T09:41:38+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.portlets/commit/571d7957810ccd778ee4e33438d220f4c1a3c28f
 
-Changes to notify(PropertiesUpdated) event &amp; tests based on pull-request feedback
+add changenote
 
 Files changed:
-M src/Products/PlonePAS/tests/test_memberdatatool.py
-M src/Products/PlonePAS/tools/memberdata.py
+A news/130.bugfix
 
-b"diff --git a/src/Products/PlonePAS/tests/test_memberdatatool.py b/src/Products/PlonePAS/tests/test_memberdatatool.py\nindex b5220342..c00acd98 100644\n--- a/src/Products/PlonePAS/tests/test_memberdatatool.py\n+++ b/src/Products/PlonePAS/tests/test_memberdatatool.py\n@@ -104,6 +104,41 @@ def event_handler(context, event):\n                             (IMemberData, IPropertiesUpdatedEvent))\n \n         self._properties_updated_handler_called = False\n-        self.addMember('ez', 'Ez Zy', 'ez@ezmail.net',\n-                       ['Member'], '2018-01-01')\n+\n+        username = 'ez'\n+        roles = ['Member']\n+        fullname = 'Ez Zy'\n+        email = 'ez@ezmail.net'\n+\n+        self.membership.addMember(username, 'secret', roles, [])\n+        member = self.membership.getMemberById(username)\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+\n+        member.setMemberProperties({\n+            'fullname': fullname,\n+            'email': email})\n+\n         self.assertTrue(self._properties_updated_handler_called)\n+\n+        # Test that notify(PropertiesUpdated) isn't called on user login.\n+        self._properties_updated_handler_called = False\n+        login(self.portal, username)\n+        # Imitate a login as the plone.app.testing login method doesn't seem to\n+        # set these member properties.\n+        member.setMemberProperties({\n+            'login_time': DateTime('2018-02-15'),\n+            'last_login_time': DateTime('2018-02-15')})\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+\n+        # Test notify(PropertiesUpdated) isn't called when login_time is\n+        # present as we're assuming this should only be changed on login.\n+        self._properties_updated_handler_called = False\n+        member.setMemberProperties({\n+            'login_time': DateTime('2018-02-15'),\n+            'fullname': 'Bed Rock'})\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+        gsm.unregisterHandler(event_handler,\n+                              (IMemberData, IPropertiesUpdatedEvent))\ndiff --git a/src/Products/PlonePAS/tools/memberdata.py b/src/Products/PlonePAS/tools/memberdata.py\nindex a3a7c413..361844e7 100644\n--- a/src/Products/PlonePAS/tools/memberdata.py\n+++ b/src/Products/PlonePAS/tools/memberdata.py\n@@ -279,7 +279,7 @@ def setMemberProperties(self, mapping, force_local=0, force_empty=False):\n \n         # Trigger PropertiesUpdated event when member properties are updated,\n         # excluding user login events\n-        if set(mapping.keys()) != set(('login_time', 'last_login_time')):\n+        if not set(mapping.keys()) & set(('login_time', 'last_login_time')):\n             notify(PropertiesUpdated(self, mapping))\n \n     def getProperty(self, id, default=_marker):\n"
+b'diff --git a/news/130.bugfix b/news/130.bugfix\nnew file mode 100644\nindex 0000000..9bc5db7\n--- /dev/null\n+++ b/news/130.bugfix\n@@ -0,0 +1 @@\n+Fix review portlet when show on the portal-root\n\\ No newline at end of file\n'
 
-Repository: Products.PlonePAS
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2019-11-25T23:52:28+01:00
-Author: ezvirtual () <ezvirtual@thevirtual.co.nz>
-Commit: https://github.com/plone/Products.PlonePAS/commit/6ff44ecc5466831618c30dce6d748669a263ad3d
+Date: 2019-11-28T10:44:47+01:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.portlets/commit/88387e252190d3cc93607977c3fc1f65cdc65a79
 
-remove login call from test as it doesn't seem to set login_time or last_login_time properties that I'm attempting to test
+Merge pull request #130 from plone/fix_thumbs_in_review_portlet
 
-Files changed:
-M src/Products/PlonePAS/tests/test_memberdatatool.py
-
-b"diff --git a/src/Products/PlonePAS/tests/test_memberdatatool.py b/src/Products/PlonePAS/tests/test_memberdatatool.py\nindex c00acd98..8a0c5d85 100644\n--- a/src/Products/PlonePAS/tests/test_memberdatatool.py\n+++ b/src/Products/PlonePAS/tests/test_memberdatatool.py\n@@ -123,7 +123,7 @@ def event_handler(context, event):\n \n         # Test that notify(PropertiesUpdated) isn't called on user login.\n         self._properties_updated_handler_called = False\n-        login(self.portal, username)\n+\n         # Imitate a login as the plone.app.testing login method doesn't seem to\n         # set these member properties.\n         member.setMemberProperties({\n"
-
-Repository: Products.PlonePAS
-
-
-Branch: refs/heads/master
-Date: 2019-11-25T23:55:13+01:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/Products.PlonePAS/commit/718555196fa48af6dc8e17f2691b4ee091edd9e4
-
-Fix test
+fix review portlet when show on the portal-root
 
 Files changed:
-M src/Products/PlonePAS/tests/test_memberdatatool.py
+A news/130.bugfix
+M plone/app/portlets/portlets/review.pt
 
-b'diff --git a/src/Products/PlonePAS/tests/test_memberdatatool.py b/src/Products/PlonePAS/tests/test_memberdatatool.py\nindex 8a0c5d85..6189d267 100644\n--- a/src/Products/PlonePAS/tests/test_memberdatatool.py\n+++ b/src/Products/PlonePAS/tests/test_memberdatatool.py\n@@ -99,7 +99,7 @@ def testPropertiesUpdatedEvent(self):\n         def event_handler(context, event):\n             self._properties_updated_handler_called = True\n \n-        gsm = zope.component.getGlobalSiteManager()\n+        gsm = getGlobalSiteManager()\n         gsm.registerHandler(event_handler,\n                             (IMemberData, IPropertiesUpdatedEvent))\n \n'
-
-Repository: Products.PlonePAS
-
-
-Branch: refs/heads/master
-Date: 2019-11-26T00:02:43+01:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/Products.PlonePAS/commit/b8d6bbc58b43b8c0ff14f578451bd0a83740460d
-
-Update changelog
-
-Files changed:
-A news/27.bugfix
-D news/50.bugfix
-D news/51.bugfix
-D news/52.bugfix
-
-b'diff --git a/news/27.bugfix b/news/27.bugfix\nnew file mode 100644\nindex 00000000..60c120aa\n--- /dev/null\n+++ b/news/27.bugfix\n@@ -0,0 +1,5 @@\n+- Notify PropertiesUpdated event when member properties are changed\n+  [ezvirtual]\n+\n+- Add simple test for PropertiesUpdated event\n+  [ezvirtual]\ndiff --git a/news/50.bugfix b/news/50.bugfix\ndeleted file mode 100644\nindex 160e733e..00000000\n--- a/news/50.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Log exception from PAS logout() instead of swallowing them\n-[ajung]\ndiff --git a/news/51.bugfix b/news/51.bugfix\ndeleted file mode 100644\nindex ff89e3bc..00000000\n--- a/news/51.bugfix\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Fix deprecated imports.\n-Fix buildout infrastructure for Plone 5.2.\n-[thet]\ndiff --git a/news/52.bugfix b/news/52.bugfix\ndeleted file mode 100644\nindex 9beaabf2..00000000\n--- a/news/52.bugfix\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Create the MemberData object from an adapter instead of directly instantiating it, as intended in Products.CMFCore.MemberDataTool.\n-This allows for better extensibility.\n-[thet]\n'
-
-Repository: Products.PlonePAS
-
-
-Branch: refs/heads/master
-Date: 2019-11-26T00:05:59+01:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/Products.PlonePAS/commit/1aca99d150856e631e11627e9b0c62a197ffc02f
-
-Merge branch 'master' into backport-510-511
-
-Files changed:
-M CHANGES.rst
-M setup.py
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 476b7d20..d185c198 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,21 @@ Changelog\n \n .. towncrier release notes start\n \n+6.0.3 (2019-11-25)\n+------------------\n+\n+Bug fixes:\n+\n+\n+- Log exception from PAS logout() instead of swallowing them\n+  [ajung] (#50)\n+- Fix deprecated imports.\n+  Fix buildout infrastructure for Plone 5.2.\n+  [thet] (#51)\n+- Create the MemberData object from an adapter instead of directly instantiating it, as intended in Products.CMFCore.MemberDataTool.\n+  This allows for better extensibility.\n+  [thet] (#52)\n+\n \n 6.0.2 (2019-04-29)\n ------------------\ndiff --git a/setup.py b/setup.py\nindex 9328cef8..f9b2afcc 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -3,8 +3,7 @@\n from setuptools import find_packages\n import sys\n \n-\n-version = \'6.0.3.dev0\'\n+version = \'6.0.4.dev0\'\n \n \n longdescription = open("README.rst").read()\n'
-
-Repository: Products.PlonePAS
-
-
-Branch: refs/heads/master
-Date: 2019-11-27T14:17:39+01:00
-Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/Products.PlonePAS/commit/74bdbe25d37572665ec407260cb59971d857f02b
-
-Merge pull request #53 from plone/backport-510-511
-
-Back-port fix for issue #27
-
-Files changed:
-A news/27.bugfix
-M setup.py
-M src/Products/PlonePAS/tests/test_memberdatatool.py
-M src/Products/PlonePAS/tools/memberdata.py
-
-b'diff --git a/news/27.bugfix b/news/27.bugfix\nnew file mode 100644\nindex 00000000..60c120aa\n--- /dev/null\n+++ b/news/27.bugfix\n@@ -0,0 +1,5 @@\n+- Notify PropertiesUpdated event when member properties are changed\n+  [ezvirtual]\n+\n+- Add simple test for PropertiesUpdated event\n+  [ezvirtual]\ndiff --git a/setup.py b/setup.py\nindex fc2a0f96..f9b2afcc 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -5,6 +5,7 @@\n \n version = \'6.0.4.dev0\'\n \n+\n longdescription = open("README.rst").read()\n longdescription += \'\\n\'\n longdescription += open("CHANGES.rst").read()\ndiff --git a/src/Products/PlonePAS/tests/test_memberdatatool.py b/src/Products/PlonePAS/tests/test_memberdatatool.py\nindex 89ba2267..6189d267 100644\n--- a/src/Products/PlonePAS/tests/test_memberdatatool.py\n+++ b/src/Products/PlonePAS/tests/test_memberdatatool.py\n@@ -4,12 +4,17 @@\n from plone.app.testing import TEST_USER_ID as default_user\n from Products.PlonePAS.tests import dummy\n from Products.PlonePAS.testing import PRODUCTS_PLONEPAS_INTEGRATION_TESTING\n+from zope.component import getGlobalSiteManager\n from zope.component import getMultiAdapter\n from Products.CMFCore.interfaces import IMember\n+from Products.CMFCore.interfaces import IMemberData\n+from Products.PluggableAuthService.interfaces.events import \\\n+        IPropertiesUpdatedEvent\n \n import unittest\n \n \n+\n class TestMemberDataTool(unittest.TestCase):\n \n     layer = PRODUCTS_PLONEPAS_INTEGRATION_TESTING\n@@ -88,3 +93,52 @@ def testMemberDataAdapter(self):\n \n         wrapped_user = self.memberdata.wrapUser(member)\n         self.assertEqual(wrapped_user.__class__, MemberData)\n+\n+    def testPropertiesUpdatedEvent(self):\n+\n+        def event_handler(context, event):\n+            self._properties_updated_handler_called = True\n+\n+        gsm = getGlobalSiteManager()\n+        gsm.registerHandler(event_handler,\n+                            (IMemberData, IPropertiesUpdatedEvent))\n+\n+        self._properties_updated_handler_called = False\n+\n+        username = \'ez\'\n+        roles = [\'Member\']\n+        fullname = \'Ez Zy\'\n+        email = \'ez@ezmail.net\'\n+\n+        self.membership.addMember(username, \'secret\', roles, [])\n+        member = self.membership.getMemberById(username)\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+\n+        member.setMemberProperties({\n+            \'fullname\': fullname,\n+            \'email\': email})\n+\n+        self.assertTrue(self._properties_updated_handler_called)\n+\n+        # Test that notify(PropertiesUpdated) isn\'t called on user login.\n+        self._properties_updated_handler_called = False\n+\n+        # Imitate a login as the plone.app.testing login method doesn\'t seem to\n+        # set these member properties.\n+        member.setMemberProperties({\n+            \'login_time\': DateTime(\'2018-02-15\'),\n+            \'last_login_time\': DateTime(\'2018-02-15\')})\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+\n+        # Test notify(PropertiesUpdated) isn\'t called when login_time is\n+        # present as we\'re assuming this should only be changed on login.\n+        self._properties_updated_handler_called = False\n+        member.setMemberProperties({\n+            \'login_time\': DateTime(\'2018-02-15\'),\n+            \'fullname\': \'Bed Rock\'})\n+\n+        self.assertFalse(self._properties_updated_handler_called)\n+        gsm.unregisterHandler(event_handler,\n+                              (IMemberData, IPropertiesUpdatedEvent))\ndiff --git a/src/Products/PlonePAS/tools/memberdata.py b/src/Products/PlonePAS/tools/memberdata.py\nindex 063f25bd..361844e7 100644\n--- a/src/Products/PlonePAS/tools/memberdata.py\n+++ b/src/Products/PlonePAS/tools/memberdata.py\n@@ -19,12 +19,14 @@\n from Products.PlonePAS.interfaces.memberdata import IMemberDataTool\n from Products.PlonePAS.interfaces.plugins import IUserManagement\n from Products.PlonePAS.interfaces.propertysheets import IMutablePropertySheet\n+from Products.PluggableAuthService.events import PropertiesUpdated\n from Products.PluggableAuthService.interfaces.authservice import \\\n     IPluggableAuthService\n from Products.PluggableAuthService.interfaces.plugins import IPropertiesPlugin\n from Products.PluggableAuthService.interfaces.plugins import \\\n     IRoleAssignerPlugin\n from zope.component import adapter\n+from zope.event import notify\n from zope.interface import implementer\n \n import six\n@@ -275,6 +277,11 @@ def setMemberProperties(self, mapping, force_local=0, force_empty=False):\n         if modified:\n             self.notifyModified()\n \n+        # Trigger PropertiesUpdated event when member properties are updated,\n+        # excluding user login events\n+        if not set(mapping.keys()) & set((\'login_time\', \'last_login_time\')):\n+            notify(PropertiesUpdated(self, mapping))\n+\n     def getProperty(self, id, default=_marker):\n         """PAS-specific method to fetch a user\'s properties. Looks\n         through the ordered property sheets.\n'
+b'diff --git a/news/130.bugfix b/news/130.bugfix\nnew file mode 100644\nindex 0000000..9bc5db7\n--- /dev/null\n+++ b/news/130.bugfix\n@@ -0,0 +1 @@\n+Fix review portlet when show on the portal-root\n\\ No newline at end of file\ndiff --git a/plone/app/portlets/portlets/review.pt b/plone/app/portlets/portlets/review.pt\nindex e150d5f..89611b0 100644\n--- a/plone/app/portlets/portlets/review.pt\n+++ b/plone/app/portlets/portlets/review.pt\n@@ -15,10 +15,7 @@\n            tal:content="view/title" />\n   </header>\n   <div class="portletContent"\n-       tal:define="plone_layout context/@@plone_layout;\n-                   portal context/@@plone_portal_state/portal;\n-                   \n-                   supress_icon    view/data/no_icons;\n+       tal:define="supress_icon    view/data/no_icons;\n                    supress_thumb   view/data/no_thumbs;\n                    thumb_scale python:view.thumb_scale();\n                    ">\n@@ -26,7 +23,6 @@\n       <tal:items tal:repeat="obj view/review_items">\n           <li class="portletItem"\n               tal:define="oddrow repeat/obj/odd;\n-                          imagescale context/@@images;\n                           review_state_class obj/review_state_class;\n                           image obj/images;\n                           hasImage obj/hasImage;\n@@ -37,9 +33,9 @@\n                  tal:attributes="href string:${obj/path}/view;\n                                  title obj/description;\n                                  class string:$review_state_class tile $item_class">\n-                                 \n-            <img  tal:condition="python:hasImage and thumb_scale!=\'none\' and imagescale is not None"\n-                   tal:replace="structure python:image.scale(\'image\', scale=thumb_scale).tag(css_class=\'pull-right thumb-\'+thumb_scale)"/>\n+\n+            <img tal:condition="python:not supress_thumb and hasImage and thumb_scale"\n+                 tal:replace="structure python:image.scale(\'image\', scale=thumb_scale).tag(css_class=\'pull-right thumb-\'+thumb_scale)"/>\n \n                   <span tal:replace="obj/title">\n                       Title\n'
 
