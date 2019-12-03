@@ -1,51 +1,147 @@
-Repository: Products.PlonePAS
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2019-11-28T00:42:07+01:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/Products.PlonePAS/commit/56470e67248608c57572bfb361f4e1b80bb9cd1b
+Date: 2019-11-29T16:23:43+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/22a7152e92d958dae7ad759f11fb6b02b6ab3258
 
-Notify CredentialsUpdated event when password is changed
+publish only pending comment, else show status message
 
 Files changed:
-A news/33.bugfix
-M src/Products/PlonePAS/plugins/user.py
-M src/Products/PlonePAS/tests/test_membershiptool.py
+M plone/app/discussion/browser/moderation.py
 
-b'diff --git a/news/33.bugfix b/news/33.bugfix\nnew file mode 100644\nindex 00000000..5965b109\n--- /dev/null\n+++ b/news/33.bugfix\n@@ -0,0 +1,2 @@\n+- Notify CredentialsUpdated event when password is changed\n+  [ezvirtual]\ndiff --git a/src/Products/PlonePAS/plugins/user.py b/src/Products/PlonePAS/plugins/user.py\nindex 5a4d8ace..5b51ab42 100644\n--- a/src/Products/PlonePAS/plugins/user.py\n+++ b/src/Products/PlonePAS/plugins/user.py\n@@ -11,9 +11,11 @@\n from Products.PlonePAS.interfaces.capabilities import IPasswordSetCapability\n from Products.PlonePAS.interfaces.plugins import IUserIntrospection\n from Products.PlonePAS.interfaces.plugins import IUserManagement\n+from Products.PluggableAuthService.events import CredentialsUpdated\n from Products.PluggableAuthService.plugins.ZODBUserManager \\\n     import ZODBUserManager as BasePlugin\n from Products.PluggableAuthService.utils import createViewName\n+from zope.event import notify\n from zope.interface import implementer\n \n manage_addUserManagerForm = DTMLFile(\'../zmi/UserManagerForm\', globals())\n@@ -85,6 +87,7 @@ def doChangeUser(self, principal_id, password):\n         if self._user_passwords.get(principal_id) is None:\n             raise RuntimeError("User does not exist: %s" % principal_id)\n         self._user_passwords[principal_id] = AuthEncoding.pw_encrypt(password)\n+        notify(CredentialsUpdated(self.getUserById(principal_id), password))\n \n     # implement interfaces IDeleteCapability, IPasswordSetCapability\n \ndiff --git a/src/Products/PlonePAS/tests/test_membershiptool.py b/src/Products/PlonePAS/tests/test_membershiptool.py\nindex 42d989c8..3bdb6525 100644\n--- a/src/Products/PlonePAS/tests/test_membershiptool.py\n+++ b/src/Products/PlonePAS/tests/test_membershiptool.py\n@@ -23,7 +23,11 @@\n from Products.PlonePAS.tools.memberdata import MemberData\n from Products.PlonePAS.tools.membership import MembershipTool\n from Products.PlonePAS.utils import getGroupsForPrincipal\n+from Products.PluggableAuthService.interfaces.events import \\\n+    ICredentialsUpdatedEvent\n from six import BytesIO\n+from zope.component import adapter\n+from zope.component import getGlobalSiteManager\n from zExceptions import BadRequest\n from plone.app.testing import TEST_USER_ID\n \n@@ -700,6 +704,26 @@ def testGetBadMembers(self):\n                                              TEST_USER_ID)\n         self.assertEqual(self.membership.getBadMembers(), [])\n \n+    def test_credentials_updated_event(self):\n+        events_fired = []\n+\n+        @adapter(ICredentialsUpdatedEvent)\n+        def got_credentials_updated_event(event):\n+            events_fired.append(event)\n+\n+        gsm = getGlobalSiteManager()\n+        gsm.registerHandler(got_credentials_updated_event)\n+\n+        self.assertTrue(self.membership.testCurrentPassword(\'secret\'))\n+        self.assertFalse(self.membership.testCurrentPassword(\'whoknows\'))\n+        login(self.portal, TEST_USER_NAME)  # Back to normal\n+        self.membership.setPassword(\'guessagain\')\n+        self.assertEqual(len(events_fired), 1)\n+        self.assertEqual(events_fired[0].principal.getId(), TEST_USER_ID)\n+        self.assertEqual(events_fired[0].password, \'guessagain\')\n+\n+        gsm.unregisterHandler(got_credentials_updated_event)\n+\n \n class TestCreateMemberarea(unittest.TestCase):\n \n'
+b'diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py\nindex 556b6047..075ee8a5 100644\n--- a/plone/app/discussion/browser/moderation.py\n+++ b/plone/app/discussion/browser/moderation.py\n@@ -8,11 +8,13 @@\n from plone.app.discussion.interfaces import _\n from plone.app.discussion.interfaces import IComment\n from plone.app.discussion.interfaces import IReplies\n+from plone.protect.interfaces import IDisableCSRFProtection\n from Products.CMFCore.utils import getToolByName\n from Products.Five.browser import BrowserView\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n from Products.statusmessages.interfaces import IStatusMessage\n from zope.event import notify\n+from zope.interface import alsoProvides\n \n \n class View(BrowserView):\n@@ -205,17 +207,24 @@ class PublishComment(BrowserView):\n     """\n \n     def __call__(self):\n+        alsoProvides(self.request, IDisableCSRFProtection)\n         comment = aq_inner(self.context)\n         content_object = aq_parent(aq_parent(comment))\n         workflowTool = getToolByName(comment, \'portal_workflow\', None)\n         workflow_action = self.request.form.get(\'workflow_action\', \'publish\')\n-        workflowTool.doActionFor(comment, workflow_action)\n-        comment.reindexObject()\n-        content_object.reindexObject(idxs=[\'total_comments\'])\n-        notify(CommentPublishedEvent(self.context, comment))\n-        IStatusMessage(self.context.REQUEST).addStatusMessage(\n-            _(\'Comment approved.\'),\n-            type=\'info\')\n+        review_state = workflowTool.getInfoFor(comment, \'review_state\', \'\')\n+        if review_state == "pending":\n+            workflowTool.doActionFor(comment, workflow_action)\n+            comment.reindexObject()\n+            content_object.reindexObject(idxs=[\'total_comments\'])\n+            notify(CommentPublishedEvent(self.context, comment))\n+            IStatusMessage(self.context.REQUEST).addStatusMessage(\n+                _(\'Comment approved.\'),\n+                type=\'info\')\n+        else:\n+            IStatusMessage(self.context.REQUEST).addStatusMessage(\n+                _(\'Comment already approved.\'),\n+                type=\'info\')\n         came_from = self.context.REQUEST.HTTP_REFERER\n         # if the referrer already has a came_from in it, don\'t redirect back\n         if (len(came_from) == 0 or \'came_from=\' in came_from or\n'
 
-Repository: Products.PlonePAS
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2019-11-29T17:07:57+01:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/Products.PlonePAS/commit/c16f8c4894af4964402a8b282b52aabdf5a1a3d7
+Date: 2019-11-29T16:23:43+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/f3c0b16a42ac30ad8c2bfcca1c993063b41e0c0b
 
-Remove gsm.unregisterHandler -- as it should be taken caren by test-layer
+changelog
 
 Files changed:
-M src/Products/PlonePAS/tests/test_membershiptool.py
+A news/163.enhancement
 
-b"diff --git a/src/Products/PlonePAS/tests/test_membershiptool.py b/src/Products/PlonePAS/tests/test_membershiptool.py\nindex 3bdb6525..70ccd05e 100644\n--- a/src/Products/PlonePAS/tests/test_membershiptool.py\n+++ b/src/Products/PlonePAS/tests/test_membershiptool.py\n@@ -722,8 +722,6 @@ def got_credentials_updated_event(event):\n         self.assertEqual(events_fired[0].principal.getId(), TEST_USER_ID)\n         self.assertEqual(events_fired[0].password, 'guessagain')\n \n-        gsm.unregisterHandler(got_credentials_updated_event)\n-\n \n class TestCreateMemberarea(unittest.TestCase):\n \n"
+b'diff --git a/news/163.enhancement b/news/163.enhancement\nnew file mode 100644\nindex 00000000..f6ee230f\n--- /dev/null\n+++ b/news/163.enhancement\n@@ -0,0 +1,2 @@\n+link of notification mail: /@@moderate-publish-comment : publish only pending comment, else show status message "comment already approved"\n+[ksuess]\n'
 
-Repository: Products.PlonePAS
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2019-12-03T13:46:30+01:00
+Date: 2019-11-29T16:23:43+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/8bd1992a7f02e66821c8b62d92f1e0339e568c22
+
+IDisableCSRFProtection on @@moderate-publish-comment removed
+
+Files changed:
+M plone/app/discussion/browser/moderation.py
+
+b'diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py\nindex 075ee8a5..2420e408 100644\n--- a/plone/app/discussion/browser/moderation.py\n+++ b/plone/app/discussion/browser/moderation.py\n@@ -207,7 +207,6 @@ class PublishComment(BrowserView):\n     """\n \n     def __call__(self):\n-        alsoProvides(self.request, IDisableCSRFProtection)\n         comment = aq_inner(self.context)\n         content_object = aq_parent(aq_parent(comment))\n         workflowTool = getToolByName(comment, \'portal_workflow\', None)\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-11-29T16:23:43+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/1e5951101f2673897c1701db327ca3f0b5e353cd
+
+prevent infinite request for confirmation (plone.protect)
+
+Files changed:
+M plone/app/discussion/browser/moderation.py
+
+b"diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py\nindex 2420e408..6b24b956 100644\n--- a/plone/app/discussion/browser/moderation.py\n+++ b/plone/app/discussion/browser/moderation.py\n@@ -228,7 +228,8 @@ def __call__(self):\n         # if the referrer already has a came_from in it, don't redirect back\n         if (len(came_from) == 0 or 'came_from=' in came_from or\n                 not getToolByName(\n-                content_object, 'portal_url').isURLInPortal(came_from)):\n+                content_object, 'portal_url').isURLInPortal(came_from) or\n+                '@@confirm-action' in came_from):\n             came_from = content_object.absolute_url()\n         return self.context.REQUEST.RESPONSE.redirect(came_from)\n \n"
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-12-01T19:47:08+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/3d3c6385650512e24cab94a05e013ebed6817769
+
+Notification moderator: email of commentator added. Link as is but request to log in for moderating comment added.
+
+New moderator notification with email and link to commented page and request to login.
+No links to approve and delete: due to CSRF direct links to modification of Plone objects result in request to confirm. So page with comments is presented to moderator.
+If already logged in, moderator is on comment to moderate.
+If not logged in, moderator is on login page with came_from.
+
+Files changed:
+M plone/app/discussion/comment.py
+
+b'diff --git a/plone/app/discussion/comment.py b/plone/app/discussion/comment.py\nindex 3baca534..9c687381 100644\n--- a/plone/app/discussion/comment.py\n+++ b/plone/app/discussion/comment.py\n@@ -58,12 +58,12 @@\n MAIL_NOTIFICATION_MESSAGE_MODERATOR = _(\n     u\'mail_notification_message_moderator\',\n     default=u\'A comment on "${title}" \'\n-            u\'has been posted here: ${link}\\n\\n\'\n-            u\'---\\n\'\n-            u\'${text}\\n\'\n+            u\'has been posted by ${commentator}\\n\'\n+            u\'here: ${link}\\n\\n\'\n+            u\'---\\n\\n\'\n+            u\'${text}\\n\\n\'\n             u\'---\\n\\n\'\n-            u\'Approve comment:\\n${link_approve}\\n\\n\'\n-            u\'Delete comment:\\n${link_delete}\\n\',\n+            u\'Log in to moderate.\\n\\n\',\n     )\n \n logger = logging.getLogger(\'plone.app.discussion\')\n@@ -419,8 +419,6 @@ def notify_moderator(obj, event):\n \n     # Compose email\n     subject = translate(_(u\'A comment has been posted.\'), context=obj.REQUEST)\n-    link_approve = obj.absolute_url() + \'/@@moderate-publish-comment\'\n-    link_delete = obj.absolute_url() + \'/@@moderate-delete-comment\'\n     message = translate(\n         Message(\n             MAIL_NOTIFICATION_MESSAGE_MODERATOR,\n@@ -428,8 +426,14 @@ def notify_moderator(obj, event):\n                 \'title\': safe_unicode(content_object.title),\n                 \'link\': content_object.absolute_url() + \'/view#\' + obj.id,\n                 \'text\': obj.text,\n-                \'link_approve\': link_approve,\n-                \'link_delete\': link_delete,\n+                \'commentator\': obj.author_email or translate(\n+                        Message(\n+                            _(\n+                                u\'label_anonymous\',\n+                                default=u\'Anonymous\',\n+                            ),\n+                        ),\n+                    )\n             },\n         ),\n         context=obj.REQUEST,\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-12-01T19:53:11+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/296d591856ecdaf3a7002b9591433ea334cce4c0
+
+Update moderation.py
+
+unused IDisableCSRFProtection removed
+
+Files changed:
+M plone/app/discussion/browser/moderation.py
+
+b'diff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py\nindex 6b24b956..e05352e0 100644\n--- a/plone/app/discussion/browser/moderation.py\n+++ b/plone/app/discussion/browser/moderation.py\n@@ -8,7 +8,6 @@\n from plone.app.discussion.interfaces import _\n from plone.app.discussion.interfaces import IComment\n from plone.app.discussion.interfaces import IReplies\n-from plone.protect.interfaces import IDisableCSRFProtection\n from Products.CMFCore.utils import getToolByName\n from Products.Five.browser import BrowserView\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-12-02T09:09:49+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/7b43d80486cef1ac1cefd54f829ac7e783427391
+
+test_notifications moderator
+
+Files changed:
+M plone/app/discussion/tests/test_notifications.py
+
+b'diff --git a/plone/app/discussion/tests/test_notifications.py b/plone/app/discussion/tests/test_notifications.py\nindex 0320f1ad..16844e2b 100644\n--- a/plone/app/discussion/tests/test_notifications.py\n+++ b/plone/app/discussion/tests/test_notifications.py\n@@ -197,9 +197,10 @@ def beforeTearDown(self):\n                            provided=IMailHost)\n \n     def test_notify_moderator(self):\n-        # Add a comment and make sure an email is send to the moderator.\n+        """Add a comment and make sure an email is send to the moderator."""\n         comment = createObject(\'plone.Comment\')\n         comment.text = \'Comment text\'\n+        comment.author_email = \'john@plone.test\'\n \n         comment_id = self.conversation.addComment(comment)\n \n@@ -215,27 +216,20 @@ def test_notify_moderator(self):\n         # The output should be encoded in a reasonable manner\n         # (in this case quoted-printable):\n         self.assertTrue(\n-            \'A comment on "K=C3=B6lle Alaaf" has been posted here:\'\n-            in msg)\n-        self.assertIn(\n-            \'http://nohost/plone/d=\\noc1/view#{0}\'.format(comment_id),\n-            msg,\n+            \'A comment on "K=C3=B6lle Alaaf" has been posted\'\n+            in msg\n         )\n         self.assertIn(\n-            \'Comment text\',\n-            msg,\n+            \'http://nohost/plone/doc1/view#{0}\'.format(comment_id),\n+            msg\n         )\n-        text = \'Approve comment:\\nhttp://nohost/plone/doc1/\' \\\n-               \'++conversation++default/{0}/@@moderat=\\ne-publish-comment\'\n         self.assertIn(\n-            text.format(comment_id),\n-            msg,\n+            comment.author_email,\n+            msg\n         )\n-        text = \'Delete comment:\\nhttp://nohost/plone/doc1/\' \\\n-               \'++conversation++default/{0}/@@moderat=\\ne-delete-comment\'\n         self.assertIn(\n-            text.format(comment_id),\n-            msg,\n+            comment.text,\n+            msg\n         )\n \n     def test_notify_moderator_specific_address(self):\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-12-02T09:20:12+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/000e929b753a403f9fa6284a7ddbf7abedb672b3
+
+changelog detailed info
+
+Files changed:
+M news/163.enhancement
+
+b'diff --git a/news/163.enhancement b/news/163.enhancement\nindex f6ee230f..e5b75645 100644\n--- a/news/163.enhancement\n+++ b/news/163.enhancement\n@@ -1,2 +1,4 @@\n-link of notification mail: /@@moderate-publish-comment : publish only pending comment, else show status message "comment already approved"\n+Notification moderator: - Email commentator added\n+  - Link to commented page for editing, approving, deleting comment instead of link to /@@moderate-publish-comment and @@moderate-delete-comment\n+/@@moderate-publish-comment : publish only pending comment, else show status message "comment already approved"\n [ksuess]\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2019-12-03T13:51:35+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.PlonePAS/commit/d2274466d7a250e10f8001293157b2e67f6a8b02
+Commit: https://github.com/plone/plone.app.discussion/commit/7469a4f31ca083a94967e5e7038a6d54bded8263
 
-Merge pull request #54 from plone/notify_missing_events
+Merge pull request #163 from plone/moderation
 
-Notify CredentialsUpdated event when password is changed
+notification moderator: link to commented page to moderate comments instead of links to approve or delete with CSRF confirmation
 
 Files changed:
-A news/33.bugfix
-M src/Products/PlonePAS/plugins/user.py
-M src/Products/PlonePAS/tests/test_membershiptool.py
+A news/163.enhancement
+M plone/app/discussion/browser/moderation.py
+M plone/app/discussion/comment.py
+M plone/app/discussion/tests/test_notifications.py
 
-b'diff --git a/news/33.bugfix b/news/33.bugfix\nnew file mode 100644\nindex 00000000..5965b109\n--- /dev/null\n+++ b/news/33.bugfix\n@@ -0,0 +1,2 @@\n+- Notify CredentialsUpdated event when password is changed\n+  [ezvirtual]\ndiff --git a/src/Products/PlonePAS/plugins/user.py b/src/Products/PlonePAS/plugins/user.py\nindex 5a4d8ace..5b51ab42 100644\n--- a/src/Products/PlonePAS/plugins/user.py\n+++ b/src/Products/PlonePAS/plugins/user.py\n@@ -11,9 +11,11 @@\n from Products.PlonePAS.interfaces.capabilities import IPasswordSetCapability\n from Products.PlonePAS.interfaces.plugins import IUserIntrospection\n from Products.PlonePAS.interfaces.plugins import IUserManagement\n+from Products.PluggableAuthService.events import CredentialsUpdated\n from Products.PluggableAuthService.plugins.ZODBUserManager \\\n     import ZODBUserManager as BasePlugin\n from Products.PluggableAuthService.utils import createViewName\n+from zope.event import notify\n from zope.interface import implementer\n \n manage_addUserManagerForm = DTMLFile(\'../zmi/UserManagerForm\', globals())\n@@ -85,6 +87,7 @@ def doChangeUser(self, principal_id, password):\n         if self._user_passwords.get(principal_id) is None:\n             raise RuntimeError("User does not exist: %s" % principal_id)\n         self._user_passwords[principal_id] = AuthEncoding.pw_encrypt(password)\n+        notify(CredentialsUpdated(self.getUserById(principal_id), password))\n \n     # implement interfaces IDeleteCapability, IPasswordSetCapability\n \ndiff --git a/src/Products/PlonePAS/tests/test_membershiptool.py b/src/Products/PlonePAS/tests/test_membershiptool.py\nindex 42d989c8..70ccd05e 100644\n--- a/src/Products/PlonePAS/tests/test_membershiptool.py\n+++ b/src/Products/PlonePAS/tests/test_membershiptool.py\n@@ -23,7 +23,11 @@\n from Products.PlonePAS.tools.memberdata import MemberData\n from Products.PlonePAS.tools.membership import MembershipTool\n from Products.PlonePAS.utils import getGroupsForPrincipal\n+from Products.PluggableAuthService.interfaces.events import \\\n+    ICredentialsUpdatedEvent\n from six import BytesIO\n+from zope.component import adapter\n+from zope.component import getGlobalSiteManager\n from zExceptions import BadRequest\n from plone.app.testing import TEST_USER_ID\n \n@@ -700,6 +704,24 @@ def testGetBadMembers(self):\n                                              TEST_USER_ID)\n         self.assertEqual(self.membership.getBadMembers(), [])\n \n+    def test_credentials_updated_event(self):\n+        events_fired = []\n+\n+        @adapter(ICredentialsUpdatedEvent)\n+        def got_credentials_updated_event(event):\n+            events_fired.append(event)\n+\n+        gsm = getGlobalSiteManager()\n+        gsm.registerHandler(got_credentials_updated_event)\n+\n+        self.assertTrue(self.membership.testCurrentPassword(\'secret\'))\n+        self.assertFalse(self.membership.testCurrentPassword(\'whoknows\'))\n+        login(self.portal, TEST_USER_NAME)  # Back to normal\n+        self.membership.setPassword(\'guessagain\')\n+        self.assertEqual(len(events_fired), 1)\n+        self.assertEqual(events_fired[0].principal.getId(), TEST_USER_ID)\n+        self.assertEqual(events_fired[0].password, \'guessagain\')\n+\n \n class TestCreateMemberarea(unittest.TestCase):\n \n'
+b'diff --git a/news/163.enhancement b/news/163.enhancement\nnew file mode 100644\nindex 00000000..e5b75645\n--- /dev/null\n+++ b/news/163.enhancement\n@@ -0,0 +1,4 @@\n+Notification moderator: - Email commentator added\n+  - Link to commented page for editing, approving, deleting comment instead of link to /@@moderate-publish-comment and @@moderate-delete-comment\n+/@@moderate-publish-comment : publish only pending comment, else show status message "comment already approved"\n+[ksuess]\ndiff --git a/plone/app/discussion/browser/moderation.py b/plone/app/discussion/browser/moderation.py\nindex 556b6047..e05352e0 100644\n--- a/plone/app/discussion/browser/moderation.py\n+++ b/plone/app/discussion/browser/moderation.py\n@@ -13,6 +13,7 @@\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n from Products.statusmessages.interfaces import IStatusMessage\n from zope.event import notify\n+from zope.interface import alsoProvides\n \n \n class View(BrowserView):\n@@ -209,18 +210,25 @@ def __call__(self):\n         content_object = aq_parent(aq_parent(comment))\n         workflowTool = getToolByName(comment, \'portal_workflow\', None)\n         workflow_action = self.request.form.get(\'workflow_action\', \'publish\')\n-        workflowTool.doActionFor(comment, workflow_action)\n-        comment.reindexObject()\n-        content_object.reindexObject(idxs=[\'total_comments\'])\n-        notify(CommentPublishedEvent(self.context, comment))\n-        IStatusMessage(self.context.REQUEST).addStatusMessage(\n-            _(\'Comment approved.\'),\n-            type=\'info\')\n+        review_state = workflowTool.getInfoFor(comment, \'review_state\', \'\')\n+        if review_state == "pending":\n+            workflowTool.doActionFor(comment, workflow_action)\n+            comment.reindexObject()\n+            content_object.reindexObject(idxs=[\'total_comments\'])\n+            notify(CommentPublishedEvent(self.context, comment))\n+            IStatusMessage(self.context.REQUEST).addStatusMessage(\n+                _(\'Comment approved.\'),\n+                type=\'info\')\n+        else:\n+            IStatusMessage(self.context.REQUEST).addStatusMessage(\n+                _(\'Comment already approved.\'),\n+                type=\'info\')\n         came_from = self.context.REQUEST.HTTP_REFERER\n         # if the referrer already has a came_from in it, don\'t redirect back\n         if (len(came_from) == 0 or \'came_from=\' in came_from or\n                 not getToolByName(\n-                content_object, \'portal_url\').isURLInPortal(came_from)):\n+                content_object, \'portal_url\').isURLInPortal(came_from) or\n+                \'@@confirm-action\' in came_from):\n             came_from = content_object.absolute_url()\n         return self.context.REQUEST.RESPONSE.redirect(came_from)\n \ndiff --git a/plone/app/discussion/comment.py b/plone/app/discussion/comment.py\nindex 3baca534..9c687381 100644\n--- a/plone/app/discussion/comment.py\n+++ b/plone/app/discussion/comment.py\n@@ -58,12 +58,12 @@\n MAIL_NOTIFICATION_MESSAGE_MODERATOR = _(\n     u\'mail_notification_message_moderator\',\n     default=u\'A comment on "${title}" \'\n-            u\'has been posted here: ${link}\\n\\n\'\n-            u\'---\\n\'\n-            u\'${text}\\n\'\n+            u\'has been posted by ${commentator}\\n\'\n+            u\'here: ${link}\\n\\n\'\n+            u\'---\\n\\n\'\n+            u\'${text}\\n\\n\'\n             u\'---\\n\\n\'\n-            u\'Approve comment:\\n${link_approve}\\n\\n\'\n-            u\'Delete comment:\\n${link_delete}\\n\',\n+            u\'Log in to moderate.\\n\\n\',\n     )\n \n logger = logging.getLogger(\'plone.app.discussion\')\n@@ -419,8 +419,6 @@ def notify_moderator(obj, event):\n \n     # Compose email\n     subject = translate(_(u\'A comment has been posted.\'), context=obj.REQUEST)\n-    link_approve = obj.absolute_url() + \'/@@moderate-publish-comment\'\n-    link_delete = obj.absolute_url() + \'/@@moderate-delete-comment\'\n     message = translate(\n         Message(\n             MAIL_NOTIFICATION_MESSAGE_MODERATOR,\n@@ -428,8 +426,14 @@ def notify_moderator(obj, event):\n                 \'title\': safe_unicode(content_object.title),\n                 \'link\': content_object.absolute_url() + \'/view#\' + obj.id,\n                 \'text\': obj.text,\n-                \'link_approve\': link_approve,\n-                \'link_delete\': link_delete,\n+                \'commentator\': obj.author_email or translate(\n+                        Message(\n+                            _(\n+                                u\'label_anonymous\',\n+                                default=u\'Anonymous\',\n+                            ),\n+                        ),\n+                    )\n             },\n         ),\n         context=obj.REQUEST,\ndiff --git a/plone/app/discussion/tests/test_notifications.py b/plone/app/discussion/tests/test_notifications.py\nindex 0320f1ad..16844e2b 100644\n--- a/plone/app/discussion/tests/test_notifications.py\n+++ b/plone/app/discussion/tests/test_notifications.py\n@@ -197,9 +197,10 @@ def beforeTearDown(self):\n                            provided=IMailHost)\n \n     def test_notify_moderator(self):\n-        # Add a comment and make sure an email is send to the moderator.\n+        """Add a comment and make sure an email is send to the moderator."""\n         comment = createObject(\'plone.Comment\')\n         comment.text = \'Comment text\'\n+        comment.author_email = \'john@plone.test\'\n \n         comment_id = self.conversation.addComment(comment)\n \n@@ -215,27 +216,20 @@ def test_notify_moderator(self):\n         # The output should be encoded in a reasonable manner\n         # (in this case quoted-printable):\n         self.assertTrue(\n-            \'A comment on "K=C3=B6lle Alaaf" has been posted here:\'\n-            in msg)\n-        self.assertIn(\n-            \'http://nohost/plone/d=\\noc1/view#{0}\'.format(comment_id),\n-            msg,\n+            \'A comment on "K=C3=B6lle Alaaf" has been posted\'\n+            in msg\n         )\n         self.assertIn(\n-            \'Comment text\',\n-            msg,\n+            \'http://nohost/plone/doc1/view#{0}\'.format(comment_id),\n+            msg\n         )\n-        text = \'Approve comment:\\nhttp://nohost/plone/doc1/\' \\\n-               \'++conversation++default/{0}/@@moderat=\\ne-publish-comment\'\n         self.assertIn(\n-            text.format(comment_id),\n-            msg,\n+            comment.author_email,\n+            msg\n         )\n-        text = \'Delete comment:\\nhttp://nohost/plone/doc1/\' \\\n-               \'++conversation++default/{0}/@@moderat=\\ne-delete-comment\'\n         self.assertIn(\n-            text.format(comment_id),\n-            msg,\n+            comment.text,\n+            msg\n         )\n \n     def test_notify_moderator_specific_address(self):\n'
 
