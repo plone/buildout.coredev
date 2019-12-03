@@ -203,7 +203,7 @@ Now write a test case for the bug you are fixing and make sure everything is run
 After the module level tests run with your change,
 please make sure other modules aren't affected by the change by running the full suite, including robot-tests (remove the `--all` to run without robot tests)::
 
-  > ./bin/tests --all
+  > ./bin/test --all
 
 .. note::
     Tests take a long time to run.
