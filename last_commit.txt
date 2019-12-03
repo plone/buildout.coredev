@@ -1,64 +1,36 @@
-Repository: plone.formwidget.namedfile
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2019-11-20T16:56:02-05:00
-Author: flipmcf (flipmcf) <flipmcf@gmail.com>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/046fa379ddad60ad8a5fc6cab869bf925866dd72
+Date: 2019-11-26T15:07:02+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/10bb87ff3b9491cb5331bb7e5aff481919ac8ce7
 
-Add check for 'Keep existing file'
+Fixed error when upgrading relations.
+
+Fixes https://github.com/plone/plone.app.upgrade/issues/220
 
 Files changed:
-M plone/formwidget/namedfile/converter.py
+A news/220.bugfix
+M plone/app/upgrade/v52/betas.py
 
-b'diff --git a/plone/formwidget/namedfile/converter.py b/plone/formwidget/namedfile/converter.py\nindex a648cd7..b3875a6 100644\n--- a/plone/formwidget/namedfile/converter.py\n+++ b/plone/formwidget/namedfile/converter.py\n@@ -8,6 +8,7 @@\n from plone.namedfile.interfaces import INamedField\n from plone.namedfile.utils import safe_basename\n from z3c.form.converter import BaseDataConverter\n+from z3c.form.interfaces import NOT_CHANGED\n from zope.component import adapts\n from zope.schema.interfaces import IBytes\n from ZPublisher.HTTPRequest import FileUpload\n@@ -25,7 +26,10 @@ def toWidgetValue(self, value):\n         return value\n \n     def toFieldValue(self, value):\n-\n+        action = self.widget.request.get("%s.action" % self.widget.name, None)\n+        if action == \'nochange\':\n+            return NOT_CHANGED\n+        \n         if value is None or value == \'\':\n             return self.field.missing_value\n \n'
+b'diff --git a/news/220.bugfix b/news/220.bugfix\nnew file mode 100644\nindex 00000000..8d601464\n--- /dev/null\n+++ b/news/220.bugfix\n@@ -0,0 +1,2 @@\n+Fixed error when upgrading relations.\n+[maurits]\ndiff --git a/plone/app/upgrade/v52/betas.py b/plone/app/upgrade/v52/betas.py\nindex c2a56e75..24f5faa9 100644\n--- a/plone/app/upgrade/v52/betas.py\n+++ b/plone/app/upgrade/v52/betas.py\n@@ -6,6 +6,7 @@\n from zc.relation.interfaces import ICatalog\n from zope import component\n from zope.interface import Interface\n+from zope.intid.interfaces import IIntIds\n from zope.intid.interfaces import IntIdMissingError\n \n import logging\n@@ -62,18 +63,37 @@ def remove_interface_indexes_from_relations_catalog():\n         if index_to_remove in catalog._name_TO_mapping:\n             catalog.removeValueIndex(index_to_remove)\n \n-    # Avoid RuntimeError: the bucket being iterated changed size by first\n-    # getting all relations. This might need lots of RAM on large databases\n-    relations = [rel for rel in catalog]\n+    # Avoid "RuntimeError: the bucket being iterated changed size" by first\n+    # getting all tokens. This might need lots of RAM on large databases\n+    tokens = [token for token in catalog._relTokens]\n+    empty = 0\n+    for token in tokens:\n+        relation = catalog.resolveRelationToken(token)\n+        if relation.from_object is not None or relation.to_object is not None:\n+            continue\n+        catalog.unindex_doc(token)\n+        empty += 1\n+    if empty:\n+        logger.warning(\'Removed %s empty relations.\', empty)\n \n-    # get rid of broken relations, where inid no longer exists\n-    # those broken need to be removed for a later zodbupdate\n+    # Get rid of broken relations, where intid no longer exists.\n+    # Those broken need to be removed for a later zodbupdate.\n+    relations = [rel for rel in catalog]\n+    intids = component.getUtility(IIntIds)\n+    added_rel_intids = 0\n     for rel in relations:\n+        try:\n+            intids.getId(rel)\n+        except KeyError:\n+            intids.register(rel)\n+            added_rel_intids += 1\n         catalog.unindex(rel)\n         try:\n             catalog.index(rel)\n         except IntIdMissingError:\n-            logger.warn(\'Broken relation removed.\')\n+            logger.warning(\'Broken relation removed.\')\n+    if added_rel_intids:\n+        logger.info(\'Registered %s extra relations in the intid utility.\', added_rel_intids)\n \n \n class IResourceRegistriesSettings(Interface):\n'
 
-Repository: plone.formwidget.namedfile
-
-
-Branch: refs/heads/master
-Date: 2019-11-21T09:27:41-05:00
-Author: Flip McFadden (flipmcf) <flipmcf@gmail.com>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/aa3816cfe6235dcd5531e3f887a28dcd64d08e0c
-
-Create 41.bugfix
-
-Files changed:
-A news/41.bugfix
-
-b"diff --git a/news/41.bugfix b/news/41.bugfix\nnew file mode 100644\nindex 0000000..52a3e66\n--- /dev/null\n+++ b/news/41.bugfix\n@@ -0,0 +1 @@\n+set widget value to z3c.form.interfaces.NOT_CHANGED when the user selects 'Keep Existing File' in the widget, so z3c.form understands the field has not changed\n"
-
-Repository: plone.formwidget.namedfile
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2019-11-25T14:41:14-05:00
-Author: flipmcf (flipmcf) <flipmcf@gmail.com>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/ed84d8fa86ea62cda6acbf72f20543159d6442d7
-
-Update doctests for #41
-
-Files changed:
-M plone/formwidget/namedfile/widget.rst
-
-b"diff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst\nindex 369552e..29a3db3 100644\n--- a/plone/formwidget/namedfile/widget.rst\n+++ b/plone/formwidget/namedfile/widget.rst\n@@ -451,12 +451,18 @@ instances and the two named file/image widgets::\n \n   >>> from zope.component import getMultiAdapter\n   >>> from z3c.form.interfaces import IDataConverter\n-\n+  >>> from z3c.form.interfaces import NOT_CHANGED\n+  \n   >>> file_converter = getMultiAdapter((IContent['file_field'], file_widget), IDataConverter)\n   >>> image_converter = getMultiAdapter((IContent['image_field'], image_widget), IDataConverter)\n \n-A value of None or '' results in the field's missing_value being returned::\n+An initial upload of a file will never include the action field, \n+so let's remove it from our test requests\n \n+  >>> del file_widget.request.form['widget.name.file.action']\n+  >>> del image_widget.request.form['widget.name.image.action']\n+\n+A value of None or '' results in the field's missing_value being returned::\n   >>> file_converter.toFieldValue(u'') is IContent['file_field'].missing_value\n   True\n   >>> file_converter.toFieldValue(None) is IContent['file_field'].missing_value\n@@ -526,6 +532,17 @@ being returned::\n   >>> field_value is IContent['image_field'].missing_value\n   True\n \n+If the file has already been uploaded and the user selects 'Keep Existing File' \n+in the widget, the widget will include 'action':'nochange' in the form post, \n+and the converter will always set the value to z3c.form.interfaces.NOT_CHANGED::\n+\n+  >>> file_widget.request.form['widget.name.file.action'] = 'nochange'\n+  >>> file_converter.toFieldValue(u'') is NOT_CHANGED\n+  True\n+  >>> image_widget.request.form['widget.name.image.action'] = 'nochange'\n+  >>> image_converter.toFieldValue(u'') is NOT_CHANGED\n+  True\n+  \n \n The Base64Converter for Bytes fields\n ------------------------------------\n"
-
-Repository: plone.formwidget.namedfile
-
-
-Branch: refs/heads/master
-Date: 2019-12-03T13:52:14+01:00
+Date: 2019-12-03T13:52:37+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.formwidget.namedfile/commit/8ed9372bb2421cf97dc1c933c2af74f397b20994
+Commit: https://github.com/plone/plone.app.upgrade/commit/67b84b696f2c2f8f69f03f9831fa6532ec9de76c
 
-Merge pull request #42 from flipmcf/issue41
+Merge pull request #221 from plone/maurits/issue-220-relations-and-intids
 
-Add check for 'Keep existing file'
+Fixed error when upgrading relations.
 
 Files changed:
-A news/41.bugfix
-M plone/formwidget/namedfile/converter.py
-M plone/formwidget/namedfile/widget.rst
+A news/220.bugfix
+M plone/app/upgrade/v52/betas.py
 
-b'diff --git a/news/41.bugfix b/news/41.bugfix\nnew file mode 100644\nindex 0000000..52a3e66\n--- /dev/null\n+++ b/news/41.bugfix\n@@ -0,0 +1 @@\n+set widget value to z3c.form.interfaces.NOT_CHANGED when the user selects \'Keep Existing File\' in the widget, so z3c.form understands the field has not changed\ndiff --git a/plone/formwidget/namedfile/converter.py b/plone/formwidget/namedfile/converter.py\nindex a648cd7..b3875a6 100644\n--- a/plone/formwidget/namedfile/converter.py\n+++ b/plone/formwidget/namedfile/converter.py\n@@ -8,6 +8,7 @@\n from plone.namedfile.interfaces import INamedField\n from plone.namedfile.utils import safe_basename\n from z3c.form.converter import BaseDataConverter\n+from z3c.form.interfaces import NOT_CHANGED\n from zope.component import adapts\n from zope.schema.interfaces import IBytes\n from ZPublisher.HTTPRequest import FileUpload\n@@ -25,7 +26,10 @@ def toWidgetValue(self, value):\n         return value\n \n     def toFieldValue(self, value):\n-\n+        action = self.widget.request.get("%s.action" % self.widget.name, None)\n+        if action == \'nochange\':\n+            return NOT_CHANGED\n+        \n         if value is None or value == \'\':\n             return self.field.missing_value\n \ndiff --git a/plone/formwidget/namedfile/widget.rst b/plone/formwidget/namedfile/widget.rst\nindex 369552e..29a3db3 100644\n--- a/plone/formwidget/namedfile/widget.rst\n+++ b/plone/formwidget/namedfile/widget.rst\n@@ -451,12 +451,18 @@ instances and the two named file/image widgets::\n \n   >>> from zope.component import getMultiAdapter\n   >>> from z3c.form.interfaces import IDataConverter\n-\n+  >>> from z3c.form.interfaces import NOT_CHANGED\n+  \n   >>> file_converter = getMultiAdapter((IContent[\'file_field\'], file_widget), IDataConverter)\n   >>> image_converter = getMultiAdapter((IContent[\'image_field\'], image_widget), IDataConverter)\n \n-A value of None or \'\' results in the field\'s missing_value being returned::\n+An initial upload of a file will never include the action field, \n+so let\'s remove it from our test requests\n \n+  >>> del file_widget.request.form[\'widget.name.file.action\']\n+  >>> del image_widget.request.form[\'widget.name.image.action\']\n+\n+A value of None or \'\' results in the field\'s missing_value being returned::\n   >>> file_converter.toFieldValue(u\'\') is IContent[\'file_field\'].missing_value\n   True\n   >>> file_converter.toFieldValue(None) is IContent[\'file_field\'].missing_value\n@@ -526,6 +532,17 @@ being returned::\n   >>> field_value is IContent[\'image_field\'].missing_value\n   True\n \n+If the file has already been uploaded and the user selects \'Keep Existing File\' \n+in the widget, the widget will include \'action\':\'nochange\' in the form post, \n+and the converter will always set the value to z3c.form.interfaces.NOT_CHANGED::\n+\n+  >>> file_widget.request.form[\'widget.name.file.action\'] = \'nochange\'\n+  >>> file_converter.toFieldValue(u\'\') is NOT_CHANGED\n+  True\n+  >>> image_widget.request.form[\'widget.name.image.action\'] = \'nochange\'\n+  >>> image_converter.toFieldValue(u\'\') is NOT_CHANGED\n+  True\n+  \n \n The Base64Converter for Bytes fields\n ------------------------------------\n'
+b'diff --git a/news/220.bugfix b/news/220.bugfix\nnew file mode 100644\nindex 00000000..8d601464\n--- /dev/null\n+++ b/news/220.bugfix\n@@ -0,0 +1,2 @@\n+Fixed error when upgrading relations.\n+[maurits]\ndiff --git a/plone/app/upgrade/v52/betas.py b/plone/app/upgrade/v52/betas.py\nindex c2a56e75..24f5faa9 100644\n--- a/plone/app/upgrade/v52/betas.py\n+++ b/plone/app/upgrade/v52/betas.py\n@@ -6,6 +6,7 @@\n from zc.relation.interfaces import ICatalog\n from zope import component\n from zope.interface import Interface\n+from zope.intid.interfaces import IIntIds\n from zope.intid.interfaces import IntIdMissingError\n \n import logging\n@@ -62,18 +63,37 @@ def remove_interface_indexes_from_relations_catalog():\n         if index_to_remove in catalog._name_TO_mapping:\n             catalog.removeValueIndex(index_to_remove)\n \n-    # Avoid RuntimeError: the bucket being iterated changed size by first\n-    # getting all relations. This might need lots of RAM on large databases\n-    relations = [rel for rel in catalog]\n+    # Avoid "RuntimeError: the bucket being iterated changed size" by first\n+    # getting all tokens. This might need lots of RAM on large databases\n+    tokens = [token for token in catalog._relTokens]\n+    empty = 0\n+    for token in tokens:\n+        relation = catalog.resolveRelationToken(token)\n+        if relation.from_object is not None or relation.to_object is not None:\n+            continue\n+        catalog.unindex_doc(token)\n+        empty += 1\n+    if empty:\n+        logger.warning(\'Removed %s empty relations.\', empty)\n \n-    # get rid of broken relations, where inid no longer exists\n-    # those broken need to be removed for a later zodbupdate\n+    # Get rid of broken relations, where intid no longer exists.\n+    # Those broken need to be removed for a later zodbupdate.\n+    relations = [rel for rel in catalog]\n+    intids = component.getUtility(IIntIds)\n+    added_rel_intids = 0\n     for rel in relations:\n+        try:\n+            intids.getId(rel)\n+        except KeyError:\n+            intids.register(rel)\n+            added_rel_intids += 1\n         catalog.unindex(rel)\n         try:\n             catalog.index(rel)\n         except IntIdMissingError:\n-            logger.warn(\'Broken relation removed.\')\n+            logger.warning(\'Broken relation removed.\')\n+    if added_rel_intids:\n+        logger.info(\'Registered %s extra relations in the intid utility.\', added_rel_intids)\n \n \n class IResourceRegistriesSettings(Interface):\n'
 
