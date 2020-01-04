@@ -2,41 +2,14 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2020-01-04T19:29:20+01:00
-Author: Luca (luca-bellenghi) <lucabel@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/c2ff926fbe0dbd9f3ab63cb12316967033c6afcc
+Date: 2020-01-04T19:45:34+01:00
+Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
+Commit: https://github.com/plone/plone.restapi/commit/8deefe2f0572a3d862c4be4507d8c4c7dd708772
 
-Add SearchableText indexing for text in blocks (#844)
-
-* Add SearchableText indexing for text in blocks; used for document implementing IBlock interface
-
-* add news file
-
-* Do not fail if block has no text attr.
-
-* Remove unused zcml ns.
-
-* Use safe_nativestring from CMFPlone.
-
-* Do not introduce a hard dependency on p.a.contenttypes.
-
-* Refactor p.a.contenttypes conditional zcml registration.
-
-* Revert "Use safe_nativestring from CMFPlone."
-
-This reverts commit a06556f19a58aa3a099bd26474c8e141f372162a.
-
-* Downgrade astunparse to 1.6.2.
-
-Co-authored-by: Timo Stollenwerk &lt;tisto@users.noreply.github.com&gt;
+Add experimental note to indexer.py.
 
 Files changed:
-A news/844.feature
-A src/plone/restapi/indexers.py
-A src/plone/restapi/indexers.zcml
-A src/plone/restapi/tests/test_blocks_searchable_text.py
-M src/plone/restapi/configure.zcml
-M versions.cfg
+M src/plone/restapi/indexers.py
 
-b'diff --git a/news/844.feature b/news/844.feature\nnew file mode 100644\nindex 00000000..21fa81c9\n--- /dev/null\n+++ b/news/844.feature\n@@ -0,0 +1,2 @@\n+ * Add SearchableText indexing for text in blocks\n+   [luca-bellenghi]\ndiff --git a/src/plone/restapi/configure.zcml b/src/plone/restapi/configure.zcml\nindex 032c739d..ae4a931d 100644\n--- a/src/plone/restapi/configure.zcml\n+++ b/src/plone/restapi/configure.zcml\n@@ -15,6 +15,7 @@\n   <include package="plone.behavior" />\n   <include package="plone.rest" />\n   <include package="plone.schema" />\n+  <include file="indexers.zcml" />\n \n   <five:registerPackage package="." initialize=".initialize" />\n \ndiff --git a/src/plone/restapi/indexers.py b/src/plone/restapi/indexers.py\nnew file mode 100644\nindex 00000000..2483ade0\n--- /dev/null\n+++ b/src/plone/restapi/indexers.py\n@@ -0,0 +1,33 @@\n+# -*- coding: utf-8 -*-\n+from plone.restapi.behaviors import IBlocks\n+from plone.indexer.decorator import indexer\n+from plone.app.contenttypes.indexers import SearchableText\n+import six\n+\n+\n+def _extract_text(block):\n+    result = ""\n+    for paragraph in block.get("text").get("blocks"):\n+        text = paragraph["text"]\n+        if six.PY2:\n+            if isinstance(text, six.text_type):\n+                text = text.encode("utf-8", "replace")\n+            if text:\n+                result = " ".join((result, text))\n+        else:\n+            result = " ".join((result, text))\n+    return result\n+\n+\n+@indexer(IBlocks)\n+def SearchableText_blocks(obj):\n+    std_text = SearchableText(obj)\n+    blocks = obj.blocks\n+    blocks_text = [\n+        _extract_text(blocks[block_uid])\n+        for block_uid in obj.blocks\n+        if blocks[block_uid].get("@type", "") == "text"\n+    ]\n+    blocks_text.append(std_text)\n+    text = " ".join(blocks_text)\n+    return text\ndiff --git a/src/plone/restapi/indexers.zcml b/src/plone/restapi/indexers.zcml\nnew file mode 100644\nindex 00000000..d3a598f5\n--- /dev/null\n+++ b/src/plone/restapi/indexers.zcml\n@@ -0,0 +1,11 @@\n+<configure\n+    xmlns="http://namespaces.zope.org/zope"\n+    xmlns:zcml="http://namespaces.zope.org/zcml"\n+    i18n_domain="plone">\n+\n+  <configure zcml:condition="installed plone.app.contenttypes">\n+    <adapter name="SearchableText" factory=".indexers.SearchableText_blocks" />\n+  </configure>\n+\n+</configure>\n+\ndiff --git a/src/plone/restapi/tests/test_blocks_searchable_text.py b/src/plone/restapi/tests/test_blocks_searchable_text.py\nnew file mode 100644\nindex 00000000..cfc1c9d1\n--- /dev/null\n+++ b/src/plone/restapi/tests/test_blocks_searchable_text.py\n@@ -0,0 +1,98 @@\n+# -*- coding: utf-8 -*-\n+from plone.app.testing import setRoles\n+from plone.app.testing import SITE_OWNER_NAME\n+from plone.app.testing import SITE_OWNER_PASSWORD\n+from plone.app.testing import TEST_USER_ID\n+from plone.dexterity.interfaces import IDexterityFTI\n+from plone.dexterity.utils import createContentInContainer\n+from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n+from plone.restapi.testing import RelativeSession\n+from zope.component import queryUtility\n+\n+import transaction\n+import unittest\n+\n+\n+class TestSearchTextInBlocks(unittest.TestCase):\n+\n+    layer = PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n+\n+    def setUp(self):\n+        self.app = self.layer["app"]\n+        self.portal = self.layer["portal"]\n+        self.portal_url = self.portal.absolute_url()\n+        setRoles(self.portal, TEST_USER_ID, ["Manager"])\n+\n+        self.api_session = RelativeSession(self.portal_url)\n+        self.api_session.headers.update({"Accept": "application/json"})\n+        self.api_session.auth = (SITE_OWNER_NAME, SITE_OWNER_PASSWORD)\n+\n+        fti = queryUtility(IDexterityFTI, name="Document")\n+        behavior_list = [a for a in fti.behaviors]\n+        behavior_list.append("volto.blocks")\n+        fti.behaviors = tuple(behavior_list)\n+\n+        self.doc = createContentInContainer(\n+            self.portal, u"Document", id=u"doc", title=u"A document"\n+        )\n+        transaction.commit()\n+\n+    def tearDown(self):\n+        self.api_session.close()\n+\n+    def test_search_text(self):\n+        response = self.api_session.patch(\n+            "/doc",\n+            json={\n+                "blocks": {\n+                    "uuid1": {\n+                        "@type": "text",\n+                        "text": {\n+                            "blocks": [\n+                                {\n+                                    "data": {},\n+                                    "depth": 0,\n+                                    "entityRanges": [],\n+                                    "inlineStyleRanges": [],\n+                                    "key": "acv4f",\n+                                    "text": "Plone " "text " "for " "block ",\n+                                    "type": "unstyled",\n+                                }\n+                            ],\n+                            "entityMap": {},\n+                        },\n+                    },\n+                    "uuid2": {\n+                        "@type": "text",\n+                        "text": {\n+                            "blocks": [\n+                                {\n+                                    "data": {},\n+                                    "depth": 0,\n+                                    "entityRanges": [],\n+                                    "inlineStyleRanges": [],\n+                                    "key": "1m9qt",\n+                                    "text": "Volto " "text " "for " "block ",\n+                                    "type": "unstyled",\n+                                }\n+                            ],\n+                            "entityMap": {},\n+                        },\n+                    },\n+                }\n+            },\n+        )\n+\n+        self.assertEqual(response.status_code, 204)\n+\n+        query = {"SearchableText": "Volto", "metadata_fields": "Title"}\n+        response = self.api_session.get("/@search", params=query)\n+        json_response = response.json()\n+        self.assertEqual(json_response["items_total"], 1)\n+        self.assertEqual(json_response["items"][0]["Title"], "A document")\n+\n+        query = {"SearchableText": "Plone", "metadata_fields": "Title"}\n+        response = self.api_session.get("/@search", params=query)\n+        json_response = response.json()\n+        self.assertEqual(json_response["items_total"], 1)\n+        self.assertEqual(json_response["items"][0]["Title"], "A document")\ndiff --git a/versions.cfg b/versions.cfg\nindex 7f99dbaf..8086ef94 100644\n--- a/versions.cfg\n+++ b/versions.cfg\n@@ -32,6 +32,7 @@ sphinxcontrib-httpdomain = 1.5.0\n sphinx-rtd-theme = 0.2.4\n Jinja2 = 2.10\n Babel = 2.5.1\n+astunparse = 1.6.2\n \n # plone.restapi specific\n plone.schema = 1.2.0\n'
+b'diff --git a/src/plone/restapi/indexers.py b/src/plone/restapi/indexers.py\nindex 2483ade0..b381085d 100644\n--- a/src/plone/restapi/indexers.py\n+++ b/src/plone/restapi/indexers.py\n@@ -1,4 +1,10 @@\n # -*- coding: utf-8 -*-\n+# XXX: EXPERIMENTAL!!!\n+# This is an experimental feature meant for use in Volto only!\n+# This code is likely to change in the future, even within minor releases.\n+# We will make sure plone.restapi latest always works with the latest Volto release.\n+# This code is planned to being refactored into CMFPlone 6.0 as soon as Volto 4 final is out.\n+# <tisto@plone.org>\n from plone.restapi.behaviors import IBlocks\n from plone.indexer.decorator import indexer\n from plone.app.contenttypes.indexers import SearchableText\n'
 
