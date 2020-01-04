@@ -43,9 +43,8 @@ Create a pull request
   This means that we can NOT accept pull requests from you unless this is done,
   so please don't put the code reviewers at risk and do it anyways.
 
-* Add a changelog entry in ``CHANGES.rst``.
-  Make it clear if it is a fix or a new feature.
-  When in doubt, don't worry about it.
+* Add a changelog entry as file in the news directory.
+  For helpful instructions, please see: https://github.com/plone/plone.releaser/blob/master/ADD-A-NEWS-ITEM.rst
 
 * For new features, an addition to README.rst is probably needed.
   A package may include other documentation that needs updating.
