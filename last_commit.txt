@@ -1,33 +1,15 @@
-Repository: plone.restapi
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2020-01-10T15:56:17+01:00
-Author: arsenico13 (arsenico13) <arsenico13@users.noreply.github.com>
-Commit: https://github.com/plone/plone.restapi/commit/01265545407af7281f44a51142a5632ef7764dc3
+Date: 2020-01-14T16:29:20+01:00
+Author: Katja Suess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.upgrade/commit/0d9b9d0ba0aabde4632e53b0eecc20d437b221d2
 
-Fix related item review state 376 (#852)
-
-* [fix] #376: handle WorkflowException for review_state
-
-* [chg] when WorkflowException, leave the field None
-
-* [new] test added: test_get_content_related_items_without_workflow
-
-* [new] bugfix towncrier file
-
-* [chg] update CONTRIBUTORS.rst
-
-* [fix] restored CONTRIBUTORS.rst order
-
-* [new] added flag HAS_DX and check for dexterity in TestContentGet
+Run upgrade step from plone.app.discussion to apply review workflow changes
 
 Files changed:
-A news/376.bugfix
-M CONTRIBUTORS.rst
-M src/plone/restapi/serializer/summary.py
-M src/plone/restapi/testing.py
-M src/plone/restapi/tests/test_content_get.py
+M plone/app/upgrade/v52/configure.zcml
 
-b'diff --git a/CONTRIBUTORS.rst b/CONTRIBUTORS.rst\nindex 394ca5ae..1377a6b7 100644\n--- a/CONTRIBUTORS.rst\n+++ b/CONTRIBUTORS.rst\n@@ -16,3 +16,6 @@\n - Yann Fouillat, alias Gagaro\n - Sune Br\xc3\xb8ndum W\xc3\xb8ller\n - Philippe Gross\n+- Andrea Cecchi\n+- Luca Bellenghi\n+- Giacomo Monari\ndiff --git a/news/376.bugfix b/news/376.bugfix\nnew file mode 100644\nindex 00000000..dd15e805\n--- /dev/null\n+++ b/news/376.bugfix\n@@ -0,0 +1,2 @@\n+Fix WorkflowException for related items with no review_state.\n+[arsenico13]\ndiff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex 3387658e..ee52e57d 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -3,6 +3,7 @@\n from plone.restapi.interfaces import ISerializeToJsonSummary\n from plone.restapi.serializer.converters import json_compatible\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFCore.WorkflowCore import WorkflowException\n from Products.CMFPlone.interfaces import IPloneSiteRoot\n from zope.component import adapter\n from zope.interface import implementer\n@@ -59,8 +60,12 @@ def __call__(self):\n                 continue\n             accessor = FIELD_ACCESSORS.get(field, field)\n             value = getattr(obj, accessor, None)\n-            if callable(value):\n-                value = value()\n+            try:\n+                if callable(value):\n+                    value = value()\n+            except WorkflowException:\n+                summary[field] = None\n+                continue\n             summary[field] = json_compatible(value)\n         return summary\n \ndiff --git a/src/plone/restapi/testing.py b/src/plone/restapi/testing.py\nindex 341247cb..ae976a3e 100644\n--- a/src/plone/restapi/testing.py\n+++ b/src/plone/restapi/testing.py\n@@ -64,6 +64,13 @@\n else:\n     HAS_AT = True\n \n+try:\n+    pkg_resources.get_distribution("plone.dexterity")\n+except pkg_resources.DistributionNotFound:\n+    HAS_DX = False\n+else:\n+    HAS_DX = True\n+\n ENABLED_LANGUAGES = ["de", "en", "es", "fr"]\n \n \ndiff --git a/src/plone/restapi/tests/test_content_get.py b/src/plone/restapi/tests/test_content_get.py\nindex d87ed540..42be0919 100644\n--- a/src/plone/restapi/tests/test_content_get.py\n+++ b/src/plone/restapi/tests/test_content_get.py\n@@ -5,7 +5,9 @@\n from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n from plone.app.textfield.value import RichTextValue\n+from plone.namedfile.file import NamedBlobImage\n from plone.restapi.testing import HAS_AT\n+from plone.restapi.testing import HAS_DX\n from plone.restapi.testing import PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from Products.CMFCore.utils import getToolByName\n@@ -13,6 +15,7 @@\n from zope.component import getUtility\n from zope.intid.interfaces import IIntIds\n \n+import os\n import requests\n import transaction\n import unittest\n@@ -23,8 +26,8 @@ class TestContentGet(unittest.TestCase):\n     layer = PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n \n     def setUp(self):\n-        if not HAS_AT:\n-            raise unittest.SkipTest("Skip tests if Archetypes is not present")\n+        if not HAS_DX:\n+            raise unittest.SkipTest("Skip tests if Dexterity is not present")\n         self.app = self.layer["app"]\n         self.portal = self.layer["portal"]\n         self.portal_url = self.portal.absolute_url()\n@@ -139,6 +142,44 @@ def test_get_content_includes_related_items(self):\n             response.json()["relatedItems"],\n         )\n \n+    def test_get_content_related_items_without_workflow(self):\n+        intids = getUtility(IIntIds)\n+\n+        self.portal.invokeFactory("Image", id="imagewf")\n+        self.portal.imagewf.title = "Image without workflow"\n+        self.portal.imagewf.description = u"This is an image"\n+        image_file = os.path.join(os.path.dirname(__file__), u"image.png")\n+        with open(image_file, "rb") as f:\n+            image_data = f.read()\n+        self.portal.imagewf.image = NamedBlobImage(\n+            data=image_data, contentType="image/png", filename=u"image.png"\n+        )\n+        transaction.commit()\n+\n+        self.portal.folder1.doc1.relatedItems = [\n+            RelationValue(intids.getId(self.portal.imagewf))\n+        ]\n+        transaction.commit()\n+        response = requests.get(\n+            self.portal.folder1.doc1.absolute_url(),\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+        )\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(1, len(response.json()["relatedItems"]))\n+        self.assertEqual(\n+            [\n+                {\n+                    u"@id": self.portal_url + u"/imagewf",\n+                    u"@type": u"Image",\n+                    u"description": u"This is an image",\n+                    u"review_state": None,\n+                    u"title": u"Image without workflow",\n+                }\n+            ],\n+            response.json()["relatedItems"],\n+        )\n+\n \n class TestContentATGet(unittest.TestCase):\n \n'
+b'diff --git a/plone/app/upgrade/v52/configure.zcml b/plone/app/upgrade/v52/configure.zcml\nindex ce754111..6e95e1c7 100644\n--- a/plone/app/upgrade/v52/configure.zcml\n+++ b/plone/app/upgrade/v52/configure.zcml\n@@ -138,4 +138,17 @@\n \n     </gs:upgradeSteps>\n \n+    <gs:upgradeSteps\n+        source="5208"\n+        destination="5209"\n+        profile="Products.CMFPlone:plone">\n+\n+        <gs:upgradeStep\n+            title="Extended review workflow with states pending, published and new: rejected and spam"\n+            description="Additional states allows moderator to review history of publishing and rejection"\n+            handler="plone.app.discussion.upgrades.extend_review_workflow"\n+            />\n+\n+    </gs:upgradeSteps>\n+\n </configure>\n'
 
