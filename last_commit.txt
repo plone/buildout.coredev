@@ -1,16 +1,34 @@
-Repository: plone.dexterity
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/2.6.x
-Date: 2020-02-03T15:46:59+01:00
-Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.dexterity/commit/984f8f8eead3866f2a9f7785c910d7540ac3a9a1
+Branch: refs/heads/master
+Date: 2020-02-06T16:47:24+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.upgrade/commit/e407d02a407bd6de0697ae01baa0b491c0ff122d
 
-Backport https://github.com/plone/plone.dexterity/pull/119/ for 2.6.x
+fix problem in remove_interface_indexes_from_relations_catalog whe token is disconnected
 
 Files changed:
-A news/120.bugfix
-M plone/dexterity/content.py
+A news/225.bugfix
+M plone/app/upgrade/v52/betas.py
 
-b"diff --git a/news/120.bugfix b/news/120.bugfix\nnew file mode 100644\nindex 0000000..0bf0f63\n--- /dev/null\n+++ b/news/120.bugfix\n@@ -0,0 +1 @@\n+- Fix thread safe recursion detection. This fixes an issue in plone.restapi: https://github.com/plone/plone.dexterity/issues/120. (Backport of https://github.com/plone/plone.dexterity/pull/119) [jensens]\ndiff --git a/plone/dexterity/content.py b/plone/dexterity/content.py\nindex 7f08793..8751f90 100644\n--- a/plone/dexterity/content.py\n+++ b/plone/dexterity/content.py\n@@ -48,10 +48,12 @@\n from zope.security.interfaces import IPermission\n \n import six\n+import threading\n \n \n _marker = object()\n _zone = DateTime().timezone()\n+_recursion_detection = threading.local()\n FLOOR_DATE = DateTime(1970, 0)  # always effective\n CEILING_DATE = DateTime(2500, 0)  # never expires\n \n@@ -84,13 +86,12 @@ def __get__(self, inst, cls=None):\n         if inst is None:\n             return getObjectSpecification(cls)\n \n-        direct_spec = getattr(inst, '__provides__', None)\n+        # get direct specification\n+        spec = getattr(inst, '__provides__', None)\n \n         # avoid recursion - fall back on default\n-        if getattr(self, '__recursion__', False):\n-            return direct_spec\n-\n-        spec = direct_spec\n+        if getattr(_recursion_detection, 'blocked', False):\n+            return spec\n \n         # If the instance doesn't have a __provides__ attribute, get the\n         # interfaces implied by the class as a starting point.\n@@ -117,7 +118,7 @@ def __get__(self, inst, cls=None):\n             inst._p_mtime,\n             SCHEMA_CACHE.modified(portal_type),\n             SCHEMA_CACHE.invalidations,\n-            hash(direct_spec)\n+            hash(spec)\n         )\n         if cache is not None and cache[:-1] == updated:\n             if cache[-1] is not None:\n@@ -131,7 +132,7 @@ def __get__(self, inst, cls=None):\n             dynamically_provided = []\n \n         # block recursion\n-        self.__recursion__ = True\n+        setattr(_recursion_detection, 'blocked', True)\n         try:\n             assignable = IBehaviorAssignable(inst, None)\n             if assignable is not None:\n@@ -141,7 +142,7 @@ def __get__(self, inst, cls=None):\n                             behavior_registration.marker\n                         )\n         finally:\n-            del self.__recursion__\n+            setattr(_recursion_detection, 'blocked', False)\n \n         if not dynamically_provided:\n             # rare case if no schema nor behaviors with markers are set\n"
+b"diff --git a/news/225.bugfix b/news/225.bugfix\nnew file mode 100644\nindex 00000000..53bb44b8\n--- /dev/null\n+++ b/news/225.bugfix\n@@ -0,0 +1,4 @@\n+Fix problem in step to 5.2 beta 1 `remove_interface_indexes_from_relations_catalog`.\n+While upgrading the relation-catalog in some real world databases some of the iterated tokens are orphaned.\n+Remove them to have a clean relation-catalog afterwards and log a warning.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/plone/app/upgrade/v52/betas.py b/plone/app/upgrade/v52/betas.py\nindex b639b06f..2309aefa 100644\n--- a/plone/app/upgrade/v52/betas.py\n+++ b/plone/app/upgrade/v52/betas.py\n@@ -8,7 +8,7 @@\n from zope.interface import Interface\n from zope.intid.interfaces import IIntIds\n from zope.intid.interfaces import IntIdMissingError\n-\n+from zope.intid.interfaces import ObjectMissingError\n import logging\n import sys\n \n@@ -68,7 +68,13 @@ def remove_interface_indexes_from_relations_catalog():\n     tokens = [token for token in catalog._relTokens]\n     empty = 0\n     for token in tokens:\n-        relation = catalog.resolveRelationToken(token)\n+        try:\n+            relation = catalog.resolveRelationToken(token)\n+        except ObjectMissingError:\n+            logger.warning('Removed token with missing object.')\n+            catalog._relTokens.remove(token)\n+            continue\n+\n         if relation.from_object is not None or relation.to_object is not None:\n             continue\n         catalog.unindex_doc(token)\n"
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2020-02-11T18:45:29+01:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/plone.app.upgrade/commit/ce2dce3cd83cabc15e00ab0ecc58004f5241284a
+
+Merge pull request #225 from plone/fix-relation-update
+
+fix problem in remove_interface_indexes_from_relations_catalog
+
+Files changed:
+A news/225.bugfix
+M plone/app/upgrade/v52/betas.py
+
+b"diff --git a/news/225.bugfix b/news/225.bugfix\nnew file mode 100644\nindex 00000000..53bb44b8\n--- /dev/null\n+++ b/news/225.bugfix\n@@ -0,0 +1,4 @@\n+Fix problem in step to 5.2 beta 1 `remove_interface_indexes_from_relations_catalog`.\n+While upgrading the relation-catalog in some real world databases some of the iterated tokens are orphaned.\n+Remove them to have a clean relation-catalog afterwards and log a warning.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/plone/app/upgrade/v52/betas.py b/plone/app/upgrade/v52/betas.py\nindex b639b06f..2309aefa 100644\n--- a/plone/app/upgrade/v52/betas.py\n+++ b/plone/app/upgrade/v52/betas.py\n@@ -8,7 +8,7 @@\n from zope.interface import Interface\n from zope.intid.interfaces import IIntIds\n from zope.intid.interfaces import IntIdMissingError\n-\n+from zope.intid.interfaces import ObjectMissingError\n import logging\n import sys\n \n@@ -68,7 +68,13 @@ def remove_interface_indexes_from_relations_catalog():\n     tokens = [token for token in catalog._relTokens]\n     empty = 0\n     for token in tokens:\n-        relation = catalog.resolveRelationToken(token)\n+        try:\n+            relation = catalog.resolveRelationToken(token)\n+        except ObjectMissingError:\n+            logger.warning('Removed token with missing object.')\n+            catalog._relTokens.remove(token)\n+            continue\n+\n         if relation.from_object is not None or relation.to_object is not None:\n             continue\n         catalog.unindex_doc(token)\n"
 
