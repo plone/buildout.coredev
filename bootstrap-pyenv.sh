@@ -1,10 +1,7 @@
 #!/bin/sh
 # This script uses pyenv to install specific virtualenv
-TAG=6.0
-PY=3.7.6
-VENVBASE=plone-coredev-$TAG
-
-git clone -b $TAG git@github.com:plone/buildout.coredev.git
+PY="3.7.6"
+VENVBASE="plone-coredev-6.0"
 
 eval "$(pyenv init -)"
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
