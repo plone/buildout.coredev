@@ -1,39 +1,110 @@
-Repository: Products.CMFPlone
+Repository: plone.api
 
 
-Branch: refs/heads/4.3.x
-Date: 2020-01-22T21:55:54+01:00
+Branch: refs/heads/master
+Date: 2020-02-14T00:47:05+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/5989716e7523dba603f8d0b055b7900dc254db0d
+Commit: https://github.com/plone/plone.api/commit/fdd157eca143e2ad2e180dd3c4f6d4a55fd197d5
 
-Merge Hotfix20200121 with tests
+In tests, use stronger password.
 
-The isURLInPortal check that is done to avoid linking to an external
-site could be tricked into accepting malicious links.
-
-Files changed:
-A news/3021.bugfix.2
-M Products/CMFPlone/URLTool.py
-M Products/CMFPlone/tests/testURLTool.py
-
-b'diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py\nindex dabdf23221..bb98640b32 100644\n--- a/Products/CMFPlone/URLTool.py\n+++ b/Products/CMFPlone/URLTool.py\n@@ -8,6 +8,8 @@\n from posixpath import normpath\n from urlparse import urlparse, urljoin\n import re\n+import string\n+import unicodedata\n \n \n hp = HTMLParser()\n@@ -28,6 +30,62 @@\n     \'javascript%3a\',\n ]\n \n+# Determine allowed ascii characters.\n+# We want to allow most printable characters,\n+# but no whitespace, and no punctuation, except for a few exceptions.\n+# This boils down to ascii letters plus digits plus exceptions.\n+# Exceptions:\n+# - dot and slash for relative or absolute paths.\n+# - @ because we have views starting with @@\n+# - + because we have ++resource++ urls\n+allowed_ascii = string.ascii_letters + string.digits + "./@+"\n+\n+def safe_url_first_char(url):\n+    # For character code points higher than 127, the bytes representation of a character\n+    # is longer than the unicode representation, so url[0] may give different results\n+    # for bytes and unicode.  On Python 2:\n+    # >>> unichr(128)\n+    # u\'\\x80\'\n+    # >>> len(unichr(128))\n+    # 1\n+    # >>> unichr(128).encode("latin-1")\n+    # \'\\x80\'\n+    # >>> len(unichr(128).encode("latin-1"))\n+    # 1\n+    # >>> unichr(128).encode("utf-8")\n+    # \'\\xc2\\x80\'\n+    # >>> len(unichr(128).encode("utf-8"))\n+    # 2\n+    # >>> unichr(128).encode("utf-8")[0]\n+    # \'\\xc2\'\n+    # So make sure we have unicode here for comparing the first character.\n+    if isinstance(url, bytes):\n+        # Remember, on Python 2, bytes == str.\n+        try:\n+            first = url.decode("utf-8")[0]\n+        except UnicodeDecodeError:\n+            # We don\'t trust this\n+            return False\n+    else:\n+        first = url[0]\n+    if ord(first) < 128:\n+        if first not in allowed_ascii:\n+            # The first character of the url is ascii but not in the allowed range.\n+            return False\n+    else:\n+        # This is non-ascii, which has lots of control characters, which may be dangerous.\n+        # Check taken from django.utils.http._is_safe_url.  See\n+        # https://github.com/django/django/blob/2.1.5/django/utils/http.py#L356-L382\n+        # Forbid URLs that start with control characters. Some browsers (like\n+        # Chrome) ignore quite a few control characters at the start of a\n+        # URL and might consider the URL as scheme relative.\n+        # For categories, see 5.7.1 General Category Values here:\n+        # http://www.unicode.org/reports/tr44/tr44-6.html#Property_Values\n+        # We look for Control categories here.\n+        if unicodedata.category(first)[0] == "C":\n+            return False\n+    return True\n+\n \n class URLTool(PloneBaseTool, BaseTool):\n \n@@ -48,6 +106,9 @@ def isURLInPortal(self, url, context=None):\n         # site_properties are also considered within the portal to allow for\n         # single sign on.\n \n+        if url and not safe_url_first_char(url):\n+            return False\n+\n         # sanitize url\n         url = re.sub(\'^[\\x00-\\x20]+\', \'\', url).strip()\n         cmp_url = url.lower()\ndiff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py\nindex a132636343..d65286eb87 100644\n--- a/Products/CMFPlone/tests/testURLTool.py\n+++ b/Products/CMFPlone/tests/testURLTool.py\n@@ -56,6 +56,7 @@ def test_isURLInPortal(self):\n         self.assertTrue(iURLiP(\'https://www.foobar.com/bar/foo/folder\'))\n         self.assertFalse(iURLiP(\'http://www.foobar.com:8080/bar/foo/folder\'))\n         self.assertFalse(iURLiP(\'http://www.foobar.com/bar\'))\n+        self.assertTrue(iURLiP(\'//www.foobar.com/bar/foo\'))\n         self.assertFalse(iURLiP(\'/images\'))\n         self.assertTrue(iURLiP(\'/bar/foo/foo\'))\n \n@@ -125,6 +126,15 @@ def test_double_back_slash(self):\n         iURLiP = url_tool.isURLInPortal\n         self.assertFalse(iURLiP(\'\\\\\\\\www.example.com\'))\n \n+    def test_escape(self):\n+        url_tool = self._makeOne()\n+        iURLiP = url_tool.isURLInPortal\n+        self.assertFalse(iURLiP(\'\\/\\/www.example.com\'))\n+        self.assertFalse(iURLiP(\'\\%2F\\%2Fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'\\%2f\\%2fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'%2F%2Fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'%2f%2fwww.example.com\'))\n+\n     def test_regression_absolute_url_in_portal(self):\n         url_tool = self._makeOne()\n         iURLiP = url_tool.isURLInPortal\ndiff --git a/news/3021.bugfix.2 b/news/3021.bugfix.2\nnew file mode 100644\nindex 0000000000..b48698a2db\n--- /dev/null\n+++ b/news/3021.bugfix.2\n@@ -0,0 +1 @@\n+Merge Hotfix20200121: isURLInPortal could be tricked into accepting malicious links.\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/4.3.x
-Date: 2020-02-11T12:47:11+01:00
-Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/Products.CMFPlone/commit/49277de01f41f120a3bd6a28fd3bbac585780e40
-
-Merge pull request #3024 from plone/merge-hotfix-20200121-4.3.x-in-portal
-
-4.3.x Hotfix20200121 isURLInPortal
+Otherwise the tests in test_env.py fail during setup when the January 2020 hotfix is merged to CMFPlone.
+The password strength is tested in more places then.
 
 Files changed:
-A news/3021.bugfix.2
-M Products/CMFPlone/URLTool.py
-M Products/CMFPlone/tests/testURLTool.py
+A 3021.bugfix
+M src/plone/api/tests/test_env.py
 
-b'diff --git a/Products/CMFPlone/URLTool.py b/Products/CMFPlone/URLTool.py\nindex dabdf23221..bb98640b32 100644\n--- a/Products/CMFPlone/URLTool.py\n+++ b/Products/CMFPlone/URLTool.py\n@@ -8,6 +8,8 @@\n from posixpath import normpath\n from urlparse import urlparse, urljoin\n import re\n+import string\n+import unicodedata\n \n \n hp = HTMLParser()\n@@ -28,6 +30,62 @@\n     \'javascript%3a\',\n ]\n \n+# Determine allowed ascii characters.\n+# We want to allow most printable characters,\n+# but no whitespace, and no punctuation, except for a few exceptions.\n+# This boils down to ascii letters plus digits plus exceptions.\n+# Exceptions:\n+# - dot and slash for relative or absolute paths.\n+# - @ because we have views starting with @@\n+# - + because we have ++resource++ urls\n+allowed_ascii = string.ascii_letters + string.digits + "./@+"\n+\n+def safe_url_first_char(url):\n+    # For character code points higher than 127, the bytes representation of a character\n+    # is longer than the unicode representation, so url[0] may give different results\n+    # for bytes and unicode.  On Python 2:\n+    # >>> unichr(128)\n+    # u\'\\x80\'\n+    # >>> len(unichr(128))\n+    # 1\n+    # >>> unichr(128).encode("latin-1")\n+    # \'\\x80\'\n+    # >>> len(unichr(128).encode("latin-1"))\n+    # 1\n+    # >>> unichr(128).encode("utf-8")\n+    # \'\\xc2\\x80\'\n+    # >>> len(unichr(128).encode("utf-8"))\n+    # 2\n+    # >>> unichr(128).encode("utf-8")[0]\n+    # \'\\xc2\'\n+    # So make sure we have unicode here for comparing the first character.\n+    if isinstance(url, bytes):\n+        # Remember, on Python 2, bytes == str.\n+        try:\n+            first = url.decode("utf-8")[0]\n+        except UnicodeDecodeError:\n+            # We don\'t trust this\n+            return False\n+    else:\n+        first = url[0]\n+    if ord(first) < 128:\n+        if first not in allowed_ascii:\n+            # The first character of the url is ascii but not in the allowed range.\n+            return False\n+    else:\n+        # This is non-ascii, which has lots of control characters, which may be dangerous.\n+        # Check taken from django.utils.http._is_safe_url.  See\n+        # https://github.com/django/django/blob/2.1.5/django/utils/http.py#L356-L382\n+        # Forbid URLs that start with control characters. Some browsers (like\n+        # Chrome) ignore quite a few control characters at the start of a\n+        # URL and might consider the URL as scheme relative.\n+        # For categories, see 5.7.1 General Category Values here:\n+        # http://www.unicode.org/reports/tr44/tr44-6.html#Property_Values\n+        # We look for Control categories here.\n+        if unicodedata.category(first)[0] == "C":\n+            return False\n+    return True\n+\n \n class URLTool(PloneBaseTool, BaseTool):\n \n@@ -48,6 +106,9 @@ def isURLInPortal(self, url, context=None):\n         # site_properties are also considered within the portal to allow for\n         # single sign on.\n \n+        if url and not safe_url_first_char(url):\n+            return False\n+\n         # sanitize url\n         url = re.sub(\'^[\\x00-\\x20]+\', \'\', url).strip()\n         cmp_url = url.lower()\ndiff --git a/Products/CMFPlone/tests/testURLTool.py b/Products/CMFPlone/tests/testURLTool.py\nindex a132636343..d65286eb87 100644\n--- a/Products/CMFPlone/tests/testURLTool.py\n+++ b/Products/CMFPlone/tests/testURLTool.py\n@@ -56,6 +56,7 @@ def test_isURLInPortal(self):\n         self.assertTrue(iURLiP(\'https://www.foobar.com/bar/foo/folder\'))\n         self.assertFalse(iURLiP(\'http://www.foobar.com:8080/bar/foo/folder\'))\n         self.assertFalse(iURLiP(\'http://www.foobar.com/bar\'))\n+        self.assertTrue(iURLiP(\'//www.foobar.com/bar/foo\'))\n         self.assertFalse(iURLiP(\'/images\'))\n         self.assertTrue(iURLiP(\'/bar/foo/foo\'))\n \n@@ -125,6 +126,15 @@ def test_double_back_slash(self):\n         iURLiP = url_tool.isURLInPortal\n         self.assertFalse(iURLiP(\'\\\\\\\\www.example.com\'))\n \n+    def test_escape(self):\n+        url_tool = self._makeOne()\n+        iURLiP = url_tool.isURLInPortal\n+        self.assertFalse(iURLiP(\'\\/\\/www.example.com\'))\n+        self.assertFalse(iURLiP(\'\\%2F\\%2Fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'\\%2f\\%2fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'%2F%2Fwww.example.com\'))\n+        self.assertFalse(iURLiP(\'%2f%2fwww.example.com\'))\n+\n     def test_regression_absolute_url_in_portal(self):\n         url_tool = self._makeOne()\n         iURLiP = url_tool.isURLInPortal\ndiff --git a/news/3021.bugfix.2 b/news/3021.bugfix.2\nnew file mode 100644\nindex 0000000000..b48698a2db\n--- /dev/null\n+++ b/news/3021.bugfix.2\n@@ -0,0 +1 @@\n+Merge Hotfix20200121: isURLInPortal could be tricked into accepting malicious links.\n'
+b"diff --git a/3021.bugfix b/3021.bugfix\nnew file mode 100644\nindex 0000000..68f5946\n--- /dev/null\n+++ b/3021.bugfix\n@@ -0,0 +1 @@\n+In tests, use stronger password.  [maurits]\ndiff --git a/src/plone/api/tests/test_env.py b/src/plone/api/tests/test_env.py\nindex 49d5cc9..db1f2dd 100644\n--- a/src/plone/api/tests/test_env.py\n+++ b/src/plone/api/tests/test_env.py\n@@ -92,7 +92,7 @@ def setUp(self):\n         api.user.create(\n             username='boss',\n             email='important_person@example.com',\n-            password='123',\n+            password='123456',\n             roles=('Member', 'VIP'),\n         )\n \n"
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2020-02-14T00:53:24+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.api/commit/83655ed6cc7f1510dbacab79d02bdb9202417b26
+
+Travis: do not start xvfb.
+
+We have no robot browser tests, so setting up X Windows is useless.
+Travis failed immediately because of this.
+
+Files changed:
+M .travis.yml
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex 7195292..e84bae6 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -32,10 +32,6 @@ before_install:\n install:\n   - travis_retry pip install -U setuptools==33.1.1 tox coveralls coverage\n \n-before_script:\n-  - export DISPLAY=:99.0\n-  - sh -e /etc/init.d/xvfb start\n-\n script:\n     - travis_retry tox\n \n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2020-02-14T08:55:35+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.api/commit/e420eaa664810e9734f6a4cb8ab149af47baf7a8
+
+Removed inline doctest for content.find that was not tested.
+
+Well, it was tested by 'tox -e docs' and that completely failed.
+The function is tested just fine in content.rst.
+Fixes https://github.com/plone/plone.api/issues/437
+
+Files changed:
+M src/plone/api/content.py
+
+b'diff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex 9931599..a5706dc 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -619,55 +619,6 @@ def find(context=None, depth=None, **kwargs):\n     :rtype: List\n     :Example: :ref:`content_find_example`\n \n-    Find works alike catalog(). Indexes are passing in as arguments with the\n-    search query as the values.\n-\n-    Specify indexes as arguments:\n-    >>> find(portal_type=\'Document\')\n-\n-    or combinations of indexes.\n-    >>> find(portal_type=\'Document\', SearchableText=\'Team\')\n-\n-\n-    Differences to using the catalog directly are:\n-\n-    The context argument allows passing in an context object, instead\n-    of path=\'/\'.join(context.getPhysicalPath().\n-\n-    >>> find(context=context)\n-    - or -\n-    >>> find(context=context, portal_type=\'Document\')\n-\n-    Specifing the search depth is supported using the `depth` argument.\n-    >>> find(depth=1)\n-\n-    Using `depth` needs a context for it\'s path. If no context and no\n-    path is passed, the portal root is used.\n-    >>> find(context=portal, depth=1, portal_type=\'Document\')\n-    - or -\n-    >>> find(depth=1, path=\'/plone/folder\', portal_type=\'Document\')\n-    - or -\n-    >>> find(depth=1, portal_type=\'Document\')\n-\n-    The path can be queried directly, too:\n-    >>> find(path={\'query\': \'/plone/about/team\', \'depth\': 1})\n-\n-    The `object_provides` index/argument allows Interface objects as well as\n-    identifiers. It also supports querying multiple interfaces combined with\n-    `and` or `or`.\n-    >>> find(object_provides=IATDocument)\n-    - or -\n-    >>> find(object_provides=IATDocument.__identifier__)\n-    - or -\n-    >>> find(object_provides={\n-    ...     \'query\': [IATFolder, INavigationRoot],\n-    ...     \'operator\': \'and\',\n-    ... })\n-\n-\n-    An empty resultset is returned if no valid indexes are queried.\n-    >>> len(find())\n-    >>> 0\n     """\n     query = {}\n     query.update(**kwargs)\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2020-02-14T08:57:55+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.api/commit/675d5e718becf005c353cce021302be3875738e4
+
+Added news snippets.
+
+Files changed:
+A news/436.bugfix
+A news/437.bugfix
+
+b'diff --git a/news/436.bugfix b/news/436.bugfix\nnew file mode 100644\nindex 0000000..101a1e8\n--- /dev/null\n+++ b/news/436.bugfix\n@@ -0,0 +1,2 @@\n+In tests, use stronger password.\n+[maurits]\ndiff --git a/news/437.bugfix b/news/437.bugfix\nnew file mode 100644\nindex 0000000..93ca415\n--- /dev/null\n+++ b/news/437.bugfix\n@@ -0,0 +1,2 @@\n+Removed duplicate and failing inline doctest for content.find.\n+[maurits]\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2020-02-14T11:23:28+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.api/commit/693c2afedc1288f4e7c8441da5e7eb468a56f83d
+
+Oops, put news snippet in right place.
+
+Files changed:
+A news/3021.bugfix
+D 3021.bugfix
+
+b'diff --git a/3021.bugfix b/news/3021.bugfix\nsimilarity index 100%\nrename from 3021.bugfix\nrename to news/3021.bugfix\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2020-02-18T16:40:59+01:00
+Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/d5c08ae873f6b1080b1f78d0270e12b21bd38260
+
+Merge pull request #436 from plone/maurits-password-strength-fixes
+
+In tests, use stronger password.
+
+Files changed:
+A news/3021.bugfix
+A news/436.bugfix
+A news/437.bugfix
+M .travis.yml
+M src/plone/api/content.py
+M src/plone/api/tests/test_env.py
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex 7195292..e84bae6 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -32,10 +32,6 @@ before_install:\n install:\n   - travis_retry pip install -U setuptools==33.1.1 tox coveralls coverage\n \n-before_script:\n-  - export DISPLAY=:99.0\n-  - sh -e /etc/init.d/xvfb start\n-\n script:\n     - travis_retry tox\n \ndiff --git a/news/3021.bugfix b/news/3021.bugfix\nnew file mode 100644\nindex 0000000..68f5946\n--- /dev/null\n+++ b/news/3021.bugfix\n@@ -0,0 +1 @@\n+In tests, use stronger password.  [maurits]\ndiff --git a/news/436.bugfix b/news/436.bugfix\nnew file mode 100644\nindex 0000000..101a1e8\n--- /dev/null\n+++ b/news/436.bugfix\n@@ -0,0 +1,2 @@\n+In tests, use stronger password.\n+[maurits]\ndiff --git a/news/437.bugfix b/news/437.bugfix\nnew file mode 100644\nindex 0000000..93ca415\n--- /dev/null\n+++ b/news/437.bugfix\n@@ -0,0 +1,2 @@\n+Removed duplicate and failing inline doctest for content.find.\n+[maurits]\ndiff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex 9931599..a5706dc 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -619,55 +619,6 @@ def find(context=None, depth=None, **kwargs):\n     :rtype: List\n     :Example: :ref:`content_find_example`\n \n-    Find works alike catalog(). Indexes are passing in as arguments with the\n-    search query as the values.\n-\n-    Specify indexes as arguments:\n-    >>> find(portal_type=\'Document\')\n-\n-    or combinations of indexes.\n-    >>> find(portal_type=\'Document\', SearchableText=\'Team\')\n-\n-\n-    Differences to using the catalog directly are:\n-\n-    The context argument allows passing in an context object, instead\n-    of path=\'/\'.join(context.getPhysicalPath().\n-\n-    >>> find(context=context)\n-    - or -\n-    >>> find(context=context, portal_type=\'Document\')\n-\n-    Specifing the search depth is supported using the `depth` argument.\n-    >>> find(depth=1)\n-\n-    Using `depth` needs a context for it\'s path. If no context and no\n-    path is passed, the portal root is used.\n-    >>> find(context=portal, depth=1, portal_type=\'Document\')\n-    - or -\n-    >>> find(depth=1, path=\'/plone/folder\', portal_type=\'Document\')\n-    - or -\n-    >>> find(depth=1, portal_type=\'Document\')\n-\n-    The path can be queried directly, too:\n-    >>> find(path={\'query\': \'/plone/about/team\', \'depth\': 1})\n-\n-    The `object_provides` index/argument allows Interface objects as well as\n-    identifiers. It also supports querying multiple interfaces combined with\n-    `and` or `or`.\n-    >>> find(object_provides=IATDocument)\n-    - or -\n-    >>> find(object_provides=IATDocument.__identifier__)\n-    - or -\n-    >>> find(object_provides={\n-    ...     \'query\': [IATFolder, INavigationRoot],\n-    ...     \'operator\': \'and\',\n-    ... })\n-\n-\n-    An empty resultset is returned if no valid indexes are queried.\n-    >>> len(find())\n-    >>> 0\n     """\n     query = {}\n     query.update(**kwargs)\ndiff --git a/src/plone/api/tests/test_env.py b/src/plone/api/tests/test_env.py\nindex 49d5cc9..db1f2dd 100644\n--- a/src/plone/api/tests/test_env.py\n+++ b/src/plone/api/tests/test_env.py\n@@ -92,7 +92,7 @@ def setUp(self):\n         api.user.create(\n             username=\'boss\',\n             email=\'important_person@example.com\',\n-            password=\'123\',\n+            password=\'123456\',\n             roles=(\'Member\', \'VIP\'),\n         )\n \n'
 
