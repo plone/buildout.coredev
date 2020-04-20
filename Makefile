@@ -17,7 +17,7 @@ help: ## This help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: all
-all: build code-analysis test test-acceptance
+all: build
 
 .PHONY: build
 build:
@@ -31,15 +31,10 @@ clean: ## Remove old virtualenv and creates a new one
 	@echo "Clean"
 	rm -rf develop-eggs eggs bin lib include share .Python .installed.cfg .mr.developer.cfg
 
-.PHONY: code-analysis
-code-analysis: ## Run static code analysis
-	@echo "$(GREEN)==> Run static code analysis$(RESET)"
-	bin/code-analysis
-
 .PHONY: test
 test: ## Run tests
 	@echo "$(GREEN)==> Run Tests$(RESET)"
-	bin/alltests --xml
+	bin/test --xml
 
 .PHONY: test-acceptance
 test-acceptance: ## Run acceptance tests
