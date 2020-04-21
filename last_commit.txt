@@ -1,32 +1,32 @@
-Repository: plone.restapi
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2020-04-21T20:55:24+02:00
-Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/485b27ae412c72f7d4351d760a1a299698974566
+Date: 2020-04-21T21:01:09+02:00
+Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
+Commit: https://github.com/plone/plone.namedfile/commit/29b627ca2d2ba147b754a091de20630f93e67ab6
 
-Make the querystring-search endpoint context aware (#916)
-
-* Make the querystring-search endpoint context aware
-
-* Changelog
-
-* Do not add the not UID query if ZCatalog is not &gt;=5.1
-
-* Add comment and changed condition as suggested
-
-* Products.ZCatalog = 5.1
-
-Co-authored-by: Timo Stollenwerk &lt;stollenwerk@kitconcept.com&gt;
+Preparing release 5.3.0
 
 Files changed:
-A news/911.feature
-M Makefile
-M plone-5.2.x.cfg
-M src/plone/restapi/services/querystringsearch/configure.zcml
-M src/plone/restapi/services/querystringsearch/get.py
-M src/plone/restapi/tests/test_services_querystringsearch.py
+M CHANGES.rst
+M setup.py
+D news/91.feature
 
-b'diff --git a/Makefile b/Makefile\nindex 1aacdf22..1ff20854 100644\n--- a/Makefile\n+++ b/Makefile\n@@ -3,7 +3,7 @@\n SHELL := /bin/bash\n CURRENT_DIR:=$(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))\n \n-version = 3.7\n+version = 3\n \n # We like colors\n # From: https://coderwall.com/p/izxssa/colored-makefile-for-golang-projects\ndiff --git a/news/911.feature b/news/911.feature\nnew file mode 100644\nindex 00000000..93ce4612\n--- /dev/null\n+++ b/news/911.feature\n@@ -0,0 +1,2 @@\n+- Make ``@querystring-search`` endpoint context aware\n+[sneridagh]\ndiff --git a/plone-5.2.x.cfg b/plone-5.2.x.cfg\nindex 2f382564..d111e56b 100644\n--- a/plone-5.2.x.cfg\n+++ b/plone-5.2.x.cfg\n@@ -7,4 +7,9 @@ find-links += http://dist.plone.org/thirdparty/\n [versions]\n plone.restapi =\n astunparse = 1.6.2\n-coverage = 5.1\n\\ No newline at end of file\n+coverage = 5.1\n+\n+# Add support for not queries in the UUIDIndex\n+# This is needed to exclude self from the context-aware\n+# querystring-search which is used by the Volto Listing Block\n+Products.ZCatalog = 5.1\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/services/querystringsearch/configure.zcml b/src/plone/restapi/services/querystringsearch/configure.zcml\nindex ab195655..4abeedb3 100644\n--- a/src/plone/restapi/services/querystringsearch/configure.zcml\n+++ b/src/plone/restapi/services/querystringsearch/configure.zcml\n@@ -10,4 +10,11 @@\n     permission="zope2.View"\n     />\n \n+  <plone:service\n+    method="POST"\n+    for="Products.CMFCore.interfaces.IContentish"\n+    factory=".get.QuerystringSearchPost"\n+    name="@querystring-search"\n+    permission="zope2.View"\n+    />\n </configure>\ndiff --git a/src/plone/restapi/services/querystringsearch/get.py b/src/plone/restapi/services/querystringsearch/get.py\nindex 4625351a..e687b7b1 100644\n--- a/src/plone/restapi/services/querystringsearch/get.py\n+++ b/src/plone/restapi/services/querystringsearch/get.py\n@@ -1,9 +1,18 @@\n # -*- coding: utf-8 -*-\n+from pkg_resources import get_distribution\n+from pkg_resources import parse_version\n from plone.restapi.deserializer import json_body\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n+from Products.CMFPlone.interfaces import IPloneSiteRoot\n from zope.component import getMultiAdapter\n \n+zcatalog_version = get_distribution("Products.ZCatalog").version\n+if parse_version(zcatalog_version) >= parse_version("5.1"):\n+    SUPPORT_NOT_UUID_QUERIES = True\n+else:\n+    SUPPORT_NOT_UUID_QUERIES = False\n+\n \n class QuerystringSearchPost(Service):\n     """Returns the querystring search results given a p.a.querystring data.\n@@ -28,7 +37,8 @@ def reply(self):\n         querybuilder = getMultiAdapter(\n             (self.context, self.request), name="querybuilderresults"\n         )\n-        results = querybuilder(\n+\n+        querybuilder_parameters = dict(\n             query=query,\n             brains=True,\n             b_start=b_start,\n@@ -38,6 +48,15 @@ def reply(self):\n             limit=limit,\n         )\n \n+        # Exclude "self" content item from the results when ZCatalog supports NOT UUID\n+        # queries and it is called on a content object.\n+        if not IPloneSiteRoot.providedBy(self.context) and SUPPORT_NOT_UUID_QUERIES:\n+            querybuilder_parameters.update(\n+                dict(custom_query={"UID": {"not": self.context.UID()}})\n+            )\n+\n+        results = querybuilder(**querybuilder_parameters)\n+\n         results = getMultiAdapter((results, self.request), ISerializeToJson)(\n             fullobjects=fullobjects\n         )\ndiff --git a/src/plone/restapi/tests/test_services_querystringsearch.py b/src/plone/restapi/tests/test_services_querystringsearch.py\nindex 976fb438..3a6f9e5b 100644\n--- a/src/plone/restapi/tests/test_services_querystringsearch.py\n+++ b/src/plone/restapi/tests/test_services_querystringsearch.py\n@@ -1,4 +1,6 @@\n # -*- coding: utf-8 -*-\n+from pkg_resources import get_distribution\n+from pkg_resources import parse_version\n from plone.app.testing import setRoles\n from plone.app.testing import SITE_OWNER_NAME\n from plone.app.testing import SITE_OWNER_PASSWORD\n@@ -9,6 +11,12 @@\n import transaction\n import unittest\n \n+zcatalog_version = get_distribution("Products.ZCatalog").version\n+if parse_version(zcatalog_version) >= parse_version("5.1"):\n+    SUPPORT_NOT_UUID_QUERIES = True\n+else:\n+    SUPPORT_NOT_UUID_QUERIES = False\n+\n \n class TestQuerystringSearchEndpoint(unittest.TestCase):\n \n@@ -129,3 +137,33 @@ def test_querystringsearch_complex(self):\n         self.assertEqual(len(response.json()["items"]), 5)\n         self.assertNotIn("effective", response.json()["items"][0])\n         self.assertEqual(response.json()["items"][4]["title"], u"Test Document 9")\n+\n+    @unittest.skipIf(\n+        not SUPPORT_NOT_UUID_QUERIES,\n+        "Skipping because ZCatalog allows not queries on UUIDIndex from >=5.1",\n+    )\n+    def test_querystringsearch_do_not_return_context(self):\n+        self.portal.invokeFactory("Document", "testdocument2", title="Test Document 2")\n+        self.doc = self.portal.testdocument\n+\n+        transaction.commit()\n+\n+        response = self.api_session.post(\n+            "/testdocument/@querystring-search",\n+            json={\n+                "query": [\n+                    {\n+                        "i": "portal_type",\n+                        "o": "plone.app.querystring.operation.selection.is",\n+                        "v": ["Document"],\n+                    }\n+                ],\n+            },\n+        )\n+\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["items_total"], 1)\n+        self.assertEqual(\n+            response.json()["items"][0]["@id"],\n+            "http://localhost:55001/plone/testdocument2",\n+        )\n'
+b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 8286994..86135b2 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,15 @@ Changelog\n \n .. towncrier release notes start\n \n+5.3.0 (2020-04-21)\n+------------------\n+\n+New features:\n+\n+\n+- - Change to use field value _p_mtime instead of context object _p_mtime as image scale invalidation timestamp to fix issue where context object (e.g. a document with lead image) modification invalidated all its image field scales even the images itself were not modified. [datakurre] (#91)\n+\n+\n 5.2.2 (2020-04-14)\n ------------------\n \ndiff --git a/news/91.feature b/news/91.feature\ndeleted file mode 100644\nindex 1e7735b..0000000\n--- a/news/91.feature\n+++ /dev/null\n@@ -1 +0,0 @@\n-- Change to use field value _p_mtime instead of context object _p_mtime as image scale invalidation timestamp to fix issue where context object (e.g. a document with lead image) modification invalidated all its image field scales even the images itself were not modified. [datakurre]\ndiff --git a/setup.py b/setup.py\nindex de989bf..dbd3a43 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -5,7 +5,7 @@\n import os\n \n \n-version = '5.2.3.dev0'\n+version = '5.3.0'\n \n description = 'File types and fields for images, files and blob files with ' \\\n               'filenames'\n"
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/master
+Date: 2020-04-21T21:02:03+02:00
+Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
+Commit: https://github.com/plone/plone.namedfile/commit/5d501ebaa48afce67291af235f2ef51cb3d7562c
+
+Back to development: 5.3.1
+
+Files changed:
+M setup.py
+
+b"diff --git a/setup.py b/setup.py\nindex dbd3a43..09a3b59 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -5,7 +5,7 @@\n import os\n \n \n-version = '5.3.0'\n+version = '5.3.1.dev0'\n \n description = 'File types and fields for images, files and blob files with ' \\\n               'filenames'\n"
 
