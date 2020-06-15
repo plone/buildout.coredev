@@ -17,21 +17,21 @@ This is extended with Plone coredev specific features by `plone.releaser <https:
 
 ... which includes ...
 
-* All releases must be hosted on PyPi
+* All releases must be hosted on PyPI
 
 * All versions must be tagged at version control
 
-* Each package must have README.rst with links to the version control repository and issue tracker
+* Each package must have ``README.rst`` with links to the version control repository and issue tracker
 
-* CHANGES.rst (docs/HISTORY.rst respectively .txt in some packages) must be always up-to-date and must contain list of functional changes which may affect package users.
+* ``CHANGES.rst`` (``docs/HISTORY.rst`` respectively ``.txt`` in some packages) must be always up-to-date and must contain list of functional changes which may affect package users.
 
-* CHANGES.rst must contain release dates
+* ``CHANGES.rst`` must contain release dates
 
-* README.rst and CHANGES.rst must be visible on PyPI
+* ``README.rst`` and ``CHANGES.rst`` must be visible on PyPI
 
-* Released eggs must contain generated gettext .mo files,
+* Released eggs must contain generated gettext ``.mo`` files,
   but these files must not be committed to the repository.
-  The .mo files can be created with the ``zest.pocompile`` add-on,
+  The ``.mo`` files can be created with the ``zest.pocompile`` add-on,
   which should be installed together with ``zest.releaser``.
 
 * ``.gitignore`` and ``MANIFEST.in`` must reflect the files going to egg (must include page template, po files)
@@ -45,14 +45,14 @@ Special packages
 ================
 
 The Plone Release Team releases the core Plone packages.
-Several others also have the rights to release individual packages on https://pypi.python.org.
+Several others also have the rights to release individual packages on https://pypi.org.
 If you have those rights on your account, you should feel free to make releases.
 
 Some packages need special care or should be done only by specific people as they know what they are doing.
 These are:
 
 ``Products.CMFPlone``, ``Plone``, and ``plone.app.upgrade``:
-  Please leave these to the release manager, Eric Steele.
+  Please leave these to the release managers, Eric Steele and Maurits van Rees.
 
 ``plone.app.locales``:
   Please leave this to the i18n team lead, Vincent Fretin.
@@ -146,7 +146,7 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 
 14. Create new release on launchpad (https://launchpad.net/plone/)
 
-15. Create release page on http://plone.org/products/plone/releases
+15. Create release page on https://plone.org/download/releases
 
 16. Send links to installers list
     (plone-installers@lists.sourceforge.net <mailto:plone-installers@lists.sourceforge.net>)
@@ -163,3 +163,4 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 21. Update #plone topic
 
 22. Ask the security team to update the https://plone.org/security/hotfixes/ page in the configuration control panel.
+     (Configuration registry: ``plone.securitysupport``, ``plone.versions``, ``plone.activemaintenance``)
