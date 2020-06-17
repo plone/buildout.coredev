@@ -1,23 +1,49 @@
-Repository: plone.restapi
+Repository: plone.staticresources
 
 
 Branch: refs/heads/master
-Date: 2020-06-16T21:22:05+02:00
-Author: Gauthier Bastien (gbastien) <gauthier@imio.be>
-Commit: https://github.com/plone/plone.restapi/commit/a46da1aa85ddc7b50f2db23cadd4b3152fbd6400
+Date: 2020-06-17T11:50:39+02:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.staticresources/commit/3b3821e1818c677322dcff35de0fdd48fbf27270
 
-- Take the `include_items` parameter into account in `SerializeCollectionToJson`, see #957 (#959)
-
-* - Take the `include_items` parameter into account in `SerializeCollectionToJson`, see #957
-
-* Sorted imports
-
-* black
+fix syntax error in registry.xml
 
 Files changed:
-A news/957.bugfix
-M src/plone/restapi/serializer/collection.py
-M src/plone/restapi/tests/test_serializer.py
+A news/85.bugfix
+M src/plone/staticresources/upgrades/profiles/8/registry.xml
 
-b'diff --git a/news/957.bugfix b/news/957.bugfix\nnew file mode 100644\nindex 000000000..f9ba638e9\n--- /dev/null\n+++ b/news/957.bugfix\n@@ -0,0 +1 @@\n+- Take the `include_items` parameter into account in `SerializeCollectionToJson`. [gbastien]\ndiff --git a/src/plone/restapi/serializer/collection.py b/src/plone/restapi/serializer/collection.py\nindex 42f30ba2d..f071cad81 100644\n--- a/src/plone/restapi/serializer/collection.py\n+++ b/src/plone/restapi/serializer/collection.py\n@@ -1,6 +1,7 @@\n # -*- coding: utf-8 -*-\n from plone.app.contenttypes.interfaces import ICollection\n from plone.restapi.batching import HypermediaBatch\n+from plone.restapi.deserializer import boolean_value\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.interfaces import ISerializeToJsonSummary\n from plone.restapi.serializer.dxcontent import SerializeToJson\n@@ -14,27 +15,31 @@\n @adapter(ICollection, Interface)\n class SerializeCollectionToJson(SerializeToJson):\n     def __call__(self, version=None, include_items=True):\n-        collection_metadata = super(SerializeCollectionToJson, self).__call__(\n-            version=version\n-        )\n-        results = self.context.results(batch=False)\n-        batch = HypermediaBatch(self.request, results)\n+        result = super(SerializeCollectionToJson, self).__call__(version=version)\n \n-        results = collection_metadata\n-        if not self.request.form.get("fullobjects"):\n-            results["@id"] = batch.canonical_url\n-        results["items_total"] = batch.items_total\n-        if batch.links:\n-            results["batching"] = batch.links\n+        include_items = self.request.form.get("include_items", include_items)\n+        include_items = boolean_value(include_items)\n+        if include_items:\n+            results = self.context.results(batch=False)\n+            batch = HypermediaBatch(self.request, results)\n \n-        if "fullobjects" in list(self.request.form):\n-            results["items"] = [\n-                getMultiAdapter((brain.getObject(), self.request), ISerializeToJson)()\n-                for brain in batch\n-            ]\n-        else:\n-            results["items"] = [\n-                getMultiAdapter((brain, self.request), ISerializeToJsonSummary)()\n-                for brain in batch\n-            ]\n-        return results\n+            if not self.request.form.get("fullobjects"):\n+                result["@id"] = batch.canonical_url\n+            result["items_total"] = batch.items_total\n+            if batch.links:\n+                result["batching"] = batch.links\n+\n+            if "fullobjects" in list(self.request.form):\n+                result["items"] = [\n+                    getMultiAdapter(\n+                        (brain.getObject(), self.request), ISerializeToJson\n+                    )()\n+                    for brain in batch\n+                ]\n+            else:\n+                result["items"] = [\n+                    getMultiAdapter((brain, self.request), ISerializeToJsonSummary)()\n+                    for brain in batch\n+                ]\n+\n+        return result\ndiff --git a/src/plone/restapi/tests/test_serializer.py b/src/plone/restapi/tests/test_serializer.py\nindex 02ffab24f..10e12b8a4 100644\n--- a/src/plone/restapi/tests/test_serializer.py\n+++ b/src/plone/restapi/tests/test_serializer.py\n@@ -358,6 +358,40 @@ def test_serialize_to_json_collection_fullobjects(self):\n         self.assertIn("UID", items[1])\n         self.assertEqual(items[1]["id"], self.portal.doc2.getId())\n \n+    def test_serialize_to_json_collection_include_items(self):\n+        self.portal.invokeFactory("Collection", id="collection1")\n+        self.portal.collection1.title = "My Collection"\n+        self.portal.collection1.description = u"This is a collection with two documents"\n+        self.portal.collection1.query = [\n+            {\n+                "i": "portal_type",\n+                "o": "plone.app.querystring.operation.string.is",\n+                "v": "Document",\n+            }\n+        ]\n+        self.portal.invokeFactory("Document", id="doc2", title="Document 2")\n+        self.portal.doc1.reindexObject()\n+        self.portal.doc2.reindexObject()\n+\n+        self.assertEqual(\n+            u"Collection", self.serialize(self.portal.collection1).get("@type")\n+        )\n+        self.assertEqual(\n+            u"Collection", self.serialize(self.portal.collection1).get("@type")\n+        )\n+\n+        self.request.form["include_items"] = False\n+        without_items = self.serialize(self.portal.collection1)\n+        self.assertFalse("items" in without_items)\n+        self.assertFalse("items_total" in without_items)\n+\n+        self.request.form["include_items"] = True\n+        serialized = self.serialize(self.portal.collection1)\n+        items = serialized.get("items")\n+        self.assertEqual(items[0]["title"], self.portal.doc1.Title())\n+        self.assertEqual(items[1]["title"], self.portal.doc2.Title())\n+        self.assertEqual(serialized.get("items_total"), 2)\n+\n     def test_serialize_returns_site_root_common(self):\n         self.assertIn("title", self.serialize(self.portal))\n         self.assertIn("description", self.serialize(self.portal))\n'
+b'diff --git a/news/85.bugfix b/news/85.bugfix\nnew file mode 100644\nindex 0000000..e69de29\ndiff --git a/src/plone/staticresources/upgrades/profiles/8/registry.xml b/src/plone/staticresources/upgrades/profiles/8/registry.xml\nindex 7db54aa..7e1bf1f 100644\n--- a/src/plone/staticresources/upgrades/profiles/8/registry.xml\n+++ b/src/plone/staticresources/upgrades/profiles/8/registry.xml\n@@ -23,6 +23,7 @@\n   </records>\n   <records prefix="plone.bundles/resourceregistry" interface=\'Products.CMFPlone.interfaces.IBundleRegistry\'>\n     <value key="last_compilation">2020-06-16 10:10:00</value>\n+  </records>\n   <records prefix="plone.bundles/thememapper" interface=\'Products.CMFPlone.interfaces.IBundleRegistry\'>\n     <value key="last_compilation">2020-06-16 10:10:00</value>\n   </records>\n'
+
+Repository: plone.staticresources
+
+
+Branch: refs/heads/master
+Date: 2020-06-17T11:52:09+02:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.staticresources/commit/4ef1e7afbd64f274aca087272c0bd0e6e68d40c6
+
+add changenote
+
+Files changed:
+M news/85.bugfix
+
+b'diff --git a/news/85.bugfix b/news/85.bugfix\nindex e69de29..7ac7ecf 100644\n--- a/news/85.bugfix\n+++ b/news/85.bugfix\n@@ -0,0 +1,2 @@\n+fix syntax in `upgrades/profiles/8/registry.xml`\n+[petschki]\n'
+
+Repository: plone.staticresources
+
+
+Branch: refs/heads/master
+Date: 2020-06-17T15:07:05+02:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/plone.staticresources/commit/857ef318d83d9e91cd88af86f953d2028e1a5f29
+
+Merge pull request #86 from plone/petschki-issue-85
+
+fix syntax error in registry.xml
+
+Files changed:
+A news/85.bugfix
+M src/plone/staticresources/upgrades/profiles/8/registry.xml
+
+b'diff --git a/news/85.bugfix b/news/85.bugfix\nnew file mode 100644\nindex 0000000..7ac7ecf\n--- /dev/null\n+++ b/news/85.bugfix\n@@ -0,0 +1,2 @@\n+fix syntax in `upgrades/profiles/8/registry.xml`\n+[petschki]\ndiff --git a/src/plone/staticresources/upgrades/profiles/8/registry.xml b/src/plone/staticresources/upgrades/profiles/8/registry.xml\nindex 7db54aa..7e1bf1f 100644\n--- a/src/plone/staticresources/upgrades/profiles/8/registry.xml\n+++ b/src/plone/staticresources/upgrades/profiles/8/registry.xml\n@@ -23,6 +23,7 @@\n   </records>\n   <records prefix="plone.bundles/resourceregistry" interface=\'Products.CMFPlone.interfaces.IBundleRegistry\'>\n     <value key="last_compilation">2020-06-16 10:10:00</value>\n+  </records>\n   <records prefix="plone.bundles/thememapper" interface=\'Products.CMFPlone.interfaces.IBundleRegistry\'>\n     <value key="last_compilation">2020-06-16 10:10:00</value>\n   </records>\n'
 
