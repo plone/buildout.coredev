@@ -118,8 +118,7 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 
 6. Update CMFPlone version in ``profiles/default/metadata.xml``
 
-7. Write an email to the translation team,
-   asking them to do a plone.app.locales release.
+7. Create an issue in https://github.com/collective/plone.app.locales/issues to ask the i18n team lead @vincentfretin to do a plone.app.locales release.
 
 8. Create a pending release (directory) on dist.plone.org
 
