@@ -71,7 +71,7 @@ Check latest Plone coredev job on jenkins.plone.org, it should be green, if it i
 
   git clone git@github.com:plone/buildout.coredev.git
   cd buildout.coredev
-  git checkout 5.1
+  git checkout 5.2
   python bootstrap.py
   bin/buildout -c buildout.cfg
 
