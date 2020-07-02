@@ -83,8 +83,9 @@ This script may help::
 
   bin/manage report --interactive
 
-This step should not be needed, because we do the check for every single commit,
+This step should not be needed, because we do the check for every single commit (``mr.roboto``),
 but people may still have forgotten to add a package to the ``checkouts.cfg`` file.
+Also, the automatic check currently does not work.
 
 4. Check packages individually
 
@@ -114,11 +115,16 @@ but people may still have forgotten to add a package to the ``checkouts.cfg`` fi
 
   f) Remove packages from auto-checkout section in ``checkouts.cfg`` and update ``versions.cfg``.
 
-5. Make sure ``plone.app.upgrade`` contains an upgrade step for the future Plone release.
+5. Take care of a few special packages:
 
-6. Update CMFPlone version in ``profiles/default/metadata.xml``
+   - If unsure, ask if ``mockup`` and ``plone.staticresources`` are in sync and can be released.
+   - If needed, `ask the Plone REST api team <https://github.com/plone/plone.restapi/issues>`_ for a new release of ``plone.restapi`` and ``plone.rest``.
+   - Create an issue in https://github.com/collective/plone.app.locales/issues to ask the i18n team lead @vincentfretin to do a plone.app.locales release.
 
-7. Create an issue in https://github.com/collective/plone.app.locales/issues to ask the i18n team lead @vincentfretin to do a plone.app.locales release.
+6. Make sure ``plone.app.upgrade`` contains an upgrade step for the future Plone release.
+
+7. Update CMFPlone version in ``profiles/default/metadata.xml``
+   Check that the version numbers of `CMFPlone metadata.xml <https://github.com/plone/Products.CMFPlone/blob/5.2.x/Products/CMFPlone/profiles/default/metadata.xml>`_ and latest `upgrade step <https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v52/configure.zcml>`_ are in sync.
 
 8. Create a pending release (directory) on dist.plone.org
 
