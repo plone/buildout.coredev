@@ -1,41 +1,84 @@
-Repository: Products.CMFPlone
+Repository: plone.app.theming
 
 
-Branch: refs/heads/5.2.x
-Date: 2020-07-20T22:54:49+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/de256212adc9e81ab02d07588defe747cc44c5dd
+Branch: refs/heads/master
+Date: 2020-07-22T00:40:07+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.theming/commit/860a41758c0452b68eeb5457370a17bb7993eff1
 
-Return a Zope aware engine for page templates based on `zope.pagetemplate`.
-
-Fixes possible problems with such templates, for example z3c.form ones, with Zope 4.4 and higher.
-Most templates are based on `Products.PageTemplates`, which is working fine.
-
-See https://github.com/plone/Products.CMFPlone/issues/3141
+Fix #187: Invalid dependency on plone.app.caching
 
 Files changed:
-A news/3141.bugfix
-M Products/CMFPlone/configure.zcml
-M Products/CMFPlone/traversal.py
+A news/187.bugfix
+M setup.py
+M src/plone/app/theming/browser/custom_css.py
 
-b'diff --git a/Products/CMFPlone/configure.zcml b/Products/CMFPlone/configure.zcml\nindex 16b85809d0..f3a6a7f42c 100644\n--- a/Products/CMFPlone/configure.zcml\n+++ b/Products/CMFPlone/configure.zcml\n@@ -131,4 +131,9 @@\n       provides="plone.scale.interfaces.IScaledImageQuality"\n       />\n \n+  <adapter\n+      for="zope.pagetemplate.engine.ZopeBaseEngine"\n+      factory=".traversal.get_zope_page_template_engine"\n+      />\n+\n </configure>\ndiff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py\nindex 2b2a75826c..6afe23ce4f 100644\n--- a/Products/CMFPlone/traversal.py\n+++ b/Products/CMFPlone/traversal.py\n@@ -5,7 +5,22 @@\n from plone.resource.interfaces import IUniqueResourceRequest\n from Products.CMFPlone.interfaces.resources import (\n     OVERRIDE_RESOURCE_DIRECTORY_NAME)\n+from Products.PageTemplates.Expressions import getEngine\n+from Products.PageTemplates.Expressions import getTrustedEngine\n from zope.globalrequest import getRequest\n+from zope.interface import implementer\n+from zope.interface import Interface\n+from zope.pagetemplate import engine as zpt_engine\n+\n+\n+try:\n+    # This was introduced in Zope 4.5.\n+    # We try not to make this a hard dependency yet.\n+    from Products.PageTemplates.interfaces import IZopeAwareEngine\n+except ImportError:\n+    # Zope 4.4-\n+    class IZopeAwareEngine(Interface):\n+        pass\n \n \n class PloneBundlesTraverser(ResourceTraverser):\n@@ -38,3 +53,25 @@ def traverse(self, name, remaining):\n                 if resource_filepath in directory:\n                     return directory\n         return super(PloneBundlesTraverser, self).traverse(name, remaining)\n+\n+\n+@implementer(IZopeAwareEngine)\n+def get_zope_page_template_engine(engine):\n+    """Get Zope-aware page template engine.\n+\n+    Hopefully a trusted one, but maybe an untrusted one,\n+    with less possibilities and more security checks.\n+    We fall back to nothing. This means the original engine will be used.\n+\n+    Needed since the page template refactoring/cleanup in Zope 4.4.\n+    See https://github.com/plone/Products.CMFPlone/issues/3141\n+\n+    This is currently expected to only be called when a zope.pagetemplate\n+    is being rendered, which can happen with z3c.form related code.\n+    For Products.PageTemplates, this code should not be needed.\n+    """\n+    if isinstance(engine, zpt_engine.ZopeEngine):\n+        # Get untrusted engine.\n+        return getEngine()\n+    if isinstance(engine, zpt_engine.TrustedZopeEngine):\n+        return getTrustedEngine()\ndiff --git a/news/3141.bugfix b/news/3141.bugfix\nnew file mode 100644\nindex 0000000000..16bea1e83a\n--- /dev/null\n+++ b/news/3141.bugfix\n@@ -0,0 +1,4 @@\n+Return a Zope aware engine for page templates based on ``zope.pagetemplate`` instead of ``Products.PageTemplates``.\n+Fixes possible problems with such templates, for example z3c.form ones, with Zope 4.4 and higher.\n+See `issue 3141 <https://github.com/plone/Products.CMFPlone/issues/3141>`_.\n+[maurits]\n'
+b'diff --git a/news/187.bugfix b/news/187.bugfix\nnew file mode 100644\nindex 0000000..673bbd7\n--- /dev/null\n+++ b/news/187.bugfix\n@@ -0,0 +1,2 @@\n+Fixes #187: Invalid dependency on plone.app.caching\n+[jensens]\ndiff --git a/setup.py b/setup.py\nindex 2afdc02..51750d8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -53,6 +53,7 @@\n     zip_safe=False,\n     install_requires=[\n         \'Products.CMFPlone\',\n+        \'dateutil\',\n         \'diazo>=1.0.3\',\n         \'docutils\',\n         \'lxml>=2.2.4\',\ndiff --git a/src/plone/app/theming/browser/custom_css.py b/src/plone/app/theming/browser/custom_css.py\nindex bc78c5d..ae9686a 100644\n--- a/src/plone/app/theming/browser/custom_css.py\n+++ b/src/plone/app/theming/browser/custom_css.py\n@@ -3,8 +3,22 @@\n from plone.registry.interfaces import IRegistry\n from Products.Five.browser import BrowserView\n from zope.component import getUtility\n-from plone.app.caching.operations.utils import formatDateTime\n \n+import dateutil\n+import wsgiref\n+\n+\n+def formatDateTime(dt):\n+    """Format a Python datetime object as an RFC1123 date.\n+\n+    """\n+\n+    # We have to pass local time to format_date_time()\n+\n+    if dt.tzinfo is not None:\n+        dt = dt.astimezone(dateutil.tz.tzlocal())\n+\n+    return wsgiref.handlers.format_date_time(time.mktime(dt.timetuple()))\n \n class CustomCSSView(BrowserView):\n     """\n@@ -12,16 +26,19 @@ class CustomCSSView(BrowserView):\n     """\n \n     def __call__(self):\n-\n         registry = getUtility(IRegistry)\n         theme_settings = registry.forInterface(IThemeSettings, False)\n         self.request.response.setHeader(\n             \'Content-Type\',\n             \'text/css; charset=utf-8\',\n         )\n+        dt = theme_settings.custom_css_timestamp\n+        # If the datetime object is timezone-naive, it is assumed to be local time.\n+        if dt.tzinfo is not None:\n+            dt = dt.astimezone(dateutil.tz.tzlocal())\n+        # Format a Python datetime object as an RFC1123 date.\n         self.request.response.setHeader(\n             \'Last-Modified\',\n-            formatDateTime(theme_settings.custom_css_timestamp),\n+            wsgiref.handlers.format_date_time(time.mktime(dt.timetuple())),\n         )\n-        custom_css = theme_settings.custom_css\n-        return custom_css\n+        return theme_settings.custom_css\n'
 
-Repository: Products.CMFPlone
+Repository: plone.app.theming
 
 
-Branch: refs/heads/5.2.x
-Date: 2020-07-21T20:49:19+02:00
+Branch: refs/heads/master
+Date: 2020-07-22T00:44:50+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.theming/commit/47a59fafdf5a4b5419485df70bb24f7a22bcd4b8
+
+Cleanup: Remove meanwhile unused test fixture code refering to plone.app.caching
+
+Files changed:
+A news/188.bugfix
+M src/plone/app/theming/testing.py
+
+b'diff --git a/news/188.bugfix b/news/188.bugfix\nnew file mode 100644\nindex 0000000..f25d964\n--- /dev/null\n+++ b/news/188.bugfix\n@@ -0,0 +1,4 @@\n+Cleanup: Remove meanwhile unused test fixture code refering to ``plone.app.caching``.\n+Removed class and fixtures: ``ThemingWithCaching``, ``THEMINGWITHCACHING_FIXTURE``, ``THEMINGWITHCACHING_TESTING``.\n+Those were nowhere used active in Plone nor outside in Github.\n+[jensens]\ndiff --git a/src/plone/app/theming/testing.py b/src/plone/app/theming/testing.py\nindex 6892326..ef1fb6f 100644\n--- a/src/plone/app/theming/testing.py\n+++ b/src/plone/app/theming/testing.py\n@@ -28,36 +28,6 @@ def setUpPloneSite(self, portal):\n         applyProfile(portal, \'plone.app.theming:default\')\n \n \n-class ThemingWithCaching(Theming):\n-    defaultBases = (PLONE_APP_CONTENTTYPES_FIXTURE,)\n-\n-    def setUpZope(self, app, configurationContext):\n-        # load ZCML\n-        import plone.app.theming.tests\n-        import plone.app.caching\n-        xmlconfig.file(\n-            \'configure.zcml\',\n-            plone.app.caching,\n-            context=configurationContext\n-        )\n-        xmlconfig.file(\n-            \'configure.zcml\',\n-            plone.app.theming.tests,\n-            context=configurationContext\n-        )\n-\n-        # Run the startup hook\n-        from plone.app.theming.plugins.hooks import onStartup\n-        onStartup(None)\n-\n-    def setUpPloneSite(self, portal):\n-        # install into the Plone site\n-        applyProfile(portal, \'plone.app.caching:default\')\n-        applyProfile(portal, \'plone.app.theming:default\')\n-        portal[\'portal_workflow\'].setDefaultChain(\n-            \'simple_publication_workflow\'\n-        )\n-\n THEMING_FIXTURE = Theming()\n THEMING_INTEGRATION_TESTING = IntegrationTesting(\n     bases=(THEMING_FIXTURE,),\n@@ -67,8 +37,3 @@ def setUpPloneSite(self, portal):\n     bases=(THEMING_FIXTURE,),\n     name="Theming:Functional"\n )\n-THEMINGWITHCACHING_FIXTURE = ThemingWithCaching()\n-THEMINGWITHCACHING_TESTING = IntegrationTesting(\n-    bases=(THEMINGWITHCACHING_FIXTURE,),\n-    name="Theming:IntegrationWithCaching"\n-)\n'
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2020-07-22T01:00:48+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.theming/commit/8babf551d3513a02acd157ec698c120d1ae81db8
+
+wrong package name for dateutil dependency corrected
+
+Files changed:
+M setup.py
+
+b"diff --git a/setup.py b/setup.py\nindex 51750d8..9f4e5f3 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -53,7 +53,6 @@\n     zip_safe=False,\n     install_requires=[\n         'Products.CMFPlone',\n-        'dateutil',\n         'diazo>=1.0.3',\n         'docutils',\n         'lxml>=2.2.4',\n@@ -62,6 +61,7 @@\n         'plone.staticresources',\n         'plone.subrequest',\n         'plone.transformchain',\n+        'python-dateutil',\n         'repoze.xmliter>=0.3',\n         'roman',\n         'setuptools',\n"
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2020-07-22T13:18:10+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.theming/commit/f55050c1a2081863955bca019b055c4c6f017f6e
+
+remove leftover from cnp
+
+Files changed:
+M src/plone/app/theming/browser/custom_css.py
+
+b'diff --git a/src/plone/app/theming/browser/custom_css.py b/src/plone/app/theming/browser/custom_css.py\nindex ae9686a..ba6d836 100644\n--- a/src/plone/app/theming/browser/custom_css.py\n+++ b/src/plone/app/theming/browser/custom_css.py\n@@ -7,19 +7,6 @@\n import dateutil\n import wsgiref\n \n-\n-def formatDateTime(dt):\n-    """Format a Python datetime object as an RFC1123 date.\n-\n-    """\n-\n-    # We have to pass local time to format_date_time()\n-\n-    if dt.tzinfo is not None:\n-        dt = dt.astimezone(dateutil.tz.tzlocal())\n-\n-    return wsgiref.handlers.format_date_time(time.mktime(dt.timetuple()))\n-\n class CustomCSSView(BrowserView):\n     """\n     Renders custom CSS stored in registry\n'
+
+Repository: plone.app.theming
+
+
+Branch: refs/heads/master
+Date: 2020-07-22T13:24:32+02:00
 Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/Products.CMFPlone/commit/d57a8c25d462ee8b589435d35611453b01766db7
+Commit: https://github.com/plone/plone.app.theming/commit/ef6b1aaad17754f70d5a4c60b78f8e9c2aebd2a7
 
-Merge pull request #3149 from plone/maurits/issue-3141-zope-aware-template-engine
+Merge pull request #188 from plone/fix-187
 
-Return a Zope aware engine for page templates based on zope.pagetemplate
+Fix 187
 
 Files changed:
-A news/3141.bugfix
-M Products/CMFPlone/configure.zcml
-M Products/CMFPlone/traversal.py
+A news/187.bugfix
+A news/188.bugfix
+M setup.py
+M src/plone/app/theming/browser/custom_css.py
+M src/plone/app/theming/testing.py
 
-b'diff --git a/Products/CMFPlone/configure.zcml b/Products/CMFPlone/configure.zcml\nindex 16b85809d0..f3a6a7f42c 100644\n--- a/Products/CMFPlone/configure.zcml\n+++ b/Products/CMFPlone/configure.zcml\n@@ -131,4 +131,9 @@\n       provides="plone.scale.interfaces.IScaledImageQuality"\n       />\n \n+  <adapter\n+      for="zope.pagetemplate.engine.ZopeBaseEngine"\n+      factory=".traversal.get_zope_page_template_engine"\n+      />\n+\n </configure>\ndiff --git a/Products/CMFPlone/traversal.py b/Products/CMFPlone/traversal.py\nindex 2b2a75826c..6afe23ce4f 100644\n--- a/Products/CMFPlone/traversal.py\n+++ b/Products/CMFPlone/traversal.py\n@@ -5,7 +5,22 @@\n from plone.resource.interfaces import IUniqueResourceRequest\n from Products.CMFPlone.interfaces.resources import (\n     OVERRIDE_RESOURCE_DIRECTORY_NAME)\n+from Products.PageTemplates.Expressions import getEngine\n+from Products.PageTemplates.Expressions import getTrustedEngine\n from zope.globalrequest import getRequest\n+from zope.interface import implementer\n+from zope.interface import Interface\n+from zope.pagetemplate import engine as zpt_engine\n+\n+\n+try:\n+    # This was introduced in Zope 4.5.\n+    # We try not to make this a hard dependency yet.\n+    from Products.PageTemplates.interfaces import IZopeAwareEngine\n+except ImportError:\n+    # Zope 4.4-\n+    class IZopeAwareEngine(Interface):\n+        pass\n \n \n class PloneBundlesTraverser(ResourceTraverser):\n@@ -38,3 +53,25 @@ def traverse(self, name, remaining):\n                 if resource_filepath in directory:\n                     return directory\n         return super(PloneBundlesTraverser, self).traverse(name, remaining)\n+\n+\n+@implementer(IZopeAwareEngine)\n+def get_zope_page_template_engine(engine):\n+    """Get Zope-aware page template engine.\n+\n+    Hopefully a trusted one, but maybe an untrusted one,\n+    with less possibilities and more security checks.\n+    We fall back to nothing. This means the original engine will be used.\n+\n+    Needed since the page template refactoring/cleanup in Zope 4.4.\n+    See https://github.com/plone/Products.CMFPlone/issues/3141\n+\n+    This is currently expected to only be called when a zope.pagetemplate\n+    is being rendered, which can happen with z3c.form related code.\n+    For Products.PageTemplates, this code should not be needed.\n+    """\n+    if isinstance(engine, zpt_engine.ZopeEngine):\n+        # Get untrusted engine.\n+        return getEngine()\n+    if isinstance(engine, zpt_engine.TrustedZopeEngine):\n+        return getTrustedEngine()\ndiff --git a/news/3141.bugfix b/news/3141.bugfix\nnew file mode 100644\nindex 0000000000..16bea1e83a\n--- /dev/null\n+++ b/news/3141.bugfix\n@@ -0,0 +1,4 @@\n+Return a Zope aware engine for page templates based on ``zope.pagetemplate`` instead of ``Products.PageTemplates``.\n+Fixes possible problems with such templates, for example z3c.form ones, with Zope 4.4 and higher.\n+See `issue 3141 <https://github.com/plone/Products.CMFPlone/issues/3141>`_.\n+[maurits]\n'
+b'diff --git a/news/187.bugfix b/news/187.bugfix\nnew file mode 100644\nindex 0000000..673bbd7\n--- /dev/null\n+++ b/news/187.bugfix\n@@ -0,0 +1,2 @@\n+Fixes #187: Invalid dependency on plone.app.caching\n+[jensens]\ndiff --git a/news/188.bugfix b/news/188.bugfix\nnew file mode 100644\nindex 0000000..f25d964\n--- /dev/null\n+++ b/news/188.bugfix\n@@ -0,0 +1,4 @@\n+Cleanup: Remove meanwhile unused test fixture code refering to ``plone.app.caching``.\n+Removed class and fixtures: ``ThemingWithCaching``, ``THEMINGWITHCACHING_FIXTURE``, ``THEMINGWITHCACHING_TESTING``.\n+Those were nowhere used active in Plone nor outside in Github.\n+[jensens]\ndiff --git a/setup.py b/setup.py\nindex 2afdc02..9f4e5f3 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -61,6 +61,7 @@\n         \'plone.staticresources\',\n         \'plone.subrequest\',\n         \'plone.transformchain\',\n+        \'python-dateutil\',\n         \'repoze.xmliter>=0.3\',\n         \'roman\',\n         \'setuptools\',\ndiff --git a/src/plone/app/theming/browser/custom_css.py b/src/plone/app/theming/browser/custom_css.py\nindex bc78c5d..ba6d836 100644\n--- a/src/plone/app/theming/browser/custom_css.py\n+++ b/src/plone/app/theming/browser/custom_css.py\n@@ -3,8 +3,9 @@\n from plone.registry.interfaces import IRegistry\n from Products.Five.browser import BrowserView\n from zope.component import getUtility\n-from plone.app.caching.operations.utils import formatDateTime\n \n+import dateutil\n+import wsgiref\n \n class CustomCSSView(BrowserView):\n     """\n@@ -12,16 +13,19 @@ class CustomCSSView(BrowserView):\n     """\n \n     def __call__(self):\n-\n         registry = getUtility(IRegistry)\n         theme_settings = registry.forInterface(IThemeSettings, False)\n         self.request.response.setHeader(\n             \'Content-Type\',\n             \'text/css; charset=utf-8\',\n         )\n+        dt = theme_settings.custom_css_timestamp\n+        # If the datetime object is timezone-naive, it is assumed to be local time.\n+        if dt.tzinfo is not None:\n+            dt = dt.astimezone(dateutil.tz.tzlocal())\n+        # Format a Python datetime object as an RFC1123 date.\n         self.request.response.setHeader(\n             \'Last-Modified\',\n-            formatDateTime(theme_settings.custom_css_timestamp),\n+            wsgiref.handlers.format_date_time(time.mktime(dt.timetuple())),\n         )\n-        custom_css = theme_settings.custom_css\n-        return custom_css\n+        return theme_settings.custom_css\ndiff --git a/src/plone/app/theming/testing.py b/src/plone/app/theming/testing.py\nindex 6892326..ef1fb6f 100644\n--- a/src/plone/app/theming/testing.py\n+++ b/src/plone/app/theming/testing.py\n@@ -28,36 +28,6 @@ def setUpPloneSite(self, portal):\n         applyProfile(portal, \'plone.app.theming:default\')\n \n \n-class ThemingWithCaching(Theming):\n-    defaultBases = (PLONE_APP_CONTENTTYPES_FIXTURE,)\n-\n-    def setUpZope(self, app, configurationContext):\n-        # load ZCML\n-        import plone.app.theming.tests\n-        import plone.app.caching\n-        xmlconfig.file(\n-            \'configure.zcml\',\n-            plone.app.caching,\n-            context=configurationContext\n-        )\n-        xmlconfig.file(\n-            \'configure.zcml\',\n-            plone.app.theming.tests,\n-            context=configurationContext\n-        )\n-\n-        # Run the startup hook\n-        from plone.app.theming.plugins.hooks import onStartup\n-        onStartup(None)\n-\n-    def setUpPloneSite(self, portal):\n-        # install into the Plone site\n-        applyProfile(portal, \'plone.app.caching:default\')\n-        applyProfile(portal, \'plone.app.theming:default\')\n-        portal[\'portal_workflow\'].setDefaultChain(\n-            \'simple_publication_workflow\'\n-        )\n-\n THEMING_FIXTURE = Theming()\n THEMING_INTEGRATION_TESTING = IntegrationTesting(\n     bases=(THEMING_FIXTURE,),\n@@ -67,8 +37,3 @@ def setUpPloneSite(self, portal):\n     bases=(THEMING_FIXTURE,),\n     name="Theming:Functional"\n )\n-THEMINGWITHCACHING_FIXTURE = ThemingWithCaching()\n-THEMINGWITHCACHING_TESTING = IntegrationTesting(\n-    bases=(THEMINGWITHCACHING_FIXTURE,),\n-    name="Theming:IntegrationWithCaching"\n-)\n'
 
