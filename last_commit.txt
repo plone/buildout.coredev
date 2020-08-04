@@ -2,33 +2,49 @@ Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2020-08-03T16:13:39+02:00
+Date: 2020-08-03T16:07:41+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/2dd0be7f0d49852d2acdb0c374b4145981e06229
+Commit: https://github.com/plone/plone.app.contenttypes/commit/cdd1ebd18d8ab1850f1c4cc1a96ea88ab658e958
 
-In the edge case where the meta_type could not be resolved assume is_folderish being false.
+handle case where __parent__ of discussion was not updated
 
 Files changed:
-A news/567.bugfix
-M plone/app/contenttypes/migration/migration.py
+M plone/app/contenttypes/migration/utils.py
+M plone/app/contenttypes/tests/test_migration.py
 
-b"diff --git a/news/567.bugfix b/news/567.bugfix\nnew file mode 100644\nindex 00000000..77338565\n--- /dev/null\n+++ b/news/567.bugfix\n@@ -0,0 +1,2 @@\n+In the edge case where the meta_type could not be resolved assume is_folderish being false.\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py\nindex 4ee3dd64..b9c8894c 100644\n--- a/plone/app/contenttypes/migration/migration.py\n+++ b/plone/app/contenttypes/migration/migration.py\n@@ -524,6 +524,8 @@ def migrateCustomAT(fields_mapping,\n             is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)\n             src_meta_type = src_obj.meta_type\n     else:\n+        # fallback\n+        is_folderish = False\n         # Get info from at-fti\n         src_meta_type = fti.content_meta_type\n         archetype_tool = getToolByName(portal, 'archetype_tool', None)\n@@ -533,6 +535,7 @@ def migrateCustomAT(fields_mapping,\n             if info.get('meta_type') == src_meta_type:\n                 klass = info.get('klass', None)\n                 is_folderish = klass.isPrincipiaFolderish\n+                break\n \n     migrator = makeCustomATMigrator(context=portal,\n                                     src_type=src_type,\n"
+b'diff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py\nindex cd231160..1689eec4 100644\n--- a/plone/app/contenttypes/migration/utils.py\n+++ b/plone/app/contenttypes/migration/utils.py\n@@ -10,7 +10,6 @@\n from plone.app.contenttypes.migration.field_migrators import migrate_imagefield\n from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa\n from plone.app.contenttypes.utils import DEFAULT_TYPES\n-from plone.app.discussion.conversation import ANNOTATION_KEY as DISCUSSION_KEY\n from plone.app.discussion.interfaces import IConversation\n from plone.app.linkintegrity.handlers import modifiedArchetype\n from plone.app.linkintegrity.handlers import modifiedDexterity\n@@ -28,6 +27,7 @@\n from Products.Archetypes.config import REFERENCE_CATALOG\n from Products.Archetypes.interfaces.referenceable import IReferenceable\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY\n from Products.CMFPlone.interfaces import IPloneSiteRoot\n from Products.CMFPlone.utils import safe_hasattr\n from Products.Five.browser import BrowserView\n@@ -151,21 +151,25 @@ def move_comments(source_object, target_object):\n     and then removing the comments from the source (not the annotation).\n     """\n     source_annotations = IAnnotations(source_object)\n-    comments = source_annotations.get(DISCUSSION_KEY, None)\n+    comments = source_annotations.get(DISCUSSION_ANNOTATION_KEY, None)\n     if comments is not None:\n         target_annotations = IAnnotations(target_object)\n-        if target_annotations.get(DISCUSSION_KEY, None) is not None:\n+        if target_annotations.get(DISCUSSION_ANNOTATION_KEY, None) is not None:\n             logger.error(\'Comments exist on {0}\').format(\n                 target_object.absolute_url())\n-        target_annotations[DISCUSSION_KEY] = deepcopy(comments)\n+        # reset the parent before copying\n+        del comments.__parent__\n+        copy_of_comments = deepcopy(comments)\n+        copy_of_comments.__parent__ = target_object\n+        target_annotations[DISCUSSION_ANNOTATION_KEY] = copy_of_comments\n \n-        # Delete comments from the portal where wthey were stored temporarily.\n+        # Delete comments from the portal where whey were stored temporarily.\n         # Comments on the old objects will be removed with the objects.\n         if IPloneSiteRoot.providedBy(source_object):\n             source_conversation = IConversation(source_object)\n             for comment in source_conversation.getComments():\n                 del source_conversation[comment.comment_id]\n-            del source_annotations[DISCUSSION_KEY]\n+            del source_annotations[DISCUSSION_ANNOTATION_KEY]\n \n \n def copy_contentrules(source_object, target_object):\ndiff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py\nindex 709945ed..ac1000e9 100644\n--- a/plone/app/contenttypes/tests/test_migration.py\n+++ b/plone/app/contenttypes/tests/test_migration.py\n@@ -1830,6 +1830,7 @@ def test_comments_are_migrated(self):\n         at_comment = [i for i in at_comments][0]\n         at_plone_uuid = getattr(at_comment, \'_plone.uuid\')\n         at_comment_id = getattr(at_comment, \'comment_id\')\n+        self.assertEqual(at_conversation.__parent__, at_document)\n \n         # migrate\n         applyProfile(self.portal, \'plone.app.contenttypes:default\')\n@@ -1843,6 +1844,7 @@ def test_comments_are_migrated(self):\n         self.assertFalse(portal_conversation)\n         # comments were migrated\n         dx_conversation = IConversation(dx_document)\n+        self.assertEqual(dx_conversation.__parent__, dx_document)\n         self.assertEqual(\n             len(dx_conversation),\n             1\n'
 
 Repository: plone.app.contenttypes
 
 
 Branch: refs/heads/master
-Date: 2020-08-04T13:26:24+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/175e0fbd0f35f5a12d0eee2488f085b0860a3e5f
+Date: 2020-08-03T16:09:32+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/313357c20cc1bc13dd9620b4544f93bcaf283401
 
-Merge pull request #567 from plone/custom_migration_edge_case
-
-In the edge case where the meta_type could not be resolved
+add changenote
 
 Files changed:
-A news/567.bugfix
-M plone/app/contenttypes/migration/migration.py
+A news/566.bugfix
 
-b"diff --git a/news/567.bugfix b/news/567.bugfix\nnew file mode 100644\nindex 00000000..77338565\n--- /dev/null\n+++ b/news/567.bugfix\n@@ -0,0 +1,2 @@\n+In the edge case where the meta_type could not be resolved assume is_folderish being false.\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/plone/app/contenttypes/migration/migration.py b/plone/app/contenttypes/migration/migration.py\nindex 4ee3dd64..b9c8894c 100644\n--- a/plone/app/contenttypes/migration/migration.py\n+++ b/plone/app/contenttypes/migration/migration.py\n@@ -524,6 +524,8 @@ def migrateCustomAT(fields_mapping,\n             is_folderish = getattr(src_obj, 'isPrincipiaFolderish', False)\n             src_meta_type = src_obj.meta_type\n     else:\n+        # fallback\n+        is_folderish = False\n         # Get info from at-fti\n         src_meta_type = fti.content_meta_type\n         archetype_tool = getToolByName(portal, 'archetype_tool', None)\n@@ -533,6 +535,7 @@ def migrateCustomAT(fields_mapping,\n             if info.get('meta_type') == src_meta_type:\n                 klass = info.get('klass', None)\n                 is_folderish = klass.isPrincipiaFolderish\n+                break\n \n     migrator = makeCustomATMigrator(context=portal,\n                                     src_type=src_type,\n"
+b'diff --git a/news/566.bugfix b/news/566.bugfix\nnew file mode 100644\nindex 00000000..6b73e676\n--- /dev/null\n+++ b/news/566.bugfix\n@@ -0,0 +1,2 @@\n+Handle cases where the __parent__ of a discussion was not set to the migrated DX object.\n+[pbauer]\n\\ No newline at end of file\n'
+
+Repository: plone.app.contenttypes
+
+
+Branch: refs/heads/master
+Date: 2020-08-04T13:28:20+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.contenttypes/commit/6e1db0c7cf5ef7f82cc1499991f7ca414def9cdf
+
+Merge pull request #566 from plone/fix_migrate_discussions
+
+handle case where __parent__ of discussion was not updated
+
+Files changed:
+A news/566.bugfix
+M plone/app/contenttypes/migration/utils.py
+M plone/app/contenttypes/tests/test_migration.py
+
+b'diff --git a/news/566.bugfix b/news/566.bugfix\nnew file mode 100644\nindex 00000000..6b73e676\n--- /dev/null\n+++ b/news/566.bugfix\n@@ -0,0 +1,2 @@\n+Handle cases where the __parent__ of a discussion was not set to the migrated DX object.\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/plone/app/contenttypes/migration/utils.py b/plone/app/contenttypes/migration/utils.py\nindex cd231160..1689eec4 100644\n--- a/plone/app/contenttypes/migration/utils.py\n+++ b/plone/app/contenttypes/migration/utils.py\n@@ -10,7 +10,6 @@\n from plone.app.contenttypes.migration.field_migrators import migrate_imagefield\n from plone.app.contenttypes.migration.field_migrators import migrate_simplefield  # noqa\n from plone.app.contenttypes.utils import DEFAULT_TYPES\n-from plone.app.discussion.conversation import ANNOTATION_KEY as DISCUSSION_KEY\n from plone.app.discussion.interfaces import IConversation\n from plone.app.linkintegrity.handlers import modifiedArchetype\n from plone.app.linkintegrity.handlers import modifiedDexterity\n@@ -28,6 +27,7 @@\n from Products.Archetypes.config import REFERENCE_CATALOG\n from Products.Archetypes.interfaces.referenceable import IReferenceable\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFPlone import DISCUSSION_ANNOTATION_KEY\n from Products.CMFPlone.interfaces import IPloneSiteRoot\n from Products.CMFPlone.utils import safe_hasattr\n from Products.Five.browser import BrowserView\n@@ -151,21 +151,25 @@ def move_comments(source_object, target_object):\n     and then removing the comments from the source (not the annotation).\n     """\n     source_annotations = IAnnotations(source_object)\n-    comments = source_annotations.get(DISCUSSION_KEY, None)\n+    comments = source_annotations.get(DISCUSSION_ANNOTATION_KEY, None)\n     if comments is not None:\n         target_annotations = IAnnotations(target_object)\n-        if target_annotations.get(DISCUSSION_KEY, None) is not None:\n+        if target_annotations.get(DISCUSSION_ANNOTATION_KEY, None) is not None:\n             logger.error(\'Comments exist on {0}\').format(\n                 target_object.absolute_url())\n-        target_annotations[DISCUSSION_KEY] = deepcopy(comments)\n+        # reset the parent before copying\n+        del comments.__parent__\n+        copy_of_comments = deepcopy(comments)\n+        copy_of_comments.__parent__ = target_object\n+        target_annotations[DISCUSSION_ANNOTATION_KEY] = copy_of_comments\n \n-        # Delete comments from the portal where wthey were stored temporarily.\n+        # Delete comments from the portal where whey were stored temporarily.\n         # Comments on the old objects will be removed with the objects.\n         if IPloneSiteRoot.providedBy(source_object):\n             source_conversation = IConversation(source_object)\n             for comment in source_conversation.getComments():\n                 del source_conversation[comment.comment_id]\n-            del source_annotations[DISCUSSION_KEY]\n+            del source_annotations[DISCUSSION_ANNOTATION_KEY]\n \n \n def copy_contentrules(source_object, target_object):\ndiff --git a/plone/app/contenttypes/tests/test_migration.py b/plone/app/contenttypes/tests/test_migration.py\nindex 709945ed..ac1000e9 100644\n--- a/plone/app/contenttypes/tests/test_migration.py\n+++ b/plone/app/contenttypes/tests/test_migration.py\n@@ -1830,6 +1830,7 @@ def test_comments_are_migrated(self):\n         at_comment = [i for i in at_comments][0]\n         at_plone_uuid = getattr(at_comment, \'_plone.uuid\')\n         at_comment_id = getattr(at_comment, \'comment_id\')\n+        self.assertEqual(at_conversation.__parent__, at_document)\n \n         # migrate\n         applyProfile(self.portal, \'plone.app.contenttypes:default\')\n@@ -1843,6 +1844,7 @@ def test_comments_are_migrated(self):\n         self.assertFalse(portal_conversation)\n         # comments were migrated\n         dx_conversation = IConversation(dx_document)\n+        self.assertEqual(dx_conversation.__parent__, dx_document)\n         self.assertEqual(\n             len(dx_conversation),\n             1\n'
 
