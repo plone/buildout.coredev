@@ -1,22 +1,69 @@
-Repository: plone.namedfile
+Repository: Products.isurlinportal
 
 
-Branch: refs/heads/4.2.x
-Date: 2020-08-17T13:37:58+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.namedfile/commit/88e2f48b13da7e5934a11e1697a61e3f5cc183f5
+Branch: refs/heads/master
+Date: 2020-08-18T10:24:57+02:00
+Author: Thomas Schorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.isurlinportal/commit/d56eb71b2b5e748b05c269469c28ae59e9ea5e69
 
-Reverted new range request feature on bugfix branch 4.2.x.
-
-I am creating a branch 4.x and will make a release from there.
+Support Python 3.8
 
 Files changed:
-M plone/namedfile/browser.py
-M plone/namedfile/file.py
-M plone/namedfile/usage.rst
-M plone/namedfile/utils/__init__.py
+M .travis.yml
 M setup.py
-D news/86.feature
 
-b'diff --git a/news/86.feature b/news/86.feature\ndeleted file mode 100644\nindex b05453d..0000000\n--- a/news/86.feature\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-- Range support (https://developer.mozilla.org/en-US/docs/Web/HTTP/Range_requests)\n-  (backported from #86 for Plone 5.2 by [fredvd])\n-  [mamico]\ndiff --git a/plone/namedfile/browser.py b/plone/namedfile/browser.py\nindex 012797f..63da817 100644\n--- a/plone/namedfile/browser.py\n+++ b/plone/namedfile/browser.py\n@@ -4,12 +4,9 @@\n from plone.namedfile.utils import stream_data\n from plone.rfc822.interfaces import IPrimaryFieldInfo\n from Products.Five.browser import BrowserView\n-from zope.annotation.interfaces import IAnnotations\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n from zope.publisher.interfaces import NotFound\n-from ZPublisher.HTTPRangeSupport import expandRanges\n-from ZPublisher.HTTPRangeSupport import parseRange\n \n \n @implementer(IPublishTraverse)\n@@ -33,46 +30,20 @@ def __init__(self, context, request):\n         self.filename = None\n \n     def publishTraverse(self, request, name):\n+\n         if self.fieldname is None:  # ../@@download/fieldname\n             self.fieldname = name\n         elif self.filename is None:  # ../@@download/fieldname/filename\n             self.filename = name\n         else:\n             raise NotFound(self, name, request)\n+\n         return self\n \n     def __call__(self):\n         file = self._getFile()\n         self.set_headers(file)\n-        request_range = self.handle_request_range(file)\n-        return stream_data(file, **request_range)\n-\n-    def handle_request_range(self, file):\n-        # check if we have a range in the request\n-        ranges = None\n-        header_range = self.request.getHeader(\'Range\', None)\n-        if_range = self.request.getHeader(\'If-Range\', None)\n-        if header_range is not None:\n-            ranges = parseRange(header_range)\n-            if if_range is not None:\n-                # We delete the ranges, which causes us to skip to the 200\n-                # response.\n-                return {}\n-            # XXX: multipart ranges not implemented\n-            if ranges and len(ranges) == 1:\n-                try:\n-                    length = file.getSize()\n-                    [(start, end)] = expandRanges(ranges, length)\n-                    size = end - start\n-                    self.request.response.setHeader(\'Content-Length\', size)\n-                    self.request.response.setHeader(\n-                        \'Content-Range\',\n-                        \'bytes {0}-{1}/{2}\'.format(start, end - 1, length))\n-                    self.request.response.setStatus(206)  # Partial content\n-                    return dict(start=start, end=end)\n-                except ValueError:\n-                    return {}\n-        return {}\n+        return stream_data(file)\n \n     def set_headers(self, file):\n         if not self.filename:\ndiff --git a/plone/namedfile/file.py b/plone/namedfile/file.py\nindex 67eea4e..9b225b4 100644\n--- a/plone/namedfile/file.py\n+++ b/plone/namedfile/file.py\n@@ -17,7 +17,6 @@\n from zope.component import getUtility\n from zope.interface import implementer\n from zope.schema.fieldproperty import FieldProperty\n-from ZPublisher import HTTPRangeSupport\n \n import piexif\n import transaction\n@@ -306,7 +305,7 @@ def getImageSize(self):\n     data = property(NamedFile._getData, _setData)\n \n \n-@implementer(INamedBlobFile, HTTPRangeSupport.HTTPRangeInterface)\n+@implementer(INamedBlobFile)\n class NamedBlobFile(Persistent):\n     """A file stored in a ZODB BLOB, with a filename"""\n \ndiff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex cf1ee1b..580847c 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -214,37 +214,6 @@ We will test this with a dummy request, faking traversal::\n     >>> request.response.getHeader(\'Content-Disposition\')\n     "attachment; filename*=UTF-8\'\'zpt.gif"\n \n-Range support\n--------------\n-\n-Checking for partial requests support::\n-\n-    >>> request = TestRequest()\n-    >>> download = Download(container, request).publishTraverse(request, \'blobimage\')\n-    >>> data = download()\n-    >>> request.response.getHeader(\'Content-Length\')\n-    \'341\'\n-    >>> request.response.getHeader(\'Accept-Ranges\')\n-    \'bytes\'\n-\n-Request a specific range::\n-\n-    >>> request = TestRequest(environ={\'HTTP_RANGE\': \'bytes=0-99\'})\n-    >>> download = Download(container, request).publishTraverse(request, \'blobimage\')\n-    >>> data = download()\n-    >>> request.response.getStatus()\n-    206\n-    >>> len(hasattr(data, \'read\') and data.read() or data)\n-    100\n-\n-The Content-Length header now indicates the size of the requested range (and not the full size of the image).\n-The Content-Range response header indicates where in the full resource this partial message belongs.::\n-\n-    >>> request.response.getHeader(\'Content-Length\')\n-    \'100\'\n-    >>> request.response.getHeader(\'Content-Range\')\n-    \'bytes 0-99/341\'\n-\n \n Display-file view\n -----------------\ndiff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py\nindex 3538197..d2116b2 100644\n--- a/plone/namedfile/utils/__init__.py\n+++ b/plone/namedfile/utils/__init__.py\n@@ -1,5 +1,5 @@\n # -*- coding: utf-8 -*-\n-from io import FileIO\n+\n from logging import getLogger\n from plone.namedfile.interfaces import IBlobby\n from plone.namedfile.utils.jpeg_utils import process_jpeg\n@@ -7,10 +7,8 @@\n from plone.namedfile.utils.tiff_utils import process_tiff\n from plone.registry.interfaces import IRegistry\n from StringIO import StringIO\n-from ZPublisher.Iterators import IStreamIterator\n from zope.component import queryUtility\n from zope.deprecation import deprecate\n-from zope.interface import implementer\n \n import mimetypes\n import os.path\n@@ -18,7 +16,6 @@\n import PIL.Image\n import struct\n import urllib\n-from collections import Iterable\n \n \n log = getLogger(__name__)\n@@ -30,48 +27,11 @@\n     log.info(\'IImagingSchema for high pixel density scales not available.\')\n \n \n-@implementer(IStreamIterator)\n-class filestream_range_iterator(Iterable):\n-    """\n-    A class that mimics FileIO and implements an iterator that returns a\n-    fixed-sized sequence of bytes. Beginning from `start` to `end`.\n-\n-    BBB: due to a possible bug in Zope>4, <=4.1.3, couldn\'t be subclass of FileIO\n-         as Iterators.filestream_iterator\n-    """\n-\n-    def __init__(self, name, mode=\'rb\', bufsize=-1, streamsize=1 << 16, start=0, end=None):\n-        self._io = FileIO(name, mode=mode)\n-        self.streamsize = streamsize\n-        self.start = start\n-        self.end = end\n-        self._io.seek(start, 0)\n-\n-    def __iter__(self):\n-        if self._io.closed:\n-            raise ValueError("I/O operation on closed file.")\n-        return self\n-\n-    def __next__(self):\n-        if self.end is None:\n-            bytes = self.streamsize\n-        else:\n-            bytes = max(min(self.end - self._io.tell(), self.streamsize), 0)\n-        data = self._io.read(bytes)\n-        if not data:\n-            raise StopIteration\n-        return data\n-\n-    next = __next__\n-\n-    def close(self):\n-        self._io.close()\n-\n-    # BBB: is it necessary to implement __len__ ?\n-    # def __len__(self)\n-\n-    def read(self, size=-1):\n-        return self._io.read(size)\n+try:\n+    # use this to stream data if we can\n+    from ZPublisher.Iterators import filestream_iterator\n+except ImportError:\n+    filestream_iterator = None\n \n \n def safe_basename(filename):\n@@ -114,7 +74,6 @@ def set_headers(file, response, filename=None):\n \n     response.setHeader(\'Content-Type\', contenttype)\n     response.setHeader(\'Content-Length\', file.getSize())\n-    response.setHeader(\'Accept-Ranges\', \'bytes\')\n \n     if filename is not None:\n         if not isinstance(filename, unicode):\n@@ -126,14 +85,17 @@ def set_headers(file, response, filename=None):\n         )\n \n \n-def stream_data(file, start=0, end=None):\n+def stream_data(file):\n     """Return the given file as a stream if possible.\n     """\n+\n     if IBlobby.providedBy(file):\n         if file._blob._p_blob_uncommitted:\n-            return file.data[start:end]\n-        return filestream_range_iterator(file._blob.committed(), \'rb\', start=start, end=end)\n-    return file.data[start:end]\n+            return file.data\n+        if filestream_iterator is not None:\n+            return filestream_iterator(file._blob.committed(), \'rb\')\n+\n+    return file.data\n \n \n def _ensure_data(image):\ndiff --git a/setup.py b/setup.py\nindex 7517c7f..2bf4f17 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -4,7 +4,7 @@\n import os\n \n \n-version = \'4.2.8.dev0+zest0\'\n+version = \'4.2.8.dev0\'\n description = \'File types and fields for images, files and blob files with \' \\\n               \'filenames\'\n long_description = (\'\\n\\n\'.join([\n'
+b'diff --git a/.travis.yml b/.travis.yml\nindex dafd153..c630f72 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -10,3 +10,5 @@ matrix:\n       env: PLONE_VERSION="5.2"\n     - python: "3.7"\n       env: PLONE_VERSION="5.2"\n+    - python: "3.8"\n+      env: PLONE_VERSION="5.2"\ndiff --git a/setup.py b/setup.py\nindex 0674448..fbd6fa8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -28,6 +28,7 @@\n         "Programming Language :: Python :: 2.7",\n         "Programming Language :: Python :: 3.6",\n         "Programming Language :: Python :: 3.7",\n+        "Programming Language :: Python :: 3.8",\n     ],\n     keywords="plone security hotfix patch",\n     author="Plone Security Team",\n'
+
+Repository: Products.isurlinportal
+
+
+Branch: refs/heads/master
+Date: 2020-08-18T14:28:38+02:00
+Author: Thomas Schorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.isurlinportal/commit/0561698141c862ba9c42c19a74f1e57a42470e3b
+
+test python 3.6; update changelog
+
+Files changed:
+A news/3.bugfix
+M .travis.yml
+M buildout.cfg
+M tox.ini
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex c630f72..dcc047e 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -8,6 +8,8 @@ matrix:\n       env: PLONE_VERSION="5.1"\n     - python: "2.7"\n       env: PLONE_VERSION="5.2"\n+    - python: "3.6"\n+      env: PLONE_VERSION="5.2"\n     - python: "3.7"\n       env: PLONE_VERSION="5.2"\n     - python: "3.8"\ndiff --git a/buildout.cfg b/buildout.cfg\nindex bb188ad..170b5d4 100644\n--- a/buildout.cfg\n+++ b/buildout.cfg\n@@ -1,6 +1,6 @@\n [buildout]\n extends =\n-    https://raw.githubusercontent.com/collective/buildout.plonetest/master/test-5.x.cfg\n+    https://raw.githubusercontent.com/collective/buildout.plonetest/master/test-5.2.x.cfg\n \n package-name = Products.isurlinportal\n \ndiff --git a/news/3.bugfix b/news/3.bugfix\nnew file mode 100644\nindex 0000000..a475218\n--- /dev/null\n+++ b/news/3.bugfix\n@@ -0,0 +1,2 @@\n+Add testing for Python 3.6 + 3.8; add Python 3.8 trove classifier.\n+[tschorr]\ndiff --git a/tox.ini b/tox.ini\nindex d7e9110..164c370 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -5,7 +5,9 @@ envlist =\n     43,\n     51,\n     52-py27\n+    52-py36\n     52-py37\n+    52-py38\n \n [testenv]\n basepython = python2.7\n@@ -33,7 +35,17 @@ setenv =\n setenv =\n     PLONE_VERSION=5.2\n \n+[testenv:52-py36]\n+basepython = python3.6\n+setenv =\n+    PLONE_VERSION=5.2\n+\n [testenv:52-py37]\n basepython = python3.7\n setenv =\n     PLONE_VERSION=5.2\n+\n+[testenv:52-py38]\n+basepython = python3.8\n+setenv =\n+    PLONE_VERSION=5.2\n'
+
+Repository: Products.isurlinportal
+
+
+Branch: refs/heads/master
+Date: 2020-08-18T15:54:29+02:00
+Author: Thomas Schorr (tschorr) <t_schorr@gmx.de>
+Commit: https://github.com/plone/Products.isurlinportal/commit/9cf1d1e0739e75efd4f99e2a059d9a588b6a0dd6
+
+restore extends url
+
+Files changed:
+M buildout.cfg
+
+b'diff --git a/buildout.cfg b/buildout.cfg\nindex 170b5d4..bb188ad 100644\n--- a/buildout.cfg\n+++ b/buildout.cfg\n@@ -1,6 +1,6 @@\n [buildout]\n extends =\n-    https://raw.githubusercontent.com/collective/buildout.plonetest/master/test-5.2.x.cfg\n+    https://raw.githubusercontent.com/collective/buildout.plonetest/master/test-5.x.cfg\n \n package-name = Products.isurlinportal\n \n'
+
+Repository: Products.isurlinportal
+
+
+Branch: refs/heads/master
+Date: 2020-08-18T16:08:41+02:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/Products.isurlinportal/commit/88de78434a9ed4ceac86bb7945dc78deb18c785e
+
+Merge pull request #3 from plone/support_py38
+
+Support Python 3.8
+
+Files changed:
+A news/3.bugfix
+M .travis.yml
+M setup.py
+M tox.ini
+
+b'diff --git a/.travis.yml b/.travis.yml\nindex dafd153..dcc047e 100644\n--- a/.travis.yml\n+++ b/.travis.yml\n@@ -8,5 +8,9 @@ matrix:\n       env: PLONE_VERSION="5.1"\n     - python: "2.7"\n       env: PLONE_VERSION="5.2"\n+    - python: "3.6"\n+      env: PLONE_VERSION="5.2"\n     - python: "3.7"\n       env: PLONE_VERSION="5.2"\n+    - python: "3.8"\n+      env: PLONE_VERSION="5.2"\ndiff --git a/news/3.bugfix b/news/3.bugfix\nnew file mode 100644\nindex 0000000..a475218\n--- /dev/null\n+++ b/news/3.bugfix\n@@ -0,0 +1,2 @@\n+Add testing for Python 3.6 + 3.8; add Python 3.8 trove classifier.\n+[tschorr]\ndiff --git a/setup.py b/setup.py\nindex 0674448..fbd6fa8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -28,6 +28,7 @@\n         "Programming Language :: Python :: 2.7",\n         "Programming Language :: Python :: 3.6",\n         "Programming Language :: Python :: 3.7",\n+        "Programming Language :: Python :: 3.8",\n     ],\n     keywords="plone security hotfix patch",\n     author="Plone Security Team",\ndiff --git a/tox.ini b/tox.ini\nindex d7e9110..164c370 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -5,7 +5,9 @@ envlist =\n     43,\n     51,\n     52-py27\n+    52-py36\n     52-py37\n+    52-py38\n \n [testenv]\n basepython = python2.7\n@@ -33,7 +35,17 @@ setenv =\n setenv =\n     PLONE_VERSION=5.2\n \n+[testenv:52-py36]\n+basepython = python3.6\n+setenv =\n+    PLONE_VERSION=5.2\n+\n [testenv:52-py37]\n basepython = python3.7\n setenv =\n     PLONE_VERSION=5.2\n+\n+[testenv:52-py38]\n+basepython = python3.8\n+setenv =\n+    PLONE_VERSION=5.2\n'
 
