@@ -1,38 +1,19 @@
-Repository: plone.portlet.static
+Repository: icalendar
 
 
 Branch: refs/heads/master
-Date: 2020-08-22T11:32:01+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.portlet.static/commit/c6f7714b964d2d13731fece14498117629d7227f
+Date: 2020-08-24T15:27:21+02:00
+Author: Simon Budig (simon-budig) <simon@budig.de>
+Commit: https://github.com/collective/icalendar/commit/2a82c88c65dc513f6246dd0c2adf7d1a7fc19fac
 
-Fixed startup warning for setDefaultRoles.
+Correct the handling of rrules within timezone definitions.
 
-```
-DeprecationWarning: setDefaultRoles is deprecated. Please use addPermission from AccessControl.Permission.
-```
+Fix for https://github.com/collective/icalendar/issues/303
 
 Files changed:
-A news/17.bugfix
-M plone/portlet/static/__init__.py
+M CHANGES.rst
+M src/icalendar/cal.py
+M src/icalendar/tests/test_timezoned.py
 
-b"diff --git a/news/17.bugfix b/news/17.bugfix\nnew file mode 100644\nindex 0000000..c87b380\n--- /dev/null\n+++ b/news/17.bugfix\n@@ -0,0 +1,2 @@\n+Fixed startup warning for setDefaultRoles.\n+[maurits]\ndiff --git a/plone/portlet/static/__init__.py b/plone/portlet/static/__init__.py\nindex d65704c..0c37cfb 100644\n--- a/plone/portlet/static/__init__.py\n+++ b/plone/portlet/static/__init__.py\n@@ -1,10 +1,11 @@\n # -*- coding: utf-8 -*-\n-from Products.CMFCore.permissions import setDefaultRoles\n+from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+\n PloneMessageFactory = MessageFactory('plone')\n \n-setDefaultRoles(\n+addPermission(\n     'plone.portlet.static: Add static portlet',\n     ('Manager', 'Site Administrator', 'Owner', )\n )\n"
-
-Repository: plone.portlet.static
-
-
-Branch: refs/heads/master
-Date: 2020-08-24T12:30:48+02:00
-Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/plone.portlet.static/commit/0b06f03e9ad4fc081e0d0b035615d6759072f943
-
-Merge pull request #17 from plone/maurits/fix-startup-warnings
-
-Fixed startup warning for setDefaultRoles.
-
-Files changed:
-A news/17.bugfix
-M plone/portlet/static/__init__.py
-
-b"diff --git a/news/17.bugfix b/news/17.bugfix\nnew file mode 100644\nindex 0000000..c87b380\n--- /dev/null\n+++ b/news/17.bugfix\n@@ -0,0 +1,2 @@\n+Fixed startup warning for setDefaultRoles.\n+[maurits]\ndiff --git a/plone/portlet/static/__init__.py b/plone/portlet/static/__init__.py\nindex d65704c..0c37cfb 100644\n--- a/plone/portlet/static/__init__.py\n+++ b/plone/portlet/static/__init__.py\n@@ -1,10 +1,11 @@\n # -*- coding: utf-8 -*-\n-from Products.CMFCore.permissions import setDefaultRoles\n+from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+\n PloneMessageFactory = MessageFactory('plone')\n \n-setDefaultRoles(\n+addPermission(\n     'plone.portlet.static: Add static portlet',\n     ('Manager', 'Site Administrator', 'Owner', )\n )\n"
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex f7063db..9911ab2 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -14,7 +14,7 @@ New features:\n \n Bug fixes:\n \n-- *add item here*\n+- fixed rrule handling, re-enabled test_create_america_new_york()\n \n \n 4.0.6 (2020-05-06)\ndiff --git a/src/icalendar/cal.py b/src/icalendar/cal.py\nindex 36620a1..2c7dcd7 100644\n--- a/src/icalendar/cal.py\n+++ b/src/icalendar/cal.py\n@@ -17,7 +17,7 @@\n from icalendar.timezone_cache import _timezone_cache\n \n import pytz\n-import dateutil.rrule\n+import dateutil.rrule, dateutil.tz\n from pytz.tzinfo import DstTzInfo\n \n from icalendar.compat import unicode_type\n@@ -536,15 +536,23 @@ def _extract_offsets(component, tzname):\n \n         # expand recurrences\n         if \'RRULE\' in component:\n+            # to be paranoid about correct weekdays\n+            # evaluate the rrule with the current offset\n+            tzi = dateutil.tz.tzoffset ("(offsetfrom)", offsetfrom)\n+            rrstart = dtstart.replace (tzinfo=tzi)\n+\n             rrulestr = component[\'RRULE\'].to_ical().decode(\'utf-8\')\n-            rrule = dateutil.rrule.rrulestr(rrulestr, dtstart=dtstart)\n+            rrule = dateutil.rrule.rrulestr(rrulestr, dtstart=rrstart)\n             if not {\'UNTIL\', \'COUNT\'}.intersection(component[\'RRULE\'].keys()):\n                 # pytz.timezones don\'t know any transition dates after 2038\n                 # either\n-                rrule._until = datetime(2038, 12, 31)\n-            elif \'UNTIL\' in component[\'RRULE\'] and rrule._until.tzinfo:\n-                rrule._until = rrule._until.replace(tzinfo=None)\n-            transtimes = rrule\n+                rrule._until = datetime(2038, 12, 31, tzinfo=pytz.UTC)\n+\n+            # constructing the pytz-timezone requires UTC transition times.\n+            # here we construct local times without tzinfo, the offset to UTC\n+            # gets subtracted in to_tz().\n+            transtimes = [dt.replace (tzinfo=None) for dt in rrule]\n+\n         # or rdates\n         elif \'RDATE\' in component:\n             if not isinstance(component[\'RDATE\'], list):\ndiff --git a/src/icalendar/tests/test_timezoned.py b/src/icalendar/tests/test_timezoned.py\nindex 6dd1bb8..c80abd4 100644\n--- a/src/icalendar/tests/test_timezoned.py\n+++ b/src/icalendar/tests/test_timezoned.py\n@@ -149,14 +149,9 @@ def test_tzinfo_dateutil(self):\n \n class TestTimezoneCreation(unittest.TestCase):\n \n-    @unittest.expectedFailure\n     def test_create_america_new_york(self):\n         """testing America/New_York, the most complex example from the\n         RFC"""\n-        # FIXME\n-        # This currently fails because of mixed naive and timezone\n-        # aware datetimes in dtstart and until which breaks\n-        # dateutil recurrence.\n \n         directory = os.path.dirname(__file__)\n         with open(os.path.join(directory, \'america_new_york.ics\'), \'rb\') as fp:\n'
 
