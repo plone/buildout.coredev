@@ -1,34 +1,19 @@
-Repository: plone.app.relationfield
+Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2020-10-07T23:28:16+03:00
+Date: 2020-10-08T14:46:24+02:00
 Author: Alin Voinea (avoinea) <contact@avoinea.com>
-Commit: https://github.com/plone/plone.app.relationfield/commit/635524f242b02232c0acc652182e2636930632c6
+Commit: https://github.com/plone/plone.dexterity/commit/8fd6060e7b33e4742157df5a6d5bc43177269e7a
 
-Refs #30 - Fix tests to match plone.dexterity dynamic schema name
+Refs #136 - Update dynamic schema on all ZEO clients on change (#137)
 
-Files changed:
-A news/30.bugfix
-M plone/app/relationfield/tests/test_schemaeditor.py
-
-b'diff --git a/news/30.bugfix b/news/30.bugfix\nnew file mode 100644\nindex 0000000..bbbe493\n--- /dev/null\n+++ b/news/30.bugfix\n@@ -0,0 +1,2 @@\n+- Update tests to fix https://github.com/plone/plone.dexterity/pull/137\n+[@avoinea]\ndiff --git a/plone/app/relationfield/tests/test_schemaeditor.py b/plone/app/relationfield/tests/test_schemaeditor.py\nindex 1d9892e..2da2132 100644\n--- a/plone/app/relationfield/tests/test_schemaeditor.py\n+++ b/plone/app/relationfield/tests/test_schemaeditor.py\n@@ -4,12 +4,21 @@\n \n import doctest\n import os\n+import six\n+import re\n import unittest\n \n \n optionflags = doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE\n \n \n+class Py23DocChecker(doctest.OutputChecker):\n+    def check_output(self, want, got, optionflags):\n+        if six.PY2:\n+            got = re.sub("u\'(.*?)\'", "\'\\\\1\'", got)\n+        return doctest.OutputChecker.check_output(self, want, got, optionflags)\n+\n+\n def test_suite():\n     suite = unittest.TestSuite()\n     suite.addTests(\n@@ -18,6 +27,7 @@ def test_suite():\n                 doctest.DocFileSuite(\n                     os.path.join(os.path.pardir, \'schemaeditor.txt\'),\n                     optionflags=optionflags,\n+                    checker=Py23DocChecker(),\n                 ),\n                 FUNCTIONAL_WIDGETS_TESTING,\n             )\n'
-
-Repository: plone.app.relationfield
-
-
-Branch: refs/heads/master
-Date: 2020-10-08T11:40:40+02:00
-Author: Alessandro Pisa (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.relationfield/commit/d817430a346c05230673247fa102327bfe4ad3fa
-
-Merge pull request #31 from plone/sync-schema-on-zeo-clients
-
-Refs #30 - Fix tests to match plone.dexterity dynamic schema name
+* Fixes #136 - Update dynamic schema on all ZEO clients on change
 
 Files changed:
-A news/30.bugfix
-M plone/app/relationfield/tests/test_schemaeditor.py
+A news/136.bugfix
+M plone/dexterity/fti.py
+M plone/dexterity/schema.py
 
-b'diff --git a/news/30.bugfix b/news/30.bugfix\nnew file mode 100644\nindex 0000000..bbbe493\n--- /dev/null\n+++ b/news/30.bugfix\n@@ -0,0 +1,2 @@\n+- Update tests to fix https://github.com/plone/plone.dexterity/pull/137\n+[@avoinea]\ndiff --git a/plone/app/relationfield/tests/test_schemaeditor.py b/plone/app/relationfield/tests/test_schemaeditor.py\nindex 1d9892e..2da2132 100644\n--- a/plone/app/relationfield/tests/test_schemaeditor.py\n+++ b/plone/app/relationfield/tests/test_schemaeditor.py\n@@ -4,12 +4,21 @@\n \n import doctest\n import os\n+import six\n+import re\n import unittest\n \n \n optionflags = doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE\n \n \n+class Py23DocChecker(doctest.OutputChecker):\n+    def check_output(self, want, got, optionflags):\n+        if six.PY2:\n+            got = re.sub("u\'(.*?)\'", "\'\\\\1\'", got)\n+        return doctest.OutputChecker.check_output(self, want, got, optionflags)\n+\n+\n def test_suite():\n     suite = unittest.TestSuite()\n     suite.addTests(\n@@ -18,6 +27,7 @@ def test_suite():\n                 doctest.DocFileSuite(\n                     os.path.join(os.path.pardir, \'schemaeditor.txt\'),\n                     optionflags=optionflags,\n+                    checker=Py23DocChecker(),\n                 ),\n                 FUNCTIONAL_WIDGETS_TESTING,\n             )\n'
+b'diff --git a/news/136.bugfix b/news/136.bugfix\nnew file mode 100644\nindex 0000000..bbaa530\n--- /dev/null\n+++ b/news/136.bugfix\n@@ -0,0 +1,2 @@\n+Make sure that Dynamic schema is updated on all ZEO clients on change\n+[@avoinea]\ndiff --git a/plone/dexterity/fti.py b/plone/dexterity/fti.py\nindex ef50bd7..05f1b87 100644\n--- a/plone/dexterity/fti.py\n+++ b/plone/dexterity/fti.py\n@@ -264,8 +264,8 @@ def lookupSchema(self):\n         # Otherwise, look up a dynamic schema. This will query the model for\n         # an unnamed schema if it is the first time it is looked up.\n         # See schema.py\n-\n-        schemaName = portalTypeToSchemaName(self.getId())\n+        mtime = getattr(self, "_p_mtime", None) or ""\n+        schemaName = portalTypeToSchemaName(self.getId(), suffix=str(mtime))\n         return getattr(plone.dexterity.schema.generated, schemaName)\n \n     def lookupModel(self):\n@@ -553,7 +553,8 @@ def ftiModified(object, event):\n         if (fti.model_source or fti.model_file) \\\n            and (\'model_source\' in mod or \'model_file\' in mod or \'schema_policy\' in mod):\n \n-            schemaName = portalTypeToSchemaName(portal_type)\n+            mtime = getattr(fti, "_p_mtime", None) or ""\n+            schemaName = portalTypeToSchemaName(portal_type, suffix=str(mtime))\n             schema = getattr(plone.dexterity.schema.generated, schemaName)\n \n             model = fti.lookupModel()\ndiff --git a/plone/dexterity/schema.py b/plone/dexterity/schema.py\nindex e7e5c83..0e1d41d 100644\n--- a/plone/dexterity/schema.py\n+++ b/plone/dexterity/schema.py\n@@ -302,6 +302,7 @@ class SchemaNameEncoder(object):\n         (\'.\', \'_2_\'),\n         (\'-\', \'_3_\'),\n         (\'/\', \'_4_\'),\n+        (\'|\', \'_5_\'),\n     )\n \n     def encode(self, s):\n@@ -321,11 +322,13 @@ def split(self, s):\n         return [self.decode(a) for a in s.split(\'_0_\')]\n \n \n-def portalTypeToSchemaName(portal_type, schema=u"", prefix=None):\n+def portalTypeToSchemaName(portal_type, schema=u"", prefix=None, suffix=None):\n     """Return a canonical interface name for a generated schema interface.\n     """\n     if prefix is None:\n         prefix = \'/\'.join(getUtility(ISiteRoot).getPhysicalPath())[1:]\n+    if suffix:\n+        prefix = \'|\'.join([prefix, suffix])\n \n     encoder = SchemaNameEncoder()\n     return encoder.join(prefix, portal_type, schema)\n@@ -377,7 +380,6 @@ def __call__(self, name, module):\n         module using setattr(). This means that the factory will not be\n         invoked again.\n         """\n-\n         try:\n             prefix, portal_type, schemaName = splitSchemaName(name)\n         except ValueError:\n@@ -412,6 +414,7 @@ def __call__(self, name, module):\n             if name in self._transient_SCHEMA_CACHE:\n                 del self._transient_SCHEMA_CACHE[name]\n \n+            log.debug("Dynamic schema generated: %s", name)\n             setattr(module, name, schema)\n \n         return schema\n'
 
