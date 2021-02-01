@@ -1,23 +1,37 @@
-Repository: plone.restapi
+Repository: plone.app.caching
 
 
-Branch: refs/heads/master
-Date: 2021-02-01T08:41:20+01:00
-Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/a4b5338dcfcc6bb8ca0ff64fa895521b2f8e6f0b
+Branch: refs/heads/2.x
+Date: 2021-02-01T11:00:24+01:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/93f8fb91dda67cfa2dc93980e65a12e13ed0ea60
 
-Fix href smart field in transformers do not cover the object_widget u… (#1055)
+Do not break if some custom code provides an alias for
+Products.Archetypes
 
-* Fix href smart field in transformers do not cover the object_widget use case
-
-* str is unicode in py2
+Fixes #72
 
 Files changed:
-A news/1054.bugfix
-M src/plone/restapi/deserializer/blocks.py
-M src/plone/restapi/serializer/blocks.py
-M src/plone/restapi/tests/test_blocks_deserializer.py
-M src/plone/restapi/tests/test_blocks_serializer.py
+A news/72.bugfix
+M plone/app/caching/caching.zcml
 
-b'diff --git a/news/1054.bugfix b/news/1054.bugfix\nnew file mode 100644\nindex 000000000..4e89c1c13\n--- /dev/null\n+++ b/news/1054.bugfix\n@@ -0,0 +1,2 @@\n+- Fix href smart field in transformers do not cover the object_widget use case\n+  [sneridagh]\ndiff --git a/src/plone/restapi/deserializer/blocks.py b/src/plone/restapi/deserializer/blocks.py\nindex 71ce429a9..d9780ca1e 100644\n--- a/src/plone/restapi/deserializer/blocks.py\n+++ b/src/plone/restapi/deserializer/blocks.py\n@@ -10,6 +10,7 @@\n from plone.uuid.interfaces import IUUID\n from plone.uuid.interfaces import IUUIDAware\n from Products.CMFPlone.interfaces import IPloneSiteRoot\n+from six import string_types\n from zope.component import adapter\n from zope.component import getMultiAdapter\n from zope.component import subscribers\n@@ -98,8 +99,12 @@ def __call__(self, block):\n         # Convert absolute links to resolveuid\n         for field in ["url", "href"]:\n             link = block.get(field, "")\n-            if link:\n+            if link and isinstance(link, string_types):\n                 block[field] = path2uid(context=self.context, link=link)\n+            elif link and isinstance(link, list):\n+                block[field] = [\n+                    path2uid(context=self.context, link=item) for item in link\n+                ]\n         return block\n \n \ndiff --git a/src/plone/restapi/serializer/blocks.py b/src/plone/restapi/serializer/blocks.py\nindex b00f35acc..7ecb7a784 100644\n--- a/src/plone/restapi/serializer/blocks.py\n+++ b/src/plone/restapi/serializer/blocks.py\n@@ -9,6 +9,7 @@\n from plone.restapi.serializer.dxfields import DefaultFieldSerializer\n from plone.schema import IJSONField\n from Products.CMFPlone.interfaces import IPloneSiteRoot\n+from six import string_types\n from zope.component import adapter\n from zope.component import queryMultiAdapter\n from zope.component import subscribers\n@@ -17,8 +18,9 @@\n from zope.publisher.interfaces.browser import IBrowserRequest\n \n import copy\n-import re\n import os\n+import re\n+\n \n RESOLVEUID_RE = re.compile("^[./]*resolve[Uu]id/([^/]*)/?(.*)$")\n \n@@ -84,7 +86,11 @@ def __init__(self, context, request):\n     def __call__(self, value):\n         for field in ["url", "href"]:\n             if field in value.keys():\n-                value[field] = uid_to_url(value.get(field, ""))\n+                link = value.get(field, "")\n+                if isinstance(link, string_types):\n+                    value[field] = uid_to_url(link)\n+                elif isinstance(link, list):\n+                    value[field] = [uid_to_url(item) for item in link]\n         return value\n \n \ndiff --git a/src/plone/restapi/tests/test_blocks_deserializer.py b/src/plone/restapi/tests/test_blocks_deserializer.py\nindex 687b6e5f5..420d7cf21 100644\n--- a/src/plone/restapi/tests/test_blocks_deserializer.py\n+++ b/src/plone/restapi/tests/test_blocks_deserializer.py\n@@ -216,3 +216,14 @@ def test_blocks_custom_block_doesnt_resolve_non_standard_fields(self):\n         self.assertEqual(\n             self.portal.doc1.blocks["123"]["link"], self.portal.doc1.absolute_url()\n         )\n+\n+    def test_deserialize_blocks_smart_href_array_volto_object_browser(self):\n+        self.deserialize(\n+            blocks={"123": {"@type": "foo", "href": [self.portal.doc1.absolute_url()]}}\n+        )\n+        doc_uid = IUUID(self.portal.doc1)\n+\n+        self.assertEqual(\n+            self.portal.doc1.blocks["123"]["href"][0],\n+            "../resolveuid/{}".format(doc_uid),\n+        )\ndiff --git a/src/plone/restapi/tests/test_blocks_serializer.py b/src/plone/restapi/tests/test_blocks_serializer.py\nindex 18425df3f..bdf29ae6d 100644\n--- a/src/plone/restapi/tests/test_blocks_serializer.py\n+++ b/src/plone/restapi/tests/test_blocks_serializer.py\n@@ -7,6 +7,7 @@\n from plone.restapi.interfaces import IBlockFieldSerializationTransformer\n from plone.restapi.interfaces import IFieldSerializer\n from plone.restapi.testing import PLONE_RESTAPI_DX_INTEGRATION_TESTING\n+from plone.uuid.interfaces import IUUID\n from z3c.form.interfaces import IDataManager\n from zope.component import adapter\n from zope.component import getMultiAdapter\n@@ -121,3 +122,14 @@ def __call__(self, value):\n \n         assert not getattr(self.portal.doc1, "_handler_called", False)\n         self.assertEqual(value["123"]["value"], u"text")\n+\n+    def test_serialize_blocks_smart_href_array_volto_object_browser(self):\n+        doc_uid = IUUID(self.portal.doc1)\n+        value = self.serialize(\n+            context=self.portal.doc1,\n+            blocks={\n+                "123": {"@type": "foo", "href": ["../resolveuid/{}".format(doc_uid)]}\n+            },\n+        )\n+\n+        self.assertEqual(value["123"]["href"][0], self.portal.doc1.absolute_url())\n'
+b'diff --git a/news/72.bugfix b/news/72.bugfix\nnew file mode 100644\nindex 0000000..1a2b9db\n--- /dev/null\n+++ b/news/72.bugfix\n@@ -0,0 +1 @@\n+Do not break if some custom code provides an alias for Products.Archetypes\ndiff --git a/plone/app/caching/caching.zcml b/plone/app/caching/caching.zcml\nindex ecacf81..c3edddb 100644\n--- a/plone/app/caching/caching.zcml\n+++ b/plone/app/caching/caching.zcml\n@@ -109,14 +109,14 @@\n     </configure>\n \n     <!-- Standard image content saved in an Archetype field, like ATImage scales-->\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n \n         <cache:ruleset ruleset="plone.content.file" for="Products.Archetypes.Field.Image" />\n \n     </configure>\n \n     <!-- Archetypes based folders and non-folderish content items -->\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n \n         <!-- These rely on the ContentItemLookup delegation -->\n         <cache:ruleset ruleset="plone.content.itemView"   for="Products.Archetypes.BaseContent.BaseContent" />\n@@ -162,7 +162,7 @@\n \n     <!-- Archetypes object fields -->\n     <configure zcml:condition="installed plone.app.blob">\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n         <adapter factory=".purge.ObjectFieldPurgePaths" name="plone.atobjectfields" />\n     </configure>\n     </configure>\n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/2.x
+Date: 2021-02-01T17:46:16+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.caching/commit/9bcbbfc7ee6ac975896d531822da51a749b5c94f
+
+Merge pull request #73 from plone/72-fixed
+
+Do not break if some custom code provides an alias for
+
+Files changed:
+A news/72.bugfix
+M plone/app/caching/caching.zcml
+
+b'diff --git a/news/72.bugfix b/news/72.bugfix\nnew file mode 100644\nindex 0000000..1a2b9db\n--- /dev/null\n+++ b/news/72.bugfix\n@@ -0,0 +1 @@\n+Do not break if some custom code provides an alias for Products.Archetypes\ndiff --git a/plone/app/caching/caching.zcml b/plone/app/caching/caching.zcml\nindex ecacf81..c3edddb 100644\n--- a/plone/app/caching/caching.zcml\n+++ b/plone/app/caching/caching.zcml\n@@ -109,14 +109,14 @@\n     </configure>\n \n     <!-- Standard image content saved in an Archetype field, like ATImage scales-->\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n \n         <cache:ruleset ruleset="plone.content.file" for="Products.Archetypes.Field.Image" />\n \n     </configure>\n \n     <!-- Archetypes based folders and non-folderish content items -->\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n \n         <!-- These rely on the ContentItemLookup delegation -->\n         <cache:ruleset ruleset="plone.content.itemView"   for="Products.Archetypes.BaseContent.BaseContent" />\n@@ -162,7 +162,7 @@\n \n     <!-- Archetypes object fields -->\n     <configure zcml:condition="installed plone.app.blob">\n-    <configure zcml:condition="installed Products.Archetypes">\n+    <configure zcml:condition="installed Products.Archetypes.atapi">\n         <adapter factory=".purge.ObjectFieldPurgePaths" name="plone.atobjectfields" />\n     </configure>\n     </configure>\n'
 
