@@ -6,6 +6,11 @@ See tox.ini.
 import os
 import sys
 
+if not len(sys.argv) == 2:
+    print("ERROR. Usage: create-constraints.py <directory with contraints files>")
+    sys.exit(1)
+directory = sys.argv[1]
+
 
 def parse_file(filename):
     mapping = {}
@@ -18,9 +23,9 @@ def parse_file(filename):
     return mapping
 
 
-constraints = "constraints.txt"
-constraints2 = "constraints2.txt"
-constraints3 = "constraints3.txt"
+constraints = os.path.join(directory, "constraints.txt")
+constraints3 = os.path.join(directory, "constraints3.txt")
+constraints2 = os.path.join(directory, "constraints2.txt")
 for filename in (constraints2, constraints3):
     if not os.path.exists(filename):
         print(f"ERROR: {filename} does not exist.")
