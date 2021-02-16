@@ -8,6 +8,8 @@ zc.buildout needs to be importable in that python.
 """
 from zc.buildout import buildout
 
+import sys
+
 
 # We could read a buildout config filename from the command line arguments,
 # but for now it is fine to hardcode it:
@@ -18,7 +20,8 @@ config = buildout.Buildout(configfile, [])
 # Nice: the versions get set directly on the config.
 # Note: this works like a dictionary, but is a class 'zc.buildout.buildout.Options'.
 versions = config.versions
-constraints_file = "constraints.txt"
+constraints_file = "constraints{}.txt".format(sys.version_info.major)
+
 with open(constraints_file, "w") as cfile:
     cfile.write("# File created by {}\n".format(__file__))
     cfile.write("# Constraints parsed from {}\n".format(configfile))
