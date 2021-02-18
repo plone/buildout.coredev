@@ -12,6 +12,14 @@ import os
 import sys
 
 
+# List packages that we should not include for a Python version.
+# This is for when we have no control over it: the pin is in Zope versions.
+BLACKLIST2 = [
+    # These are packages that cannot be installed by pip on Python 2.
+    "sphinxcontrib-serializinghtml",
+]
+BLACKLIST3 = []
+
 # We could hardcode paths here, but working directories in tox confuse me.
 if not len(sys.argv) == 3:
     print("ERROR. Usage: create-constraints.py buildout.cfg constraints.txt")
@@ -30,6 +38,12 @@ with open(constraints_file, "w") as cfile:
     cfile.write("# File created by {}\n".format(__file__))
     cfile.write("# Constraints parsed from {}\n".format(config_file))
     for package, version in sorted(versions.items()):
+        if sys.version_info.major == 2 and package in BLACKLIST2:
+            print("Ignoring blacklisted package {}".format(package))
+            continue
+        if sys.version_info.major == 3 and package in BLACKLIST3:
+            print("Ignoring blacklisted package {}".format(package))
+            continue
         cfile.write("{}=={}\n".format(package, version))
 
 print("Wrote all versions as constraints to {}".format(constraints_file))
