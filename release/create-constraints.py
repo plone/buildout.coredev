@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-Parse versions from buildout.cfg and write them into constraints.txt.
-This script is automatically called by buildout.
+"""Parse versions from buildout.cfg and write them into constraints.txt.
+
+This script is called by 'tox -c release/tox.ini -e constraints2 or constraints3
+
+It must work in both Python 2 and 3.
 
 Manual usage: bin/python create-constraints.py
 zc.buildout needs to be importable in that python.

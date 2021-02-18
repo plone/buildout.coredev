@@ -2,12 +2,13 @@
 """Combine constraints2.txt and constraints3.txt into constraints.txt.
 
 See tox.ini.
+This is Python 3 only.
 """
 import os
 import sys
 
 if not len(sys.argv) == 2:
-    print("ERROR. Usage: create-constraints.py <directory with contraints files>")
+    print("ERROR. Usage: combine-constraints.py <directory with contraints files>")
     sys.exit(1)
 directory = sys.argv[1]
 
