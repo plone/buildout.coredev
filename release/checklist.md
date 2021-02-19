@@ -24,7 +24,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
   - [ ] Get the versions.cfg file from coredev.
   - [ ] Create a `constraints.txt` from this. The above tox command generates this and puts it in `release/dist`.
   - [ ] Copy (`rsync`) all core packages and the other files to the pending release directory. I think we mostly do this so we have a backup if a version gets removed from PyPI.
-- [ ] Write a post on community.plone.org announcing a pending/soft release. See [example](https://community.plone.org/t/plone-5-2-1-soft-released/11098)
+- [ ] Write a post on community.plone.org announcing a pending/soft release. See [example](https://community.plone.org/t/plone-5-2-4-soft-released/13495)
 - [ ] Wait for feedback, preferably at most a few days.
 - [ ] Make final release of `Products.CMFPlone` to PyPI, update `versions.cfg`.
 - [ ] Create tag of the release branch, e.g. 5.2.4, and push to GitHub.
