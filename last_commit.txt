@@ -1,95 +1,78 @@
-Repository: plone.restapi
+Repository: plone.app.linkintegrity
 
 
 Branch: refs/heads/master
-Date: 2021-02-11T17:01:49+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/99708b3acba164b9e17b31eb00718fadc0af18b0
+Date: 2021-01-15T18:42:41+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/b8bd2027b0fac1ec403e8e03ef13728e9d7448cc
 
-respect access inactive content permission in search
+Fix Unauthorized when editing page with link to page you cannot see.
+
+Fixes https://github.com/plone/plone.app.linkintegrity/issues/79.
+
+```
+http://localhost:8080/Plone/pageb/@@edit
+Traceback (innermost last):
+  Module ZPublisher.WSGIPublisher, line 162, in transaction_pubevents
+  Module ZPublisher.WSGIPublisher, line 371, in publish_module
+  Module ZPublisher.WSGIPublisher, line 274, in publish
+  Module ZPublisher.mapply, line 85, in mapply
+  Module ZPublisher.WSGIPublisher, line 63, in call_object
+  Module plone.z3cform.layout, line 63, in __call__
+  Module plone.z3cform.layout, line 47, in update
+  Module plone.dexterity.browser.edit, line 58, in update
+  Module plone.z3cform.fieldsets.extensible, line 65, in update
+  Module plone.z3cform.patch, line 30, in GroupForm_update
+  Module z3c.form.group, line 145, in update
+  Module plone.app.z3cform.csrf, line 22, in execute
+  Module z3c.form.action, line 98, in execute
+  Module z3c.form.button, line 315, in __call__
+  Module z3c.form.button, line 170, in __call__
+  Module plone.dexterity.browser.edit, line 30, in handleApply
+  Module z3c.form.group, line 126, in applyChanges
+  Module zope.event, line 32, in notify
+  Module zope.component.event, line 27, in dispatch
+  Module zope.component._api, line 134, in subscribers
+  Module zope.interface.registry, line 448, in subscribers
+  Module zope.interface.adapter, line 619, in subscribers
+  Module zope.component.event, line 36, in objectEventNotify
+  Module zope.component._api, line 134, in subscribers
+  Module zope.interface.registry, line 448, in subscribers
+  Module zope.interface.adapter, line 619, in subscribers
+  Module plone.app.linkintegrity.handlers, line 109, in modifiedContent
+  Module plone.app.linkintegrity.handlers, line 89, in getObjectsFromLinks
+  Module plone.app.linkintegrity.handlers, line 49, in findObject
+  Module plone.app.uuid.utils, line 39, in uuidToObject
+  Module Products.ZCatalog.CatalogBrains, line 91, in getObject
+  Module OFS.Traversable, line 360, in restrictedTraverse
+  Module OFS.Traversable, line 292, in unrestrictedTraverse
+   - __traceback_info__: ([], 'pagea')
+Unauthorized: You are not allowed to access 'pagea' in this context
+```
 
 Files changed:
-M src/plone/restapi/search/handler.py
-M src/plone/restapi/tests/test_search.py
+A news/79.bugfix
+M plone/app/linkintegrity/handlers.py
+M plone/app/linkintegrity/tests/test_handlers.py
 
-b'diff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 032435003..c8b26aef7 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -76,10 +76,9 @@ def search(self, query=None):\n \n         self._constrain_query_by_path(query)\n         query = self._parse_query(query)\n-\n-        lazy_resultset = self.catalog.searchResults(query)\n-        results = getMultiAdapter((lazy_resultset, self.request), ISerializeToJson)(\n-            fullobjects=fullobjects\n-        )\n+        lazy_resultset = self.catalog.searchResults(**query)\n+        results = getMultiAdapter(\n+            (lazy_resultset, self.request), ISerializeToJson\n+        )(fullobjects=fullobjects)\n \n         return results\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 859349d4f..c7f3ece67 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -37,10 +37,25 @@ def setUp(self):\n         self.api_session.headers.update({"Accept": "application/json"})\n         self.api_session.auth = (SITE_OWNER_NAME, SITE_OWNER_PASSWORD)\n \n+        api.user.create(\n+            email="editor@example.com",\n+            username="editoruser",\n+            password="secret",\n+        )\n+        api.user.create(\n+            email="editor@example.com",\n+            username="localeditor",\n+            password="secret",\n+        )\n+\n         # /plone/folder\n         self.folder = createContentInContainer(\n             self.portal, u"Folder", id=u"folder", title=u"Some Folder"\n         )\n+        api.user.grant_roles(username="editoruser", roles=["Editor"])\n+        api.user.grant_roles(\n+            username="localeditor", obj=self.folder, roles=["Editor", "Reader"]\n+        )\n \n         # /plone/folder/doc\n         self.doc = createContentInContainer(\n@@ -587,6 +602,56 @@ def test_uuid_index_query(self):\n         response = self.api_session.get("/@search", params=query)\n         self.assertEqual([u"/plone/folder/doc"], result_paths(response.json()))\n \n+    def test_respect_access_inactive_permission(self):\n+        # admin can see everything\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 6)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n+\n+        # not admin users can\'t see expired items\n+        self.api_session.auth = ("editoruser", "secret")\n+\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 3)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 0)\n+\n+        # now grant permission to Editor to access inactive content\n+        self.portal.manage_permission(\n+            "Access inactive portal content", roles=["Manager", "Editor"]\n+        )\n+        transaction.commit()\n+\n+        # \xc2\xa0portal-enabled Editor can see expired contents\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 6)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n+\n+        # local-enabled Editor can only access expired contents inside folder\n+        self.api_session.auth = ("localeditor", "secret")\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 1)\n+        response = self.api_session.get(\n+            "/@search", params={"path": "/plone/folder"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 3)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 0)\n+        response = self.api_session.get(\n+            "/@search",\n+            params={"Title": "Lorem Ipsum", "path": "/plone/folder"},\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n \n class TestSearchATFunctional(unittest.TestCase):\n     layer = PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n'
+b'diff --git a/news/79.bugfix b/news/79.bugfix\nnew file mode 100644\nindex 0000000..2e81351\n--- /dev/null\n+++ b/news/79.bugfix\n@@ -0,0 +1,3 @@\n+Fix Unauthorized exception when you edit a page that links to another page that you are not allowed to see.\n+Fixes `issue 79 <https://github.com/plone/plone.app.linkintegrity/issues/79>`_.\n+[maurits]\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex 3c9ea8d..ff859b2 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -5,7 +5,7 @@\n from plone.app.linkintegrity.interfaces import IRetriever\n from plone.app.linkintegrity.utils import ensure_intid\n from plone.app.linkintegrity.utils import referencedRelationship\n-from plone.app.uuid.utils import uuidToObject\n+from plone.app.uuid.utils import uuidToCatalogBrain\n from plone.dexterity.interfaces import IDexterityContent\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n@@ -46,9 +46,17 @@ def findObject(base, path):\n     # on a view or skinscript to do this for us.\n     if \'resolveuid\' in components:\n         uid = components[components.index(\'resolveuid\') + 1]\n-        obj = uuidToObject(uid)\n-        if obj:\n-            return obj, path\n+        # This may be a link to a page that once was published but not anymore,\n+        # or the current editor does not have View permission.\n+        # In that case uuidToObject(uid) could fail with Unauthorized.\n+        brain = uuidToCatalogBrain(uid)\n+        if brain is not None:\n+            # Note: _unrestrictedGetObject starts with an underscore,\n+            # but it is documented in ZCatalog.interfaces,\n+            # so should be safe to rely on.\n+            obj = brain._unrestrictedGetObject()\n+            if obj:\n+                return obj, path\n \n     while components:\n         child_id = unquote(components[0])\ndiff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py\nindex b4ec594..2cd0310 100644\n--- a/plone/app/linkintegrity/tests/test_handlers.py\n+++ b/plone/app/linkintegrity/tests/test_handlers.py\n@@ -1,6 +1,8 @@\n # -*- coding: utf-8 -*-\n from plone.app.linkintegrity.handlers import findObject\n+from plone.app.linkintegrity.testing import create\n from plone.app.linkintegrity.tests.base import DXBaseTestCase\n+from plone.app.testing import logout\n \n import six\n \n@@ -31,6 +33,24 @@ def test_webserver_rewrites_portal_name(self):\n         self.assertEqual(obj.getPhysicalPath(), (\'\', \'plone\', \'doc2\'))\n         self.assertEqual(components, \'\')\n \n+    def test_uuid_link(self):\n+        # Test that objects can be found from uuid links.\n+        create(self.portal, \'Document\', id=\'target\', title=\'Target\')\n+        target = self.portal.target\n+        target_uid = target.UID()\n+        path = "../resolveuid/{}".format(target_uid)\n+\n+        # We logout.  This is to check that findObject also finds objects\n+        # that are not visible to the current user, like a private page.\n+        # See https://github.com/plone/plone.app.linkintegrity/issues/79\n+        # Note that in the Archetypes tests this is no problem,\n+        # but for Dexterity it is.  Likely they use a different workflow.\n+        logout()\n+\n+        obj, components = findObject(self.portal.doc1, path)\n+        self.assertEqual(obj.absolute_url_path(), \'/plone/target\')\n+        self.assertEqual(components, path)\n+\n \n class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):\n     """findObject testcase for dx content types"""\n'
 
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-02-11T17:02:10+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/69fe6ca5c91c08995299482d534e6aa970e4ebbc
-
-respect access inactive content permission in search
-
-Files changed:
-M src/plone/restapi/tests/test_search.py
-
-b'diff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex c7f3ece67..f12fd974d 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -653,6 +653,7 @@ def test_respect_access_inactive_permission(self):\n         ).json()\n         self.assertEqual(response["items_total"], 1)\n \n+\n class TestSearchATFunctional(unittest.TestCase):\n     layer = PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n \n'
-
-Repository: plone.restapi
+Repository: plone.app.linkintegrity
 
 
 Branch: refs/heads/master
-Date: 2021-02-11T17:16:51+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/04c4f6e49d2c9e0cba11003ea3c2100a61b657dc
-
-add changelogg
-
-Files changed:
-A news/1066.bugfix
-
-b'diff --git a/news/1066.bugfix b/news/1066.bugfix\nnew file mode 100644\nindex 000000000..58fed2e1e\n--- /dev/null\n+++ b/news/1066.bugfix\n@@ -0,0 +1 @@\n+Respect "Access inactive portal content" permission in @search endpoint [cekk]\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-02-11T17:47:21+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/98d23aca0ab8e8d7e3c66bbe34df5abb9887444d
-
-fix black
-
-Files changed:
-M src/plone/restapi/search/handler.py
-
-b'diff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex c8b26aef7..1b310aee8 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -77,8 +77,8 @@ def search(self, query=None):\n         self._constrain_query_by_path(query)\n         query = self._parse_query(query)\n         lazy_resultset = self.catalog.searchResults(**query)\n-        results = getMultiAdapter(\n-            (lazy_resultset, self.request), ISerializeToJson\n-        )(fullobjects=fullobjects)\n+        results = getMultiAdapter((lazy_resultset, self.request), ISerializeToJson)(\n+            fullobjects=fullobjects\n+        )\n \n         return results\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-02-12T17:18:08+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/49b03fbaab514592e0d4d1fffb7b692459157daa
-
-skip test for plone 4
-
-Files changed:
-M src/plone/restapi/tests/test_search.py
-
-b'diff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex f12fd974d..64c158d6f 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -21,6 +21,13 @@\n import transaction\n import unittest\n \n+try:\n+    from Products.CMFPlone.factory import _IMREALLYPLONE5  # noqa\n+except ImportError:\n+    PLONE5 = False\n+else:\n+    PLONE5 = True\n+\n \n class TestSearchFunctional(unittest.TestCase):\n \n@@ -602,6 +609,9 @@ def test_uuid_index_query(self):\n         response = self.api_session.get("/@search", params=query)\n         self.assertEqual([u"/plone/folder/doc"], result_paths(response.json()))\n \n+    @unittest.skipIf(\n+        not PLONE5, "searchResults in Plone 4 does not handle correctly that permission"\n+    )\n     def test_respect_access_inactive_permission(self):\n         # admin can see everything\n         response = self.api_session.get("/@search", params={}).json()\n@@ -642,6 +652,7 @@ def test_respect_access_inactive_permission(self):\n         response = self.api_session.get(\n             "/@search", params={"path": "/plone/folder"}\n         ).json()\n+\n         self.assertEqual(response["items_total"], 3)\n         response = self.api_session.get(\n             "/@search", params={"Title": "Lorem Ipsum"}\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-02-23T08:51:55+01:00
+Date: 2021-02-23T08:59:38+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.restapi/commit/f556893791fba75d5cbd8d0b0030436be5cdf386
+Commit: https://github.com/plone/plone.app.linkintegrity/commit/18d511a8d193054aa202b9cd1a65a9b8d00ea538
 
-Merge pull request #1066 from plone/respect_access_inactive_permission
+Merge pull request #80 from plone/maurits/issue-79-fix-unauthorized-on-edit
 
-Respect access inactive content permission in @search
+Fix Unauthorized when editing page with link to page you cannot see.
 
 Files changed:
-A news/1066.bugfix
-M src/plone/restapi/search/handler.py
-M src/plone/restapi/tests/test_search.py
+A news/79.bugfix
+M plone/app/linkintegrity/handlers.py
+M plone/app/linkintegrity/tests/test_handlers.py
 
-b'diff --git a/news/1066.bugfix b/news/1066.bugfix\nnew file mode 100644\nindex 000000000..58fed2e1e\n--- /dev/null\n+++ b/news/1066.bugfix\n@@ -0,0 +1 @@\n+Respect "Access inactive portal content" permission in @search endpoint [cekk]\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 032435003..1b310aee8 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -76,8 +76,7 @@ def search(self, query=None):\n \n         self._constrain_query_by_path(query)\n         query = self._parse_query(query)\n-\n-        lazy_resultset = self.catalog.searchResults(query)\n+        lazy_resultset = self.catalog.searchResults(**query)\n         results = getMultiAdapter((lazy_resultset, self.request), ISerializeToJson)(\n             fullobjects=fullobjects\n         )\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 859349d4f..64c158d6f 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -21,6 +21,13 @@\n import transaction\n import unittest\n \n+try:\n+    from Products.CMFPlone.factory import _IMREALLYPLONE5  # noqa\n+except ImportError:\n+    PLONE5 = False\n+else:\n+    PLONE5 = True\n+\n \n class TestSearchFunctional(unittest.TestCase):\n \n@@ -37,10 +44,25 @@ def setUp(self):\n         self.api_session.headers.update({"Accept": "application/json"})\n         self.api_session.auth = (SITE_OWNER_NAME, SITE_OWNER_PASSWORD)\n \n+        api.user.create(\n+            email="editor@example.com",\n+            username="editoruser",\n+            password="secret",\n+        )\n+        api.user.create(\n+            email="editor@example.com",\n+            username="localeditor",\n+            password="secret",\n+        )\n+\n         # /plone/folder\n         self.folder = createContentInContainer(\n             self.portal, u"Folder", id=u"folder", title=u"Some Folder"\n         )\n+        api.user.grant_roles(username="editoruser", roles=["Editor"])\n+        api.user.grant_roles(\n+            username="localeditor", obj=self.folder, roles=["Editor", "Reader"]\n+        )\n \n         # /plone/folder/doc\n         self.doc = createContentInContainer(\n@@ -587,6 +609,61 @@ def test_uuid_index_query(self):\n         response = self.api_session.get("/@search", params=query)\n         self.assertEqual([u"/plone/folder/doc"], result_paths(response.json()))\n \n+    @unittest.skipIf(\n+        not PLONE5, "searchResults in Plone 4 does not handle correctly that permission"\n+    )\n+    def test_respect_access_inactive_permission(self):\n+        # admin can see everything\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 6)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n+\n+        # not admin users can\'t see expired items\n+        self.api_session.auth = ("editoruser", "secret")\n+\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 3)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 0)\n+\n+        # now grant permission to Editor to access inactive content\n+        self.portal.manage_permission(\n+            "Access inactive portal content", roles=["Manager", "Editor"]\n+        )\n+        transaction.commit()\n+\n+        # \xc2\xa0portal-enabled Editor can see expired contents\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 6)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n+\n+        # local-enabled Editor can only access expired contents inside folder\n+        self.api_session.auth = ("localeditor", "secret")\n+        response = self.api_session.get("/@search", params={}).json()\n+        self.assertEqual(response["items_total"], 1)\n+        response = self.api_session.get(\n+            "/@search", params={"path": "/plone/folder"}\n+        ).json()\n+\n+        self.assertEqual(response["items_total"], 3)\n+        response = self.api_session.get(\n+            "/@search", params={"Title": "Lorem Ipsum"}\n+        ).json()\n+        self.assertEqual(response["items_total"], 0)\n+        response = self.api_session.get(\n+            "/@search",\n+            params={"Title": "Lorem Ipsum", "path": "/plone/folder"},\n+        ).json()\n+        self.assertEqual(response["items_total"], 1)\n+\n \n class TestSearchATFunctional(unittest.TestCase):\n     layer = PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n'
+b'diff --git a/news/79.bugfix b/news/79.bugfix\nnew file mode 100644\nindex 0000000..2e81351\n--- /dev/null\n+++ b/news/79.bugfix\n@@ -0,0 +1,3 @@\n+Fix Unauthorized exception when you edit a page that links to another page that you are not allowed to see.\n+Fixes `issue 79 <https://github.com/plone/plone.app.linkintegrity/issues/79>`_.\n+[maurits]\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex 3c9ea8d..ff859b2 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -5,7 +5,7 @@\n from plone.app.linkintegrity.interfaces import IRetriever\n from plone.app.linkintegrity.utils import ensure_intid\n from plone.app.linkintegrity.utils import referencedRelationship\n-from plone.app.uuid.utils import uuidToObject\n+from plone.app.uuid.utils import uuidToCatalogBrain\n from plone.dexterity.interfaces import IDexterityContent\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n@@ -46,9 +46,17 @@ def findObject(base, path):\n     # on a view or skinscript to do this for us.\n     if \'resolveuid\' in components:\n         uid = components[components.index(\'resolveuid\') + 1]\n-        obj = uuidToObject(uid)\n-        if obj:\n-            return obj, path\n+        # This may be a link to a page that once was published but not anymore,\n+        # or the current editor does not have View permission.\n+        # In that case uuidToObject(uid) could fail with Unauthorized.\n+        brain = uuidToCatalogBrain(uid)\n+        if brain is not None:\n+            # Note: _unrestrictedGetObject starts with an underscore,\n+            # but it is documented in ZCatalog.interfaces,\n+            # so should be safe to rely on.\n+            obj = brain._unrestrictedGetObject()\n+            if obj:\n+                return obj, path\n \n     while components:\n         child_id = unquote(components[0])\ndiff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py\nindex b4ec594..2cd0310 100644\n--- a/plone/app/linkintegrity/tests/test_handlers.py\n+++ b/plone/app/linkintegrity/tests/test_handlers.py\n@@ -1,6 +1,8 @@\n # -*- coding: utf-8 -*-\n from plone.app.linkintegrity.handlers import findObject\n+from plone.app.linkintegrity.testing import create\n from plone.app.linkintegrity.tests.base import DXBaseTestCase\n+from plone.app.testing import logout\n \n import six\n \n@@ -31,6 +33,24 @@ def test_webserver_rewrites_portal_name(self):\n         self.assertEqual(obj.getPhysicalPath(), (\'\', \'plone\', \'doc2\'))\n         self.assertEqual(components, \'\')\n \n+    def test_uuid_link(self):\n+        # Test that objects can be found from uuid links.\n+        create(self.portal, \'Document\', id=\'target\', title=\'Target\')\n+        target = self.portal.target\n+        target_uid = target.UID()\n+        path = "../resolveuid/{}".format(target_uid)\n+\n+        # We logout.  This is to check that findObject also finds objects\n+        # that are not visible to the current user, like a private page.\n+        # See https://github.com/plone/plone.app.linkintegrity/issues/79\n+        # Note that in the Archetypes tests this is no problem,\n+        # but for Dexterity it is.  Likely they use a different workflow.\n+        logout()\n+\n+        obj, components = findObject(self.portal.doc1, path)\n+        self.assertEqual(obj.absolute_url_path(), \'/plone/target\')\n+        self.assertEqual(components, path)\n+\n \n class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):\n     """findObject testcase for dx content types"""\n'
 
