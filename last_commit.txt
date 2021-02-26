@@ -1,78 +1,19 @@
-Repository: plone.app.linkintegrity
+Repository: plone.api
 
 
 Branch: refs/heads/master
-Date: 2021-01-15T18:42:41+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/b8bd2027b0fac1ec403e8e03ef13728e9d7448cc
+Date: 2021-02-26T11:26:06+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/92a78755fe4966eb6ae73f6f7c8c8c2c9c77e4b9
 
-Fix Unauthorized when editing page with link to page you cannot see.
+Fix plone.api.content.find to respect object_provides "not" queries.
 
-Fixes https://github.com/plone/plone.app.linkintegrity/issues/79.
-
-```
-http://localhost:8080/Plone/pageb/@@edit
-Traceback (innermost last):
-  Module ZPublisher.WSGIPublisher, line 162, in transaction_pubevents
-  Module ZPublisher.WSGIPublisher, line 371, in publish_module
-  Module ZPublisher.WSGIPublisher, line 274, in publish
-  Module ZPublisher.mapply, line 85, in mapply
-  Module ZPublisher.WSGIPublisher, line 63, in call_object
-  Module plone.z3cform.layout, line 63, in __call__
-  Module plone.z3cform.layout, line 47, in update
-  Module plone.dexterity.browser.edit, line 58, in update
-  Module plone.z3cform.fieldsets.extensible, line 65, in update
-  Module plone.z3cform.patch, line 30, in GroupForm_update
-  Module z3c.form.group, line 145, in update
-  Module plone.app.z3cform.csrf, line 22, in execute
-  Module z3c.form.action, line 98, in execute
-  Module z3c.form.button, line 315, in __call__
-  Module z3c.form.button, line 170, in __call__
-  Module plone.dexterity.browser.edit, line 30, in handleApply
-  Module z3c.form.group, line 126, in applyChanges
-  Module zope.event, line 32, in notify
-  Module zope.component.event, line 27, in dispatch
-  Module zope.component._api, line 134, in subscribers
-  Module zope.interface.registry, line 448, in subscribers
-  Module zope.interface.adapter, line 619, in subscribers
-  Module zope.component.event, line 36, in objectEventNotify
-  Module zope.component._api, line 134, in subscribers
-  Module zope.interface.registry, line 448, in subscribers
-  Module zope.interface.adapter, line 619, in subscribers
-  Module plone.app.linkintegrity.handlers, line 109, in modifiedContent
-  Module plone.app.linkintegrity.handlers, line 89, in getObjectsFromLinks
-  Module plone.app.linkintegrity.handlers, line 49, in findObject
-  Module plone.app.uuid.utils, line 39, in uuidToObject
-  Module Products.ZCatalog.CatalogBrains, line 91, in getObject
-  Module OFS.Traversable, line 360, in restrictedTraverse
-  Module OFS.Traversable, line 292, in unrestrictedTraverse
-   - __traceback_info__: ([], 'pagea')
-Unauthorized: You are not allowed to access 'pagea' in this context
-```
+Fixes: #451
 
 Files changed:
-A news/79.bugfix
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/tests/test_handlers.py
+A news/452.bugfix
+M src/plone/api/content.py
+M src/plone/api/tests/test_content.py
 
-b'diff --git a/news/79.bugfix b/news/79.bugfix\nnew file mode 100644\nindex 0000000..2e81351\n--- /dev/null\n+++ b/news/79.bugfix\n@@ -0,0 +1,3 @@\n+Fix Unauthorized exception when you edit a page that links to another page that you are not allowed to see.\n+Fixes `issue 79 <https://github.com/plone/plone.app.linkintegrity/issues/79>`_.\n+[maurits]\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex 3c9ea8d..ff859b2 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -5,7 +5,7 @@\n from plone.app.linkintegrity.interfaces import IRetriever\n from plone.app.linkintegrity.utils import ensure_intid\n from plone.app.linkintegrity.utils import referencedRelationship\n-from plone.app.uuid.utils import uuidToObject\n+from plone.app.uuid.utils import uuidToCatalogBrain\n from plone.dexterity.interfaces import IDexterityContent\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n@@ -46,9 +46,17 @@ def findObject(base, path):\n     # on a view or skinscript to do this for us.\n     if \'resolveuid\' in components:\n         uid = components[components.index(\'resolveuid\') + 1]\n-        obj = uuidToObject(uid)\n-        if obj:\n-            return obj, path\n+        # This may be a link to a page that once was published but not anymore,\n+        # or the current editor does not have View permission.\n+        # In that case uuidToObject(uid) could fail with Unauthorized.\n+        brain = uuidToCatalogBrain(uid)\n+        if brain is not None:\n+            # Note: _unrestrictedGetObject starts with an underscore,\n+            # but it is documented in ZCatalog.interfaces,\n+            # so should be safe to rely on.\n+            obj = brain._unrestrictedGetObject()\n+            if obj:\n+                return obj, path\n \n     while components:\n         child_id = unquote(components[0])\ndiff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py\nindex b4ec594..2cd0310 100644\n--- a/plone/app/linkintegrity/tests/test_handlers.py\n+++ b/plone/app/linkintegrity/tests/test_handlers.py\n@@ -1,6 +1,8 @@\n # -*- coding: utf-8 -*-\n from plone.app.linkintegrity.handlers import findObject\n+from plone.app.linkintegrity.testing import create\n from plone.app.linkintegrity.tests.base import DXBaseTestCase\n+from plone.app.testing import logout\n \n import six\n \n@@ -31,6 +33,24 @@ def test_webserver_rewrites_portal_name(self):\n         self.assertEqual(obj.getPhysicalPath(), (\'\', \'plone\', \'doc2\'))\n         self.assertEqual(components, \'\')\n \n+    def test_uuid_link(self):\n+        # Test that objects can be found from uuid links.\n+        create(self.portal, \'Document\', id=\'target\', title=\'Target\')\n+        target = self.portal.target\n+        target_uid = target.UID()\n+        path = "../resolveuid/{}".format(target_uid)\n+\n+        # We logout.  This is to check that findObject also finds objects\n+        # that are not visible to the current user, like a private page.\n+        # See https://github.com/plone/plone.app.linkintegrity/issues/79\n+        # Note that in the Archetypes tests this is no problem,\n+        # but for Dexterity it is.  Likely they use a different workflow.\n+        logout()\n+\n+        obj, components = findObject(self.portal.doc1, path)\n+        self.assertEqual(obj.absolute_url_path(), \'/plone/target\')\n+        self.assertEqual(components, path)\n+\n \n class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):\n     """findObject testcase for dx content types"""\n'
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2021-02-23T08:59:38+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/18d511a8d193054aa202b9cd1a65a9b8d00ea538
-
-Merge pull request #80 from plone/maurits/issue-79-fix-unauthorized-on-edit
-
-Fix Unauthorized when editing page with link to page you cannot see.
-
-Files changed:
-A news/79.bugfix
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/tests/test_handlers.py
-
-b'diff --git a/news/79.bugfix b/news/79.bugfix\nnew file mode 100644\nindex 0000000..2e81351\n--- /dev/null\n+++ b/news/79.bugfix\n@@ -0,0 +1,3 @@\n+Fix Unauthorized exception when you edit a page that links to another page that you are not allowed to see.\n+Fixes `issue 79 <https://github.com/plone/plone.app.linkintegrity/issues/79>`_.\n+[maurits]\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex 3c9ea8d..ff859b2 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -5,7 +5,7 @@\n from plone.app.linkintegrity.interfaces import IRetriever\n from plone.app.linkintegrity.utils import ensure_intid\n from plone.app.linkintegrity.utils import referencedRelationship\n-from plone.app.uuid.utils import uuidToObject\n+from plone.app.uuid.utils import uuidToCatalogBrain\n from plone.dexterity.interfaces import IDexterityContent\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n@@ -46,9 +46,17 @@ def findObject(base, path):\n     # on a view or skinscript to do this for us.\n     if \'resolveuid\' in components:\n         uid = components[components.index(\'resolveuid\') + 1]\n-        obj = uuidToObject(uid)\n-        if obj:\n-            return obj, path\n+        # This may be a link to a page that once was published but not anymore,\n+        # or the current editor does not have View permission.\n+        # In that case uuidToObject(uid) could fail with Unauthorized.\n+        brain = uuidToCatalogBrain(uid)\n+        if brain is not None:\n+            # Note: _unrestrictedGetObject starts with an underscore,\n+            # but it is documented in ZCatalog.interfaces,\n+            # so should be safe to rely on.\n+            obj = brain._unrestrictedGetObject()\n+            if obj:\n+                return obj, path\n \n     while components:\n         child_id = unquote(components[0])\ndiff --git a/plone/app/linkintegrity/tests/test_handlers.py b/plone/app/linkintegrity/tests/test_handlers.py\nindex b4ec594..2cd0310 100644\n--- a/plone/app/linkintegrity/tests/test_handlers.py\n+++ b/plone/app/linkintegrity/tests/test_handlers.py\n@@ -1,6 +1,8 @@\n # -*- coding: utf-8 -*-\n from plone.app.linkintegrity.handlers import findObject\n+from plone.app.linkintegrity.testing import create\n from plone.app.linkintegrity.tests.base import DXBaseTestCase\n+from plone.app.testing import logout\n \n import six\n \n@@ -31,6 +33,24 @@ def test_webserver_rewrites_portal_name(self):\n         self.assertEqual(obj.getPhysicalPath(), (\'\', \'plone\', \'doc2\'))\n         self.assertEqual(components, \'\')\n \n+    def test_uuid_link(self):\n+        # Test that objects can be found from uuid links.\n+        create(self.portal, \'Document\', id=\'target\', title=\'Target\')\n+        target = self.portal.target\n+        target_uid = target.UID()\n+        path = "../resolveuid/{}".format(target_uid)\n+\n+        # We logout.  This is to check that findObject also finds objects\n+        # that are not visible to the current user, like a private page.\n+        # See https://github.com/plone/plone.app.linkintegrity/issues/79\n+        # Note that in the Archetypes tests this is no problem,\n+        # but for Dexterity it is.  Likely they use a different workflow.\n+        logout()\n+\n+        obj, components = findObject(self.portal.doc1, path)\n+        self.assertEqual(obj.absolute_url_path(), \'/plone/target\')\n+        self.assertEqual(components, path)\n+\n \n class ReferenceGenerationDXTestCase(DXBaseTestCase, FindObjectTests):\n     """findObject testcase for dx content types"""\n'
+b'diff --git a/news/452.bugfix b/news/452.bugfix\nnew file mode 100644\nindex 0000000..6e802e0\n--- /dev/null\n+++ b/news/452.bugfix\n@@ -0,0 +1,3 @@\n+Fix plone.api.content.find to respect object_provides "not" queries.\n+Fixes: #451\n+[thet]\ndiff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex a5706dc..7a47288 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -594,18 +594,35 @@ def _parse_object_provides_query(query):\n         query for multiple values\n         (eg. `{\'query\': [Iface1, Iface2], \'operator\': \'or\'}`)\n     """\n-    operator = \'or\'\n     ifaces = query\n+    operator = \'or\'\n+    query_not = []\n+\n     if isinstance(query, dict):\n-        operator = query.get(\'operator\', operator)\n         ifaces = query.get(\'query\', [])\n-    elif not isinstance(query, (list, tuple)):\n-        ifaces = [query]\n+        operator = query.get(\'operator\', operator)\n+        query_not = query.get(\'not\', [])\n+        # KeywordIndex also supports "range",\n+        # but that\'s not useful for querying object_provides\n+\n+    if not isinstance(ifaces, (list, tuple)):\n+        ifaces = [ifaces]\n+    ifaces = [getattr(x, \'__identifier__\', x) for x in ifaces]\n+\n+    if not isinstance(query_not, (list, tuple)):\n+        query_not = [query_not]\n+    query_not = [getattr(x, \'__identifier__\', x) for x in query_not]\n+\n+    result = {}\n+\n+    if ifaces:\n+        result[\'query\'] = ifaces\n+        result[\'operator\'] = operator\n+\n+    if query_not:\n+        result[\'not\'] = query_not\n \n-    return {\n-        \'query\': [getattr(x, \'__identifier__\', x) for x in ifaces],\n-        \'operator\': operator,\n-    }\n+    return result\n \n \n def find(context=None, depth=None, **kwargs):\ndiff --git a/src/plone/api/tests/test_content.py b/src/plone/api/tests/test_content.py\nindex 795a8c2..f840d10 100644\n--- a/src/plone/api/tests/test_content.py\n+++ b/src/plone/api/tests/test_content.py\n@@ -6,6 +6,7 @@\n from OFS.event import ObjectWillBeMovedEvent\n from OFS.interfaces import IObjectWillBeMovedEvent\n from plone import api\n+from plone.api.content import _parse_object_provides_query\n from plone.api.content import NEW_LINKINTEGRITY\n from plone.api.tests.base import INTEGRATION_TESTING\n from plone.app.layout.navigation.interfaces import INavigationRoot\n@@ -1049,6 +1050,74 @@ def test_find_interface_dict(self):\n         )\n         self.assertEqual(len(brains), 1)\n \n+    def test_find_interface_dict__include_not_query(self):\n+        """Check if not query in object_provides is functional.\n+        """\n+\n+        brains_all = api.content.find(\n+            object_provides={\'query\': IContentish.__identifier__},\n+        )\n+\n+        alsoProvides(self.portal.events, INavigationRoot)\n+        self.portal.events.reindexObject(idxs=[\'object_provides\'])\n+\n+        brains = api.content.find(\n+            object_provides={\n+                \'query\': IContentish.__identifier__,\n+                \'not\': INavigationRoot.__identifier__\n+            },\n+        )\n+\n+        self.assertEqual(len(brains_all) - len(brains), 1)\n+\n+    def test_find_interface_dict__all_options(self):\n+        """ Check for all options in a object_provides query are correctly\n+        transformed.\n+        """\n+        parser = _parse_object_provides_query\n+\n+        self.assertDictEqual(\n+            parser({\'query\': IContentish}),\n+            {\'query\': [IContentish.__identifier__], \'operator\': \'or\'},\n+        )\n+\n+        self.assertDictEqual(\n+            parser(\n+                {\n+                    \'query\': [IContentish, INavigationRoot.__identifier__],\n+                    \'operator\': \'and\'\n+                }\n+            ),\n+            {\n+                \'query\': [IContentish.__identifier__, INavigationRoot.__identifier__],\n+                \'operator\': \'and\'\n+            },\n+        )\n+\n+        self.assertDictEqual(\n+            parser({\'not\': IContentish}),\n+            {\'not\': [IContentish.__identifier__]},\n+        )\n+\n+        self.assertDictEqual(\n+            parser({\'not\': [IContentish, INavigationRoot.__identifier__]}),\n+            {\'not\': [IContentish.__identifier__, INavigationRoot.__identifier__]},\n+        )\n+\n+        self.assertDictEqual(\n+            parser({\'not\': IContentish}),\n+            {\'not\': [IContentish.__identifier__]},\n+        )\n+\n+        self.assertDictEqual(\n+            parser({\'query\': IContentish, \'operator\': \'and\', \'not\': INavigationRoot}),\n+            {\n+                \'query\': [IContentish.__identifier__],\n+                \'operator\': \'and\',\n+                \'not\': [INavigationRoot.__identifier__],\n+            },\n+        )\n+\n     def test_find_dict(self):\n         # Pass arguments using dict\n         path = \'/\'.join(self.portal.about.getPhysicalPath())\n'
 
