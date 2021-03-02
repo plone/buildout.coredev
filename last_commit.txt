@@ -1,34 +1,55 @@
-Repository: plone.batching
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.1.x
-Date: 2021-03-01T15:41:42+01:00
-Author: Peter Holzer (agitator) <peter.holzer@agitator.com>
-Commit: https://github.com/plone/plone.batching/commit/db3d6567f6f8cf438b90a33c1907ccedfd5177c3
+Branch: refs/heads/master
+Date: 2021-03-02T01:03:26+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/1e7ce6067e2092139681e3bf3637b8e926e2087e
 
-cherry pick changes from https://github.com/plone/plone.batching/pull/26
+Make portal_setup objects accessible only to Manager/Owner.
+
+See https://github.com/zopefoundation/Products.GenericSetup/issues/101
 
 Files changed:
-A news/26.feature
-M plone/batching/browser.py
+A news/101.bugfix
+M plone/app/upgrade/v52/configure.zcml
+M plone/app/upgrade/v52/final.py
 
-b'diff --git a/news/26.feature b/news/26.feature\nnew file mode 100644\nindex 0000000..f1b7f68\n--- /dev/null\n+++ b/news/26.feature\n@@ -0,0 +1,2 @@\n+Include request form parameters from parent request to allow batching in plone.app.standardtiles and filtering with collective.collectionfilter.\n+[agitator]\n\\ No newline at end of file\ndiff --git a/plone/batching/browser.py b/plone/batching/browser.py\nindex 333faf2..a6fb418 100644\n--- a/plone/batching/browser.py\n+++ b/plone/batching/browser.py\n@@ -39,7 +39,11 @@ class BootstrapBatchView(BatchView):\n class PloneBatchView(BatchView):\n \n     def make_link(self, pagenumber=None, omit_params=[\'ajax_load\']):\n+        # Include request form parameters from parent request\n         query_params = {}\n+        if "PARENT_REQUEST" in self.request:\n+            query_params.update(self.request["PARENT_REQUEST"].form)\n+        # update/override parent params with actual request params\n         query_params.update(self.request.form)\n         if self.batchformkeys:\n             for key in list(query_params.keys()):\n@@ -52,12 +56,10 @@ def make_link(self, pagenumber=None, omit_params=[\'ajax_load\']):\n \n         start = max(pagenumber - 1, 0) * self.batch.pagesize\n         query_params[self.batch.b_start_str] = start\n-        url = u\'{0}?{1}\'.format(\n-            self.request.ACTUAL_URL,\n-            make_query(query_params)\n-        )\n+        url = u"{0}?{1}".format(self.request.ACTUAL_URL, make_query(query_params))\n         return url\n \n \n+\n class PloneBootstrapBatchView(BootstrapBatchView, PloneBatchView):\n     pass\n'
+b'diff --git a/news/101.bugfix b/news/101.bugfix\nnew file mode 100644\nindex 00000000..e2b34302\n--- /dev/null\n+++ b/news/101.bugfix\n@@ -0,0 +1,3 @@\n+Make portal_setup objects accessible only to Manager/Owner.\n+See `GenericSetup issue 101 <https://github.com/zopefoundation/Products.GenericSetup/issues/101>`_.\n+[maurits]\ndiff --git a/plone/app/upgrade/v52/configure.zcml b/plone/app/upgrade/v52/configure.zcml\nindex fa31331a..82b0ff03 100644\n--- a/plone/app/upgrade/v52/configure.zcml\n+++ b/plone/app/upgrade/v52/configure.zcml\n@@ -187,9 +187,8 @@\n         profile="Products.CMFPlone:plone">\n \n         <gs:upgradeStep\n-            title="Miscellaneous"\n-            description=""\n-            handler="..utils.null_upgrade_step"\n+            title="Make portal_setup logs accessible only to Manager/Owner."\n+            handler=".final.secure_portal_setup_objects"\n             />\n \n     </gs:upgradeSteps>\ndiff --git a/plone/app/upgrade/v52/final.py b/plone/app/upgrade/v52/final.py\nindex 0b99fa8b..c2381840 100644\n--- a/plone/app/upgrade/v52/final.py\n+++ b/plone/app/upgrade/v52/final.py\n@@ -1,10 +1,12 @@\n # -*- coding: utf-8 -*-\n+from AccessControl.Permissions import view\n from plone.app.upgrade.utils import loadMigrationProfile\n from plone.registry import field\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.interfaces import IMarkupSchema\n from Products.CMFPlone.interfaces import ISiteSchema\n+from Products.CMFPlone.utils import base_hasattr\n from Products.CMFPlone.utils import safe_unicode\n from zope.component import getUtility\n \n@@ -238,3 +240,28 @@ def migrate_site_logo_from_ascii_to_bytes(context):\n     you get a WrongType error when saving the site-controlpanel.\n     """\n     migrate_record_from_ascii_to_bytes("plone.site_logo", ISiteSchema, prefix="plone")\n+\n+\n+def _recursive_strict_permission(obj):\n+    obj.manage_permission(view, (\'Manager\', \'Owner\'), 0)\n+    if base_hasattr(obj, \'objectValues\'):\n+        for child in obj.objectValues():\n+            _recursive_strict_permission(child)\n+\n+\n+def secure_portal_setup_objects(context):\n+    """Make portal_setup objects accessible only to Manager/Owner.\n+\n+    This matches the GenericSetup code for new logs and snapshots.\n+    See https://github.com/zopefoundation/Products.GenericSetup/pull/102\n+    """\n+    # context conveniently is the portal_setup too.\n+    # Set permission on setup tool and its sub objects, which are the logs.\n+    _recursive_strict_permission(context)\n+    logger.info("Made portal_setup logs only available for Manager and Owner.")\n+\n+    # And now the snapshot folder and sub items, if they exist.\n+    if not base_hasattr(context, "snapshots"):\n+        return\n+    _recursive_strict_permission(context.snapshots)\n+    logger.info("Made portal_setup snapshots only available for Manager and Owner.")\n'
 
-Repository: plone.batching
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/1.1.x
-Date: 2021-03-02T11:25:29+01:00
+Branch: refs/heads/master
+Date: 2021-03-02T11:19:24+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.upgrade/commit/e5006cf74849817d0e93a1f44ee31486cc9eb067
+
+Undo the part that changes the View permission on the portal_setup tool itself.
+
+Not needed, because the entire object is protected now.
+
+Files changed:
+M plone/app/upgrade/v52/final.py
+
+b'diff --git a/plone/app/upgrade/v52/final.py b/plone/app/upgrade/v52/final.py\nindex c2381840..78aa1b58 100644\n--- a/plone/app/upgrade/v52/final.py\n+++ b/plone/app/upgrade/v52/final.py\n@@ -256,8 +256,10 @@ def secure_portal_setup_objects(context):\n     See https://github.com/zopefoundation/Products.GenericSetup/pull/102\n     """\n     # context conveniently is the portal_setup too.\n-    # Set permission on setup tool and its sub objects, which are the logs.\n-    _recursive_strict_permission(context)\n+    # Set permission on the sub objects of the setup tool, which are the logs.\n+    for child in context.objectValues():\n+        # Recursive is not strictly needed, but it does not hurt.\n+        _recursive_strict_permission(child)\n     logger.info("Made portal_setup logs only available for Manager and Owner.")\n \n     # And now the snapshot folder and sub items, if they exist.\n'
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2021-03-02T19:17:15+01:00
 Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
-Commit: https://github.com/plone/plone.batching/commit/9f2b54ba711a7177644a7370ad01419b00041eea
+Commit: https://github.com/plone/plone.app.upgrade/commit/3fcd583febb69100be8236ee15cfc63ce7d59a55
 
-Merge pull request #29 from plone/1.1.x-req-params-from-parent-req
+Merge pull request #253 from plone/maurits/secure-portal-setup-objects
 
-cherry pick changes from https://github.com/plone/plone.batching/pull/26
+Make portal_setup objects accessible only to Manager/Owner.
 
 Files changed:
-A news/26.feature
-M plone/batching/browser.py
+A news/101.bugfix
+M plone/app/upgrade/v52/configure.zcml
+M plone/app/upgrade/v52/final.py
 
-b'diff --git a/news/26.feature b/news/26.feature\nnew file mode 100644\nindex 0000000..f1b7f68\n--- /dev/null\n+++ b/news/26.feature\n@@ -0,0 +1,2 @@\n+Include request form parameters from parent request to allow batching in plone.app.standardtiles and filtering with collective.collectionfilter.\n+[agitator]\n\\ No newline at end of file\ndiff --git a/plone/batching/browser.py b/plone/batching/browser.py\nindex 333faf2..a6fb418 100644\n--- a/plone/batching/browser.py\n+++ b/plone/batching/browser.py\n@@ -39,7 +39,11 @@ class BootstrapBatchView(BatchView):\n class PloneBatchView(BatchView):\n \n     def make_link(self, pagenumber=None, omit_params=[\'ajax_load\']):\n+        # Include request form parameters from parent request\n         query_params = {}\n+        if "PARENT_REQUEST" in self.request:\n+            query_params.update(self.request["PARENT_REQUEST"].form)\n+        # update/override parent params with actual request params\n         query_params.update(self.request.form)\n         if self.batchformkeys:\n             for key in list(query_params.keys()):\n@@ -52,12 +56,10 @@ def make_link(self, pagenumber=None, omit_params=[\'ajax_load\']):\n \n         start = max(pagenumber - 1, 0) * self.batch.pagesize\n         query_params[self.batch.b_start_str] = start\n-        url = u\'{0}?{1}\'.format(\n-            self.request.ACTUAL_URL,\n-            make_query(query_params)\n-        )\n+        url = u"{0}?{1}".format(self.request.ACTUAL_URL, make_query(query_params))\n         return url\n \n \n+\n class PloneBootstrapBatchView(BootstrapBatchView, PloneBatchView):\n     pass\n'
+b'diff --git a/news/101.bugfix b/news/101.bugfix\nnew file mode 100644\nindex 00000000..e2b34302\n--- /dev/null\n+++ b/news/101.bugfix\n@@ -0,0 +1,3 @@\n+Make portal_setup objects accessible only to Manager/Owner.\n+See `GenericSetup issue 101 <https://github.com/zopefoundation/Products.GenericSetup/issues/101>`_.\n+[maurits]\ndiff --git a/plone/app/upgrade/v52/configure.zcml b/plone/app/upgrade/v52/configure.zcml\nindex fa31331a..82b0ff03 100644\n--- a/plone/app/upgrade/v52/configure.zcml\n+++ b/plone/app/upgrade/v52/configure.zcml\n@@ -187,9 +187,8 @@\n         profile="Products.CMFPlone:plone">\n \n         <gs:upgradeStep\n-            title="Miscellaneous"\n-            description=""\n-            handler="..utils.null_upgrade_step"\n+            title="Make portal_setup logs accessible only to Manager/Owner."\n+            handler=".final.secure_portal_setup_objects"\n             />\n \n     </gs:upgradeSteps>\ndiff --git a/plone/app/upgrade/v52/final.py b/plone/app/upgrade/v52/final.py\nindex 0b99fa8b..78aa1b58 100644\n--- a/plone/app/upgrade/v52/final.py\n+++ b/plone/app/upgrade/v52/final.py\n@@ -1,10 +1,12 @@\n # -*- coding: utf-8 -*-\n+from AccessControl.Permissions import view\n from plone.app.upgrade.utils import loadMigrationProfile\n from plone.registry import field\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.interfaces import IMarkupSchema\n from Products.CMFPlone.interfaces import ISiteSchema\n+from Products.CMFPlone.utils import base_hasattr\n from Products.CMFPlone.utils import safe_unicode\n from zope.component import getUtility\n \n@@ -238,3 +240,30 @@ def migrate_site_logo_from_ascii_to_bytes(context):\n     you get a WrongType error when saving the site-controlpanel.\n     """\n     migrate_record_from_ascii_to_bytes("plone.site_logo", ISiteSchema, prefix="plone")\n+\n+\n+def _recursive_strict_permission(obj):\n+    obj.manage_permission(view, (\'Manager\', \'Owner\'), 0)\n+    if base_hasattr(obj, \'objectValues\'):\n+        for child in obj.objectValues():\n+            _recursive_strict_permission(child)\n+\n+\n+def secure_portal_setup_objects(context):\n+    """Make portal_setup objects accessible only to Manager/Owner.\n+\n+    This matches the GenericSetup code for new logs and snapshots.\n+    See https://github.com/zopefoundation/Products.GenericSetup/pull/102\n+    """\n+    # context conveniently is the portal_setup too.\n+    # Set permission on the sub objects of the setup tool, which are the logs.\n+    for child in context.objectValues():\n+        # Recursive is not strictly needed, but it does not hurt.\n+        _recursive_strict_permission(child)\n+    logger.info("Made portal_setup logs only available for Manager and Owner.")\n+\n+    # And now the snapshot folder and sub items, if they exist.\n+    if not base_hasattr(context, "snapshots"):\n+        return\n+    _recursive_strict_permission(context.snapshots)\n+    logger.info("Made portal_setup snapshots only available for Manager and Owner.")\n'
 
