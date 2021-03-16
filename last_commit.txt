@@ -1,33 +1,92 @@
-Repository: plone.restapi
+Repository: plone.recipe.zope2instance
 
 
 Branch: refs/heads/master
-Date: 2021-03-16T11:20:06+01:00
-Author: Tiberiu Ichim (tiberiuichim) <tiberiuichim@users.noreply.github.com>
-Commit: https://github.com/plone/plone.restapi/commit/b91a8fd75b8b6b577119e959001cce317e6545dd
+Date: 2021-03-16T09:59:47+01:00
+Author: Jens Vagelpohl (dataflake) <jens@netz.ooo>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/37b68d3278d6cbb6812ece561b0eb1d88d591d24
 
-Optional search endpoint follows site settings (#1081)
-
-* Move filtering code to search handler
-
-* Minimize git diff
-
-* Add tests for use_site_search_settings
-
-* Add a paragraph of doc
-
-* Fix navigation root test
-
-* Add changelog entry
-
-* Run black
+- add support for Python 3.9 and parallelized tox runs
 
 Files changed:
-A news/1081.feature
-M docs/source/searching.rst
-M src/plone/restapi/search/handler.py
-M src/plone/restapi/services/search/get.py
-M src/plone/restapi/tests/test_search.py
+A news/164.feature
+M .github/workflows/testing.yml
+M .gitignore
+M setup.py
+M src/plone/recipe/zope2instance/ctl.py
+M tox.ini
 
-b'diff --git a/docs/source/searching.rst b/docs/source/searching.rst\nindex cd70f4a75..9e2ce3c28 100644\n--- a/docs/source/searching.rst\n+++ b/docs/source/searching.rst\n@@ -46,7 +46,6 @@ In order to return specific metadata columns, see the documentation of the ``met\n         This is done in order to match also the partial results of the beginning of a search term(s).\n         The plone.restapi @search endpoint will not do that for you. You\'ll have to add it if you want to keep this feature.\n \n-\n Query format\n ------------\n \n@@ -163,3 +162,8 @@ You do so by specifying the ``fullobjects`` parameter:\n .. warning::\n \n     Be aware that this might induce performance issues when retrieving a lot of resources. Normally the search just serializes catalog brains, but with ``fullobjects``, we wake up all the returned objects.\n+\n+\n+Restrict search results to Plone\'s search settings\n+--------------------------------------------------\n+By default the search endpoint is not excluding any types from its results. To allow the search to follow Plone\'s search settings schema, pass the ``use_site_search_settings=1`` to the ``@search`` endpoint request. By doing this, the search results will be filtered based on the defined types to be searched and will be sorted according to the default sorting order.\ndiff --git a/news/1081.feature b/news/1081.feature\nnew file mode 100644\nindex 000000000..56f2292f0\n--- /dev/null\n+++ b/news/1081.feature\n@@ -0,0 +1 @@\n+Allow passing ``use_site_search_settings=1`` in the ``@search`` endpoint request, to follow Plone\'s ``ISearchSchema`` settings.\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 1b310aee8..f07b16c6d 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -1,8 +1,20 @@\n # -*- coding: utf-8 -*-\n+from plone.registry.interfaces import IRegistry\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.interfaces import IZCatalogCompatibleQuery\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFPlone.browser.navtree import getNavigationRoot\n from zope.component import getMultiAdapter\n+from zope.component import getUtility\n+\n+\n+try:\n+    from Products.CMFPlone.factory import _IMREALLYPLONE5  # noqa\n+    from Products.CMFPlone.interfaces import ISearchSchema\n+except ImportError:\n+    PLONE5 = False\n+else:\n+    PLONE5 = True\n \n \n class SearchHandler(object):\n@@ -74,11 +86,64 @@ def search(self, query=None):\n         else:\n             fullobjects = False\n \n+        use_site_search_settings = False\n+\n+        if "use_site_search_settings" in query:\n+            use_site_search_settings = True\n+            del query["use_site_search_settings"]\n+\n+        if PLONE5 and use_site_search_settings:\n+            query = self.filter_query(query)\n+\n         self._constrain_query_by_path(query)\n         query = self._parse_query(query)\n+\n         lazy_resultset = self.catalog.searchResults(**query)\n         results = getMultiAdapter((lazy_resultset, self.request), ISerializeToJson)(\n             fullobjects=fullobjects\n         )\n \n         return results\n+\n+    def filter_types(self, types):\n+        plone_utils = getToolByName(self.context, "plone_utils")\n+        if not isinstance(types, list):\n+            types = [types]\n+        return plone_utils.getUserFriendlyTypes(types)\n+\n+    def filter_query(self, query):\n+        registry = getUtility(IRegistry)\n+        search_settings = registry.forInterface(ISearchSchema, prefix="plone")\n+\n+        types = query.get("portal_type", [])\n+        if "query" in types:\n+            types = types["query"]\n+        query["portal_type"] = self.filter_types(types)\n+\n+        # respect effective/expiration date\n+        query["show_inactive"] = False\n+\n+        # respect navigation root\n+        if "path" not in query:\n+            query["path"] = {"query": getNavigationRoot(self.context)}\n+\n+        default_sort_on = search_settings.sort_on\n+\n+        if "sort_on" not in query:\n+            if default_sort_on != "relevance":\n+                query["sort_on"] = self.default_sort_on\n+        elif query["sort_on"] == "relevance":\n+            del query["sort_on"]\n+\n+        if not query.get("sort_order") and (\n+            query.get("sort_on", "") == "Date"\n+            or query.get("sort_on", "") == "effective"  # compatibility with Volto\n+        ):\n+            query["sort_order"] = "reverse"\n+        elif "sort_order" in query:\n+            del query["sort_order"]\n+\n+        if "sort_order" in query and not query["sort_order"]:\n+            del query["sort_order"]\n+\n+        return query\ndiff --git a/src/plone/restapi/services/search/get.py b/src/plone/restapi/services/search/get.py\nindex 1135a1e8e..46acd9b44 100644\n--- a/src/plone/restapi/services/search/get.py\n+++ b/src/plone/restapi/services/search/get.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+\n from plone.restapi.search.handler import SearchHandler\n from plone.restapi.search.utils import unflatten_dotted_dict\n from plone.restapi.services import Service\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 64c158d6f..b83a88ca6 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -16,12 +16,16 @@\n from plone.uuid.interfaces import IMutableUUID\n from Products.CMFCore.utils import getToolByName\n from zope.component import getUtility\n+from zope.interface import alsoProvides\n+from zope.interface import noLongerProvides\n \n import six\n import transaction\n import unittest\n \n+\n try:\n+    from plone.app.layout.navigation.interfaces import INavigationRoot\n     from Products.CMFPlone.factory import _IMREALLYPLONE5  # noqa\n except ImportError:\n     PLONE5 = False\n@@ -664,6 +668,70 @@ def test_respect_access_inactive_permission(self):\n         ).json()\n         self.assertEqual(response["items_total"], 1)\n \n+    @unittest.skipIf(not PLONE5, "No ISearchSchema in Plone 4")\n+    def test_search_use_site_search_settings_for_types(self):\n+        response = self.api_session.get(\n+            "/@search", params={"use_site_search_settings": 1}\n+        ).json()\n+        types = set([item["@type"] for item in response["items"]])\n+\n+        self.assertEqual(set(types), set(["Folder", "DXTestDocument"]))\n+\n+        registry = getUtility(IRegistry)\n+        from Products.CMFPlone.interfaces import ISearchSchema\n+\n+        search_settings = registry.forInterface(ISearchSchema, prefix="plone")\n+        old = search_settings.types_not_searched\n+        search_settings.types_not_searched += ("DXTestDocument",)\n+        transaction.commit()\n+\n+        response = self.api_session.get(\n+            "/@search", params={"use_site_search_settings": 1}\n+        ).json()\n+        types = set([item["@type"] for item in response["items"]])\n+\n+        self.assertEqual(set(types), set(["Folder"]))\n+        search_settings.types_not_searched = old\n+        transaction.commit()\n+\n+    @unittest.skipIf(not PLONE5, "No ISearchSchema in Plone 4")\n+    def test_search_use_site_search_settings_for_default_sort_order(self):\n+        response = self.api_session.get(\n+            "/@search", params={"use_site_search_settings": 1}\n+        ).json()\n+        titles = [\n+            u"Some Folder",\n+            u"Lorem Ipsum",\n+            u"Other Document",\n+            u"Another Folder",\n+            u"Document in second folder",\n+            u"Doc outside folder",\n+        ]\n+        self.assertEqual([item["title"] for item in response["items"]], titles)\n+\n+        response = self.api_session.get(\n+            "/@search", params={"use_site_search_settings": 1, "sort_on": "effective"}\n+        ).json()\n+        self.assertEqual(\n+            [item["title"] for item in response["items"]][0],\n+            u"Other Document",\n+        )\n+\n+    @unittest.skipIf(not PLONE5, "No ISearchSchema in Plone 4")\n+    def test_search_use_site_search_settings_with_navigation_root(self):\n+\n+        alsoProvides(self.folder, INavigationRoot)\n+        transaction.commit()\n+\n+        response = self.api_session.get(\n+            "/folder/@search", params={"use_site_search_settings": 1}\n+        ).json()\n+        titles = [u"Some Folder", u"Lorem Ipsum", u"Other Document"]\n+        self.assertEqual([item["title"] for item in response["items"]], titles)\n+\n+        noLongerProvides(self.folder, INavigationRoot)\n+        transaction.commit()\n+\n \n class TestSearchATFunctional(unittest.TestCase):\n     layer = PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n'
+b'diff --git a/.github/workflows/testing.yml b/.github/workflows/testing.yml\nindex b6ab5f8..436bd3b 100644\n--- a/.github/workflows/testing.yml\n+++ b/.github/workflows/testing.yml\n@@ -11,6 +11,7 @@ jobs:\n         - "3.6"\n         - "3.7"\n         - "3.8"\n+        - "3.9"\n         zope-version:\n         - "zope-4"\n         - "zope-5"\n@@ -22,6 +23,8 @@ jobs:\n           python-version: "2.7"\n         - zope-version: "zope-5"\n           python-version: "2.7"\n+        - zope-version: "zope-4"\n+          python-version: "3.9"\n     runs-on: ${{ matrix.os }}\n     steps:\n       - uses: actions/checkout@v2\ndiff --git a/.gitignore b/.gitignore\nindex 7c98ef7..3ae8b35 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -14,7 +14,9 @@ parts\n pip-selfcheck.json\n pyvenv.cfg\n /.coverage\n+/.coverage.*\n /.installed.cfg\n /.tox\n /coverage.xml\n+/default.profraw\n /htmlcov\ndiff --git a/news/164.feature b/news/164.feature\nnew file mode 100644\nindex 0000000..ea72001\n--- /dev/null\n+++ b/news/164.feature\n@@ -0,0 +1,2 @@\n+Added support for Python 3.9\n+[dataflake]\ndiff --git a/setup.py b/setup.py\nindex 6dbc7ab..7f53da6 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -34,12 +34,14 @@\n         "Programming Language :: Python :: 3.6",\n         "Programming Language :: Python :: 3.7",\n         "Programming Language :: Python :: 3.8",\n+        "Programming Language :: Python :: 3.9",\n         "Programming Language :: Python :: Implementation :: CPython",\n     ],\n     packages=find_packages(\'src\'),\n     include_package_data=True,\n     package_dir={\'\': \'src\'},\n     namespace_packages=[\'plone\', \'plone.recipe\'],\n+    python_requires=\'>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*\',\n     install_requires=[\n         \'zc.buildout\',\n         \'setuptools\',\ndiff --git a/src/plone/recipe/zope2instance/ctl.py b/src/plone/recipe/zope2instance/ctl.py\nindex 35ecd90..75ae39c 100644\n--- a/src/plone/recipe/zope2instance/ctl.py\n+++ b/src/plone/recipe/zope2instance/ctl.py\n@@ -955,7 +955,8 @@ def main(args=None):\n \n     if (os.environ.get(\'PLONE_ENV\')):\n         PLONE_ENV = os.environ.get(\'PLONE_ENV\')\n-        load_dotenv(os.path.join(options.directory, \'..\', \'..\', \'.env.{}\'.format(PLONE_ENV)))\n+        load_dotenv(os.path.join(options.directory,\n+                                 \'..\', \'..\', \'.env.{}\'.format(PLONE_ENV)))\n \n     # Run the right command depending on whether we have ZServer\n     options.interpreter = os.path.join(options.directory, \'bin\', \'interpreter\')\ndiff --git a/tox.ini b/tox.ini\nindex c2cf917..8381dba 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -4,6 +4,7 @@ envlist =\n     py36,\n     py37,\n     py38,\n+    py39,\n     flake8,\n     coverage\n \n@@ -25,6 +26,12 @@ setenv =\n basepython = python2.7\n skip_install = true\n deps = coverage\n+depends =\n+    py27\n+    py36\n+    py37\n+    py38\n+    py39\n setenv =\n     COVERAGE_FILE=.coverage\n commands =\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2021-03-16T10:07:33+01:00
+Author: Jens Vagelpohl (dataflake) <jens@netz.ooo>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/68bb2e64c26c4a5a59d8dff58ad83bb26061fca5
+
+- install wheel during test runs to minimize self-compiling
+
+Files changed:
+M .github/workflows/testing.yml
+
+b'diff --git a/.github/workflows/testing.yml b/.github/workflows/testing.yml\nindex 436bd3b..67bc50c 100644\n--- a/.github/workflows/testing.yml\n+++ b/.github/workflows/testing.yml\n@@ -42,7 +42,7 @@ jobs:\n             ${{ runner.os }}-test\n       - name: Install dependencies\n         run: |\n-          pip install -U pip\n+          pip install -U pip wheel\n           pip install -r requirements-testing-${{ matrix.zope-version }}.txt\n       - name: Run Tests\n         run: |\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2021-03-16T16:13:30+01:00
+Author: Jens Vagelpohl (dataflake) <jens@netz.ooo>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/b46a4fca448c392f48c9208c95dfb768319cc7ed
+
+- restore support for Python 3.5, which is needed for full Zope 4 support
+
+Files changed:
+M .github/workflows/testing.yml
+M README.rst
+M news/164.feature
+M setup.py
+M tox.ini
+
+b'diff --git a/.github/workflows/testing.yml b/.github/workflows/testing.yml\nindex 67bc50c..913e23d 100644\n--- a/.github/workflows/testing.yml\n+++ b/.github/workflows/testing.yml\n@@ -8,6 +8,7 @@ jobs:\n       matrix:\n         python-version:\n         - "2.7"\n+        - "3.5"\n         - "3.6"\n         - "3.7"\n         - "3.8"\n@@ -23,6 +24,8 @@ jobs:\n           python-version: "2.7"\n         - zope-version: "zope-5"\n           python-version: "2.7"\n+        - zope-version: "zope-5"\n+          python-version: "3.5"\n         - zope-version: "zope-4"\n           python-version: "3.9"\n     runs-on: ${{ matrix.os }}\ndiff --git a/README.rst b/README.rst\nindex 6597ce9..592523c 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -27,8 +27,9 @@ You can use it with a part like this::\n   zcml = my.distribution\n \n .. ATTENTION::\n-   This release is targeted at Plone 5.2, ZODB 5, Zope 4, and Python 2.7, 3.6 or 3.7.\n-   If you are using this recipe with earlier versions, you should use one of the releases from the 4.x series.\n+   This release is targeted at Plone 5.2, ZODB 5, Zope 4 and Zope 5, and\n+   Python 2.7 and 3.5-3.9. If you are using this recipe with earlier versions,\n+   you should use one of the releases from the 4.x series.\n \n \n .. contents:: **Contents**\ndiff --git a/news/164.feature b/news/164.feature\nindex ea72001..c4ef3af 100644\n--- a/news/164.feature\n+++ b/news/164.feature\n@@ -1,2 +1,2 @@\n-Added support for Python 3.9\n+Added support for Python 3.9 and restored support for Python 3.5 (needed for Zope 4)\n [dataflake]\ndiff --git a/setup.py b/setup.py\nindex 7f53da6..cd647d8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -31,6 +31,7 @@\n         "Programming Language :: Python :: 2",\n         "Programming Language :: Python :: 2.7",\n         "Programming Language :: Python :: 3",\n+        "Programming Language :: Python :: 3.5",\n         "Programming Language :: Python :: 3.6",\n         "Programming Language :: Python :: 3.7",\n         "Programming Language :: Python :: 3.8",\ndiff --git a/tox.ini b/tox.ini\nindex 8381dba..fa62b55 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -1,6 +1,7 @@\n [tox]\n envlist =\n     py27,\n+    py35,\n     py36,\n     py37,\n     py38,\n@@ -28,6 +29,7 @@ skip_install = true\n deps = coverage\n depends =\n     py27\n+    py35\n     py36\n     py37\n     py38\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2021-03-16T16:44:36+01:00
+Author: Jens Vagelpohl (dataflake) <jens@netz.ooo>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/1ce67814ddca1bfaf8d00726b1fa7bc6460d0faa
+
+- remove GitHub Actions test for Python 3.5 as experiment
+
+Files changed:
+M .github/workflows/testing.yml
+
+b'diff --git a/.github/workflows/testing.yml b/.github/workflows/testing.yml\nindex 913e23d..67bc50c 100644\n--- a/.github/workflows/testing.yml\n+++ b/.github/workflows/testing.yml\n@@ -8,7 +8,6 @@ jobs:\n       matrix:\n         python-version:\n         - "2.7"\n-        - "3.5"\n         - "3.6"\n         - "3.7"\n         - "3.8"\n@@ -24,8 +23,6 @@ jobs:\n           python-version: "2.7"\n         - zope-version: "zope-5"\n           python-version: "2.7"\n-        - zope-version: "zope-5"\n-          python-version: "3.5"\n         - zope-version: "zope-4"\n           python-version: "3.9"\n     runs-on: ${{ matrix.os }}\n'
+
+Repository: plone.recipe.zope2instance
+
+
+Branch: refs/heads/master
+Date: 2021-03-16T23:23:33+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.recipe.zope2instance/commit/b60a84d7210764383c0bfa15d4908358d0f89d90
+
+Merge pull request #165 from plone/dataflake/py39
+
+Add support for Python 3.9 and parallelized tox runs
+
+Files changed:
+A news/164.feature
+M .github/workflows/testing.yml
+M .gitignore
+M README.rst
+M setup.py
+M src/plone/recipe/zope2instance/ctl.py
+M tox.ini
+
+b'diff --git a/.github/workflows/testing.yml b/.github/workflows/testing.yml\nindex b6ab5f8..67bc50c 100644\n--- a/.github/workflows/testing.yml\n+++ b/.github/workflows/testing.yml\n@@ -11,6 +11,7 @@ jobs:\n         - "3.6"\n         - "3.7"\n         - "3.8"\n+        - "3.9"\n         zope-version:\n         - "zope-4"\n         - "zope-5"\n@@ -22,6 +23,8 @@ jobs:\n           python-version: "2.7"\n         - zope-version: "zope-5"\n           python-version: "2.7"\n+        - zope-version: "zope-4"\n+          python-version: "3.9"\n     runs-on: ${{ matrix.os }}\n     steps:\n       - uses: actions/checkout@v2\n@@ -39,7 +42,7 @@ jobs:\n             ${{ runner.os }}-test\n       - name: Install dependencies\n         run: |\n-          pip install -U pip\n+          pip install -U pip wheel\n           pip install -r requirements-testing-${{ matrix.zope-version }}.txt\n       - name: Run Tests\n         run: |\ndiff --git a/.gitignore b/.gitignore\nindex 7c98ef7..3ae8b35 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -14,7 +14,9 @@ parts\n pip-selfcheck.json\n pyvenv.cfg\n /.coverage\n+/.coverage.*\n /.installed.cfg\n /.tox\n /coverage.xml\n+/default.profraw\n /htmlcov\ndiff --git a/README.rst b/README.rst\nindex 6597ce9..592523c 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -27,8 +27,9 @@ You can use it with a part like this::\n   zcml = my.distribution\n \n .. ATTENTION::\n-   This release is targeted at Plone 5.2, ZODB 5, Zope 4, and Python 2.7, 3.6 or 3.7.\n-   If you are using this recipe with earlier versions, you should use one of the releases from the 4.x series.\n+   This release is targeted at Plone 5.2, ZODB 5, Zope 4 and Zope 5, and\n+   Python 2.7 and 3.5-3.9. If you are using this recipe with earlier versions,\n+   you should use one of the releases from the 4.x series.\n \n \n .. contents:: **Contents**\ndiff --git a/news/164.feature b/news/164.feature\nnew file mode 100644\nindex 0000000..c4ef3af\n--- /dev/null\n+++ b/news/164.feature\n@@ -0,0 +1,2 @@\n+Added support for Python 3.9 and restored support for Python 3.5 (needed for Zope 4)\n+[dataflake]\ndiff --git a/setup.py b/setup.py\nindex 6dbc7ab..cd647d8 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -31,15 +31,18 @@\n         "Programming Language :: Python :: 2",\n         "Programming Language :: Python :: 2.7",\n         "Programming Language :: Python :: 3",\n+        "Programming Language :: Python :: 3.5",\n         "Programming Language :: Python :: 3.6",\n         "Programming Language :: Python :: 3.7",\n         "Programming Language :: Python :: 3.8",\n+        "Programming Language :: Python :: 3.9",\n         "Programming Language :: Python :: Implementation :: CPython",\n     ],\n     packages=find_packages(\'src\'),\n     include_package_data=True,\n     package_dir={\'\': \'src\'},\n     namespace_packages=[\'plone\', \'plone.recipe\'],\n+    python_requires=\'>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*\',\n     install_requires=[\n         \'zc.buildout\',\n         \'setuptools\',\ndiff --git a/src/plone/recipe/zope2instance/ctl.py b/src/plone/recipe/zope2instance/ctl.py\nindex 35ecd90..75ae39c 100644\n--- a/src/plone/recipe/zope2instance/ctl.py\n+++ b/src/plone/recipe/zope2instance/ctl.py\n@@ -955,7 +955,8 @@ def main(args=None):\n \n     if (os.environ.get(\'PLONE_ENV\')):\n         PLONE_ENV = os.environ.get(\'PLONE_ENV\')\n-        load_dotenv(os.path.join(options.directory, \'..\', \'..\', \'.env.{}\'.format(PLONE_ENV)))\n+        load_dotenv(os.path.join(options.directory,\n+                                 \'..\', \'..\', \'.env.{}\'.format(PLONE_ENV)))\n \n     # Run the right command depending on whether we have ZServer\n     options.interpreter = os.path.join(options.directory, \'bin\', \'interpreter\')\ndiff --git a/tox.ini b/tox.ini\nindex c2cf917..fa62b55 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -1,9 +1,11 @@\n [tox]\n envlist =\n     py27,\n+    py35,\n     py36,\n     py37,\n     py38,\n+    py39,\n     flake8,\n     coverage\n \n@@ -25,6 +27,13 @@ setenv =\n basepython = python2.7\n skip_install = true\n deps = coverage\n+depends =\n+    py27\n+    py35\n+    py36\n+    py37\n+    py38\n+    py39\n setenv =\n     COVERAGE_FILE=.coverage\n commands =\n'
 
