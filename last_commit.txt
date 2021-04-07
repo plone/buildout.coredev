@@ -1,15 +1,25 @@
-Repository: plone.app.contentmenu
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-04-06T11:06:19+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.contentmenu/commit/e624678d4defdcf8197c447a59d8ab403378c09d
+Date: 2021-04-07T13:40:56+02:00
+Author: Tiberiu Ichim (tiberiuichim) <tiberiuichim@users.noreply.github.com>
+Commit: https://github.com/plone/plone.restapi/commit/92a68e31f10407e0c773304ac587cdb9aae8ca84
 
-polish README: example
+Fix search in VHM with PhysicalRoot (#1105)
+
+* WIP
+
+* Fix search when using VHM RootPhysicalPath
+
+* Run black
+
+* Add news entry
 
 Files changed:
-M README.rst
+A news/1105.bugfix
+M src/plone/restapi/search/handler.py
+M src/plone/restapi/tests/test_search.py
 
-b"diff --git a/README.rst b/README.rst\nindex c745db4..140fe5c 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -34,7 +34,6 @@ Custom menus are registered in ``configure.zcml`` like so::\n \n in ``menu.py`` the class looks like so::\n \n-    # -*- coding: utf-8 -*-\n     from zope.browsermenu.interfaces import IBrowserMenu\n     from zope.browsermenu.menu import BrowserMenu\n     from zope.browsermenu.menu import BrowserSubMenuItem\n@@ -65,13 +64,12 @@ in ``menu.py`` the class looks like so::\n         # of the inherited class tells it, don't be confused.\n \n         title = _(u'label_my_menu', default=u'My')\n-        description = _(u'title_my_menu',\n-                        default=u'My for the current content item')\n-        submenuId = 'my_fance_menu'\n+        description = _(u'title_my_menu', default=u'My for the current content item')\n+        submenuId = 'my_fancy_menu'\n \n-        order = 35\n+        order = 70  # after the default menus\n         extra = {\n-            'id': 'my-fance-menu',\n+            'id': 'my-fancy-menu',\n             'li_class': 'plonetoolbar-content-my-fancy'\n         }\n \n"
+b'diff --git a/news/1105.bugfix b/news/1105.bugfix\nnew file mode 100644\nindex 000000000..af101f2fb\n--- /dev/null\n+++ b/news/1105.bugfix\n@@ -0,0 +1,3 @@\n+Fix ``@search`` endpoint with use_site_search_settings flag, for VHM PhysicalRoot\n+scenarios\n+@tiberiuichim\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex f07b16c6d..1251acab8 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -127,6 +127,13 @@ def filter_query(self, query):\n         if "path" not in query:\n             query["path"] = {"query": getNavigationRoot(self.context)}\n \n+            vhm_physical_path = self.request.get("VirtualRootPhysicalPath")\n+            # if vhm trick is applied, we should present a stripped path, as it will be\n+            # processed again in _constrain_query_by_path\n+            if vhm_physical_path:\n+                bits = query["path"]["query"].split("/")[len(vhm_physical_path) :]\n+                query["path"]["query"] = "/".join(bits) or "/"\n+\n         default_sort_on = search_settings.sort_on\n \n         if "sort_on" not in query:\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex b83a88ca6..d06cad447 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -732,6 +732,66 @@ def test_search_use_site_search_settings_with_navigation_root(self):\n         noLongerProvides(self.folder, INavigationRoot)\n         transaction.commit()\n \n+    @unittest.skipIf(not PLONE5, "No ISearchSchema in Plone 4")\n+    def test_search_use_site_search_settings_with_navigation_root_and_vhm(self):\n+\n+        if "virtual_hosting" not in self.app.objectIds():\n+            # If ZopeLite was imported, we have no default virtual\n+            # host monster\n+            from Products.SiteAccess.VirtualHostMonster import (\n+                manage_addVirtualHostMonster,\n+            )\n+\n+            manage_addVirtualHostMonster(self.app, "virtual_hosting")\n+        alsoProvides(self.folder, INavigationRoot)\n+        transaction.commit()\n+\n+        vhm_url = "%s/VirtualHostBase/http/plone.org/plone/VirtualHostRoot/%s" % (\n+            self.app.absolute_url(),\n+            "/folder/@search",\n+        )\n+        response = self.api_session.get(\n+            vhm_url, params={"use_site_search_settings": 1, "path": "/folder"}\n+        ).json()\n+        titles = [u"Some Folder", u"Lorem Ipsum", u"Other Document"]\n+        self.assertEqual([item["title"] for item in response["items"]], titles)\n+\n+        noLongerProvides(self.folder, INavigationRoot)\n+        transaction.commit()\n+\n+    @unittest.skipIf(not PLONE5, "No ISearchSchema in Plone 4")\n+    def test_search_use_site_search_settings_with_vhm(self):\n+\n+        if "virtual_hosting" not in self.app.objectIds():\n+            # If ZopeLite was imported, we have no default virtual\n+            # host monster\n+            from Products.SiteAccess.VirtualHostMonster import (\n+                manage_addVirtualHostMonster,\n+            )\n+\n+            manage_addVirtualHostMonster(self.app, "virtual_hosting")\n+        transaction.commit()\n+\n+        vhm_url = "%s/VirtualHostBase/http/plone.org/plone/VirtualHostRoot/%s" % (\n+            self.app.absolute_url(),\n+            "/@search",\n+        )\n+        response = self.api_session.get(\n+            vhm_url, params={"use_site_search_settings": 1, "path": "/"}\n+        ).json()\n+        titles = [\n+            "Some Folder",\n+            "Lorem Ipsum",\n+            "Other Document",\n+            "Another Folder",\n+            "Document in second folder",\n+            "Doc outside folder",\n+        ]\n+        self.assertEqual([item["title"] for item in response["items"]], titles)\n+\n+        noLongerProvides(self.folder, INavigationRoot)\n+        transaction.commit()\n+\n \n class TestSearchATFunctional(unittest.TestCase):\n     layer = PLONE_RESTAPI_AT_FUNCTIONAL_TESTING\n'
 
