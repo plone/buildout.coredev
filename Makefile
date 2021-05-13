@@ -19,17 +19,17 @@ help: ## This help message
 .PHONY: all
 all: build code-analysis test test-acceptance
 
-.PHONY: build
-build: ## Create virtualenv and run buildout
+.PHONY: build-py2
+build-py2: ## Create virtualenv and run buildout
 	@echo "$(GREEN)==> Setup Virtual Env$(RESET)"
 	virtualenv -p python2 --clear .
 	bin/pip install pip --upgrade
 	bin/pip install -r requirements.txt --upgrade
 	bin/buildout
 
-.PHONY: build-py3
-build-py3:
-	virtualenv --python=python3 .
+.PHONY: build
+build:
+	python3 -m venv .
 	bin/pip install --upgrade pip
 	bin/pip install -r requirements.txt
 	bin/buildout
