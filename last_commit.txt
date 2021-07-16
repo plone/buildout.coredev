@@ -2,82 +2,20 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-07-10T20:08:44+02:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/86026f9a97ff032c48c0337710af2e0643c9ca4f
+Date: 2021-07-16T14:45:27+02:00
+Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/ef0b98d789282545b72fb402b458cb70c11ad510
 
-Set UID of a content during creation if the user has Manage Portal permission.
+Wrong deserialization if the path does not exist but is matched via a… (#1177)
 
-Files changed:
-A news/497.feature
-M src/plone/restapi/services/content/add.py
-M src/plone/restapi/tests/test_content_post.py
+* Wrong deserialization if the path does not exist but is matched via acquisition
 
-b'diff --git a/news/497.feature b/news/497.feature\nnew file mode 100644\nindex 000000000..9ae8de078\n--- /dev/null\n+++ b/news/497.feature\n@@ -0,0 +1,2 @@\n+Set UID of a content during creation if the user has Manage Portal permission.\n+[ericof]\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/services/content/add.py b/src/plone/restapi/services/content/add.py\nindex 889d6a25d..1243291f0 100644\n--- a/src/plone/restapi/services/content/add.py\n+++ b/src/plone/restapi/services/content/add.py\n@@ -1,3 +1,4 @@\n+from AccessControl import getSecurityManager\n from Acquisition import aq_base\n from Acquisition.interfaces import IAcquirer\n from plone.app.multilingual.interfaces import IPloneAppMultilingualInstalled\n@@ -9,6 +10,8 @@\n from plone.restapi.services import Service\n from plone.restapi.services.content.utils import add\n from plone.restapi.services.content.utils import create\n+from Products.CMFCore.permissions import ManagePortal\n+from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.utils import safe_hasattr\n from zExceptions import BadRequest\n from zExceptions import Unauthorized\n@@ -17,7 +20,6 @@\n from zope.interface import alsoProvides\n from zope.lifecycleevent import ObjectCreatedEvent\n from zope.component import getMultiAdapter\n-from Products.CMFCore.utils import getToolByName\n \n import plone.protect.interfaces\n \n@@ -33,6 +35,7 @@ def reply(self):\n         title = data.get("title", None)\n         translation_of = data.get("translation_of", None)\n         language = data.get("language", None)\n+        uid = data.get("UID", None)\n \n         if not type_:\n             raise BadRequest("Property \'@type\' is required")\n@@ -74,6 +77,11 @@ def reply(self):\n         if temporarily_wrapped:\n             obj = aq_base(obj)\n \n+        # ManagePortal is required to set the uid of an object during creation\n+        sm = getSecurityManager()\n+        if uid and sm.checkPermission(ManagePortal, self.context):\n+            setattr(obj, "_plone.uuid", uid)\n+\n         if not getattr(deserializer, "notifies_create", False):\n             notify(ObjectCreatedEvent(obj))\n \ndiff --git a/src/plone/restapi/tests/test_content_post.py b/src/plone/restapi/tests/test_content_post.py\nindex e42dfb3cf..9fe1803d7 100644\n--- a/src/plone/restapi/tests/test_content_post.py\n+++ b/src/plone/restapi/tests/test_content_post.py\n@@ -201,3 +201,36 @@ def test_post_to_folder_with_apostrophe_dont_return_500(self):\n             "<p>example with \'</p>", self.portal.folder1.mydocument2.text.raw\n         )\n         self.assertEqual("<p>example with \'</p>", response.json()["text"]["data"])\n+\n+    def test_post_with_uid_with_manage_portal_permission(self):\n+        response = requests.post(\n+            self.portal.folder1.absolute_url(),\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+            json={\n+                "@type": "Document",\n+                "title": "My Document",\n+                "UID": "a9597fcb108c4985a713329311bdcca0"\n+            },\n+        )\n+        self.assertEqual(201, response.status_code)\n+        self.assertEqual(response.json()["UID"], "a9597fcb108c4985a713329311bdcca0")\n+\n+    def test_post_with_uid_without_manage_portal_permission(self):\n+        user = "test-user-2"\n+        password = "secret"\n+        self.portal.acl_users.userFolderAddUser(user, password, ["Contributor"], [])\n+        transaction.commit()\n+\n+        response = requests.post(\n+            self.portal.folder1.absolute_url(),\n+            headers={"Accept": "application/json"},\n+            auth=(user, password),\n+            json={\n+                "@type": "Document",\n+                "title": "My Document",\n+                "UID": "a9597fcb108c4985a713329311bdcca0"\n+            },\n+        )\n+        self.assertEqual(201, response.status_code)\n+        self.assertNotEqual(response.json()["UID"], "a9597fcb108c4985a713329311bdcca0")\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-07-10T20:12:36+02:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/1b0f3d5de91b0cc110d44a9ec5ca1fc830a17650
-
-Apply black.
+* Fix test in case of sufixes present
 
 Files changed:
-M src/plone/restapi/tests/test_content_post.py
+A news/1176.bugfix
+M src/plone/restapi/deserializer/blocks.py
+M src/plone/restapi/tests/test_blocks_deserializer.py
 
-b'diff --git a/src/plone/restapi/tests/test_content_post.py b/src/plone/restapi/tests/test_content_post.py\nindex 9fe1803d7..efa0f5763 100644\n--- a/src/plone/restapi/tests/test_content_post.py\n+++ b/src/plone/restapi/tests/test_content_post.py\n@@ -210,7 +210,7 @@ def test_post_with_uid_with_manage_portal_permission(self):\n             json={\n                 "@type": "Document",\n                 "title": "My Document",\n-                "UID": "a9597fcb108c4985a713329311bdcca0"\n+                "UID": "a9597fcb108c4985a713329311bdcca0",\n             },\n         )\n         self.assertEqual(201, response.status_code)\n@@ -229,7 +229,7 @@ def test_post_with_uid_without_manage_portal_permission(self):\n             json={\n                 "@type": "Document",\n                 "title": "My Document",\n-                "UID": "a9597fcb108c4985a713329311bdcca0"\n+                "UID": "a9597fcb108c4985a713329311bdcca0",\n             },\n         )\n         self.assertEqual(201, response.status_code)\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-07-11T12:30:00+02:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/e38a3d34b946015c8388e9b8473a0de3e2130340
-
-Raise exception for trying to set UID without the correct permission.
-
-Files changed:
-M src/plone/restapi/services/content/add.py
-M src/plone/restapi/tests/test_content_post.py
-
-b'diff --git a/src/plone/restapi/services/content/add.py b/src/plone/restapi/services/content/add.py\nindex 1243291f0..cadedb991 100644\n--- a/src/plone/restapi/services/content/add.py\n+++ b/src/plone/restapi/services/content/add.py\n@@ -44,6 +44,13 @@ def reply(self):\n         if "IDisableCSRFProtection" in dir(plone.protect.interfaces):\n             alsoProvides(self.request, plone.protect.interfaces.IDisableCSRFProtection)\n \n+        sm = getSecurityManager()\n+        # ManagePortal is required to set the uid of an object during creation\n+        if uid and not sm.checkPermission(ManagePortal, self.context):\n+            self.request.response.setStatus(403)\n+            msg = "Setting UID of an object requires Manage Portal permission"\n+            return dict(error=dict(type="Forbidden", message=msg))\n+\n         try:\n             obj = create(self.context, type_, id_=id_, title=title)\n         except Unauthorized as exc:\n@@ -77,9 +84,7 @@ def reply(self):\n         if temporarily_wrapped:\n             obj = aq_base(obj)\n \n-        # ManagePortal is required to set the uid of an object during creation\n-        sm = getSecurityManager()\n-        if uid and sm.checkPermission(ManagePortal, self.context):\n+        if uid:\n             setattr(obj, "_plone.uuid", uid)\n \n         if not getattr(deserializer, "notifies_create", False):\ndiff --git a/src/plone/restapi/tests/test_content_post.py b/src/plone/restapi/tests/test_content_post.py\nindex efa0f5763..3e2291e34 100644\n--- a/src/plone/restapi/tests/test_content_post.py\n+++ b/src/plone/restapi/tests/test_content_post.py\n@@ -232,5 +232,8 @@ def test_post_with_uid_without_manage_portal_permission(self):\n                 "UID": "a9597fcb108c4985a713329311bdcca0",\n             },\n         )\n-        self.assertEqual(201, response.status_code)\n-        self.assertNotEqual(response.json()["UID"], "a9597fcb108c4985a713329311bdcca0")\n+        self.assertEqual(403, response.status_code)\n+        self.assertEqual(\n+            response.json()["error"]["message"],\n+            "Setting UID of an object requires Manage Portal permission",\n+        )\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-07-12T21:30:19+02:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/2918ae1f923e10d2149361c1d8dd54e2b3e66f33
-
-Update documentation.
-
-Files changed:
-M docs/source/content.rst
-
-b'diff --git a/docs/source/content.rst b/docs/source/content.rst\nindex 919b42e67..695cbd0ee 100644\n--- a/docs/source/content.rst\n+++ b/docs/source/content.rst\n@@ -31,6 +31,8 @@ The \'Content-Type\' header indicates that the body uses the \'application/json\' fo\n The request body contains the minimal necessary information needed to create a document (the type and the title).\n You could set other properties, like "description" here as well.\n \n+A special property during content creation is "UID", as it requires the user to have the *Manage Portal* permission to set it. Without the permission, the request will fail as Unauthorized.\n+\n \n Successful Response (201 Created)\n ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n'
-
-Repository: plone.restapi
-
-
-Branch: refs/heads/master
-Date: 2021-07-13T10:45:25+02:00
-Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/3d751919c0b9ae534d4b74e60aa3c5d62cf079f3
-
-Merge pull request #1173 from plone/issue-497-set-uuid
-
-Set UID of a content during creation
-
-Files changed:
-A news/497.feature
-M docs/source/content.rst
-M src/plone/restapi/services/content/add.py
-M src/plone/restapi/tests/test_content_post.py
-
-b'diff --git a/docs/source/content.rst b/docs/source/content.rst\nindex 919b42e67..695cbd0ee 100644\n--- a/docs/source/content.rst\n+++ b/docs/source/content.rst\n@@ -31,6 +31,8 @@ The \'Content-Type\' header indicates that the body uses the \'application/json\' fo\n The request body contains the minimal necessary information needed to create a document (the type and the title).\n You could set other properties, like "description" here as well.\n \n+A special property during content creation is "UID", as it requires the user to have the *Manage Portal* permission to set it. Without the permission, the request will fail as Unauthorized.\n+\n \n Successful Response (201 Created)\n ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndiff --git a/news/497.feature b/news/497.feature\nnew file mode 100644\nindex 000000000..9ae8de078\n--- /dev/null\n+++ b/news/497.feature\n@@ -0,0 +1,2 @@\n+Set UID of a content during creation if the user has Manage Portal permission.\n+[ericof]\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/services/content/add.py b/src/plone/restapi/services/content/add.py\nindex 889d6a25d..cadedb991 100644\n--- a/src/plone/restapi/services/content/add.py\n+++ b/src/plone/restapi/services/content/add.py\n@@ -1,3 +1,4 @@\n+from AccessControl import getSecurityManager\n from Acquisition import aq_base\n from Acquisition.interfaces import IAcquirer\n from plone.app.multilingual.interfaces import IPloneAppMultilingualInstalled\n@@ -9,6 +10,8 @@\n from plone.restapi.services import Service\n from plone.restapi.services.content.utils import add\n from plone.restapi.services.content.utils import create\n+from Products.CMFCore.permissions import ManagePortal\n+from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.utils import safe_hasattr\n from zExceptions import BadRequest\n from zExceptions import Unauthorized\n@@ -17,7 +20,6 @@\n from zope.interface import alsoProvides\n from zope.lifecycleevent import ObjectCreatedEvent\n from zope.component import getMultiAdapter\n-from Products.CMFCore.utils import getToolByName\n \n import plone.protect.interfaces\n \n@@ -33,6 +35,7 @@ def reply(self):\n         title = data.get("title", None)\n         translation_of = data.get("translation_of", None)\n         language = data.get("language", None)\n+        uid = data.get("UID", None)\n \n         if not type_:\n             raise BadRequest("Property \'@type\' is required")\n@@ -41,6 +44,13 @@ def reply(self):\n         if "IDisableCSRFProtection" in dir(plone.protect.interfaces):\n             alsoProvides(self.request, plone.protect.interfaces.IDisableCSRFProtection)\n \n+        sm = getSecurityManager()\n+        # ManagePortal is required to set the uid of an object during creation\n+        if uid and not sm.checkPermission(ManagePortal, self.context):\n+            self.request.response.setStatus(403)\n+            msg = "Setting UID of an object requires Manage Portal permission"\n+            return dict(error=dict(type="Forbidden", message=msg))\n+\n         try:\n             obj = create(self.context, type_, id_=id_, title=title)\n         except Unauthorized as exc:\n@@ -74,6 +84,9 @@ def reply(self):\n         if temporarily_wrapped:\n             obj = aq_base(obj)\n \n+        if uid:\n+            setattr(obj, "_plone.uuid", uid)\n+\n         if not getattr(deserializer, "notifies_create", False):\n             notify(ObjectCreatedEvent(obj))\n \ndiff --git a/src/plone/restapi/tests/test_content_post.py b/src/plone/restapi/tests/test_content_post.py\nindex e42dfb3cf..3e2291e34 100644\n--- a/src/plone/restapi/tests/test_content_post.py\n+++ b/src/plone/restapi/tests/test_content_post.py\n@@ -201,3 +201,39 @@ def test_post_to_folder_with_apostrophe_dont_return_500(self):\n             "<p>example with \'</p>", self.portal.folder1.mydocument2.text.raw\n         )\n         self.assertEqual("<p>example with \'</p>", response.json()["text"]["data"])\n+\n+    def test_post_with_uid_with_manage_portal_permission(self):\n+        response = requests.post(\n+            self.portal.folder1.absolute_url(),\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+            json={\n+                "@type": "Document",\n+                "title": "My Document",\n+                "UID": "a9597fcb108c4985a713329311bdcca0",\n+            },\n+        )\n+        self.assertEqual(201, response.status_code)\n+        self.assertEqual(response.json()["UID"], "a9597fcb108c4985a713329311bdcca0")\n+\n+    def test_post_with_uid_without_manage_portal_permission(self):\n+        user = "test-user-2"\n+        password = "secret"\n+        self.portal.acl_users.userFolderAddUser(user, password, ["Contributor"], [])\n+        transaction.commit()\n+\n+        response = requests.post(\n+            self.portal.folder1.absolute_url(),\n+            headers={"Accept": "application/json"},\n+            auth=(user, password),\n+            json={\n+                "@type": "Document",\n+                "title": "My Document",\n+                "UID": "a9597fcb108c4985a713329311bdcca0",\n+            },\n+        )\n+        self.assertEqual(403, response.status_code)\n+        self.assertEqual(\n+            response.json()["error"]["message"],\n+            "Setting UID of an object requires Manage Portal permission",\n+        )\n'
+b'diff --git a/news/1176.bugfix b/news/1176.bugfix\nnew file mode 100644\nindex 000000000..400cec59f\n--- /dev/null\n+++ b/news/1176.bugfix\n@@ -0,0 +1,2 @@\n+Wrong deserialization if the path does not exist but is matched via acquisition\n+[sneridagh]\ndiff --git a/src/plone/restapi/deserializer/blocks.py b/src/plone/restapi/deserializer/blocks.py\nindex 9123575df..45310a26b 100644\n--- a/src/plone/restapi/deserializer/blocks.py\n+++ b/src/plone/restapi/deserializer/blocks.py\n@@ -59,6 +59,9 @@ def path2uid(context, link):\n     while not IUUIDAware.providedBy(obj):\n         obj = aq_parent(obj)\n         suffix += "/" + segments.pop()\n+    # check if obj is wrong because of acquisition\n+    if "/".join(obj.getPhysicalPath()) != "/".join(segments):\n+        return link\n     href = relative_up * "../" + "resolveuid/" + IUUID(obj)\n     if suffix:\n         href += suffix\ndiff --git a/src/plone/restapi/tests/test_blocks_deserializer.py b/src/plone/restapi/tests/test_blocks_deserializer.py\nindex f92e6c7c0..9264b04c9 100644\n--- a/src/plone/restapi/tests/test_blocks_deserializer.py\n+++ b/src/plone/restapi/tests/test_blocks_deserializer.py\n@@ -382,3 +382,38 @@ def test_slate_simple_link_deserializer(self):\n         value = res.blocks["abc"]["value"]\n         link = value[0]["children"][1]["data"]["url"]\n         self.assertTrue(link.startswith("../resolveuid/"))\n+\n+    def test_aquisition_messing_with_link_deserializer(self):\n+        self.portal.invokeFactory(\n+            "Folder",\n+            id="aktuelles",\n+        )\n+        self.portal["aktuelles"].invokeFactory(\n+            "Document",\n+            id="meldungen",\n+        )\n+        self.portal.invokeFactory(\n+            "Folder",\n+            id="institut",\n+        )\n+\n+        wrong_uid = IUUID(self.portal["aktuelles"]["meldungen"])\n+\n+        self.deserialize(\n+            blocks={\n+                "123": {\n+                    "@type": "foo",\n+                    "href": [\n+                        {\n+                            # Pointing to a not created yet object, but matches because acquisition\n+                            # with another existing parent content with alike-ish path structure\n+                            "@id": f"{self.portal.absolute_url()}/institut/aktuelles/meldungen"\n+                        }\n+                    ],\n+                }\n+            }\n+        )\n+        self.assertNotEqual(\n+            self.portal.doc1.blocks["123"]["href"][0]["@id"],\n+            f"../resolveuid/{wrong_uid}",\n+        )\n'
 
