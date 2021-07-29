@@ -9,7 +9,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Check Jenkins Status: should be green. (This should be checked often during the release process.)
 - [ ] In coredev, check packages for updates: `bin/manage report --interactive`
 - [ ] Release individual packages from `checkouts.cfg`.
-- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/5.2.x/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v52/configure.zcml) are in sync.
+- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/5.2.x/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v52/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
 - [ ] If unsure, ask if `mockup` and `plone.staticresources` are in sync and can be released. Example: https://github.com/plone/mockup/issues/1026
 - [ ] If needed, [ask the Plone REST api team](https://github.com/plone/plone.restapi/issues) for a new release of `plone.restapi` and `plone.rest`.
 - [ ] Write an email to the translation team, asking them to do a plone.app.locales release. Or create an issue in https://github.com/collective/plone.app.locales/issues
