@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Parse versions from buildout.cfg and write them into constraints.txt.
 
-This script is called by 'tox -c release/tox.ini -e constraints2 or constraints3
+This script is called by 'tox -c release/tox.ini -e constraints2' or constraints3
 
 It must work in both Python 2 and 3.
 
@@ -20,7 +20,9 @@ BLACKLIST2 = [
     # These are packages that cannot be installed by pip on Python 2.
     "sphinxcontrib-serializinghtml",
 ]
-BLACKLIST3 = []
+BLACKLIST3 = [
+    # These are packages that cannot be installed by pip on Python 3.
+]
 
 # We could hardcode paths here, but working directories in tox confuse me.
 if not len(sys.argv) == 3:
