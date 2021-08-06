@@ -29,7 +29,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Make final release of `Products.CMFPlone` to PyPI, update `versions.cfg`.
 - [ ] Create tag of the release branch, e.g. 5.2.4, and push to GitHub.
 - [ ] Make final release on dist.plone.org (remove "-pending", make sure updated distributions, versions and constraints are added).
-- [ ] Update the "-latest" link on dist.plone.org
+- [ ] Update the "-latest" links on dist.plone.org, e.g. `ln -sfT 5.2.5 5.2-latest`
 - [ ] Create new release on launchpad (https://launchpad.net/plone/): `bin/manage launchpad <version>`
 - [ ] Create release page on https://plone.org/download/releases
 - [ ] Announce community.plone.org, with warning that installers are not ready yet.
