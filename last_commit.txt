@@ -1,21 +1,56 @@
-Repository: plone.restapi
+Repository: plone.app.registry
 
 
 Branch: refs/heads/master
-Date: 2021-08-03T10:51:36+02:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/c14ed13a5c63c3aedb16ecc93f8db1dccd21731b
+Date: 2021-08-06T12:49:06+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.registry/commit/cd7f5c126db86f999d650a21bbe9cd3805ec705f
 
-Skip doActionFor for items without workflow (#1190)
+Fix an issue that was preventing the edit of a registry record
+containing a "/" in its name
 
-* skip doActionFor for items without workflow
-
-* add changelog
+Fixes #51
+Fixes plone/Products.CMFPlone#3296
 
 Files changed:
-A news/1190.bugfix
-M src/plone/restapi/services/workflow/transition.py
-M src/plone/restapi/tests/test_workflow.py
+M CHANGES.rst
+M plone/app/registry/browser/edit.py
+M plone/app/registry/tests/test_controlpanel.py
 
-b'diff --git a/news/1190.bugfix b/news/1190.bugfix\nnew file mode 100644\nindex 000000000..89e6116f8\n--- /dev/null\n+++ b/news/1190.bugfix\n@@ -0,0 +1 @@\n+Do not break @workflow endpoint when trying to change the state of a content without workflow [cekk]\ndiff --git a/src/plone/restapi/services/workflow/transition.py b/src/plone/restapi/services/workflow/transition.py\nindex 9e0866940..c5223ebe0 100644\n--- a/src/plone/restapi/services/workflow/transition.py\n+++ b/src/plone/restapi/services/workflow/transition.py\n@@ -108,7 +108,8 @@ def recurse_transition(\n             if obj.EffectiveDate() == "None":\n                 obj.setEffectiveDate(DateTime())\n                 obj.reindexObject()\n-\n+            if not self.wftool.getWorkflowsFor(obj):\n+                continue\n             self.wftool.doActionFor(obj, self.transition, comment=comment)\n             if include_children and IFolderish.providedBy(obj):\n                 self.recurse_transition(\ndiff --git a/src/plone/restapi/tests/test_workflow.py b/src/plone/restapi/tests/test_workflow.py\nindex a0b07be0c..b609f951e 100644\n--- a/src/plone/restapi/tests/test_workflow.py\n+++ b/src/plone/restapi/tests/test_workflow.py\n@@ -233,3 +233,17 @@ def test_transition_with_no_access_to_review_history_in_target_state(self):\n \n         self.assertEqual(200, self.request.response.getStatus(), res)\n         self.assertEqual("restricted", res["review_state"], res)\n+\n+    def test_transition_including_children_without_wf(self):\n+        folder = self.portal[self.portal.invokeFactory("Folder", id="folder")]\n+        folder.invokeFactory("File", id="file", title="File")\n+        document = folder[\n+            folder.invokeFactory("Document", id="document", title="Document")\n+        ]\n+\n+        self.request["BODY"] = \'{"comment": "A comment", "include_children": true}\'\n+        service = self.traverse("/plone/folder/@workflow/publish")\n+        service.reply()\n+        self.assertEqual(200, self.request.response.getStatus())\n+        self.assertEqual("published", self.wftool.getInfoFor(folder, "review_state"))\n+        self.assertEqual("published", self.wftool.getInfoFor(document, "review_state"))\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex b0e99b7..afc4ca3 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -21,6 +21,13 @@ New features:\n   [1letter] (#48)\n \n \n+Bug fixes:\n+\n+\n+- Fix an issue that was preventing the edit of a registry record containing a "/" in its name\n+  [ale-rt] (#51)\n+\n+\n 2.0.0a1 (2021-04-20)\n --------------------\n \ndiff --git a/plone/app/registry/browser/edit.py b/plone/app/registry/browser/edit.py\nindex 2c565ef..41a81c1 100644\n--- a/plone/app/registry/browser/edit.py\n+++ b/plone/app/registry/browser/edit.py\n@@ -16,6 +16,10 @@ class RecordEditForm(form.EditForm):\n \n     record = None\n \n+    @property\n+    def action(self):\n+        return f"{self.context.absolute_url()}/edit/{self.record.__name__}"\n+\n     def getContent(self):\n         return ImplicitAcquisitionWrapper(\n             {\'value\': self.record.value},\ndiff --git a/plone/app/registry/tests/test_controlpanel.py b/plone/app/registry/tests/test_controlpanel.py\nindex 9f0d515..efed362 100644\n--- a/plone/app/registry/tests/test_controlpanel.py\n+++ b/plone/app/registry/tests/test_controlpanel.py\n@@ -5,6 +5,7 @@\n from plone.app.registry.testing import PLONE_APP_REGISTRY_INTEGRATION_TESTING\n from plone.registry import Record\n from plone.registry.field import TextLine\n+from zope.component import getMultiAdapter\n \n import unittest\n \n@@ -77,3 +78,32 @@ def test_delete(self):\n         view = RecordDeleteView(registry, self.request)\n         view()\n         self.assertTrue(\'foobar\' not in registry.records)\n+\n+    def test_edit_record_with_slash(self):\n+        # Prepare a new record "foo/bar"\n+        registry = self.portal.portal_registry\n+        new_field = TextLine()\n+        new_record = Record(new_field)\n+        registry.records["foo/bar"] = new_record\n+\n+        # the record has no value set\n+        self.assertIsNone(new_record.value)\n+\n+        # prepare a request\n+        request = self.request.clone()\n+        request.form = {\n+            "form.widgets.value": "baz",\n+            "form.buttons.save": "Save",\n+        }\n+        request.method = "POST"\n+        request["TraversalRequestNameStack"] = []\n+\n+        # get the view and fake the traversal\n+        edit_form = getMultiAdapter(\n+            (registry, request),\n+            name="edit",\n+        ).publishTraverse(request, "foo/bar")\n+\n+        # call the view and verify the value has changed\n+        edit_form()\n+        self.assertEqual(new_record.value, "baz")\n'
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2021-08-06T14:07:44+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.registry/commit/20711c3d31e75ceda12245dbdfda470a834f43c0
+
+fixup! Fix an issue that was preventing the edit of a registry record containing a "/" in its name
+
+Files changed:
+A news/51.bugfix
+M CHANGES.rst
+
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex afc4ca3..b0e99b7 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -21,13 +21,6 @@ New features:\n   [1letter] (#48)\n \n \n-Bug fixes:\n-\n-\n-- Fix an issue that was preventing the edit of a registry record containing a "/" in its name\n-  [ale-rt] (#51)\n-\n-\n 2.0.0a1 (2021-04-20)\n --------------------\n \ndiff --git a/news/51.bugfix b/news/51.bugfix\nnew file mode 100644\nindex 0000000..b178c85\n--- /dev/null\n+++ b/news/51.bugfix\n@@ -0,0 +1 @@\n+Fix an issue that was preventing the edit of a registry record containing a "/" in its name [ale-rt]\n\\ No newline at end of file\n'
+
+Repository: plone.app.registry
+
+
+Branch: refs/heads/master
+Date: 2021-08-10T12:12:36+02:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/plone.app.registry/commit/b9af7fa6b8251d2f3e330a89cd77de007628e97d
+
+Merge pull request #52 from plone/51-fix-editing
+
+Fix an issue that was preventing the edit of a registry record containing a "/" in its name
+
+Files changed:
+A news/51.bugfix
+M plone/app/registry/browser/edit.py
+M plone/app/registry/tests/test_controlpanel.py
+
+b'diff --git a/news/51.bugfix b/news/51.bugfix\nnew file mode 100644\nindex 0000000..b178c85\n--- /dev/null\n+++ b/news/51.bugfix\n@@ -0,0 +1 @@\n+Fix an issue that was preventing the edit of a registry record containing a "/" in its name [ale-rt]\n\\ No newline at end of file\ndiff --git a/plone/app/registry/browser/edit.py b/plone/app/registry/browser/edit.py\nindex 2c565ef..41a81c1 100644\n--- a/plone/app/registry/browser/edit.py\n+++ b/plone/app/registry/browser/edit.py\n@@ -16,6 +16,10 @@ class RecordEditForm(form.EditForm):\n \n     record = None\n \n+    @property\n+    def action(self):\n+        return f"{self.context.absolute_url()}/edit/{self.record.__name__}"\n+\n     def getContent(self):\n         return ImplicitAcquisitionWrapper(\n             {\'value\': self.record.value},\ndiff --git a/plone/app/registry/tests/test_controlpanel.py b/plone/app/registry/tests/test_controlpanel.py\nindex 9f0d515..efed362 100644\n--- a/plone/app/registry/tests/test_controlpanel.py\n+++ b/plone/app/registry/tests/test_controlpanel.py\n@@ -5,6 +5,7 @@\n from plone.app.registry.testing import PLONE_APP_REGISTRY_INTEGRATION_TESTING\n from plone.registry import Record\n from plone.registry.field import TextLine\n+from zope.component import getMultiAdapter\n \n import unittest\n \n@@ -77,3 +78,32 @@ def test_delete(self):\n         view = RecordDeleteView(registry, self.request)\n         view()\n         self.assertTrue(\'foobar\' not in registry.records)\n+\n+    def test_edit_record_with_slash(self):\n+        # Prepare a new record "foo/bar"\n+        registry = self.portal.portal_registry\n+        new_field = TextLine()\n+        new_record = Record(new_field)\n+        registry.records["foo/bar"] = new_record\n+\n+        # the record has no value set\n+        self.assertIsNone(new_record.value)\n+\n+        # prepare a request\n+        request = self.request.clone()\n+        request.form = {\n+            "form.widgets.value": "baz",\n+            "form.buttons.save": "Save",\n+        }\n+        request.method = "POST"\n+        request["TraversalRequestNameStack"] = []\n+\n+        # get the view and fake the traversal\n+        edit_form = getMultiAdapter(\n+            (registry, request),\n+            name="edit",\n+        ).publishTraverse(request, "foo/bar")\n+\n+        # call the view and verify the value has changed\n+        edit_form()\n+        self.assertEqual(new_record.value, "baz")\n'
 
