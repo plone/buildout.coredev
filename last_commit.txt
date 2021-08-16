@@ -1,174 +1,63 @@
-Repository: plone.app.vocabularies
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/87d3f8c3223c998584fd81fe590d715bb27ff775
-
-Add a StaticCatalogVocabularyFactory that allows creating simple vocabularies with preset queries to use with SelectWidget, AJAXSelectWidget, etc.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex e279c5b..7adbca9 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -1,4 +1,5 @@\n # -*- coding: utf-8 -*-\n+import json\n from BTrees.IIBTree import intersection\n from plone.app.layout.navigation.root import getNavigationRootObject\n from plone.app.vocabularies import SlicableVocabulary\n@@ -7,6 +8,7 @@\n from plone.app.vocabularies.terms import safe_simplevocabulary_from_values\n from plone.app.vocabularies.utils import parseQueryString\n from plone.memoize.instance import memoize\n+from plone.memoize import request\n from plone.registry.interfaces import IRegistry\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n@@ -23,6 +25,12 @@\n from zope.schema.vocabulary import SimpleVocabulary\n from zope.component.hooks import getSite\n \n+try:\n+    from zope.globalrequest import getRequest\n+except ImportError:\n+    def getRequest():\n+        return None\n+\n import itertools\n import os\n import six\n@@ -588,6 +596,21 @@ def __getitem__(self, index):\n         else:\n             return self.createTerm(self.brains[index], None)\n \n+    def getTerm(self, value):\n+        if not isinstance(value, six.string_types):\n+            # here we have a content and fetch the uuid as hex value\n+            value = IUUID(value)\n+        query = {\'UID\': value}\n+        brains = self.catalog(**query)\n+        for b in brains:\n+            return SimpleTerm(\n+                title=u\'{} ({})\'.format(b.Title, b.getPath()),\n+                token=b.UID,\n+                value=b.UID,\n+            )\n+\n+    getTermByToken = getTerm\n+\n \n @implementer(IVocabularyFactory)\n class CatalogVocabularyFactory(object):\n@@ -646,6 +669,51 @@ def __call__(self, context, query=None):\n         return CatalogVocabulary.fromItems(parsed, context)\n \n \n+def request_query_cache_key(func, vocab):\n+    return json.dumps((vocab.query, vocab.default_text_search_index))\n+\n+\n+class StaticCatalogVocabulary(CatalogVocabulary):\n+    """Catalog Vocabulary for static lists of content based on a fixed query.\n+    """\n+\n+    def __init__(self, query, default_text_search_index=\'SearchableText\'):\n+        self.query = query\n+        self.default_text_search_index = default_text_search_index\n+\n+    @staticmethod\n+    def get_request():\n+        return getRequest()\n+\n+    @property\n+    @request.cache(get_key=request_query_cache_key, get_request=\'self.get_request()\')\n+    def brains(self):\n+        return self.catalog(**self.query)\n+\n+    @classmethod\n+    def createTerm(cls, brain, context):\n+        return SimpleTerm(\n+            value=brain.UID, token=brain.UID,\n+            title=\'{} ({})\'.format(brain.Title, brain.getPath())\n+        )\n+\n+    def search(self, query):\n+        """Required by plone.app.content.browser.vocabulary for simple queryable\n+        vocabs, e.g. for AJAXSelectWidget."""\n+        if not query.endswith(\' \'):\n+            query += \'*\'\n+        query = {self.default_text_search_index: query}\n+        query.update(self.query)\n+        brains = self.catalog(**query)\n+        return SimpleVocabulary([\n+            SimpleTerm(\n+                title=u\'{} ({})\'.format(b.Title, b.getPath()),\n+                token=b.UID,\n+                value=b.UID,\n+            ) for b in brains\n+        ])\n+\n+\n @implementer(ISource)\n class CatalogSource(object):\n     """Catalog source for use with Choice fields.\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/fdff0d446ca705f93ab5c276ee9675a968ab7836
-
-Document new vocabulary. Add vocabulary title customization.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex 7adbca9..11ce8e5 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -603,11 +603,7 @@ def getTerm(self, value):\n         query = {\'UID\': value}\n         brains = self.catalog(**query)\n         for b in brains:\n-            return SimpleTerm(\n-                title=u\'{} ({})\'.format(b.Title, b.getPath()),\n-                token=b.UID,\n-                value=b.UID,\n-            )\n+            return self.createTerm(b, None)\n \n     getTermByToken = getTerm\n \n@@ -670,47 +666,112 @@ def __call__(self, context, query=None):\n \n \n def request_query_cache_key(func, vocab):\n-    return json.dumps((vocab.query, vocab.default_text_search_index))\n+    return json.dumps([\n+        vocab.query, vocab.text_search_index, vocab.title_template\n+    ])\n \n \n class StaticCatalogVocabulary(CatalogVocabulary):\n-    """Catalog Vocabulary for static lists of content based on a fixed query.\n+    """Catalog Vocabulary for static queries of content based on a fixed query.\n+    Intended for use in a zope.schema, e.g.:\n+\n+        my_relation = RelationChoice(\n+            title="Custom Relation",\n+            vocabulary=StaticCatalogVocabulary({\n+                "portal_type": "Document",\n+                "review_state": "published",\n+            })\n+        )\n+\n+    Can be used with TextLine values (to store a UUID) or\n+    Relation/RelationChoice values (to create a z3c.relationfield style\n+    relation). This vocabulary will work with a variety of selection widgets,\n+    and provides a text search method to work with the\n+    plone.app.z3cform.widget.AjaxSelectWidget.\n+\n+    This vocabulary can be used to make a named vocabulary with a factory\n+    function:\n+\n+        from zope.interface import provider\n+        from zope.schema.interfaces import IVocabularyFactory\n+\n+\n+        @provider(IVocabularyFactory)\n+        def my_vocab_factory(context):\n+            return StaticCatalogVocabulary({\n+                \'portal_type\': \'Event\',\n+                \'path\': \'/\'.join(context.getPhysicalPath())\n+            })\n+\n+    The default item title looks like "Object Title (/path/to/object)", but this\n+    can be customized by passing a format string as the "title_template"\n+    parameter. The format string has "brain" and "path" arguments available:\n+\n+        MY_VOCABULARY = StaticCatalogVocabulary(\n+            {\'portal_type\': \'Event\'},\n+            title_template="{brain.Type}: {brain.Title} at {path}"\n+        )\n+\n+    When using this vocabulary for dynamic queries, e.g. with the\n+    AjaxSelectWidget, you can customize the index searched using the\n+    "text_search_index" parameter. By default it uses the "SearchableText"\n+    index, but you could have your vocabulary search on "Title" instead:\n+\n+        from plone.autoform import directives\n+        from plone.app.z3cform.widget import AjaxSelectFieldWidget\n+\n+\n+        directives.widget(\n+            \'my_relation\',\n+            AjaxSelectFieldWidget,\n+            vocabulary=StaticCatalogVocabulary(\n+                {\'portal_type\': \'Event\'},\n+                text_search_index="Title",\n+                title_template="{brain.Type}: {brain.Title} at {path}"\n+            )\n+        )\n+\n+    This vocabulary lazily caches the result set for the base query on the\n+    request to optimize performance.\n     """\n+    title_template = "{brain.Title} ({path})"\n+    text_search_index = "SearchableText"\n \n-    def __init__(self, query, default_text_search_index=\'SearchableText\'):\n+    def __init__(self, query, text_search_index=None,\n+                 title_template=None):\n         self.query = query\n-        self.default_text_search_index = default_text_search_index\n+        if text_search_index:\n+            self.text_search_index = text_search_index\n+        if title_template:\n+            self.title_template = title_template\n \n     @staticmethod\n     def get_request():\n         return getRequest()\n \n     @property\n-    @request.cache(get_key=request_query_cache_key, get_request=\'self.get_request()\')\n+    @request.cache(get_key=request_query_cache_key, get_request="self.get_request()")\n     def brains(self):\n         return self.catalog(**self.query)\n \n-    @classmethod\n-    def createTerm(cls, brain, context):\n+    def createTerm(self, brain, context=None):\n         return SimpleTerm(\n             value=brain.UID, token=brain.UID,\n-            title=\'{} ({})\'.format(brain.Title, brain.getPath())\n+            title=self.title_template.format(\n+                brain=brain, path=brain.getPath()\n+            )\n         )\n \n     def search(self, query):\n         """Required by plone.app.content.browser.vocabulary for simple queryable\n         vocabs, e.g. for AJAXSelectWidget."""\n-        if not query.endswith(\' \'):\n-            query += \'*\'\n-        query = {self.default_text_search_index: query}\n+        if not query.endswith(" "):\n+            query += "*"\n+        query = {self.text_search_index: query}\n         query.update(self.query)\n         brains = self.catalog(**query)\n         return SimpleVocabulary([\n-            SimpleTerm(\n-                title=u\'{} ({})\'.format(b.Title, b.getPath()),\n-                token=b.UID,\n-                value=b.UID,\n-            ) for b in brains\n+            self.createTerm(b) for b in brains\n         ])\n \n \n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/224f178043bd70cd70abd91ca4168da8692cf17a
-
-Strip site/nav_root path from display path in default StaticCatalogVocabulary title. Add tests.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/tests/base.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex 11ce8e5..538d506 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -14,6 +14,7 @@\n from Products.CMFCore.utils import getToolByName\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n from Products.ZCTextIndex.ParseTree import ParseError\n+from z3c.formwidget.query.interfaces import IQuerySource\n from zope.browser.interfaces import ITerms\n from zope.component import queryUtility\n from zope.interface import implementer\n@@ -671,6 +672,7 @@ def request_query_cache_key(func, vocab):\n     ])\n \n \n+@implementer(IQuerySource, IVocabularyFactory)\n class StaticCatalogVocabulary(CatalogVocabulary):\n     """Catalog Vocabulary for static queries of content based on a fixed query.\n     Intended for use in a zope.schema, e.g.:\n@@ -733,6 +735,62 @@ def my_vocab_factory(context):\n \n     This vocabulary lazily caches the result set for the base query on the\n     request to optimize performance.\n+\n+    Here are some doctests::\n+\n+      >>> from plone.app.vocabularies.tests.base import Brain\n+      >>> from plone.app.vocabularies.tests.base import DummyCatalog\n+      >>> from plone.app.vocabularies.tests.base import create_context\n+      >>> from plone.app.vocabularies.tests.base import DummyTool\n+\n+      >>> context = create_context()\n+\n+      >>> catalog = DummyCatalog((\'/1234\', \'/2345\'))\n+      >>> context.portal_catalog = catalog\n+\n+      >>> tool = DummyTool(\'portal_url\')\n+      >>> def getPortalPath():\n+      ...     return \'/\'\n+      >>> tool.getPortalPath = getPortalPath\n+      >>> context.portal_url = tool\n+\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> vocab\n+      <plone.app.vocabularies.catalog.StaticCatalogVocabulary object at ...>\n+\n+      >>> vocab.search(\'\')\n+      <zope.schema.vocabulary.SimpleVocabulary object at ...>\n+      >>> list(vocab.search(\'\'))\n+      []\n+\n+      >>> vocab.search(\'foo\')\n+      <zope.schema.vocabulary.SimpleVocabulary object at ...>\n+\n+      >>> [(t.title, t.value) for t in vocab.search(\'foo\')]\n+      [(\'BrainTitle (/1234)\', \'/1234\'), (\'BrainTitle (/2345)\', \'/2345\')]\n+\n+    We strip out the site path from the rendered path in the title template:\n+\n+      >>> catalog = DummyCatalog((\'/site/1234\', \'/site/2345\'))\n+      >>> context.portal_catalog = catalog\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(\'BrainTitle (/site/1234)\', \'/site/1234\'),\n+       (\'BrainTitle (/site/2345)\', \'/site/2345\')]\n+\n+      >>> context.__name__ = \'site\'\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(\'BrainTitle (/1234)\', \'/site/1234\'),\n+       (\'BrainTitle (/2345)\', \'/site/2345\')]\n+\n+    The title template can be customized:\n+\n+      >>> vocab.title_template = "{url} {brain.UID} - {brain.Title} {path}"\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(\'proto:/site/1234 /site/1234 - BrainTitle /1234\', \'/site/1234\'),\n+       (\'proto:/site/2345 /site/2345 - BrainTitle /2345\', \'/site/2345\')]\n+\n     """\n     title_template = "{brain.Title} ({path})"\n     text_search_index = "SearchableText"\n@@ -745,6 +803,20 @@ def __init__(self, query, text_search_index=None,\n         if title_template:\n             self.title_template = title_template\n \n+    @property\n+    @memoize\n+    def nav_root_path(self):\n+        site = getSite()\n+        nav_root = getNavigationRootObject(site, site)\n+        return \'/\'.join(nav_root.getPhysicalPath())\n+\n+    def get_brain_path(self, brain):\n+        nav_root_path = self.nav_root_path\n+        path = brain.getPath()\n+        if path.startswith(nav_root_path):\n+            path = path[len(nav_root_path):]\n+        return path\n+\n     @staticmethod\n     def get_request():\n         return getRequest()\n@@ -758,13 +830,17 @@ def createTerm(self, brain, context=None):\n         return SimpleTerm(\n             value=brain.UID, token=brain.UID,\n             title=self.title_template.format(\n-                brain=brain, path=brain.getPath()\n+                brain=brain, path=self.get_brain_path(brain),\n+                url=brain.getURL(),\n             )\n         )\n \n     def search(self, query):\n         """Required by plone.app.content.browser.vocabulary for simple queryable\n         vocabs, e.g. for AJAXSelectWidget."""\n+        if not query:\n+            return SimpleVocabulary([])\n+\n         if not query.endswith(" "):\n             query += "*"\n         query = {self.text_search_index: query}\ndiff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py\nindex aaec8f6..7c3136d 100644\n--- a/plone/app/vocabularies/tests/base.py\n+++ b/plone/app/vocabularies/tests/base.py\n@@ -94,6 +94,9 @@ def __init__(self, rid):\n     def getPath(self):\n         return self.rid\n \n+    def getURL(self):\n+        return \'proto:\' + self.rid\n+\n     @property\n     def UID(self):\n         return self.rid\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/72b4702f7e58d0a176dbde1949e3277afaf42766
-
-Update to use view.memoize. Thanks @ale-rt!
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex 538d506..a66c66f 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -8,7 +8,7 @@\n from plone.app.vocabularies.terms import safe_simplevocabulary_from_values\n from plone.app.vocabularies.utils import parseQueryString\n from plone.memoize.instance import memoize\n-from plone.memoize import request\n+from plone.memoize.view import memoize as view_memoize\n from plone.registry.interfaces import IRegistry\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n@@ -822,7 +822,7 @@ def get_request():\n         return getRequest()\n \n     @property\n-    @request.cache(get_key=request_query_cache_key, get_request="self.get_request()")\n+    @view_memoize\n     def brains(self):\n         return self.catalog(**self.query)\n \n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/9e3b4f0f69b2150cea51ea5212cb0458762e62c8
-
-Add CHANGELOG entry.
-
-Files changed:
-A news/66.feature
-
-b'diff --git a/news/66.feature b/news/66.feature\nnew file mode 100644\nindex 0000000..41cf57f\n--- /dev/null\n+++ b/news/66.feature\n@@ -0,0 +1,3 @@\n+Add new ``StaticCatalogVocabulary`` class providing a simplified mechanism for\n+creating queryable content vocabularies. Allows use of e.g. AJAXSelectWidget for\n+fields that store Relations or UUIDs.\n\\ No newline at end of file\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/092635e04b36c67fd76f08bbb39e7bdd75d8572d
-
-Remove moribund code.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex a66c66f..e39caaa 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -25,13 +25,6 @@\n from zope.schema.vocabulary import SimpleTerm\n from zope.schema.vocabulary import SimpleVocabulary\n from zope.component.hooks import getSite\n-\n-try:\n-    from zope.globalrequest import getRequest\n-except ImportError:\n-    def getRequest():\n-        return None\n-\n import itertools\n import os\n import six\n@@ -666,12 +659,6 @@ def __call__(self, context, query=None):\n         return CatalogVocabulary.fromItems(parsed, context)\n \n \n-def request_query_cache_key(func, vocab):\n-    return json.dumps([\n-        vocab.query, vocab.text_search_index, vocab.title_template\n-    ])\n-\n-\n @implementer(IQuerySource, IVocabularyFactory)\n class StaticCatalogVocabulary(CatalogVocabulary):\n     """Catalog Vocabulary for static queries of content based on a fixed query.\n@@ -817,10 +804,6 @@ def get_brain_path(self, brain):\n             path = path[len(nav_root_path):]\n         return path\n \n-    @staticmethod\n-    def get_request():\n-        return getRequest()\n-\n     @property\n     @view_memoize\n     def brains(self):\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/b13d32fea5645c89aa7c58e8d0f8a8739b9e9e50
-
-Revert "Remove moribund code."
-
-This reverts commit 8e71006291f186fffd9c66a7894855875ef49887.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex e39caaa..a66c66f 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -25,6 +25,13 @@\n from zope.schema.vocabulary import SimpleTerm\n from zope.schema.vocabulary import SimpleVocabulary\n from zope.component.hooks import getSite\n+\n+try:\n+    from zope.globalrequest import getRequest\n+except ImportError:\n+    def getRequest():\n+        return None\n+\n import itertools\n import os\n import six\n@@ -659,6 +666,12 @@ def __call__(self, context, query=None):\n         return CatalogVocabulary.fromItems(parsed, context)\n \n \n+def request_query_cache_key(func, vocab):\n+    return json.dumps([\n+        vocab.query, vocab.text_search_index, vocab.title_template\n+    ])\n+\n+\n @implementer(IQuerySource, IVocabularyFactory)\n class StaticCatalogVocabulary(CatalogVocabulary):\n     """Catalog Vocabulary for static queries of content based on a fixed query.\n@@ -804,6 +817,10 @@ def get_brain_path(self, brain):\n             path = path[len(nav_root_path):]\n         return path\n \n+    @staticmethod\n+    def get_request():\n+        return getRequest()\n+\n     @property\n     @view_memoize\n     def brains(self):\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/1b1208627d28fcb786d72fd08f21884ef7aefe83
-
-Revert "Update to use view.memoize. Thanks @ale-rt!"
-
-This reverts commit c79043d4314ee6eb6b155abb24ac1dde8593cac1.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex a66c66f..538d506 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -8,7 +8,7 @@\n from plone.app.vocabularies.terms import safe_simplevocabulary_from_values\n from plone.app.vocabularies.utils import parseQueryString\n from plone.memoize.instance import memoize\n-from plone.memoize.view import memoize as view_memoize\n+from plone.memoize import request\n from plone.registry.interfaces import IRegistry\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n@@ -822,7 +822,7 @@ def get_request():\n         return getRequest()\n \n     @property\n-    @view_memoize\n+    @request.cache(get_key=request_query_cache_key, get_request="self.get_request()")\n     def brains(self):\n         return self.catalog(**self.query)\n \n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-11T17:58:22+02:00
-Author: Alec Mitchell (alecpm) <alecpm@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/b3c12f68a8cf83a01eeeccce60a6f0c84db2dc8e
-
-Unicode fix and import reorder.
-
-Files changed:
-M plone/app/vocabularies/catalog.py
-
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex 538d506..455929b 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -1,5 +1,4 @@\n # -*- coding: utf-8 -*-\n-import json\n from BTrees.IIBTree import intersection\n from plone.app.layout.navigation.root import getNavigationRootObject\n from plone.app.vocabularies import SlicableVocabulary\n@@ -12,6 +11,7 @@\n from plone.registry.interfaces import IRegistry\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFPlone.utils import safe_unicode\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n from Products.ZCTextIndex.ParseTree import ParseError\n from z3c.formwidget.query.interfaces import IQuerySource\n@@ -33,6 +33,7 @@ def getRequest():\n         return None\n \n import itertools\n+import json\n import os\n import six\n import warnings\n@@ -829,10 +830,10 @@ def brains(self):\n     def createTerm(self, brain, context=None):\n         return SimpleTerm(\n             value=brain.UID, token=brain.UID,\n-            title=self.title_template.format(\n+            title=safe_unicode(self.title_template.format(\n                 brain=brain, path=self.get_brain_path(brain),\n                 url=brain.getURL(),\n-            )\n+            ))\n         )\n \n     def search(self, query):\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2021-08-12T08:11:42+02:00
+Date: 2021-08-12T12:39:23+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/6ea116e7058251215165d9a8890a1d3f357b7409
+Commit: https://github.com/plone/plone.app.upgrade/commit/34a82383d5bcc7e179e1a3abfa88862f125b4da0
 
-fix doctests for python 2
+Add relations controlpanel (https://github.com/plone/Products.CMFPlone/pull/3232)
 
 Files changed:
-M plone/app/vocabularies/catalog.py
+M plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml
 
-b'diff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex 455929b..a006e9e 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -768,7 +768,7 @@ def my_vocab_factory(context):\n       <zope.schema.vocabulary.SimpleVocabulary object at ...>\n \n       >>> [(t.title, t.value) for t in vocab.search(\'foo\')]\n-      [(\'BrainTitle (/1234)\', \'/1234\'), (\'BrainTitle (/2345)\', \'/2345\')]\n+      [(u\'BrainTitle (/1234)\', \'/1234\'), (u\'BrainTitle (/2345)\', \'/2345\')]\n \n     We strip out the site path from the rendered path in the title template:\n \n@@ -776,21 +776,21 @@ def my_vocab_factory(context):\n       >>> context.portal_catalog = catalog\n       >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n       >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n-      [(\'BrainTitle (/site/1234)\', \'/site/1234\'),\n-       (\'BrainTitle (/site/2345)\', \'/site/2345\')]\n+      [(u\'BrainTitle (/site/1234)\', \'/site/1234\'),\n+       (u\'BrainTitle (/site/2345)\', \'/site/2345\')]\n \n       >>> context.__name__ = \'site\'\n       >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n       >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n-      [(\'BrainTitle (/1234)\', \'/site/1234\'),\n-       (\'BrainTitle (/2345)\', \'/site/2345\')]\n+      [(u\'BrainTitle (/1234)\', \'/site/1234\'),\n+       (u\'BrainTitle (/2345)\', \'/site/2345\')]\n \n     The title template can be customized:\n \n       >>> vocab.title_template = "{url} {brain.UID} - {brain.Title} {path}"\n       >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n-      [(\'proto:/site/1234 /site/1234 - BrainTitle /1234\', \'/site/1234\'),\n-       (\'proto:/site/2345 /site/2345 - BrainTitle /2345\', \'/site/2345\')]\n+      [(u\'proto:/site/1234 /site/1234 - BrainTitle /1234\', \'/site/1234\'),\n+       (u\'proto:/site/2345 /site/2345 - BrainTitle /2345\', \'/site/2345\')]\n \n     """\n     title_template = "{brain.Title} ({path})"\n'
+b'diff --git a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\nindex a3806412..4041d8b9 100644\n--- a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n+++ b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n@@ -36,6 +36,13 @@\n     url_expr="string:${portal_url}/@@member-fields" visible="True"\n     i18n:attributes="title">\n     <permission>Plone Site Setup: Users and Groups</permission>\n-   </configlet>\n+  </configlet>\n+  <configlet title="Relations" action_id="inspectrelations"\n+    icon_expr="string:share-fill"\n+    appId="Relations" category="plone-content" condition_expr=""\n+    url_expr="string:${portal_url}/@@inspect-relations" visible="True"\n+    i18n:attributes="title">\n+    <permission>Inspect Relations</permission>\n+  </configlet>\n \n </object>\n\\ No newline at end of file\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2021-08-12T09:12:03+02:00
+Date: 2021-08-12T12:40:15+02:00
 Author: Philip Bauer (pbauer) <bauer@starzel.de>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/456929561019f337aeef4a46cd8aea71d577b5a6
+Commit: https://github.com/plone/plone.app.upgrade/commit/25f81c59b432f88643aa9bef1a029f6e62644049
 
-Merge pull request #66 from plone/static-catalog-vocabulary
-
-Add static catalog vocabulary to support various widgets with relationsfields or uuid-fields
+Add relations controlpanel (https://github.com/plone/Products.CMFPlone/pull/3232)
 
 Files changed:
-A news/66.feature
-M plone/app/vocabularies/catalog.py
-M plone/app/vocabularies/tests/base.py
+M plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml
 
-b'diff --git a/news/66.feature b/news/66.feature\nnew file mode 100644\nindex 0000000..41cf57f\n--- /dev/null\n+++ b/news/66.feature\n@@ -0,0 +1,3 @@\n+Add new ``StaticCatalogVocabulary`` class providing a simplified mechanism for\n+creating queryable content vocabularies. Allows use of e.g. AJAXSelectWidget for\n+fields that store Relations or UUIDs.\n\\ No newline at end of file\ndiff --git a/plone/app/vocabularies/catalog.py b/plone/app/vocabularies/catalog.py\nindex e279c5b..a006e9e 100644\n--- a/plone/app/vocabularies/catalog.py\n+++ b/plone/app/vocabularies/catalog.py\n@@ -7,11 +7,14 @@\n from plone.app.vocabularies.terms import safe_simplevocabulary_from_values\n from plone.app.vocabularies.utils import parseQueryString\n from plone.memoize.instance import memoize\n+from plone.memoize import request\n from plone.registry.interfaces import IRegistry\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n+from Products.CMFPlone.utils import safe_unicode\n from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile\n from Products.ZCTextIndex.ParseTree import ParseError\n+from z3c.formwidget.query.interfaces import IQuerySource\n from zope.browser.interfaces import ITerms\n from zope.component import queryUtility\n from zope.interface import implementer\n@@ -23,7 +26,14 @@\n from zope.schema.vocabulary import SimpleVocabulary\n from zope.component.hooks import getSite\n \n+try:\n+    from zope.globalrequest import getRequest\n+except ImportError:\n+    def getRequest():\n+        return None\n+\n import itertools\n+import json\n import os\n import six\n import warnings\n@@ -588,6 +598,17 @@ def __getitem__(self, index):\n         else:\n             return self.createTerm(self.brains[index], None)\n \n+    def getTerm(self, value):\n+        if not isinstance(value, six.string_types):\n+            # here we have a content and fetch the uuid as hex value\n+            value = IUUID(value)\n+        query = {\'UID\': value}\n+        brains = self.catalog(**query)\n+        for b in brains:\n+            return self.createTerm(b, None)\n+\n+    getTermByToken = getTerm\n+\n \n @implementer(IVocabularyFactory)\n class CatalogVocabularyFactory(object):\n@@ -646,6 +667,191 @@ def __call__(self, context, query=None):\n         return CatalogVocabulary.fromItems(parsed, context)\n \n \n+def request_query_cache_key(func, vocab):\n+    return json.dumps([\n+        vocab.query, vocab.text_search_index, vocab.title_template\n+    ])\n+\n+\n+@implementer(IQuerySource, IVocabularyFactory)\n+class StaticCatalogVocabulary(CatalogVocabulary):\n+    """Catalog Vocabulary for static queries of content based on a fixed query.\n+    Intended for use in a zope.schema, e.g.:\n+\n+        my_relation = RelationChoice(\n+            title="Custom Relation",\n+            vocabulary=StaticCatalogVocabulary({\n+                "portal_type": "Document",\n+                "review_state": "published",\n+            })\n+        )\n+\n+    Can be used with TextLine values (to store a UUID) or\n+    Relation/RelationChoice values (to create a z3c.relationfield style\n+    relation). This vocabulary will work with a variety of selection widgets,\n+    and provides a text search method to work with the\n+    plone.app.z3cform.widget.AjaxSelectWidget.\n+\n+    This vocabulary can be used to make a named vocabulary with a factory\n+    function:\n+\n+        from zope.interface import provider\n+        from zope.schema.interfaces import IVocabularyFactory\n+\n+\n+        @provider(IVocabularyFactory)\n+        def my_vocab_factory(context):\n+            return StaticCatalogVocabulary({\n+                \'portal_type\': \'Event\',\n+                \'path\': \'/\'.join(context.getPhysicalPath())\n+            })\n+\n+    The default item title looks like "Object Title (/path/to/object)", but this\n+    can be customized by passing a format string as the "title_template"\n+    parameter. The format string has "brain" and "path" arguments available:\n+\n+        MY_VOCABULARY = StaticCatalogVocabulary(\n+            {\'portal_type\': \'Event\'},\n+            title_template="{brain.Type}: {brain.Title} at {path}"\n+        )\n+\n+    When using this vocabulary for dynamic queries, e.g. with the\n+    AjaxSelectWidget, you can customize the index searched using the\n+    "text_search_index" parameter. By default it uses the "SearchableText"\n+    index, but you could have your vocabulary search on "Title" instead:\n+\n+        from plone.autoform import directives\n+        from plone.app.z3cform.widget import AjaxSelectFieldWidget\n+\n+\n+        directives.widget(\n+            \'my_relation\',\n+            AjaxSelectFieldWidget,\n+            vocabulary=StaticCatalogVocabulary(\n+                {\'portal_type\': \'Event\'},\n+                text_search_index="Title",\n+                title_template="{brain.Type}: {brain.Title} at {path}"\n+            )\n+        )\n+\n+    This vocabulary lazily caches the result set for the base query on the\n+    request to optimize performance.\n+\n+    Here are some doctests::\n+\n+      >>> from plone.app.vocabularies.tests.base import Brain\n+      >>> from plone.app.vocabularies.tests.base import DummyCatalog\n+      >>> from plone.app.vocabularies.tests.base import create_context\n+      >>> from plone.app.vocabularies.tests.base import DummyTool\n+\n+      >>> context = create_context()\n+\n+      >>> catalog = DummyCatalog((\'/1234\', \'/2345\'))\n+      >>> context.portal_catalog = catalog\n+\n+      >>> tool = DummyTool(\'portal_url\')\n+      >>> def getPortalPath():\n+      ...     return \'/\'\n+      >>> tool.getPortalPath = getPortalPath\n+      >>> context.portal_url = tool\n+\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> vocab\n+      <plone.app.vocabularies.catalog.StaticCatalogVocabulary object at ...>\n+\n+      >>> vocab.search(\'\')\n+      <zope.schema.vocabulary.SimpleVocabulary object at ...>\n+      >>> list(vocab.search(\'\'))\n+      []\n+\n+      >>> vocab.search(\'foo\')\n+      <zope.schema.vocabulary.SimpleVocabulary object at ...>\n+\n+      >>> [(t.title, t.value) for t in vocab.search(\'foo\')]\n+      [(u\'BrainTitle (/1234)\', \'/1234\'), (u\'BrainTitle (/2345)\', \'/2345\')]\n+\n+    We strip out the site path from the rendered path in the title template:\n+\n+      >>> catalog = DummyCatalog((\'/site/1234\', \'/site/2345\'))\n+      >>> context.portal_catalog = catalog\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(u\'BrainTitle (/site/1234)\', \'/site/1234\'),\n+       (u\'BrainTitle (/site/2345)\', \'/site/2345\')]\n+\n+      >>> context.__name__ = \'site\'\n+      >>> vocab = StaticCatalogVocabulary({\'portal_type\': [\'Document\']})\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(u\'BrainTitle (/1234)\', \'/site/1234\'),\n+       (u\'BrainTitle (/2345)\', \'/site/2345\')]\n+\n+    The title template can be customized:\n+\n+      >>> vocab.title_template = "{url} {brain.UID} - {brain.Title} {path}"\n+      >>> [(t.title, t.value) for t in vocab.search(\'bar\')]\n+      [(u\'proto:/site/1234 /site/1234 - BrainTitle /1234\', \'/site/1234\'),\n+       (u\'proto:/site/2345 /site/2345 - BrainTitle /2345\', \'/site/2345\')]\n+\n+    """\n+    title_template = "{brain.Title} ({path})"\n+    text_search_index = "SearchableText"\n+\n+    def __init__(self, query, text_search_index=None,\n+                 title_template=None):\n+        self.query = query\n+        if text_search_index:\n+            self.text_search_index = text_search_index\n+        if title_template:\n+            self.title_template = title_template\n+\n+    @property\n+    @memoize\n+    def nav_root_path(self):\n+        site = getSite()\n+        nav_root = getNavigationRootObject(site, site)\n+        return \'/\'.join(nav_root.getPhysicalPath())\n+\n+    def get_brain_path(self, brain):\n+        nav_root_path = self.nav_root_path\n+        path = brain.getPath()\n+        if path.startswith(nav_root_path):\n+            path = path[len(nav_root_path):]\n+        return path\n+\n+    @staticmethod\n+    def get_request():\n+        return getRequest()\n+\n+    @property\n+    @request.cache(get_key=request_query_cache_key, get_request="self.get_request()")\n+    def brains(self):\n+        return self.catalog(**self.query)\n+\n+    def createTerm(self, brain, context=None):\n+        return SimpleTerm(\n+            value=brain.UID, token=brain.UID,\n+            title=safe_unicode(self.title_template.format(\n+                brain=brain, path=self.get_brain_path(brain),\n+                url=brain.getURL(),\n+            ))\n+        )\n+\n+    def search(self, query):\n+        """Required by plone.app.content.browser.vocabulary for simple queryable\n+        vocabs, e.g. for AJAXSelectWidget."""\n+        if not query:\n+            return SimpleVocabulary([])\n+\n+        if not query.endswith(" "):\n+            query += "*"\n+        query = {self.text_search_index: query}\n+        query.update(self.query)\n+        brains = self.catalog(**query)\n+        return SimpleVocabulary([\n+            self.createTerm(b) for b in brains\n+        ])\n+\n+\n @implementer(ISource)\n class CatalogSource(object):\n     """Catalog source for use with Choice fields.\ndiff --git a/plone/app/vocabularies/tests/base.py b/plone/app/vocabularies/tests/base.py\nindex aaec8f6..7c3136d 100644\n--- a/plone/app/vocabularies/tests/base.py\n+++ b/plone/app/vocabularies/tests/base.py\n@@ -94,6 +94,9 @@ def __init__(self, rid):\n     def getPath(self):\n         return self.rid\n \n+    def getURL(self):\n+        return \'proto:\' + self.rid\n+\n     @property\n     def UID(self):\n         return self.rid\n'
+b'diff --git a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\nindex 4041d8b9..6f475650 100644\n--- a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n+++ b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n@@ -44,5 +44,4 @@\n     i18n:attributes="title">\n     <permission>Inspect Relations</permission>\n   </configlet>\n-\n </object>\n\\ No newline at end of file\n'
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2021-08-12T12:42:06+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/8b2eb91e25b5ffb4e6d41f00560e7f7af92e39f5
+
+add changenote
+
+Files changed:
+A news/255.feature
+
+b'diff --git a/news/255.feature b/news/255.feature\nnew file mode 100644\nindex 00000000..01207bc4\n--- /dev/null\n+++ b/news/255.feature\n@@ -0,0 +1,2 @@\n+Add relations controlpanel as part of https://github.com/plone/Products.CMFPlone/pull/3232\n+[pbauer]\n\\ No newline at end of file\n'
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2021-08-16T10:41:01+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.upgrade/commit/1faa2f864e03f7678e85c2f9bb580a528370def2
+
+Merge pull request #255 from plone/add_relations_controlpanel
+
+Add relations controlpanel
+
+Files changed:
+A news/255.feature
+M plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml
+
+b'diff --git a/news/255.feature b/news/255.feature\nnew file mode 100644\nindex 00000000..01207bc4\n--- /dev/null\n+++ b/news/255.feature\n@@ -0,0 +1,2 @@\n+Add relations controlpanel as part of https://github.com/plone/Products.CMFPlone/pull/3232\n+[pbauer]\n\\ No newline at end of file\ndiff --git a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\nindex a3806412..6f475650 100644\n--- a/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n+++ b/plone/app/upgrade/v60/profiles/to_alpha1/controlpanel.xml\n@@ -36,6 +36,12 @@\n     url_expr="string:${portal_url}/@@member-fields" visible="True"\n     i18n:attributes="title">\n     <permission>Plone Site Setup: Users and Groups</permission>\n-   </configlet>\n-\n+  </configlet>\n+  <configlet title="Relations" action_id="inspectrelations"\n+    icon_expr="string:share-fill"\n+    appId="Relations" category="plone-content" condition_expr=""\n+    url_expr="string:${portal_url}/@@inspect-relations" visible="True"\n+    i18n:attributes="title">\n+    <permission>Inspect Relations</permission>\n+  </configlet>\n </object>\n\\ No newline at end of file\n'
 
