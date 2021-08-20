@@ -1,19 +1,71 @@
-Repository: plone.app.testing
+Repository: plone.app.event
 
 
-Branch: refs/heads/master
-Date: 2021-08-18T18:47:46+02:00
-Author: Roel Bruggink (jaroel) <roel@jaroel.nl>
-Commit: https://github.com/plone/plone.app.testing/commit/50c1708ccd3320ba505f8c2ad19edcd96847ea26
+Branch: refs/heads/3.2.x
+Date: 2021-07-07T00:02:16+02:00
+Author: Harald Friessnegger (frisi) <friessnegger@lovelysystems.com>
+Commit: https://github.com/plone/plone.app.event/commit/2ae1d716d2a0ea709b4f777b9ee188ab0520b7b7
 
-Dx siteroot (#60)
+expand_events does not remove events
 
-Fixed test that failed for dexterity site root.
+expand_events returns the event items passed in `events` even if they do not fit into `start` and `end` (which are only used to limit the search for occurrences).
 
-Co-authored-by: ale-rt &lt;alessandro.pisa@gmail.com&gt;
+Previously events got removed if they did not fit into the start-end-range although the method is called `*expand*_events`.
+
+(this fixes #261)
 
 Files changed:
-M src/plone/app/testing/layers.rst
+M plone/app/event/base.py
+M plone/app/event/tests/test_base_module.py
 
-b'diff --git a/src/plone/app/testing/layers.rst b/src/plone/app/testing/layers.rst\nindex 89656f1..6cf1ca7 100644\n--- a/src/plone/app/testing/layers.rst\n+++ b/src/plone/app/testing/layers.rst\n@@ -338,7 +338,7 @@ We can now look for this new object through the server.\n     [\'http\', \'//localhost\']\n \n     >>> from six.moves.urllib.request import urlopen\n-    >>> conn = urlopen(portal_url + \'/Title\', timeout=10)\n+    >>> conn = urlopen(portal_url, timeout=10)\n     >>> responseBody = conn.read()\n     >>> b"Fancy Portal" in responseBody\n     True\n'
+b'diff --git a/plone/app/event/base.py b/plone/app/event/base.py\nindex 77f0e2dc..ff2c1604 100644\n--- a/plone/app/event/base.py\n+++ b/plone/app/event/base.py\n@@ -279,8 +279,12 @@ def expand_events(events, ret_mode,\n     for it in events:\n         obj = it.getObject() if getattr(it, \'getObject\', False) else it\n         if IEventRecurrence.providedBy(obj):\n-            occurrences = [_obj_or_acc(occ, ret_mode) for occ in\n-                           IRecurrenceSupport(obj).occurrences(start, end)]\n+\n+            occ_set = set(IRecurrenceSupport(obj).occurrences(start, end))\n+            # add original event (to make expand_events not remove one item of the original list)\n+            if (start or end) and (IEventAccessor(obj).start >= (end or start)):\n+                occ_set.add(obj)\n+            occurrences = [_obj_or_acc(occ, ret_mode) for occ in occ_set]\n         elif IEvent.providedBy(obj):\n             occurrences = [_obj_or_acc(obj, ret_mode)]\n         else:\ndiff --git a/plone/app/event/tests/test_base_module.py b/plone/app/event/tests/test_base_module.py\nindex 4270b83f..dd9e5c0c 100644\n--- a/plone/app/event/tests/test_base_module.py\n+++ b/plone/app/event/tests/test_base_module.py\n@@ -12,6 +12,7 @@\n from plone.app.event.base import default_start\n from plone.app.event.base import default_timezone\n from plone.app.event.base import DT\n+from plone.app.event.base import expand_events\n from plone.app.event.base import find_context\n from plone.app.event.base import find_event_listing\n from plone.app.event.base import find_ploneroot\n@@ -555,7 +556,7 @@ def test_get_event_limit(self):\n               object - such doesn\'t exist).\n \n             - The event object\'s start and end dates are the very first\n-              occurrence. Every other occurence is not stored anywhere but\n+              occurrence. Every other occurrence is not stored anywhere but\n               created on the fly from a recurrence rule.\n \n             - Sorting on start sorts on the very first occurrence - this is\n@@ -747,6 +748,55 @@ def test_expand_start_limit(self):\n         expect = self.occ[1:2] + self.occ[6:8]  # includes ongoing long event\n         self.assertEqual(res, expect, self.diff(res, expect))\n \n+    def test_expand_future_event(self):\n+        """make sure expand_events does not remove event objects (that need not be expanded)\n+        """\n+        # create event happening next year (today + 365 days)\n+        next_year = self.event_factory(\n+            container=self.portal,\n+            content_id=\'next-year\',\n+            title=u\'Next year\',\n+            start=self.tomorrow + timedelta(365),\n+            end=self.tomorrow + timedelta(365) + self.duration,\n+            location=u"Dornbirn",\n+            recurrence=\'RRULE:FREQ=DAILY;COUNT=4\',\n+        )\n+        next_year.reindexObject()\n+\n+\n+        ev = (u\'Next year\', \'2014-05-06 10:00:00\', \'2014-05-06 11:00:00\')  # original event\n+        rec1 = (u\'Next year\', \'2014-05-07 10:00:00\', \'2014-05-07 11:00:00\')  # first recurrence\n+        rec2 = (u\'Next year\', \'2014-05-08 10:00:00\', \'2014-05-08 11:00:00\')  # second recurrence\n+        rec3 = (u\'Next year\', \'2014-05-09 10:00:00\', \'2014-05-09 11:00:00\')  # third recurrence\n+        rec4 = (u\'Next year\', \'2014-05-10 10:00:00\', \'2014-05-10 11:00:00\')  # fourth recurrence\n+\n+\n+        # expand_events from today+200 until today+300\n+        res = self.fmt(expand_events(\n+            [next_year],\n+            RET_MODE_ACCESSORS,\n+            start=self.now + timedelta(200),\n+            end=self.now + timedelta(300),\n+            sort="start"))\n+\n+        # event is included in result even though it starts after the the `end` param of expand_events\n+        # this is to make expand_events only use start/end to expand occurrences, not limit events given in the list\n+        # usecase: catalog search for future events (end >= now), and also show occurrences\n+        # (limited to timeframe between start/end for the returned events,\n+        # but to not exclude the events returned by the search)\n+        expect = [ev]\n+        self.assertEqual(res, expect, self.diff(res, expect))\n+\n+        # when the event does not happen after the search timespan, expand won\'t add original event\n+        res = self.fmt(get_events(\n+            self.portal,\n+            expand=True,\n+            start=self.now + timedelta(365+2),\n+            end=self.now + timedelta(365+3),\n+            ret_mode=RET_MODE_ACCESSORS))\n+        expect = [rec1, rec2]\n+        self.assertEqual(res, expect)\n+\n     # expand=False: events\n \n     def test_noexpand_all(self):\n'
+
+Repository: plone.app.event
+
+
+Branch: refs/heads/3.2.x
+Date: 2021-07-07T00:04:50+02:00
+Author: Harald Friessnegger (frisi) <friessnegger@lovelysystems.com>
+Commit: https://github.com/plone/plone.app.event/commit/3776450b0b549d3529b336859bd02d1139d3e5bb
+
+changelog
+
+Files changed:
+A news/261.bugfix
+
+b'diff --git a/news/261.bugfix b/news/261.bugfix\nnew file mode 100644\nindex 00000000..94cafb14\n--- /dev/null\n+++ b/news/261.bugfix\n@@ -0,0 +1,2 @@\n+make expand_events return items after start/end limit (fixes https://github.com/plone/plone.app.event/issues/261)\n+[fRiSi]\n\\ No newline at end of file\n'
+
+Repository: plone.app.event
+
+
+Branch: refs/heads/3.2.x
+Date: 2021-08-18T18:00:49+02:00
+Author: Harald Friessnegger (frisi) <friessnegger@lovelysystems.com>
+Commit: https://github.com/plone/plone.app.event/commit/64179d65c2890cc94eb11f67b8227d9c102ff21f
+
+review: use list to keep order of IRecurrenceSupport.occurrences
+
+Files changed:
+M plone/app/event/base.py
+
+b"diff --git a/plone/app/event/base.py b/plone/app/event/base.py\nindex ff2c1604..e21e7bc9 100644\n--- a/plone/app/event/base.py\n+++ b/plone/app/event/base.py\n@@ -280,11 +280,12 @@ def expand_events(events, ret_mode,\n         obj = it.getObject() if getattr(it, 'getObject', False) else it\n         if IEventRecurrence.providedBy(obj):\n \n-            occ_set = set(IRecurrenceSupport(obj).occurrences(start, end))\n+            occ_list = list(IRecurrenceSupport(obj).occurrences(start, end))\n             # add original event (to make expand_events not remove one item of the original list)\n             if (start or end) and (IEventAccessor(obj).start >= (end or start)):\n-                occ_set.add(obj)\n-            occurrences = [_obj_or_acc(occ, ret_mode) for occ in occ_set]\n+                if obj not in occ_list:\n+                    occ_list.append(obj)\n+            occurrences = [_obj_or_acc(occ, ret_mode) for occ in occ_list]\n         elif IEvent.providedBy(obj):\n             occurrences = [_obj_or_acc(obj, ret_mode)]\n         else:\n"
+
+Repository: plone.app.event
+
+
+Branch: refs/heads/3.2.x
+Date: 2021-08-20T11:13:59+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.event/commit/599808e96c27475da84439cbd1938fa4457ca076
+
+Merge pull request #337 from plone/frisi/fix-expand-#261
+
+fix epand_events for future events
+
+Files changed:
+A news/261.bugfix
+M plone/app/event/base.py
+M plone/app/event/tests/test_base_module.py
+
+b'diff --git a/news/261.bugfix b/news/261.bugfix\nnew file mode 100644\nindex 00000000..94cafb14\n--- /dev/null\n+++ b/news/261.bugfix\n@@ -0,0 +1,2 @@\n+make expand_events return items after start/end limit (fixes https://github.com/plone/plone.app.event/issues/261)\n+[fRiSi]\n\\ No newline at end of file\ndiff --git a/plone/app/event/base.py b/plone/app/event/base.py\nindex 77f0e2dc..e21e7bc9 100644\n--- a/plone/app/event/base.py\n+++ b/plone/app/event/base.py\n@@ -279,8 +279,13 @@ def expand_events(events, ret_mode,\n     for it in events:\n         obj = it.getObject() if getattr(it, \'getObject\', False) else it\n         if IEventRecurrence.providedBy(obj):\n-            occurrences = [_obj_or_acc(occ, ret_mode) for occ in\n-                           IRecurrenceSupport(obj).occurrences(start, end)]\n+\n+            occ_list = list(IRecurrenceSupport(obj).occurrences(start, end))\n+            # add original event (to make expand_events not remove one item of the original list)\n+            if (start or end) and (IEventAccessor(obj).start >= (end or start)):\n+                if obj not in occ_list:\n+                    occ_list.append(obj)\n+            occurrences = [_obj_or_acc(occ, ret_mode) for occ in occ_list]\n         elif IEvent.providedBy(obj):\n             occurrences = [_obj_or_acc(obj, ret_mode)]\n         else:\ndiff --git a/plone/app/event/tests/test_base_module.py b/plone/app/event/tests/test_base_module.py\nindex 4270b83f..dd9e5c0c 100644\n--- a/plone/app/event/tests/test_base_module.py\n+++ b/plone/app/event/tests/test_base_module.py\n@@ -12,6 +12,7 @@\n from plone.app.event.base import default_start\n from plone.app.event.base import default_timezone\n from plone.app.event.base import DT\n+from plone.app.event.base import expand_events\n from plone.app.event.base import find_context\n from plone.app.event.base import find_event_listing\n from plone.app.event.base import find_ploneroot\n@@ -555,7 +556,7 @@ def test_get_event_limit(self):\n               object - such doesn\'t exist).\n \n             - The event object\'s start and end dates are the very first\n-              occurrence. Every other occurence is not stored anywhere but\n+              occurrence. Every other occurrence is not stored anywhere but\n               created on the fly from a recurrence rule.\n \n             - Sorting on start sorts on the very first occurrence - this is\n@@ -747,6 +748,55 @@ def test_expand_start_limit(self):\n         expect = self.occ[1:2] + self.occ[6:8]  # includes ongoing long event\n         self.assertEqual(res, expect, self.diff(res, expect))\n \n+    def test_expand_future_event(self):\n+        """make sure expand_events does not remove event objects (that need not be expanded)\n+        """\n+        # create event happening next year (today + 365 days)\n+        next_year = self.event_factory(\n+            container=self.portal,\n+            content_id=\'next-year\',\n+            title=u\'Next year\',\n+            start=self.tomorrow + timedelta(365),\n+            end=self.tomorrow + timedelta(365) + self.duration,\n+            location=u"Dornbirn",\n+            recurrence=\'RRULE:FREQ=DAILY;COUNT=4\',\n+        )\n+        next_year.reindexObject()\n+\n+\n+        ev = (u\'Next year\', \'2014-05-06 10:00:00\', \'2014-05-06 11:00:00\')  # original event\n+        rec1 = (u\'Next year\', \'2014-05-07 10:00:00\', \'2014-05-07 11:00:00\')  # first recurrence\n+        rec2 = (u\'Next year\', \'2014-05-08 10:00:00\', \'2014-05-08 11:00:00\')  # second recurrence\n+        rec3 = (u\'Next year\', \'2014-05-09 10:00:00\', \'2014-05-09 11:00:00\')  # third recurrence\n+        rec4 = (u\'Next year\', \'2014-05-10 10:00:00\', \'2014-05-10 11:00:00\')  # fourth recurrence\n+\n+\n+        # expand_events from today+200 until today+300\n+        res = self.fmt(expand_events(\n+            [next_year],\n+            RET_MODE_ACCESSORS,\n+            start=self.now + timedelta(200),\n+            end=self.now + timedelta(300),\n+            sort="start"))\n+\n+        # event is included in result even though it starts after the the `end` param of expand_events\n+        # this is to make expand_events only use start/end to expand occurrences, not limit events given in the list\n+        # usecase: catalog search for future events (end >= now), and also show occurrences\n+        # (limited to timeframe between start/end for the returned events,\n+        # but to not exclude the events returned by the search)\n+        expect = [ev]\n+        self.assertEqual(res, expect, self.diff(res, expect))\n+\n+        # when the event does not happen after the search timespan, expand won\'t add original event\n+        res = self.fmt(get_events(\n+            self.portal,\n+            expand=True,\n+            start=self.now + timedelta(365+2),\n+            end=self.now + timedelta(365+3),\n+            ret_mode=RET_MODE_ACCESSORS))\n+        expect = [rec1, rec2]\n+        self.assertEqual(res, expect)\n+\n     # expand=False: events\n \n     def test_noexpand_all(self):\n'
 
