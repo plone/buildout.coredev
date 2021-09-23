@@ -25,6 +25,7 @@ if not len(sys.argv) == 3:
     print("ERROR. Usage: create-constraints.py buildout.cfg constraints.txt")
     sys.exit(1)
 config_file = sys.argv[1]
+config_file = os.path.realpath(config_file)
 constraints_file = sys.argv[2]
 constraints_file = os.path.realpath(os.path.join(os.getcwd(), constraints_file))
 config = buildout.Buildout(config_file, [])
@@ -37,6 +38,8 @@ versions = config.versions
 with open(constraints_file, "w") as cfile:
     cfile.write("# File created by {}\n".format(__file__))
     cfile.write("# Constraints parsed from {}\n".format(config_file))
+    cfile.write("# In pre alpha stage we need a find-links, to find internal non-PyPI releases.\n")
+    cfile.write("-f https://dist.plone.org/release/6.0-dev/\n")
     for package, version in sorted(versions.items()):
         if package in DENYLIST:
             print("Ignoring blacklisted package {}".format(package))
