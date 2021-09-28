@@ -1,36 +1,68 @@
-Repository: plone.api
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-09-27T17:49:04+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.api/commit/7abc274c2b1d82d2c748f9beb455246e39763a97
+Date: 2021-09-24T12:39:35+02:00
+Author: Gauthier Bastien (gbastien) <gauthier.bastien@imio.be>
+Commit: https://github.com/plone/plone.restapi/commit/e20b623fc1ba06d6ae5ed166177fc6edf0893603
 
-Prevent startup error in relation code when plone.app.iterate is missing.
-
-Fixes https://github.com/plone/plone.api/issues/462
+Avoid `UnboundLocalError` or duplicates in results when using `@search` endpoint and a brain is orphan or a `KeyError` occurs during result serialization
+See issue #1231
 
 Files changed:
-A news/462.bugfix
-M src/plone/api/relation.py
+A news/1231.bugfix
+M src/plone/restapi/serializer/catalog.py
+M src/plone/restapi/tests/test_search.py
 
-b'diff --git a/news/462.bugfix b/news/462.bugfix\nnew file mode 100644\nindex 0000000..35b5941\n--- /dev/null\n+++ b/news/462.bugfix\n@@ -0,0 +1,2 @@\n+Prevent startup error in relation code when ``plone.app.iterate`` is missing.\n+[maurits]\ndiff --git a/src/plone/api/relation.py b/src/plone/api/relation.py\nindex a34c0ad..36a1bdd 100644\n--- a/src/plone/api/relation.py\n+++ b/src/plone/api/relation.py\n@@ -7,8 +7,6 @@\n from plone.api.exc import InvalidParameterError\n from plone.api.validation import at_least_one_of\n from plone.api.validation import required_parameters\n-from plone.app.iterate.dexterity import ITERATE_RELATION_NAME\n-from plone.app.iterate.dexterity.relation import StagingRelationValue\n from plone.app.linkintegrity.handlers import modifiedContent\n from plone.app.linkintegrity.utils import referencedRelationship\n from plone.dexterity.utils import iterSchemataForType\n@@ -24,6 +22,16 @@\n from zope.lifecycleevent import modified\n \n import logging\n+import pkg_resources\n+\n+try:\n+    pkg_resources.get_distribution("plone.app.iterate")\n+except pkg_resources.DistributionNotFound:\n+    ITERATE_RELATION_NAME = None\n+    StagingRelationValue = None\n+else:\n+    from plone.app.iterate.dexterity import ITERATE_RELATION_NAME\n+    from plone.app.iterate.dexterity.relation import StagingRelationValue\n \n \n logger = logging.getLogger(__name__)\n'
+b'diff --git a/news/1231.bugfix b/news/1231.bugfix\nnew file mode 100644\nindex 000000000..a27dfbc9c\n--- /dev/null\n+++ b/news/1231.bugfix\n@@ -0,0 +1,2 @@\n+Avoid `UnboundLocalError` or duplicates in results when using `@search` endpoint and a brain is orphan or a `KeyError` occurs during result serialization\n+[gbastien]\ndiff --git a/src/plone/restapi/serializer/catalog.py b/src/plone/restapi/serializer/catalog.py\nindex d73bb46d8..f1091d8ce 100644\n--- a/src/plone/restapi/serializer/catalog.py\n+++ b/src/plone/restapi/serializer/catalog.py\n@@ -41,9 +41,7 @@ def __call__(self, fullobjects=False):\n         for brain in batch:\n             if fullobjects:\n                 try:\n-                    result = getMultiAdapter(\n-                        (brain.getObject(), self.request), ISerializeToJson\n-                    )(include_items=False)\n+                    obj = brain.getObject()\n                 except KeyError:\n                     # Guard in case the brain returned refers to an object that doesn\'t\n                     # exists because it failed to uncatalog itself or the catalog has\n@@ -53,6 +51,11 @@ def __call__(self, fullobjects=False):\n                             brain.getPath()\n                         )\n                     )\n+                    continue\n+\n+                result = getMultiAdapter(\n+                    (obj, self.request), ISerializeToJson\n+                )(include_items=False)\n             else:\n                 result = getMultiAdapter(\n                     (brain, self.request), ISerializeToJsonSummary\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex e68d65bfe..2baf9cea3 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -341,6 +341,36 @@ def test_full_objects_retrieval_collections(self):\n         self.assertEqual(response.status_code, 200)\n         self.assertEqual(len(response.json()["items"]), 1)\n \n+    def test_search_orphan_brain(self):\n+\n+        # prevent unindex when deleting self.doc\n+        old__unindexObject = self.doc.__class__.unindexObject\n+        self.doc.__class__.unindexObject = lambda *args: None\n+        self.doc.aq_parent.manage_delObjects([self.doc.getId()])\n+        self.doc.__class__.unindexObject = old__unindexObject\n+        # doc deleted but still in portal_catalog\n+        doc_uid = self.doc.UID()\n+        self.assertFalse(self.doc in self.doc.aq_parent)\n+        self.assertTrue(self.portal.portal_catalog(UID=doc_uid))\n+        transaction.commit()\n+\n+        # query with fullobjects\n+        query = {"portal_type": "DXTestDocument",\n+                 "fullobjects": True,\n+                 "UID": doc_uid}\n+        response = self.api_session.get("/@search", params=query)\n+        self.assertEqual(response.status_code, 200, response.content)\n+        results = response.json()\n+        self.assertEqual(len(results["items"]), 0)\n+\n+        # query without fullobjects\n+        query = {"portal_type": "DXTestDocument",\n+                 "UID": doc_uid}\n+        response = self.api_session.get("/@search", params=query)\n+        self.assertEqual(response.status_code, 200, response.content)\n+        results = response.json()\n+        self.assertEqual(len(results["items"]), 1)\n+\n     # ZCTextIndex\n \n     def test_fulltext_search(self):\n'
 
-Repository: plone.api
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-09-28T08:50:11+02:00
+Date: 2021-09-24T12:48:54+02:00
+Author: Gauthier Bastien (gbastien) <gauthier.bastien@imio.be>
+Commit: https://github.com/plone/plone.restapi/commit/f05a6e08a9a53347290229939024d52a09cf9d8b
+
+Black
+
+Files changed:
+M src/plone/restapi/serializer/catalog.py
+M src/plone/restapi/tests/test_search.py
+
+b'diff --git a/src/plone/restapi/serializer/catalog.py b/src/plone/restapi/serializer/catalog.py\nindex f1091d8ce..f09e1288c 100644\n--- a/src/plone/restapi/serializer/catalog.py\n+++ b/src/plone/restapi/serializer/catalog.py\n@@ -53,9 +53,9 @@ def __call__(self, fullobjects=False):\n                     )\n                     continue\n \n-                result = getMultiAdapter(\n-                    (obj, self.request), ISerializeToJson\n-                )(include_items=False)\n+                result = getMultiAdapter((obj, self.request), ISerializeToJson)(\n+                    include_items=False\n+                )\n             else:\n                 result = getMultiAdapter(\n                     (brain, self.request), ISerializeToJsonSummary\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 2baf9cea3..1e6b15ac3 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -355,17 +355,14 @@ def test_search_orphan_brain(self):\n         transaction.commit()\n \n         # query with fullobjects\n-        query = {"portal_type": "DXTestDocument",\n-                 "fullobjects": True,\n-                 "UID": doc_uid}\n+        query = {"portal_type": "DXTestDocument", "fullobjects": True, "UID": doc_uid}\n         response = self.api_session.get("/@search", params=query)\n         self.assertEqual(response.status_code, 200, response.content)\n         results = response.json()\n         self.assertEqual(len(results["items"]), 0)\n \n         # query without fullobjects\n-        query = {"portal_type": "DXTestDocument",\n-                 "UID": doc_uid}\n+        query = {"portal_type": "DXTestDocument", "UID": doc_uid}\n         response = self.api_session.get("/@search", params=query)\n         self.assertEqual(response.status_code, 200, response.content)\n         results = response.json()\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-09-24T17:46:13+02:00
+Author: Gauthier Bastien (gbastien) <gauthier.bastien@imio.be>
+Commit: https://github.com/plone/plone.restapi/commit/4985c061a3c8caeae068f8e36b476fc1fb0fa2b5
+
+Re-run all
+
+Files changed:
+M news/1231.bugfix
+
+b'diff --git a/news/1231.bugfix b/news/1231.bugfix\nindex a27dfbc9c..c36457304 100644\n--- a/news/1231.bugfix\n+++ b/news/1231.bugfix\n@@ -1,2 +1,2 @@\n-Avoid `UnboundLocalError` or duplicates in results when using `@search` endpoint and a brain is orphan or a `KeyError` occurs during result serialization\n+Avoid `UnboundLocalError` or duplicates in results when using `@search` endpoint and a brain is orphan or a `KeyError` occurs during result serialization.\n [gbastien]\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-09-28T08:56:59+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.api/commit/38bdebdd3a840b108d587be2ab0d434bf669e0f2
+Commit: https://github.com/plone/plone.restapi/commit/0d42ae63f25a8e7f432cd9cd1c2fce1abe56a09a
 
-Merge pull request #463 from plone/maurits/fix-iterate
+Merge pull request #1233 from plone/issue1231_fix_search_orphan_brain
 
-Prevent startup error in relations when plone.app.iterate is missing
+Avoid `UnboundLocalError` or duplicates in results
 
 Files changed:
-A news/462.bugfix
-M src/plone/api/relation.py
+A news/1231.bugfix
+M src/plone/restapi/serializer/catalog.py
+M src/plone/restapi/tests/test_search.py
 
-b'diff --git a/news/462.bugfix b/news/462.bugfix\nnew file mode 100644\nindex 0000000..35b5941\n--- /dev/null\n+++ b/news/462.bugfix\n@@ -0,0 +1,2 @@\n+Prevent startup error in relation code when ``plone.app.iterate`` is missing.\n+[maurits]\ndiff --git a/src/plone/api/relation.py b/src/plone/api/relation.py\nindex a34c0ad..36a1bdd 100644\n--- a/src/plone/api/relation.py\n+++ b/src/plone/api/relation.py\n@@ -7,8 +7,6 @@\n from plone.api.exc import InvalidParameterError\n from plone.api.validation import at_least_one_of\n from plone.api.validation import required_parameters\n-from plone.app.iterate.dexterity import ITERATE_RELATION_NAME\n-from plone.app.iterate.dexterity.relation import StagingRelationValue\n from plone.app.linkintegrity.handlers import modifiedContent\n from plone.app.linkintegrity.utils import referencedRelationship\n from plone.dexterity.utils import iterSchemataForType\n@@ -24,6 +22,16 @@\n from zope.lifecycleevent import modified\n \n import logging\n+import pkg_resources\n+\n+try:\n+    pkg_resources.get_distribution("plone.app.iterate")\n+except pkg_resources.DistributionNotFound:\n+    ITERATE_RELATION_NAME = None\n+    StagingRelationValue = None\n+else:\n+    from plone.app.iterate.dexterity import ITERATE_RELATION_NAME\n+    from plone.app.iterate.dexterity.relation import StagingRelationValue\n \n \n logger = logging.getLogger(__name__)\n'
+b'diff --git a/news/1231.bugfix b/news/1231.bugfix\nnew file mode 100644\nindex 000000000..c36457304\n--- /dev/null\n+++ b/news/1231.bugfix\n@@ -0,0 +1,2 @@\n+Avoid `UnboundLocalError` or duplicates in results when using `@search` endpoint and a brain is orphan or a `KeyError` occurs during result serialization.\n+[gbastien]\ndiff --git a/src/plone/restapi/serializer/catalog.py b/src/plone/restapi/serializer/catalog.py\nindex d73bb46d8..f09e1288c 100644\n--- a/src/plone/restapi/serializer/catalog.py\n+++ b/src/plone/restapi/serializer/catalog.py\n@@ -41,9 +41,7 @@ def __call__(self, fullobjects=False):\n         for brain in batch:\n             if fullobjects:\n                 try:\n-                    result = getMultiAdapter(\n-                        (brain.getObject(), self.request), ISerializeToJson\n-                    )(include_items=False)\n+                    obj = brain.getObject()\n                 except KeyError:\n                     # Guard in case the brain returned refers to an object that doesn\'t\n                     # exists because it failed to uncatalog itself or the catalog has\n@@ -53,6 +51,11 @@ def __call__(self, fullobjects=False):\n                             brain.getPath()\n                         )\n                     )\n+                    continue\n+\n+                result = getMultiAdapter((obj, self.request), ISerializeToJson)(\n+                    include_items=False\n+                )\n             else:\n                 result = getMultiAdapter(\n                     (brain, self.request), ISerializeToJsonSummary\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex e2602ced2..38da0e31c 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -341,6 +341,33 @@ def test_full_objects_retrieval_collections(self):\n         self.assertEqual(response.status_code, 200)\n         self.assertEqual(len(response.json()["items"]), 1)\n \n+    def test_search_orphan_brain(self):\n+\n+        # prevent unindex when deleting self.doc\n+        old__unindexObject = self.doc.__class__.unindexObject\n+        self.doc.__class__.unindexObject = lambda *args: None\n+        self.doc.aq_parent.manage_delObjects([self.doc.getId()])\n+        self.doc.__class__.unindexObject = old__unindexObject\n+        # doc deleted but still in portal_catalog\n+        doc_uid = self.doc.UID()\n+        self.assertFalse(self.doc in self.doc.aq_parent)\n+        self.assertTrue(self.portal.portal_catalog(UID=doc_uid))\n+        transaction.commit()\n+\n+        # query with fullobjects\n+        query = {"portal_type": "DXTestDocument", "fullobjects": True, "UID": doc_uid}\n+        response = self.api_session.get("/@search", params=query)\n+        self.assertEqual(response.status_code, 200, response.content)\n+        results = response.json()\n+        self.assertEqual(len(results["items"]), 0)\n+\n+        # query without fullobjects\n+        query = {"portal_type": "DXTestDocument", "UID": doc_uid}\n+        response = self.api_session.get("/@search", params=query)\n+        self.assertEqual(response.status_code, 200, response.content)\n+        results = response.json()\n+        self.assertEqual(len(results["items"]), 1)\n+\n     # ZCTextIndex\n \n     def test_fulltext_search(self):\n'
 
