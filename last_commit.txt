@@ -1,32 +1,22 @@
-Repository: plone.locking
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-10-09T07:03:58+02:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.locking/commit/ea9af504fe16ad8a711ddb7b7e49ec18d8a3a241
+Date: 2021-10-11T10:29:09+02:00
+Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/f11b7d7a201e16f72585918998cd7fa618682377
 
-Preparing release 2.2.5
+Add missing backend logout actions for the @logout endpoint (delete c… (#1240)
 
-Files changed:
-M CHANGES.rst
-M setup.py
-D news/3331.bugfix
+* Add missing backend logout actions for the @logout endpoint (delete cookie, etc)
 
-b"diff --git a/CHANGES.rst b/CHANGES.rst\nindex 6a0413a..680475c 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,16 @@ Changelog\n \n .. towncrier release notes start\n \n+2.2.5 (2021-10-09)\n+------------------\n+\n+Bug fixes:\n+\n+\n+- Register a fallback @@plone_lock_info view to allow objects without plone.locking behavior to be edited.\n+  [ericof] (#3331)\n+\n+\n 2.2.4 (2020-04-20)\n ------------------\n \ndiff --git a/news/3331.bugfix b/news/3331.bugfix\ndeleted file mode 100644\nindex 9efab5b..0000000\n--- a/news/3331.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Register a fallback @@plone_lock_info view to allow objects without plone.locking behavior to be edited.\n-[ericof]\n\\ No newline at end of file\ndiff --git a/setup.py b/setup.py\nindex 699cbeb..ca6683a 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,6 +1,6 @@\n from setuptools import setup, find_packages\n \n-version = '2.2.5.dev0'\n+version = '2.2.5'\n \n setup(name='plone.locking',\n       version=version,\n"
-
-Repository: plone.locking
-
-
-Branch: refs/heads/master
-Date: 2021-10-09T07:04:32+02:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.locking/commit/134b3a39b55611f264bfdff3ff14a27cdb1f9aa8
-
-Back to development: 2.2.6
+* Fix the use case, removing the 501 branch, refactor old test
 
 Files changed:
-M setup.py
+A news/1239.bugfix
+M src/plone/restapi/pas/plugin.py
+M src/plone/restapi/services/auth/logout.py
+M src/plone/restapi/tests/test_auth.py
 
-b"diff --git a/setup.py b/setup.py\nindex ca6683a..f325a08 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,6 +1,6 @@\n from setuptools import setup, find_packages\n \n-version = '2.2.5'\n+version = '2.2.6.dev0'\n \n setup(name='plone.locking',\n       version=version,\n"
+b'diff --git a/news/1239.bugfix b/news/1239.bugfix\nnew file mode 100644\nindex 000000000..727d34b71\n--- /dev/null\n+++ b/news/1239.bugfix\n@@ -0,0 +1,2 @@\n+- Add missing backend logout actions for the @logout endpoint (delete cookie, etc)\n+  [sneridagh]\ndiff --git a/src/plone/restapi/pas/plugin.py b/src/plone/restapi/pas/plugin.py\nindex e244bde96..643c77e35 100644\n--- a/src/plone/restapi/pas/plugin.py\n+++ b/src/plone/restapi/pas/plugin.py\n@@ -177,7 +177,7 @@ def _path(self):\n \n     def delete_token(self, token):\n         payload = self._decode_token(token, verify=False)\n-        if "sub" not in payload:\n+        if not payload or "sub" not in payload:\n             return False\n         userid = payload["sub"]\n         if userid in self._tokens and token in self._tokens[userid]:\ndiff --git a/src/plone/restapi/services/auth/logout.py b/src/plone/restapi/services/auth/logout.py\nindex 0862471da..73303a910 100644\n--- a/src/plone/restapi/services/auth/logout.py\n+++ b/src/plone/restapi/services/auth/logout.py\n@@ -9,6 +9,7 @@ class Logout(Service):\n     def reply(self):\n         plugin = None\n         acl_users = getToolByName(self, "acl_users")\n+        mt = getToolByName(self.context, "portal_membership")\n         plugins = acl_users._getOb("plugins")\n         authenticators = plugins.listPlugins(IAuthenticationPlugin)\n         for id_, authenticator in authenticators:\n@@ -26,13 +27,20 @@ def reply(self):\n             )\n \n         if not plugin.store_tokens:\n-            self.request.response.setStatus(501)\n-            return dict(\n-                error=dict(type="Logout failed", message="Token can\'t be invalidated")\n-            )\n+            # Just logout properly from Plone\n+            mt.logoutUser()\n+            self.request.response.setStatus(200)\n+            return super().reply()\n \n         creds = plugin.extractCredentials(self.request)\n-        if creds and "token" in creds and plugin.delete_token(creds["token"]):\n+        if (\n+            plugin.store_tokens\n+            and creds\n+            and "token" in creds\n+            and plugin.delete_token(creds["token"])\n+        ):\n+            # Logout also properly from Plone\n+            mt.logoutUser()\n             self.request.response.setStatus(200)\n             return super().reply()\n \ndiff --git a/src/plone/restapi/tests/test_auth.py b/src/plone/restapi/tests/test_auth.py\nindex 7246d0145..e619e0ab7 100644\n--- a/src/plone/restapi/tests/test_auth.py\n+++ b/src/plone/restapi/tests/test_auth.py\n@@ -124,12 +124,9 @@ def test_logout_without_pas_plugin_fails(self):\n         res = service.reply()\n         self.assertIn("error", res)\n \n-    def test_logout_with_not_stored_token_fails(self):\n+    def test_logout_with_not_stored_token_just_logouts_user(self):\n         self.portal.acl_users.jwt_auth.store_tokens = False\n-        service = self.traverse()\n-        res = service.reply()\n-        self.assertEqual(501, self.request.response.getStatus())\n-        self.assertEqual("Token can\'t be invalidated", res["error"]["message"])\n+        self.assertEqual(200, self.request.response.getStatus())\n \n     def test_logout_with_without_credentials_fails(self):\n         self.portal.acl_users.jwt_auth.store_tokens = True\n@@ -138,6 +135,14 @@ def test_logout_with_without_credentials_fails(self):\n         self.assertEqual(400, self.request.response.getStatus())\n         self.assertEqual("Unknown token", res["error"]["message"])\n \n+    def test_logout_with_invalid_token_fails(self):\n+        self.portal.acl_users.jwt_auth.store_tokens = True\n+        token = "my_invalid_token"\n+        self.request._auth = f"Bearer {token}"\n+        service = self.traverse()\n+        service.reply()\n+        self.assertEqual(400, self.request.response.getStatus())\n+\n     def test_logout_succeeds(self):\n         self.portal.acl_users.jwt_auth.store_tokens = True\n         token = self.portal.acl_users.jwt_auth.create_token("admin")\n'
 
