@@ -19,7 +19,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Create a pending release (directory) on dist.plone.org, e.g. 6.0.0a1-pending, and gather files to put there:
   - [ ] You can use `tox -c release/tox.ini -p auto` to some files in `release/dist`.  But you need to create some of those files first.
   - [ ] Create a unified changelog: `bin/manage changelog --start=5.2.X > release/changelog.txt`. Remove the uninteresting top lines.
-  - [ ] Create a file `release/RELEASE-NOTES.txt`. It may be enough to look through the changelog and copy interesting changes.
+  - [ ] Create a file `release/RELEASE-NOTES.md`. It may be enough to look through the changelog and copy interesting changes.
   - [ ] Get the versions.cfg file from coredev.
   - [ ] Create a `release/constraints.txt` file from this. The above tox command generates this.  Note: at some point I expect the constraints file to become leading, and we may need to generate a `versions.cfg` file instead.
   - [ ] Copy (`rsync`) these files to the pending release directory.  (We used to copy packages as well, but let's not do this for Plone 6 anymore.)
