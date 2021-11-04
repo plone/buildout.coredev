@@ -2,14 +2,82 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-04T09:11:17+01:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.restapi/commit/1d87cc174055a6785d468b541899a5ff54971323
+Date: 2021-11-01T16:01:36+01:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/44c71bd329c2e843da786ae901dfed57e924898b
 
-Do not checkout Products.ZCatalog
+Implement IJSONSummarySerializerMetadata allowing addons to extend the metadata returned by Summary serializer
 
 Files changed:
-M plone-5.2.x-performance.cfg
+A news/1250.feature
+M src/plone/restapi/interfaces.py
+M src/plone/restapi/serializer/configure.zcml
+M src/plone/restapi/serializer/summary.py
 
-b'diff --git a/plone-5.2.x-performance.cfg b/plone-5.2.x-performance.cfg\nindex 8285f1ddf..dd78e5d5e 100644\n--- a/plone-5.2.x-performance.cfg\n+++ b/plone-5.2.x-performance.cfg\n@@ -1,7 +1,7 @@\n [buildout]\n extends = plone-5.2.x.cfg\n parts += instance plonesite\n-auto-checkout = Products.ZCatalog\n+# auto-checkout = Products.ZCatalog\n \n [instance]\n recipe = plone.recipe.zope2instance\n'
+b'diff --git a/news/1250.feature b/news/1250.feature\nnew file mode 100644\nindex 000000000..65adf4c2c\n--- /dev/null\n+++ b/news/1250.feature\n@@ -0,0 +1,2 @@\n+Return image_field metadata on SummarySerializer for brains\n+[ericof]\ndiff --git a/src/plone/restapi/interfaces.py b/src/plone/restapi/interfaces.py\nindex 28f1f49cf..9137914b8 100644\n--- a/src/plone/restapi/interfaces.py\n+++ b/src/plone/restapi/interfaces.py\n@@ -208,3 +208,19 @@ def __init__(field, context, request):\n \n     def __call__(value):\n         """Extract text from the block value. Returns text"""\n+\n+\n+class IJSONSummarySerializerMetadata(Interface):\n+    """Configure JSONSummary serializer."""\n+\n+    def default_metadata():\n+        """Returns a set with default metadata to be serialized."""\n+\n+    def field_accessors():\n+        """Returns a dictionary with field accessors to be used during serialization."""\n+\n+    def non_metadata_attributes():\n+        """Returns a set with non metadata attributes."""\n+\n+    def blocklisted_attributes():\n+        """Returns a set with attributes blocked during serialization."""\ndiff --git a/src/plone/restapi/serializer/configure.zcml b/src/plone/restapi/serializer/configure.zcml\nindex 663d0c082..7f25cfd6a 100644\n--- a/src/plone/restapi/serializer/configure.zcml\n+++ b/src/plone/restapi/serializer/configure.zcml\n@@ -107,4 +107,7 @@\n \n   <include package=".controlpanels" />\n \n+  <!-- Summary Serializer Metadata -->\n+  <utility factory=".summary.JSONSummarySerializerMetadata" name="plone.restapi.summary_serializer_metadata" />\n+\n </configure>\ndiff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex 52768ef7a..db20d4963 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -1,5 +1,6 @@\n from plone.app.contentlisting.interfaces import IContentListingObject\n from plone.restapi.interfaces import ISerializeToJsonSummary\n+from plone.restapi.interfaces import IJSONSummarySerializerMetadata\n from plone.restapi.serializer.converters import json_compatible\n from Products.CMFCore.utils import getToolByName\n from Products.CMFCore.WorkflowCore import WorkflowException\n@@ -7,34 +8,56 @@\n from zope.component import adapter\n from zope.interface import implementer\n from zope.interface import Interface\n-\n-# fmt: off\n-DEFAULT_METADATA_FIELDS = {\n-    \'@id\',\n-    \'@type\',\n-    \'description\',\n-    \'review_state\',\n-    \'title\',\n-}\n-\n-FIELD_ACCESSORS = {\n-    "@id": "getURL",\n-    "@type": "PortalType",\n-    "description": "Description",\n-    "title": "Title",\n-}\n-\n-NON_METADATA_ATTRIBUTES = {\n-    "getPath",\n-    "getURL",\n-}\n-\n-BLACKLISTED_ATTRIBUTES = {\n-    \'getDataOrigin\',\n-    \'getObject\',\n-    \'getUserData\',\n-}\n-# fmt: on\n+from zope.component import getAllUtilitiesRegisteredFor\n+\n+\n+@implementer(IJSONSummarySerializerMetadata)\n+class JSONSummarySerializerMetadata:\n+    def default_metadata_fields(self):\n+        return {\n+            "@id",\n+            "@type",\n+            "description",\n+            "review_state",\n+            "title",\n+        }\n+\n+    def field_accessors(self):\n+        return {\n+            "@id": "getURL",\n+            "@type": "PortalType",\n+            "description": "Description",\n+            "title": "Title",\n+        }\n+\n+    def non_metadata_attributes(self):\n+        return {\n+            "getPath",\n+            "getURL",\n+        }\n+\n+    def blocklisted_attributes(self):\n+        return {\n+            "getDataOrigin",\n+            "getObject",\n+            "getUserData",\n+        }\n+\n+\n+def merge_serializer_metadata_utilities_data():\n+    """Merge data returned by utilities registered for IJSONSummarySerializerMetadata."""\n+    serializer_metadata = {\n+        "default_metadata_fields": set(),\n+        "field_accessors": {},\n+        "non_metadata_attributes": set(),\n+        "blocklisted_attributes": set(),\n+    }\n+    utils = getAllUtilitiesRegisteredFor(IJSONSummarySerializerMetadata)\n+    for attribute in serializer_metadata.keys():\n+        for util in utils:\n+            value = getattr(util, attribute)()\n+            serializer_metadata[attribute].update(value)\n+    return serializer_metadata\n \n \n @implementer(ISerializeToJsonSummary)\n@@ -49,15 +72,25 @@ class DefaultJSONSummarySerializer:\n     def __init__(self, context, request):\n         self.context = context\n         self.request = request\n+        # Cache summary_serializer_metadata on request\n+        metadata = self.request.form.get("summary_serializer_metadata", None)\n+        if not metadata:\n+            metadata = merge_serializer_metadata_utilities_data()\n+            self.request.set("summary_serializer_metadata", metadata)\n+\n+        self.default_metadata_fields = metadata["default_metadata_fields"]\n+        self.field_accessors = metadata["field_accessors"]\n+        self.non_metadata_attributes = metadata["non_metadata_attributes"]\n+        self.blocklisted_attributes = metadata["blocklisted_attributes"]\n \n     def __call__(self):\n         obj = IContentListingObject(self.context)\n \n         summary = {}\n         for field in self.metadata_fields():\n-            if field.startswith("_") or field in BLACKLISTED_ATTRIBUTES:\n+            if field.startswith("_") or field in self.blocklisted_attributes:\n                 continue\n-            accessor = FIELD_ACCESSORS.get(field, field)\n+            accessor = self.field_accessors.get(field, field)\n             value = getattr(obj, accessor, None)\n             try:\n                 if callable(value):\n@@ -78,11 +111,11 @@ def metadata_fields(self):\n             fields_cache = self.request.get("_summary_fields_cache", None)\n             if fields_cache is None:\n                 catalog = getToolByName(self.context, "portal_catalog")\n-                fields_cache = set(catalog.schema()) | NON_METADATA_ATTRIBUTES\n+                fields_cache = set(catalog.schema()) | self.non_metadata_attributes\n                 self.request.set("_summary_fields_cache", fields_cache)\n             additional_metadata_fields = fields_cache\n \n-        return DEFAULT_METADATA_FIELDS | additional_metadata_fields\n+        return self.default_metadata_fields | additional_metadata_fields\n \n \n @implementer(ISerializeToJsonSummary)\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-01T16:08:28+01:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/bcbf602258b1fdd1f4d063c88fcbbcab5d48a6b0
+
+Apply zpretty.
+
+Files changed:
+M src/plone/restapi/serializer/configure.zcml
+
+b'diff --git a/src/plone/restapi/serializer/configure.zcml b/src/plone/restapi/serializer/configure.zcml\nindex 7f25cfd6a..f827730c1 100644\n--- a/src/plone/restapi/serializer/configure.zcml\n+++ b/src/plone/restapi/serializer/configure.zcml\n@@ -108,6 +108,9 @@\n   <include package=".controlpanels" />\n \n   <!-- Summary Serializer Metadata -->\n-  <utility factory=".summary.JSONSummarySerializerMetadata" name="plone.restapi.summary_serializer_metadata" />\n+  <utility\n+      factory=".summary.JSONSummarySerializerMetadata"\n+      name="plone.restapi.summary_serializer_metadata"\n+      />\n \n </configure>\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-01T16:10:08+01:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/b4a8dd2367e57a16722672bbd84248db3314a348
+
+Remove the need to implement all methods in each utility.
+
+Files changed:
+M src/plone/restapi/serializer/summary.py
+
+b'diff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex db20d4963..5a6633ae6 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -53,10 +53,13 @@ def merge_serializer_metadata_utilities_data():\n         "blocklisted_attributes": set(),\n     }\n     utils = getAllUtilitiesRegisteredFor(IJSONSummarySerializerMetadata)\n-    for attribute in serializer_metadata.keys():\n+    for name in serializer_metadata.keys():\n         for util in utils:\n-            value = getattr(util, attribute)()\n-            serializer_metadata[attribute].update(value)\n+            method = getattr(util, name, None)\n+            if not method:\n+                continue\n+            value = method()\n+            serializer_metadata[name].update(value)\n     return serializer_metadata\n \n \n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-01T16:10:45+01:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/9f4f6a701e2d4f0ecb067b3e2804dde5d9209a9e
+
+Fix Changelog.
+
+Files changed:
+M news/1250.feature
+
+b'diff --git a/news/1250.feature b/news/1250.feature\nindex 65adf4c2c..db27fb71b 100644\n--- a/news/1250.feature\n+++ b/news/1250.feature\n@@ -1,2 +1,2 @@\n-Return image_field metadata on SummarySerializer for brains\n+Implement IJSONSummarySerializerMetadata allowing addons to extend the metadata returned by Summary serializer.\n [ericof]\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-04T13:59:38+01:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/e12e1be6ba9e5de18ea4b089ece2c0e01a7f6f91
+
+Merge pull request #1261 from plone/image_field_in_summary
+
+Implement IJSONSummarySerializerMetadata
+
+Files changed:
+A news/1250.feature
+M src/plone/restapi/interfaces.py
+M src/plone/restapi/serializer/configure.zcml
+M src/plone/restapi/serializer/summary.py
+
+b'diff --git a/news/1250.feature b/news/1250.feature\nnew file mode 100644\nindex 000000000..db27fb71b\n--- /dev/null\n+++ b/news/1250.feature\n@@ -0,0 +1,2 @@\n+Implement IJSONSummarySerializerMetadata allowing addons to extend the metadata returned by Summary serializer.\n+[ericof]\ndiff --git a/src/plone/restapi/interfaces.py b/src/plone/restapi/interfaces.py\nindex 28f1f49cf..9137914b8 100644\n--- a/src/plone/restapi/interfaces.py\n+++ b/src/plone/restapi/interfaces.py\n@@ -208,3 +208,19 @@ def __init__(field, context, request):\n \n     def __call__(value):\n         """Extract text from the block value. Returns text"""\n+\n+\n+class IJSONSummarySerializerMetadata(Interface):\n+    """Configure JSONSummary serializer."""\n+\n+    def default_metadata():\n+        """Returns a set with default metadata to be serialized."""\n+\n+    def field_accessors():\n+        """Returns a dictionary with field accessors to be used during serialization."""\n+\n+    def non_metadata_attributes():\n+        """Returns a set with non metadata attributes."""\n+\n+    def blocklisted_attributes():\n+        """Returns a set with attributes blocked during serialization."""\ndiff --git a/src/plone/restapi/serializer/configure.zcml b/src/plone/restapi/serializer/configure.zcml\nindex 663d0c082..f827730c1 100644\n--- a/src/plone/restapi/serializer/configure.zcml\n+++ b/src/plone/restapi/serializer/configure.zcml\n@@ -107,4 +107,10 @@\n \n   <include package=".controlpanels" />\n \n+  <!-- Summary Serializer Metadata -->\n+  <utility\n+      factory=".summary.JSONSummarySerializerMetadata"\n+      name="plone.restapi.summary_serializer_metadata"\n+      />\n+\n </configure>\ndiff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex 47ea757c1..64768ecfd 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -1,6 +1,7 @@\n from plone.app.contentlisting.interfaces import IContentListingObject\n from plone.restapi.deserializer import json_body\n from plone.restapi.interfaces import ISerializeToJsonSummary\n+from plone.restapi.interfaces import IJSONSummarySerializerMetadata\n from plone.restapi.serializer.converters import json_compatible\n from Products.CMFCore.utils import getToolByName\n from Products.CMFCore.WorkflowCore import WorkflowException\n@@ -8,34 +9,59 @@\n from zope.component import adapter\n from zope.interface import implementer\n from zope.interface import Interface\n-\n-# fmt: off\n-DEFAULT_METADATA_FIELDS = {\n-    \'@id\',\n-    \'@type\',\n-    \'description\',\n-    \'review_state\',\n-    \'title\',\n-}\n-\n-FIELD_ACCESSORS = {\n-    "@id": "getURL",\n-    "@type": "PortalType",\n-    "description": "Description",\n-    "title": "Title",\n-}\n-\n-NON_METADATA_ATTRIBUTES = {\n-    "getPath",\n-    "getURL",\n-}\n-\n-BLACKLISTED_ATTRIBUTES = {\n-    \'getDataOrigin\',\n-    \'getObject\',\n-    \'getUserData\',\n-}\n-# fmt: on\n+from zope.component import getAllUtilitiesRegisteredFor\n+\n+\n+@implementer(IJSONSummarySerializerMetadata)\n+class JSONSummarySerializerMetadata:\n+    def default_metadata_fields(self):\n+        return {\n+            "@id",\n+            "@type",\n+            "description",\n+            "review_state",\n+            "title",\n+        }\n+\n+    def field_accessors(self):\n+        return {\n+            "@id": "getURL",\n+            "@type": "PortalType",\n+            "description": "Description",\n+            "title": "Title",\n+        }\n+\n+    def non_metadata_attributes(self):\n+        return {\n+            "getPath",\n+            "getURL",\n+        }\n+\n+    def blocklisted_attributes(self):\n+        return {\n+            "getDataOrigin",\n+            "getObject",\n+            "getUserData",\n+        }\n+\n+\n+def merge_serializer_metadata_utilities_data():\n+    """Merge data returned by utilities registered for IJSONSummarySerializerMetadata."""\n+    serializer_metadata = {\n+        "default_metadata_fields": set(),\n+        "field_accessors": {},\n+        "non_metadata_attributes": set(),\n+        "blocklisted_attributes": set(),\n+    }\n+    utils = getAllUtilitiesRegisteredFor(IJSONSummarySerializerMetadata)\n+    for name in serializer_metadata.keys():\n+        for util in utils:\n+            method = getattr(util, name, None)\n+            if not method:\n+                continue\n+            value = method()\n+            serializer_metadata[name].update(value)\n+    return serializer_metadata\n \n \n @implementer(ISerializeToJsonSummary)\n@@ -50,15 +76,25 @@ class DefaultJSONSummarySerializer:\n     def __init__(self, context, request):\n         self.context = context\n         self.request = request\n+        # Cache summary_serializer_metadata on request\n+        metadata = self.request.form.get("summary_serializer_metadata", None)\n+        if not metadata:\n+            metadata = merge_serializer_metadata_utilities_data()\n+            self.request.set("summary_serializer_metadata", metadata)\n+\n+        self.default_metadata_fields = metadata["default_metadata_fields"]\n+        self.field_accessors = metadata["field_accessors"]\n+        self.non_metadata_attributes = metadata["non_metadata_attributes"]\n+        self.blocklisted_attributes = metadata["blocklisted_attributes"]\n \n     def __call__(self):\n         obj = IContentListingObject(self.context)\n \n         summary = {}\n         for field in self.metadata_fields():\n-            if field.startswith("_") or field in BLACKLISTED_ATTRIBUTES:\n+            if field.startswith("_") or field in self.blocklisted_attributes:\n                 continue\n-            accessor = FIELD_ACCESSORS.get(field, field)\n+            accessor = self.field_accessors.get(field, field)\n             value = getattr(obj, accessor, None)\n             try:\n                 if callable(value):\n@@ -83,11 +119,11 @@ def metadata_fields(self):\n             fields_cache = self.request.get("_summary_fields_cache", None)\n             if fields_cache is None:\n                 catalog = getToolByName(self.context, "portal_catalog")\n-                fields_cache = set(catalog.schema()) | NON_METADATA_ATTRIBUTES\n+                fields_cache = set(catalog.schema()) | self.non_metadata_attributes\n                 self.request.set("_summary_fields_cache", fields_cache)\n             additional_metadata_fields = fields_cache\n \n-        return DEFAULT_METADATA_FIELDS | additional_metadata_fields\n+        return self.default_metadata_fields | additional_metadata_fields\n \n \n @implementer(ISerializeToJsonSummary)\n'
 
