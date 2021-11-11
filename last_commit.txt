@@ -1,17 +1,28 @@
-Repository: plone.app.caching
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-10T17:19:44+01:00
+Date: 2021-11-11T08:06:46+01:00
 Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
-Commit: https://github.com/plone/plone.app.caching/commit/ebfe5e8cf8752f4af3db267873b530a5362658b1
+Commit: https://github.com/plone/plone.restapi/commit/f0b0d488e47fd31dede6e16cba18b0954bfa24ca
 
-Remove translations endpoint test because it does not have the correct fixture (#88)
+Multilingual endpoint to contain information about the current INavigationRoot (#1262)
+
+* Initital implementation
+
+* Change implementation for roots to use a dict
+
+* Add docs changes
+
+* Add changelog
+
+* Fix corner case, objects outside the LRFs
 
 Files changed:
-A news/87.bugfix
-M plone/app/caching/tests/test_profile_with_caching_proxy.py
-M plone/app/caching/tests/test_profile_without_caching_proxy.py
+A news/1263.feature
+M src/plone/restapi/services/multilingual/pam.py
+M src/plone/restapi/tests/http-examples/translations_get.resp
+M src/plone/restapi/tests/test_translations.py
 
-b'diff --git a/news/87.bugfix b/news/87.bugfix\nnew file mode 100644\nindex 0000000..dc90004\n--- /dev/null\n+++ b/news/87.bugfix\n@@ -0,0 +1,2 @@\n+Remove translations endpoint test because it does not have the correct fixture\n+[sneridagh]\ndiff --git a/plone/app/caching/tests/test_profile_with_caching_proxy.py b/plone/app/caching/tests/test_profile_with_caching_proxy.py\nindex aeec7c4..78a990e 100644\n--- a/plone/app/caching/tests/test_profile_with_caching_proxy.py\n+++ b/plone/app/caching/tests/test_profile_with_caching_proxy.py\n@@ -729,15 +729,6 @@ def test_restapi_content(self):\n             response.headers["X-Cache-Operation"], "plone.app.caching.terseCaching"\n         )\n \n-    def test_restapi_translationinfo(self):\n-        # plone.content.dynamic for plone.restapi.services.multilingual.pam.TranslationInfo\n-        response = self.api_session.get("/f1/f2/@translations")\n-        self.assertEqual(response.status_code, 200)\n-        self.assertEqual(response.headers["X-Cache-Rule"], "plone.content.dynamic")\n-        self.assertEqual(\n-            response.headers["X-Cache-Operation"], "plone.app.caching.terseCaching"\n-        )\n-\n     def test_restapi_navigation(self):\n         # plone.content.dynamic for plone.restapi.services.navigation.get.NavigationGet\n         response = self.api_session.get("/f1/f2/@navigation")\ndiff --git a/plone/app/caching/tests/test_profile_without_caching_proxy.py b/plone/app/caching/tests/test_profile_without_caching_proxy.py\nindex 3dda74a..897eb26 100644\n--- a/plone/app/caching/tests/test_profile_without_caching_proxy.py\n+++ b/plone/app/caching/tests/test_profile_without_caching_proxy.py\n@@ -622,15 +622,6 @@ def test_restapi_content(self):\n             response.headers["X-Cache-Operation"], "plone.app.caching.terseCaching"\n         )\n \n-    def test_restapi_translationinfo(self):\n-        # plone.content.dynamic for plone.restapi.services.multilingual.pam.TranslationInfo\n-        response = self.api_session.get("/f1/f2/@translations")\n-        self.assertEqual(response.status_code, 200)\n-        self.assertEqual(response.headers["X-Cache-Rule"], "plone.content.dynamic")\n-        self.assertEqual(\n-            response.headers["X-Cache-Operation"], "plone.app.caching.terseCaching"\n-        )\n-\n     def test_restapi_navigation(self):\n         # plone.content.dynamic for plone.restapi.services.navigation.get.NavigationGet\n         response = self.api_session.get("/f1/f2/@navigation")\n'
+b'diff --git a/news/1263.feature b/news/1263.feature\nnew file mode 100644\nindex 000000000..c64d161b8\n--- /dev/null\n+++ b/news/1263.feature\n@@ -0,0 +1,2 @@\n+Add root (INavigationRoot) for the current object information in @translations endpoint\n+[sneridagh]\ndiff --git a/src/plone/restapi/services/multilingual/pam.py b/src/plone/restapi/services/multilingual/pam.py\nindex 33ec616d6..534dfe0ce 100644\n--- a/src/plone/restapi/services/multilingual/pam.py\n+++ b/src/plone/restapi/services/multilingual/pam.py\n@@ -5,6 +5,7 @@\n from plone.restapi.services import Service\n from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.interfaces import ILanguage\n+from Products.CMFPlone.interfaces import IPloneSiteRoot\n from zope.component import adapter\n from zope.component import getMultiAdapter\n from zope.interface import alsoProvides\n@@ -36,7 +37,25 @@ def __call__(self, expand=False):\n                     {"@id": translation.absolute_url(), "language": language}\n                 )\n \n+        portal_state = getMultiAdapter(\n+            (self.context, self.request), name="plone_portal_state"\n+        )\n+        current_lang_nav_root = portal_state.navigation_root()\n+\n+        if IPloneSiteRoot.providedBy(current_lang_nav_root):\n+            # We are not inside a LRF, bail off\n+            return result\n+\n+        nav_root_manager = ITranslationManager(current_lang_nav_root)\n+        nav_root_translations = {}\n+        for (\n+            language,\n+            translation,\n+        ) in nav_root_manager.get_restricted_translations().items():\n+            nav_root_translations[language] = translation.absolute_url()\n+\n         result["translations"]["items"] = translations\n+        result["translations"]["root"] = nav_root_translations\n         return result\n \n \ndiff --git a/src/plone/restapi/tests/http-examples/translations_get.resp b/src/plone/restapi/tests/http-examples/translations_get.resp\nindex 5afa6be6e..abbd74dc3 100644\n--- a/src/plone/restapi/tests/http-examples/translations_get.resp\n+++ b/src/plone/restapi/tests/http-examples/translations_get.resp\n@@ -8,5 +8,11 @@ Content-Type: application/json\n             "@id": "http://localhost:55001/plone/es/test-document",\n             "language": "es"\n         }\n-    ]\n+    ],\n+    "root": {\n+        "de": "http://localhost:55001/plone/de",\n+        "en": "http://localhost:55001/plone/en",\n+        "es": "http://localhost:55001/plone/es",\n+        "fr": "http://localhost:55001/plone/fr"\n+    }\n }\ndiff --git a/src/plone/restapi/tests/test_translations.py b/src/plone/restapi/tests/test_translations.py\nindex c2b5a1efe..68147c3f1 100644\n--- a/src/plone/restapi/tests/test_translations.py\n+++ b/src/plone/restapi/tests/test_translations.py\n@@ -55,6 +55,15 @@ def test_correct_translation_information(self):\n             ILanguage(self.es_content).get_language(), tinfo_es["language"]\n         )\n \n+    def test_translation_info_includes_root_translations(self):\n+        tinfo = getMultiAdapter(\n+            (self.en_content, self.request), name="GET_application_json_@translations"\n+        )\n+\n+        info = tinfo.reply()\n+        self.assertIn("root", info)\n+        self.assertEqual(4, len(info["root"]))\n+\n \n class TestLinkContentsAsTranslations(unittest.TestCase):\n     layer = PLONE_RESTAPI_DX_PAM_FUNCTIONAL_TESTING\n'
 
