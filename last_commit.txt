@@ -2,37 +2,23 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-23T07:25:51+01:00
-Author: Wesley Barroso Lopes (wesleybl) <wesleybl@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/a2e5343338429fa3680044682fd5177035ba6d2f
+Date: 2021-11-23T07:26:33+01:00
+Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/687a61621d6462a990ddbf4c147488fa1be643ea
 
-Fix random failures in tests (#1270)
+Return non-batched vocabularies given a query param b_size=-1 (#1265)
 
-* Fix random failure in test_serialize_to_json_collection_include_items
+* Return non-batched vocabularies given a query param not_batched
 
-When we don't have the sort_on parameter, it's not guaranteed that the
-search result will always come in the same order. This was causing the
-test to fail randomly. So we sort the titles before comparing the
-result.
+* Change parameter name to b_size=-1
 
-This fixes the error:
-
-AssertionError: 'Document 2' != 'Document 1'
-
-* Fix random failure in test_querystringsearch_complex
-
-When we don't have the sort_on parameter, it's not guaranteed that the
-search result will always come in the same order. This was causing the
-test to fail randomly. So we add the sort_on parameter to ensure that
-the result always comes in the same order.
-
-This fixes the error:
-
-AssertionError: 'Test Document 8' != 'Test Document 4'
+* Amend changelogg
 
 Files changed:
-M src/plone/restapi/tests/test_serializer.py
-M src/plone/restapi/tests/test_services_querystringsearch.py
+A news/1264.feature
+M docs/source/vocabularies.rst
+M src/plone/restapi/serializer/vocabularies.py
+M src/plone/restapi/tests/test_services_vocabularies.py
 
-b'diff --git a/src/plone/restapi/tests/test_serializer.py b/src/plone/restapi/tests/test_serializer.py\nindex a9d552f17..271b86c30 100644\n--- a/src/plone/restapi/tests/test_serializer.py\n+++ b/src/plone/restapi/tests/test_serializer.py\n@@ -385,8 +385,10 @@ def test_serialize_to_json_collection_include_items(self):\n         self.request.form["include_items"] = True\n         serialized = self.serialize(self.portal.collection1)\n         items = serialized.get("items")\n-        self.assertEqual(items[0]["title"], self.portal.doc1.Title())\n-        self.assertEqual(items[1]["title"], self.portal.doc2.Title())\n+        self.assertEqual(\n+            sorted([item["title"] for item in items]),\n+            [self.portal.doc1.Title(), self.portal.doc2.Title()],\n+        )\n         self.assertEqual(serialized.get("items_total"), 2)\n \n     def test_serialize_returns_site_root_common(self):\ndiff --git a/src/plone/restapi/tests/test_services_querystringsearch.py b/src/plone/restapi/tests/test_services_querystringsearch.py\nindex 0373ab07d..22c7ae07c 100644\n--- a/src/plone/restapi/tests/test_services_querystringsearch.py\n+++ b/src/plone/restapi/tests/test_services_querystringsearch.py\n@@ -130,6 +130,7 @@ def test_querystringsearch_complex(self):\n                     }\n                 ],\n                 "b_size": 5,\n+                "sort_on": "sortable_title",\n             },\n         )\n \n@@ -153,6 +154,7 @@ def test_querystringsearch_complex(self):\n                 ],\n                 "b_size": 5,\n                 "b_start": 5,\n+                "sort_on": "sortable_title",\n             },\n         )\n \n'
+b'diff --git a/docs/source/vocabularies.rst b/docs/source/vocabularies.rst\nindex 37a79e39e..d826caf60 100644\n--- a/docs/source/vocabularies.rst\n+++ b/docs/source/vocabularies.rst\n@@ -83,6 +83,8 @@ The token is what should be sent to the server to address that term.\n .. literalinclude:: ../../src/plone/restapi/tests/http-examples/vocabularies_get.resp\n    :language: http\n \n+By default, the vocabularies are batched. However, you can pass ``b_size=-1`` parameter to force the endpoint to return all the terms, not batched response.\n+\n Filter Vocabularies\n ^^^^^^^^^^^^^^^^^^^\n \ndiff --git a/news/1264.feature b/news/1264.feature\nnew file mode 100644\nindex 000000000..1fbea0e0b\n--- /dev/null\n+++ b/news/1264.feature\n@@ -0,0 +1,2 @@\n+Return non-batched vocabularies given a query param ``b_size=-1``\n+[sneridagh]\ndiff --git a/src/plone/restapi/serializer/vocabularies.py b/src/plone/restapi/serializer/vocabularies.py\nindex 26acb2407..9c2555a8d 100644\n--- a/src/plone/restapi/serializer/vocabularies.py\n+++ b/src/plone/restapi/serializer/vocabularies.py\n@@ -27,6 +27,7 @@ def __call__(self, vocabulary_id):\n         vocabulary = self.context\n         title = safe_unicode(self.request.form.get("title", ""))\n         token = self.request.form.get("token", "")\n+        b_size = self.request.form.get("b_size", "")\n \n         terms = []\n         for term in vocabulary:\n@@ -52,9 +53,19 @@ def __call__(self, vocabulary_id):\n                     continue\n                 terms.append(term)\n \n+        serialized_terms = []\n+\n+        # Do not batch parameter is set\n+        if b_size == "-1":\n+            for term in terms:\n+                serializer = getMultiAdapter(\n+                    (term, self.request), interface=ISerializeToJson\n+                )\n+                serialized_terms.append(serializer())\n+            return {"@id": vocabulary_id, "items": serialized_terms}\n+\n         batch = HypermediaBatch(self.request, terms)\n \n-        serialized_terms = []\n         for term in batch:\n             serializer = getMultiAdapter(\n                 (term, self.request), interface=ISerializeToJson\ndiff --git a/src/plone/restapi/tests/test_services_vocabularies.py b/src/plone/restapi/tests/test_services_vocabularies.py\nindex 2b4e4324e..2353f9424 100644\n--- a/src/plone/restapi/tests/test_services_vocabularies.py\n+++ b/src/plone/restapi/tests/test_services_vocabularies.py\n@@ -43,6 +43,15 @@ def test_vocabulary_factory(context):\n     return TEST_VOCABULARY\n \n \n+TEST_BIG_VOCABULARY = SimpleVocabulary(\n+    [SimpleTerm(a, token=f"token{a}", title=f"Title {a}") for a in range(100)]\n+)\n+\n+\n+def test_big_vocabulary_factory(context):\n+    return TEST_BIG_VOCABULARY\n+\n+\n def test_context_vocabulary_factory(context):\n     return SimpleVocabulary(\n         [\n@@ -331,6 +340,20 @@ def test_context_vocabulary(self):\n             },\n         )\n \n+    def test_big_vocabulary_not_batched(self):\n+        provideUtility(\n+            test_big_vocabulary_factory,\n+            provides=IVocabularyFactory,\n+            name="plone.restapi.tests.test_big_vocabulary",\n+        )\n+        response = self.api_session.get(\n+            "/@vocabularies/plone.restapi.tests.test_big_vocabulary?b_size=-1"\n+        )\n+\n+        self.assertEqual(200, response.status_code)\n+        response = response.json()\n+        self.assertEqual(len(response["items"]), 100)\n+\n     def tearDown(self):\n         self.api_session.close()\n         gsm = getGlobalSiteManager()\n'
 
