@@ -1,65 +1,160 @@
-Repository: plone.app.caching
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-23T08:07:25+01:00
-Author: wolbernd (wolbernd) <wolbernd@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.caching/commit/c98e44bc449bbdad6c36a6448888333995e3cec2
+Date: 2021-11-24T10:35:15+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/3ff3c332012647a5a5f9074a78fd00a3e356d93d
 
-Add @@images/image to purge list for images
+Lower restriction of vocabularies endpoint
+
+Check if user is authorized to access vocabulary
+
+        default permission for endpoint for all vocabularies, built-in and others, was
+          &lt;permission
+            id="plone.restapi.vocabularies"
+            title="plone.restapi: Access Plone vocabularies"
+            /&gt;
+permission for built-in vocabularies in Classic is
+PERMISSIONS = {
+    "plone.app.vocabularies.Catalog": "View",
+    "plone.app.vocabularies.Keywords": "Modify portal content",
+    "plone.app.vocabularies.SyndicatableFeedItems": "Modify portal content",
+    "plone.app.vocabularies.Users": "Modify portal content",
+    "plone.app.multilingual.RootCatalog": "View",
+}
 
 Files changed:
-M plone/app/caching/purge.py
+M src/plone/restapi/services/vocabularies/configure.zcml
+M src/plone/restapi/services/vocabularies/get.py
 
-b'diff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex f21d6ad..96b6e46 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -208,6 +208,7 @@ def schemas():\n                     continue\n                 filename = value.filename\n                 if is_image:\n+                    yield f"{prefix}/@@images/image"\n                     for size in self.getScales():\n                         yield f"{prefix}/images/{field_name}/{size}"\n                         yield f"{prefix}/@@images/{field_name}/{size}"\n'
+b'diff --git a/src/plone/restapi/services/vocabularies/configure.zcml b/src/plone/restapi/services/vocabularies/configure.zcml\nindex 14956d953..809147272 100644\n--- a/src/plone/restapi/services/vocabularies/configure.zcml\n+++ b/src/plone/restapi/services/vocabularies/configure.zcml\n@@ -8,7 +8,7 @@\n       accept="application/json"\n       factory=".get.VocabulariesGet"\n       for="Products.CMFPlone.interfaces.IPloneSiteRoot"\n-      permission="plone.restapi.vocabularies"\n+      permission="zope2.View"\n       name="@vocabularies"\n       />\n \n@@ -17,7 +17,7 @@\n       accept="application/json"\n       factory=".get.VocabulariesGet"\n       for="Products.CMFCore.interfaces.IContentish"\n-      permission="plone.restapi.vocabularies"\n+      permission="zope2.View"\n       name="@vocabularies"\n       />\n \ndiff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 3905db087..0979485a1 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -1,9 +1,16 @@\n+from AccessControl import getSecurityManager\n+try:\n+    from plone.app.vocabularies import DEFAULT_PERMISSION, DEFAULT_PERMISSION_SECURE, PERMISSIONS\n+except ImportError:\n+    from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION, DEFAULT_PERMISSION_SECURE, PERMISSIONS\n+from plone.app.z3cform.interfaces import IFieldPermissionChecker\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n from zope.component import ComponentLookupError\n from zope.component import getMultiAdapter\n from zope.component import getUtilitiesFor\n from zope.component import getUtility\n+from zope.component import queryAdapter\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n from zope.schema.interfaces import IVocabularyFactory\n@@ -24,7 +31,24 @@ def _error(self, status, type, message):\n         self.request.response.setStatus(status)\n         return {"error": {"type": type, "message": message}}\n \n+    def _has_permission_to_access_vocabulary(self, vocabulary_name):\n+        """Check if user is authorized to access built-in vocabulary\n+\n+        default permission for all vocabularies, built-in and others, was\n+          <permission\n+            id="plone.restapi.vocabularies"\n+            title="plone.restapi: Access Plone vocabularies"\n+            />\n+        """\n+        if vocabulary_name in PERMISSIONS:\n+            sm = getSecurityManager()\n+            return sm.checkPermission(\n+                PERMISSIONS.get(vocabulary_name, DEFAULT_PERMISSION), self.context\n+            )\n+        return True\n+\n     def reply(self):\n+        # return list of all vocabularies\n         if len(self.params) == 0:\n             return [\n                 {\n@@ -36,16 +60,28 @@ def reply(self):\n                 for vocab in getUtilitiesFor(IVocabularyFactory)\n             ]\n \n-        name = self.params[0]\n+        # return single vocabulary by name\n+        vocabulary_name = self.params[0]\n+        if not self._has_permission_to_access_vocabulary(vocabulary_name):\n+            return self._error(\n+                403,\n+                "Not authorized",\n+                (\n+                    f"You are not authorized to access "\n+                    f"the vocabulary \'{vocabulary_name}\'."\n+                )\n+            )\n+\n         try:\n-            factory = getUtility(IVocabularyFactory, name=name)\n+            factory = getUtility(IVocabularyFactory, name=vocabulary_name)\n         except ComponentLookupError:\n             return self._error(\n-                404, "Not Found", f"The vocabulary \'{name}\' does not exist"\n+                404,\n+                "Not Found",\n+                f"The vocabulary \'{vocabulary_name}\' does not exist"\n             )\n \n         vocabulary = factory(self.context)\n-        vocabulary_name = self.params[0]\n         serializer = getMultiAdapter(\n             (vocabulary, self.request), interface=ISerializeToJson\n         )\n'
 
-Repository: plone.app.caching
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-23T15:40:45+01:00
-Author: wolbernd (wolbernd) <wolbernd@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.caching/commit/c42de65716bbef9221481b11d4177372ba5dc342
+Date: 2021-11-24T10:35:15+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/5a66ad7ea8e241c8d69b5fa09ab3d87ad4bc8aaf
 
-Use field_name to purge image
+Test authorization for accessing special built-in vocabularies
 
-Co-authored-by: Jens W. Klein &lt;jk@kleinundpartner.at&gt;
+See plone.app.vocabularies.PERMISSIONS
 
 Files changed:
-M plone/app/caching/purge.py
+M src/plone/restapi/tests/test_services_vocabularies.py
 
-b'diff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex 96b6e46..0982b05 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -208,7 +208,7 @@ def schemas():\n                     continue\n                 filename = value.filename\n                 if is_image:\n-                    yield f"{prefix}/@@images/image"\n+                    yield f"{prefix}/@@images/{field_name}"\n                     for size in self.getScales():\n                         yield f"{prefix}/images/{field_name}/{size}"\n                         yield f"{prefix}/@@images/{field_name}/{size}"\n'
+b'diff --git a/src/plone/restapi/tests/test_services_vocabularies.py b/src/plone/restapi/tests/test_services_vocabularies.py\nindex 2353f9424..6bd8d77d6 100644\n--- a/src/plone/restapi/tests/test_services_vocabularies.py\n+++ b/src/plone/restapi/tests/test_services_vocabularies.py\n@@ -3,6 +3,8 @@\n from plone.app.testing import SITE_OWNER_NAME\n from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n+from plone.app.testing import TEST_USER_NAME\n+from plone.app.testing import TEST_USER_PASSWORD\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from plone.restapi.testing import RelativeSession\n from zope.component import getGlobalSiteManager\n@@ -110,6 +112,38 @@ def test_get_vocabulary(self):\n             },\n         )\n \n+    def test_get_builtin_vocabulary(self):\n+        """Check if built-in vocabularies are protected.\n+        \n+        See plone.app.vocabularies.PERMISSIONS\n+        """\n+        self.api_session.auth = (TEST_USER_NAME, TEST_USER_PASSWORD)\n+\n+        # test editor\n+        setRoles(self.portal, TEST_USER_ID, ["Member", "Contributor", "Editor"])\n+        transaction.commit()\n+        response = self.api_session.get(\n+            "/@vocabularies/plone.app.vocabularies.Keywords"\n+        )\n+        self.assertEqual(200, response.status_code)\n+        response = response.json()\n+        self.assertEqual(\n+            response,\n+            {\n+                "@id": self.portal_url\n+                + "/@vocabularies/plone.app.vocabularies.Keywords",  # noqa\n+                "items": [],\n+                "items_total": 0,\n+            },\n+        )\n+        # test Anonymous\n+        setRoles(self.portal, TEST_USER_ID, ["Anonymous"])\n+        transaction.commit()\n+        response = self.api_session.get(\n+            "/@vocabularies/plone.app.vocabularies.Keywords"\n+        )\n+        self.assertEqual(403, response.status_code)\n+\n     def test_get_vocabulary_batched(self):\n         response = self.api_session.get(\n             "/@vocabularies/plone.restapi.tests.test_vocabulary?b_size=1"\n'
 
-Repository: plone.app.caching
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-24T15:06:22+01:00
-Author: wolbernd (wolbernd) <wolbernd@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.caching/commit/cc5ea9fa83b54e160da55f46cd9486a6d6341059
+Date: 2021-11-24T10:35:15+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/3a2b68be08d1b1d96cf53b6643493bf566181a85
 
-Add info for PR 89
+black, flake8, isort
 
 Files changed:
-A news/89.feature
+M src/plone/restapi/services/vocabularies/get.py
+M src/plone/restapi/tests/test_services_vocabularies.py
 
-b'diff --git a/news/89.feature b/news/89.feature\nnew file mode 100644\nindex 0000000..8e31439\n--- /dev/null\n+++ b/news/89.feature\n@@ -0,0 +1 @@\n+When purging images also purge the field WITHOUT a size parameter (e.g. [...]/@@images/image)\n'
+b'diff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 0979485a1..6e1467116 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -1,16 +1,21 @@\n from AccessControl import getSecurityManager\n+\n+\n try:\n-    from plone.app.vocabularies import DEFAULT_PERMISSION, DEFAULT_PERMISSION_SECURE, PERMISSIONS\n+    from plone.app.vocabularies import DEFAULT_PERMISSION\n+    from plone.app.vocabularies import PERMISSIONS\n except ImportError:\n-    from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION, DEFAULT_PERMISSION_SECURE, PERMISSIONS\n-from plone.app.z3cform.interfaces import IFieldPermissionChecker\n+    from plone.app.content.browser.vocabulary import (\n+        DEFAULT_PERMISSION,\n+        PERMISSIONS,\n+    )\n+\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n from zope.component import ComponentLookupError\n from zope.component import getMultiAdapter\n from zope.component import getUtilitiesFor\n from zope.component import getUtility\n-from zope.component import queryAdapter\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n from zope.schema.interfaces import IVocabularyFactory\n@@ -69,16 +74,14 @@ def reply(self):\n                 (\n                     f"You are not authorized to access "\n                     f"the vocabulary \'{vocabulary_name}\'."\n-                )\n+                ),\n             )\n \n         try:\n             factory = getUtility(IVocabularyFactory, name=vocabulary_name)\n         except ComponentLookupError:\n             return self._error(\n-                404,\n-                "Not Found",\n-                f"The vocabulary \'{vocabulary_name}\' does not exist"\n+                404, "Not Found", f"The vocabulary \'{vocabulary_name}\' does not exist"\n             )\n \n         vocabulary = factory(self.context)\ndiff --git a/src/plone/restapi/tests/test_services_vocabularies.py b/src/plone/restapi/tests/test_services_vocabularies.py\nindex 6bd8d77d6..4aa1437ca 100644\n--- a/src/plone/restapi/tests/test_services_vocabularies.py\n+++ b/src/plone/restapi/tests/test_services_vocabularies.py\n@@ -114,7 +114,7 @@ def test_get_vocabulary(self):\n \n     def test_get_builtin_vocabulary(self):\n         """Check if built-in vocabularies are protected.\n-        \n+\n         See plone.app.vocabularies.PERMISSIONS\n         """\n         self.api_session.auth = (TEST_USER_NAME, TEST_USER_PASSWORD)\n'
 
-Repository: plone.app.caching
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2021-11-24T15:33:05+01:00
+Date: 2021-11-24T10:35:15+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/46479451dc92d0dc511f96d36f10f0d3862ab478
+
+Create 1258.bugfix
+
+Files changed:
+A news/1258.bugfix
+
+b'diff --git a/news/1258.bugfix b/news/1258.bugfix\nnew file mode 100644\nindex 000000000..9460f28ae\n--- /dev/null\n+++ b/news/1258.bugfix\n@@ -0,0 +1 @@\n+Adjust restrictions of vocabularies endpoint [ksuess]\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-24T10:35:37+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/bc583b124103ab52d0477fcedd65eb7bbca6df48
+
+Import from plone.app.vocabularies.security, instead of plone.app.vocabularies
+
+Files changed:
+M src/plone/restapi/services/vocabularies/get.py
+
+b'diff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 6e1467116..398788068 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -2,13 +2,11 @@\n \n \n try:\n-    from plone.app.vocabularies import DEFAULT_PERMISSION\n-    from plone.app.vocabularies import PERMISSIONS\n+    from plone.app.vocabularies.security import DEFAULT_PERMISSION\n+    from plone.app.vocabularies.security import PERMISSIONS\n except ImportError:\n-    from plone.app.content.browser.vocabulary import (\n-        DEFAULT_PERMISSION,\n-        PERMISSIONS,\n-    )\n+    from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION\n+    from plone.app.content.browser.vocabulary import PERMISSIONS\n \n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-24T10:35:37+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/f4ad5a967206554a72a7054fe9f96ab5b95f755b
+
+Check DEFAULT_PERMISSION for all vocabularies (built-in and custom)
+
+Files changed:
+M src/plone/restapi/services/vocabularies/get.py
+
+b'diff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 398788068..8e09386b2 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -35,20 +35,19 @@ def _error(self, status, type, message):\n         return {"error": {"type": type, "message": message}}\n \n     def _has_permission_to_access_vocabulary(self, vocabulary_name):\n-        """Check if user is authorized to access built-in vocabulary\n+        """Check if user is authorized to access the vocabulary.\n \n-        default permission for all vocabularies, built-in and others, was\n-          <permission\n-            id="plone.restapi.vocabularies"\n-            title="plone.restapi: Access Plone vocabularies"\n-            />\n+        The endpoint using this method is supposed to have no further protection (`zope.2Public` permission).\n+        A vocabulary with no further protection follows the `plone.app.vocabularies.DEFAULT_PERMISSION` (usually `zope2.View`).\n+        For further protection the dictionary `plone.app.vocabularies.PERMISSION` is used.\n+        It is a mapping from vocabulary name to permission.\n+        If a vocabulary is mapped there, the permission from the map is taken.\n+        Thus vocabularies can be protected stronger or weaker than the default.\n         """\n-        if vocabulary_name in PERMISSIONS:\n-            sm = getSecurityManager()\n-            return sm.checkPermission(\n-                PERMISSIONS.get(vocabulary_name, DEFAULT_PERMISSION), self.context\n-            )\n-        return True\n+        sm = getSecurityManager()\n+        return sm.checkPermission(\n+            PERMISSIONS.get(vocabulary_name, DEFAULT_PERMISSION), self.context\n+        )\n \n     def reply(self):\n         # return list of all vocabularies\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-24T12:43:37+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/05a7f2877cd820fb1ba9e550f84ad719315cc2ca
+
+Modify docstring
+
+Files changed:
+M src/plone/restapi/services/vocabularies/get.py
+
+b'diff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 8e09386b2..d2cd47875 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -37,12 +37,12 @@ def _error(self, status, type, message):\n     def _has_permission_to_access_vocabulary(self, vocabulary_name):\n         """Check if user is authorized to access the vocabulary.\n \n-        The endpoint using this method is supposed to have no further protection (`zope.2Public` permission).\n+        The endpoint using this method is supposed to have no further protection (`zope.View` permission).\n         A vocabulary with no further protection follows the `plone.app.vocabularies.DEFAULT_PERMISSION` (usually `zope2.View`).\n         For further protection the dictionary `plone.app.vocabularies.PERMISSION` is used.\n         It is a mapping from vocabulary name to permission.\n         If a vocabulary is mapped there, the permission from the map is taken.\n-        Thus vocabularies can be protected stronger or weaker than the default.\n+        Thus vocabularies can be protected stronger than the default.\n         """\n         sm = getSecurityManager()\n         return sm.checkPermission(\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-24T13:16:08+01:00
+Author: ksuess (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.restapi/commit/264c9ea4c888c07d835414f46a12a08b51c08d01
+
+Switch back to former import of PERMISSIONS for vocabulary
+
+Files changed:
+M src/plone/restapi/services/vocabularies/get.py
+
+b'diff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex d2cd47875..9b67ca178 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -1,12 +1,8 @@\n from AccessControl import getSecurityManager\n \n \n-try:\n-    from plone.app.vocabularies.security import DEFAULT_PERMISSION\n-    from plone.app.vocabularies.security import PERMISSIONS\n-except ImportError:\n-    from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION\n-    from plone.app.content.browser.vocabulary import PERMISSIONS\n+from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION\n+from plone.app.content.browser.vocabulary import PERMISSIONS\n \n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2021-11-24T15:35:12+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.app.caching/commit/0f8aa320228bcb4943722ad2d83e7dddecf01a94
+Commit: https://github.com/plone/plone.restapi/commit/8f1d624727901224ff3eef122cb404221550d492
 
-Merge pull request #89 from wolbernd/master
+Merge pull request #1258 from plone/restriction-vocabularies
 
-Add @@images/image to purge list for images
+Lower restriction of vocabularies endpoint
 
 Files changed:
-A news/89.feature
-M plone/app/caching/purge.py
+A news/1258.bugfix
+M src/plone/restapi/services/vocabularies/configure.zcml
+M src/plone/restapi/services/vocabularies/get.py
+M src/plone/restapi/tests/test_services_vocabularies.py
 
-b'diff --git a/news/89.feature b/news/89.feature\nnew file mode 100644\nindex 0000000..8e31439\n--- /dev/null\n+++ b/news/89.feature\n@@ -0,0 +1 @@\n+When purging images also purge the field WITHOUT a size parameter (e.g. [...]/@@images/image)\ndiff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex f21d6ad..0982b05 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -208,6 +208,7 @@ def schemas():\n                     continue\n                 filename = value.filename\n                 if is_image:\n+                    yield f"{prefix}/@@images/{field_name}"\n                     for size in self.getScales():\n                         yield f"{prefix}/images/{field_name}/{size}"\n                         yield f"{prefix}/@@images/{field_name}/{size}"\n'
+b'diff --git a/news/1258.bugfix b/news/1258.bugfix\nnew file mode 100644\nindex 000000000..9460f28ae\n--- /dev/null\n+++ b/news/1258.bugfix\n@@ -0,0 +1 @@\n+Adjust restrictions of vocabularies endpoint [ksuess]\ndiff --git a/src/plone/restapi/services/vocabularies/configure.zcml b/src/plone/restapi/services/vocabularies/configure.zcml\nindex 14956d953..809147272 100644\n--- a/src/plone/restapi/services/vocabularies/configure.zcml\n+++ b/src/plone/restapi/services/vocabularies/configure.zcml\n@@ -8,7 +8,7 @@\n       accept="application/json"\n       factory=".get.VocabulariesGet"\n       for="Products.CMFPlone.interfaces.IPloneSiteRoot"\n-      permission="plone.restapi.vocabularies"\n+      permission="zope2.View"\n       name="@vocabularies"\n       />\n \n@@ -17,7 +17,7 @@\n       accept="application/json"\n       factory=".get.VocabulariesGet"\n       for="Products.CMFCore.interfaces.IContentish"\n-      permission="plone.restapi.vocabularies"\n+      permission="zope2.View"\n       name="@vocabularies"\n       />\n \ndiff --git a/src/plone/restapi/services/vocabularies/get.py b/src/plone/restapi/services/vocabularies/get.py\nindex 3905db087..9b67ca178 100644\n--- a/src/plone/restapi/services/vocabularies/get.py\n+++ b/src/plone/restapi/services/vocabularies/get.py\n@@ -1,3 +1,9 @@\n+from AccessControl import getSecurityManager\n+\n+\n+from plone.app.content.browser.vocabulary import DEFAULT_PERMISSION\n+from plone.app.content.browser.vocabulary import PERMISSIONS\n+\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.services import Service\n from zope.component import ComponentLookupError\n@@ -24,7 +30,23 @@ def _error(self, status, type, message):\n         self.request.response.setStatus(status)\n         return {"error": {"type": type, "message": message}}\n \n+    def _has_permission_to_access_vocabulary(self, vocabulary_name):\n+        """Check if user is authorized to access the vocabulary.\n+\n+        The endpoint using this method is supposed to have no further protection (`zope.View` permission).\n+        A vocabulary with no further protection follows the `plone.app.vocabularies.DEFAULT_PERMISSION` (usually `zope2.View`).\n+        For further protection the dictionary `plone.app.vocabularies.PERMISSION` is used.\n+        It is a mapping from vocabulary name to permission.\n+        If a vocabulary is mapped there, the permission from the map is taken.\n+        Thus vocabularies can be protected stronger than the default.\n+        """\n+        sm = getSecurityManager()\n+        return sm.checkPermission(\n+            PERMISSIONS.get(vocabulary_name, DEFAULT_PERMISSION), self.context\n+        )\n+\n     def reply(self):\n+        # return list of all vocabularies\n         if len(self.params) == 0:\n             return [\n                 {\n@@ -36,16 +58,26 @@ def reply(self):\n                 for vocab in getUtilitiesFor(IVocabularyFactory)\n             ]\n \n-        name = self.params[0]\n+        # return single vocabulary by name\n+        vocabulary_name = self.params[0]\n+        if not self._has_permission_to_access_vocabulary(vocabulary_name):\n+            return self._error(\n+                403,\n+                "Not authorized",\n+                (\n+                    f"You are not authorized to access "\n+                    f"the vocabulary \'{vocabulary_name}\'."\n+                ),\n+            )\n+\n         try:\n-            factory = getUtility(IVocabularyFactory, name=name)\n+            factory = getUtility(IVocabularyFactory, name=vocabulary_name)\n         except ComponentLookupError:\n             return self._error(\n-                404, "Not Found", f"The vocabulary \'{name}\' does not exist"\n+                404, "Not Found", f"The vocabulary \'{vocabulary_name}\' does not exist"\n             )\n \n         vocabulary = factory(self.context)\n-        vocabulary_name = self.params[0]\n         serializer = getMultiAdapter(\n             (vocabulary, self.request), interface=ISerializeToJson\n         )\ndiff --git a/src/plone/restapi/tests/test_services_vocabularies.py b/src/plone/restapi/tests/test_services_vocabularies.py\nindex 2353f9424..4aa1437ca 100644\n--- a/src/plone/restapi/tests/test_services_vocabularies.py\n+++ b/src/plone/restapi/tests/test_services_vocabularies.py\n@@ -3,6 +3,8 @@\n from plone.app.testing import SITE_OWNER_NAME\n from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n+from plone.app.testing import TEST_USER_NAME\n+from plone.app.testing import TEST_USER_PASSWORD\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from plone.restapi.testing import RelativeSession\n from zope.component import getGlobalSiteManager\n@@ -110,6 +112,38 @@ def test_get_vocabulary(self):\n             },\n         )\n \n+    def test_get_builtin_vocabulary(self):\n+        """Check if built-in vocabularies are protected.\n+\n+        See plone.app.vocabularies.PERMISSIONS\n+        """\n+        self.api_session.auth = (TEST_USER_NAME, TEST_USER_PASSWORD)\n+\n+        # test editor\n+        setRoles(self.portal, TEST_USER_ID, ["Member", "Contributor", "Editor"])\n+        transaction.commit()\n+        response = self.api_session.get(\n+            "/@vocabularies/plone.app.vocabularies.Keywords"\n+        )\n+        self.assertEqual(200, response.status_code)\n+        response = response.json()\n+        self.assertEqual(\n+            response,\n+            {\n+                "@id": self.portal_url\n+                + "/@vocabularies/plone.app.vocabularies.Keywords",  # noqa\n+                "items": [],\n+                "items_total": 0,\n+            },\n+        )\n+        # test Anonymous\n+        setRoles(self.portal, TEST_USER_ID, ["Anonymous"])\n+        transaction.commit()\n+        response = self.api_session.get(\n+            "/@vocabularies/plone.app.vocabularies.Keywords"\n+        )\n+        self.assertEqual(403, response.status_code)\n+\n     def test_get_vocabulary_batched(self):\n         response = self.api_session.get(\n             "/@vocabularies/plone.restapi.tests.test_vocabulary?b_size=1"\n'
 
