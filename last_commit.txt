@@ -1,37 +1,34 @@
-Repository: plone.restapi
+Repository: plone.releaser
 
 
 Branch: refs/heads/master
-Date: 2021-11-30T14:35:48+01:00
-Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/389d237f985c394da4062b3048f4e4df059b8624
+Date: 2021-12-01T01:35:00+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.releaser/commit/421b8b5cbc53186f27f77287a9934d206b18920e
 
-Improve support for `missing_value` and `default` story (#1283)
-
-* WIP
-
-* Better implementation
-
-* Add changelog
-
-* Improve condition
-
-* Refine tests
-
-* Better condition (@jensens)
-
-Co-authored-by: Jens W. Klein &lt;jk@kleinundpartner.at&gt;
-
-* Fix whitespace and make black happy
-
-Co-authored-by: Jens W. Klein &lt;jk@kleinundpartner.at&gt;
+Fix InterpolationMissingOptionError when parsing coredev 6.0 sources.
 
 Files changed:
-A news/1282.bugfix
-M src/plone/restapi/deserializer/dxcontent.py
-M src/plone/restapi/tests/dxtypes.py
-M src/plone/restapi/tests/test_dxcontent_deserializer.py
-M src/plone/restapi/tests/test_dxcontent_serializer.py
+A news/42.bugfix
+M plone/releaser/buildout.py
 
-b'diff --git a/news/1282.bugfix b/news/1282.bugfix\nnew file mode 100644\nindex 000000000..a7aa00a61\n--- /dev/null\n+++ b/news/1282.bugfix\n@@ -0,0 +1,2 @@\n+Improve support and meaning for `default` and `missing_value` in serializers/deserializers\n+[sneridagh]\ndiff --git a/src/plone/restapi/deserializer/dxcontent.py b/src/plone/restapi/deserializer/dxcontent.py\nindex 88258ab04..43f4487dc 100644\n--- a/src/plone/restapi/deserializer/dxcontent.py\n+++ b/src/plone/restapi/deserializer/dxcontent.py\n@@ -159,6 +159,24 @@ def get_schema_data(self, data, validate_all, create=False):\n                     if name == "changeNote":\n                         continue\n                     dm = queryMultiAdapter((self.context, field), IDataManager)\n+                    # Covering here missing_value/default edge cases\n+                    if (\n+                        name not in data\n+                        and field.missing_value is not None\n+                        and not field.required\n+                    ):\n+                        # precondition:\n+                        # - name was not handled before\n+                        # - not required, otherwise there has to be a value\n+                        # - missing_value is defined, so it can be set\n+                        dm_value = dm.get()\n+                        if not dm_value or dm_value == field.default:\n+                            # If theres no value at all\n+                            # or if value is the default\n+                            # (so it prevails instead of default)\n+                            # then it sets the missing value\n+                            dm.set(field.missing_value)\n+\n                     bound = field.bind(self.context)\n                     try:\n                         bound.validate(dm.get())\ndiff --git a/src/plone/restapi/tests/dxtypes.py b/src/plone/restapi/tests/dxtypes.py\nindex 493801524..61178f7dd 100644\n--- a/src/plone/restapi/tests/dxtypes.py\n+++ b/src/plone/restapi/tests/dxtypes.py\n@@ -279,6 +279,10 @@ class IDXTestDocumentSchema(model.Schema):\n         required=False, missing_value="missing", default="default"\n     )\n \n+    test_missing_value_field_and_no_default = schema.List(\n+        required=False, value_type=schema.Choice(values=[1, 2, 3]), missing_value=[]\n+    )\n+\n     test_missing_value_required_field = schema.TextLine(\n         required=True, missing_value="missing", default="some value"\n     )\ndiff --git a/src/plone/restapi/tests/test_dxcontent_deserializer.py b/src/plone/restapi/tests/test_dxcontent_deserializer.py\nindex e9cc6fdf1..0e2167665 100644\n--- a/src/plone/restapi/tests/test_dxcontent_deserializer.py\n+++ b/src/plone/restapi/tests/test_dxcontent_deserializer.py\n@@ -186,6 +186,20 @@ def test_deserializer_sets_missing_value_when_receiving_null(self):\n         self.deserialize(body=\'{"test_missing_value_field": null}\')\n         self.assertEqual("missing", self.portal.doc1.test_missing_value_field)\n \n+    def test_deserializer_sets_missing_value_when_receiving_nothing_at_all(self):\n+        # If the field is not set in the request data, it has no value set either,\n+        # and missing_value is defined, it sets the missing value\n+        self.deserialize(body=\'{"test_required_field": "My Value"}\', validate_all=True)\n+        self.assertEqual([], self.portal.doc1.test_missing_value_field_and_no_default)\n+\n+    def test_deserializer_has_default_and_missing_value_sets_missing_value_when_receiving_nothing_at_all(\n+        self,\n+    ):\n+        # If the field is not set in the request data, it has a default,\n+        # and missing_value is defined, it sets the missing value (so it prevails instead of default)\n+        self.deserialize(body=\'{"test_required_field": "My Value"}\', validate_all=True)\n+        self.assertEqual("missing", self.portal.doc1.test_missing_value_field)\n+\n     def test_deserializer_sets_missing_value_on_required_field(self):\n         """We don\'t set missing_value if the field is required"""\n         self.deserialize(body=\'{"test_missing_value_required_field": "valid value"}\')\ndiff --git a/src/plone/restapi/tests/test_dxcontent_serializer.py b/src/plone/restapi/tests/test_dxcontent_serializer.py\nindex b57b552df..d6948a593 100644\n--- a/src/plone/restapi/tests/test_dxcontent_serializer.py\n+++ b/src/plone/restapi/tests/test_dxcontent_serializer.py\n@@ -150,6 +150,16 @@ def test_serializer_includes_field_with_read_permission(self):\n         self.assertIn("test_read_permission_field", obj)\n         self.assertEqual("Secret Stuff", obj["test_read_permission_field"])\n \n+    def test_serializer_includes_default_value(self):\n+        obj = self.serialize()\n+        self.assertIn("test_missing_value_field", obj)\n+        self.assertEqual("default", obj["test_missing_value_field"])\n+\n+    def test_serializer_returns_None_if_only_missing_value_is_present(self):\n+        obj = self.serialize()\n+        self.assertIn("test_missing_value_field_and_no_default", obj)\n+        self.assertEqual(None, obj["test_missing_value_field_and_no_default"])\n+\n     def test_get_layout(self):\n         current_layout = self.portal.doc1.getLayout()\n         obj = self.serialize()\n'
+b'diff --git a/news/42.bugfix b/news/42.bugfix\nnew file mode 100644\nindex 0000000..a3c8ce2\n--- /dev/null\n+++ b/news/42.bugfix\n@@ -0,0 +1,2 @@\n+Fix InterpolationMissingOptionError when parsing coredev 6.0 sources.\n+[maurits]\ndiff --git a/plone/releaser/buildout.py b/plone/releaser/buildout.py\nindex fda731b..8cc3795 100644\n--- a/plone/releaser/buildout.py\n+++ b/plone/releaser/buildout.py\n@@ -68,6 +68,8 @@ def versions(self):\n         config = ConfigParser(interpolation=ExtendedInterpolation(), strict=False)\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        # https://github.com/plone/plone.releaser/issues/42\n+        config["buildout"]["directory"] = os.getcwd()\n         versions = {}\n         for section in config.sections():\n             if "versions" in section.split(":"):\n@@ -118,9 +120,15 @@ def data(self):\n         config.optionxform = str\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        config["buildout"]["directory"] = os.getcwd()\n         sources_dict = OrderedDict()\n         for name, value in config["sources"].items():\n-            source = Source().create_from_string(value)\n+            try:\n+                source = Source().create_from_string(value)\n+            except TypeError:\n+                # Happens now for the documentation items in coredev 6.0.\n+                # We could print, but this gets printed a lot.\n+                continue\n             sources_dict[name] = source\n         return sources_dict\n \n@@ -140,6 +148,7 @@ def data(self):\n         config = ConfigParser(interpolation=ExtendedInterpolation())\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        config["buildout"]["directory"] = os.getcwd()\n         checkouts = config.get("buildout", "auto-checkout")\n         checkout_list = checkouts.split("\\n")\n         return checkout_list\n'
+
+Repository: plone.releaser
+
+
+Branch: refs/heads/master
+Date: 2021-12-01T01:35:51+01:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/plone.releaser/commit/1e5b3a2de05e5d253f7bbc4b6bc86bd1d57e8995
+
+Merge pull request #43 from plone/maurits-issue-42-interpolation
+
+Fix InterpolationMissingOptionError when parsing coredev 6.0 sources.
+
+Files changed:
+A news/42.bugfix
+M plone/releaser/buildout.py
+
+b'diff --git a/news/42.bugfix b/news/42.bugfix\nnew file mode 100644\nindex 0000000..a3c8ce2\n--- /dev/null\n+++ b/news/42.bugfix\n@@ -0,0 +1,2 @@\n+Fix InterpolationMissingOptionError when parsing coredev 6.0 sources.\n+[maurits]\ndiff --git a/plone/releaser/buildout.py b/plone/releaser/buildout.py\nindex fda731b..8cc3795 100644\n--- a/plone/releaser/buildout.py\n+++ b/plone/releaser/buildout.py\n@@ -68,6 +68,8 @@ def versions(self):\n         config = ConfigParser(interpolation=ExtendedInterpolation(), strict=False)\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        # https://github.com/plone/plone.releaser/issues/42\n+        config["buildout"]["directory"] = os.getcwd()\n         versions = {}\n         for section in config.sections():\n             if "versions" in section.split(":"):\n@@ -118,9 +120,15 @@ def data(self):\n         config.optionxform = str\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        config["buildout"]["directory"] = os.getcwd()\n         sources_dict = OrderedDict()\n         for name, value in config["sources"].items():\n-            source = Source().create_from_string(value)\n+            try:\n+                source = Source().create_from_string(value)\n+            except TypeError:\n+                # Happens now for the documentation items in coredev 6.0.\n+                # We could print, but this gets printed a lot.\n+                continue\n             sources_dict[name] = source\n         return sources_dict\n \n@@ -140,6 +148,7 @@ def data(self):\n         config = ConfigParser(interpolation=ExtendedInterpolation())\n         with open(self.file_location) as f:\n             config.read_file(f)\n+        config["buildout"]["directory"] = os.getcwd()\n         checkouts = config.get("buildout", "auto-checkout")\n         checkout_list = checkouts.split("\\n")\n         return checkout_list\n'
 
