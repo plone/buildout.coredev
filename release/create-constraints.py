@@ -38,8 +38,6 @@ versions = config.versions
 with open(constraints_file, "w") as cfile:
     cfile.write("# File created by {}\n".format(__file__))
     cfile.write("# Constraints parsed from {}\n".format(config_file))
-    cfile.write("# In pre alpha stage we need a find-links, to find internal non-PyPI releases.\n")
-    cfile.write("-f https://dist.plone.org/release/6.0-dev/\n")
     for package, version in sorted(versions.items()):
         if package in DENYLIST:
             print("Ignoring blacklisted package {}".format(package))
