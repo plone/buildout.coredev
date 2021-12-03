@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.0 dev
+# Release notes for Plone 6.0.0 alpha 2
 
-Last updated: Wednesday December 1, 2021.
+Released: Friday December 3, 2021.
 
 ## Highlights
 
