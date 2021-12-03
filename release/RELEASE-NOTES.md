@@ -6,9 +6,11 @@ Last updated: Wednesday December 1, 2021.
 
 Changes since 6.0.0a1:
 
+- Products.CMFPlone: Replace `z3c.autoinclude` with `plone.autoinclude`.  Note: ``includeDependencies`` is no longer supported.  See [Plip 3339](https://github.com/plone/Products.CMFPlone/issues/3339).
+- Products.CMFPlone: On Zope root, create Volto site by default.
 - plone.app.contenttypes: Remove atcontenttypes dependencies and most migration code, and removed backwards compatibility ATContentTypes view name registrations.
 - plone.app.layout: Moved most portlet related code to `plone.app.portlets`.  Removed long deprecated `getIcon` from layout-policy.
-- plone.app.textfield and plone.app.z3cform: Restored ability to enable multiple wysiwyg editors. This change will end up in Plone 5.2 as well.
+- plone.app.textfield and plone.app.z3cform: Restored ability to enable multiple wysiwyg editors. This change will end up in Plone 5.2.7 as well.
 - plone.app.z3cform: Enable formautofocus for Plone forms. Allow disabling it for specific forms with `enable_autofocus = False`.
 - plone.dexterity: Removed dependency on `plone.synchronize`, and copy its one and only simple `synchronized` function.
 - plone.restapi: Enable table blocks indexing. Return non-batched vocabularies given a query param `b_size=-1`.  Add root (INavigationRoot) for the current object information in @translations endpoint. Implement `IJSONSummarySerializerMetadata` allowing addons to extend the metadata returned by Summary serializer. Enable usage of metadata_fields also for POST calls.
@@ -20,7 +22,6 @@ Changes since 6.0.0a1:
 There are some items that we want to include during the alpha phase, but which are not ready yet:
 
 - Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
-- Replace `z3c.autoinclude` with `plone.autoinclude`.  No more `includeDependencies`.  See [Plip 3339](https://github.com/plone/Products.CMFPlone/issues/3339).
 - An updated installation method to more easily combine the node frontend and Python backend. See [community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562).
 
 
@@ -95,14 +96,11 @@ bin/runwsgi -v etc/zope.ini
 ## Create Plone backend
 
 After you have installed the backend with buildout or pip, open a browser and go to http://localhost:8080/.
-If you want Plone Classic, click 'Create a new Plone site'.
-If instead you want to prepare for the new Volto frontend, click the Advanced button.
-In the Advanced form:
+Click 'Create a new Plone site' to prepare for the new Volto frontend.
+If you want Plone Classic instead, click 'Create Classic Plone site'.
+(If this button is not available, then you did not install `plone.volto` with buildout or pip. 'Create a new Plone site' will create a Classic site then.)
 
-* Make sure the Path identifier is Plone.  (You can change this, but then you need to change some Volto configuration as well.)
-* uncheck 'Example content'
-* check 'Plone 6 Frontend (Default content on homepage)'
-* check 'Plone 6 Frontend (plone.volto)'
+Note: For Volto, make sure the Path identifier is Plone.  You can change this, but then you need to change some Volto frontend configuration as well.
 
 Submit the form and your backend is ready.
 If you want Classic Plone, you are done.
