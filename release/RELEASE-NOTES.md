@@ -1,40 +1,28 @@
-# Release notes for Plone 6.0.0 alpha 1
+# Release notes for Plone 6.0.0 alpha 2
 
-Released: Friday October 22, 2021.
-
-The first real alpha release of Plone 6 is here!
-
+Released: Friday December 3, 2021.
 
 ## Highlights
 
-Some highlights of this release are:
+Changes since 6.0.0a1:
 
-- The big one: Volto as new front-end, using React, built with modern JavaScript tools.
-- The backend is now called Plone Classic. It generally works the same as Plone 5.2, so if you are not ready for Volto yet, you can just use this.
-- Removed Python 2 and Archetypes compatibility.
-- Support only for Python 3.7, 3.8 and 3.9.
-- Zope 5.3
-- Removed `CMFQuickInstallerTool` dependency.
-- Removed `CMFFormController` dependency and removed all remaining form controller scripts (`cpy`/`vpy`).
-- Removed dependency on `Products.TemporaryFolder`.
-  Note: in your `plone.recipe.zope2instance` buildout part, you must set `zodb-temporary-storage = off`,
-  otherwise you get errors when starting Plone.
-- Extensive overhaul of Plone UI elements based on Bootstrap 5 components.
-- Introduction of icon resolver with use of `icon_expr` definitions.
-- Barceloneta LTS theme
-- Add control panel for relations
-- Add plone.api.relation module to ease using relations.
-- Use Dexterity for the Plone Site root object.
-- Add a traverser `++api++` as an alternative to mark a request as REST request.
+- Products.CMFPlone: Replace `z3c.autoinclude` with `plone.autoinclude`.  Note: ``includeDependencies`` is no longer supported.  See [Plip 3339](https://github.com/plone/Products.CMFPlone/issues/3339).
+- Products.CMFPlone: On Zope root, create Volto site by default.
+- plone.app.contenttypes: Remove atcontenttypes dependencies and most migration code, and removed backwards compatibility ATContentTypes view name registrations.
+- plone.app.layout: Moved most portlet related code to `plone.app.portlets`.  Removed long deprecated `getIcon` from layout-policy.
+- plone.app.textfield and plone.app.z3cform: Restored ability to enable multiple wysiwyg editors. This change will end up in Plone 5.2.7 as well.
+- plone.app.z3cform: Enable formautofocus for Plone forms. Allow disabling it for specific forms with `enable_autofocus = False`.
+- plone.dexterity: Removed dependency on `plone.synchronize`, and copy its one and only simple `synchronized` function.
+- plone.restapi: Enable table blocks indexing. Return non-batched vocabularies given a query param `b_size=-1`.  Add root (INavigationRoot) for the current object information in @translations endpoint. Implement `IJSONSummarySerializerMetadata` allowing addons to extend the metadata returned by Summary serializer. Enable usage of metadata_fields also for POST calls.
+- plonetheme.barceloneta: Make loading of webfont optional. Move Barceloneta specific styles out of `base.scss`. Update to Bootstrap 5.1.3.
 
 
 ## Expected
 
 There are some items that we want to include during the alpha phase, but which are not ready yet:
 
-- Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript.
-- Replace `z3c.autoinclude` with `plone.autoinclude`.  No more `includeDependencies`.
-- An updated installation method to more easily combine the node frontend and Python backend.
+- Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+- An updated installation method to more easily combine the node frontend and Python backend. See [community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562).
 
 
 ## Installation
@@ -45,8 +33,15 @@ Some documentation about installation:
   https://training.plone.org/5/mastering-plone/installation.html
 - Volto frontend installation:
   https://docs.voltocms.com/getting-started/install/
+- [Community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562) on work in progress.
 
-There is no Docker image for Plone 6 yet, so we will have to do the backend by hand.
+If you use Docker, we have some images:
+
+- `plone/plone-backend` (5.2 and 6.0)
+- `plone/plone-frontend` (Volto)
+- `plone/plone-haproxy`
+
+If you don't do Docker, you will have to do the backend by hand.
 The links above should give you information on how to install the prerequisites, like Python, also on Windows.
 Here, we will focus on Unix-like systems (Linux, Mac OSX), but Windows should work as well.
 The steps are:
@@ -62,7 +57,7 @@ Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0.0a1/versions.cfg
+extends = https://dist.plone.org/release/6.0-dev/versions.cfg
 parts = instance
 
 [instance]
@@ -78,7 +73,7 @@ Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0.0a1/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0-dev/requirements.txt
 bin/buildout
 bin/instance fg
 ```
@@ -92,7 +87,7 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0.0a1/constraints.txt --use-deprecated legacy-resolver
+bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0-dev/constraints.txt --use-deprecated legacy-resolver
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
@@ -101,14 +96,11 @@ bin/runwsgi -v etc/zope.ini
 ## Create Plone backend
 
 After you have installed the backend with buildout or pip, open a browser and go to http://localhost:8080/.
-If you want Plone Classic, click 'Create a new Plone site'.
-If instead you want to prepare for the new Volto frontend, click the Advanced button.
-In the Advanced form:
+Click 'Create a new Plone site' to prepare for the new Volto frontend.
+If you want Plone Classic instead, click 'Create Classic Plone site'.
+(If this button is not available, then you did not install `plone.volto` with buildout or pip. 'Create a new Plone site' will create a Classic site then.)
 
-* Make sure the Path identifier is Plone.  (You can change this, but then you need to change some Volto configuration as well.)
-* uncheck 'Example content'
-* check 'Plone 6 Frontend (Default content on homepage)'
-* check 'Plone 6 Frontend (plone.volto)'
+Note: For Volto, make sure the Path identifier is Plone.  You can change this, but then you need to change some Volto frontend configuration as well.
 
 Submit the form and your backend is ready.
 If you want Classic Plone, you are done.
