@@ -1,25 +1,37 @@
-Repository: plone.restapi
+Repository: plone.dexterity
 
 
 Branch: refs/heads/master
-Date: 2021-12-21T15:53:41+01:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/8c7e645481e677e7ad0e2e296f98e22a2ea20dd9
+Date: 2021-12-20T12:42:18+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.dexterity/commit/d1e04956adcc27cc7a266dd8e61aaf0ee22cc3ca
 
-Do not break if publish recursive folder children that are already published (#1291)
+Plone 6: Always use a lines property for behaviors, no longer the deprecated ulines.
 
-* add test to prove the bug
-
-* check obj state
-
-* add changelog
-
-* improve test case
+Part of https://github.com/plone/Products.CMFPlone/issues/3305.
+Note: I have switched coredev 5.2 to use `plone.dexterity` branch 2.x.
 
 Files changed:
-A news/1291.bugfix
-M src/plone/restapi/services/workflow/transition.py
-M src/plone/restapi/tests/test_workflow.py
+A news/3305.bugfix
+M plone/dexterity/fti.py
 
-b'diff --git a/news/1291.bugfix b/news/1291.bugfix\nnew file mode 100644\nindex 000000000..e8325eeae\n--- /dev/null\n+++ b/news/1291.bugfix\n@@ -0,0 +1 @@\n+Do not break in recursive transition when children already are in destination state. [cekk]\ndiff --git a/src/plone/restapi/services/workflow/transition.py b/src/plone/restapi/services/workflow/transition.py\nindex c5223ebe0..e83a2bc7f 100644\n--- a/src/plone/restapi/services/workflow/transition.py\n+++ b/src/plone/restapi/services/workflow/transition.py\n@@ -110,8 +110,28 @@ def recurse_transition(\n                 obj.reindexObject()\n             if not self.wftool.getWorkflowsFor(obj):\n                 continue\n-            self.wftool.doActionFor(obj, self.transition, comment=comment)\n+            try:\n+                self.wftool.doActionFor(obj, self.transition, comment=comment)\n+            except WorkflowException as e:\n+                if not self.is_same_state(obj):\n+                    # this is a real error\n+                    raise e\n             if include_children and IFolderish.providedBy(obj):\n                 self.recurse_transition(\n                     obj.objectValues(), comment, publication_dates, include_children\n                 )\n+\n+    def is_same_state(self, obj):\n+        """\n+        Return True if the object is already in the transition\'s destination state.\n+        """\n+        review_state = self.wftool.getInfoFor(ob=obj, name="review_state")\n+\n+        for wf in self.wftool.getWorkflowsFor(obj):\n+            for transition in wf.transitions.objectValues():\n+                if (\n+                    review_state == transition.new_state_id\n+                    and self.transition == transition.id\n+                ):\n+                    return True\n+        return False\ndiff --git a/src/plone/restapi/tests/test_workflow.py b/src/plone/restapi/tests/test_workflow.py\nindex b609f951e..c31539ae6 100644\n--- a/src/plone/restapi/tests/test_workflow.py\n+++ b/src/plone/restapi/tests/test_workflow.py\n@@ -247,3 +247,34 @@ def test_transition_including_children_without_wf(self):\n         self.assertEqual(200, self.request.response.getStatus())\n         self.assertEqual("published", self.wftool.getInfoFor(folder, "review_state"))\n         self.assertEqual("published", self.wftool.getInfoFor(document, "review_state"))\n+\n+    def test_transition_recursive_do_not_break_if_children_does_not_have_the_action(\n+        self,\n+    ):\n+        """\n+        If one children is already published, he does not have "publish" action available\n+        """\n+        folder = self.portal[self.portal.invokeFactory("Folder", id="folder")]\n+        subfolder1 = folder[folder.invokeFactory("Folder", id="subfolder-1")]\n+        document = subfolder1[subfolder1.invokeFactory("Document", id="document")]\n+        subfolder2 = folder[folder.invokeFactory("Folder", id="subfolder-2")]\n+        self.wftool.doActionFor(subfolder1, "publish")\n+\n+        self.assertEqual(\n+            "published", self.wftool.getInfoFor(subfolder1, "review_state")\n+        )\n+        self.assertEqual("private", self.wftool.getInfoFor(document, "review_state"))\n+\n+        # now try to publish folder and all children\n+        self.request["BODY"] = \'{"comment": "A comment", "include_children": true}\'\n+        service = self.traverse("/plone/folder/@workflow/publish")\n+        service.reply()\n+        self.assertEqual(200, self.request.response.getStatus())\n+        self.assertEqual("published", self.wftool.getInfoFor(folder, "review_state"))\n+        self.assertEqual(\n+            "published", self.wftool.getInfoFor(subfolder1, "review_state")\n+        )\n+        self.assertEqual(\n+            "published", self.wftool.getInfoFor(subfolder2, "review_state")\n+        )\n+        self.assertEqual("published", self.wftool.getInfoFor(document, "review_state"))\n'
+b'diff --git a/news/3305.bugfix b/news/3305.bugfix\nnew file mode 100644\nindex 0000000..0d4d3c6\n--- /dev/null\n+++ b/news/3305.bugfix\n@@ -0,0 +1,3 @@\n+Plone 6: Always use a lines property for behaviors, no longer the deprecated ulines.\n+Part of `issue 3305 <https://github.com/plone/Products.CMFPlone/issues/3305>`_.\n+[maurits]\ndiff --git a/plone/dexterity/fti.py b/plone/dexterity/fti.py\nindex abea8c2..e918ef4 100644\n--- a/plone/dexterity/fti.py\n+++ b/plone/dexterity/fti.py\n@@ -63,10 +63,6 @@ class DexterityFTI(base.DynamicViewTypeInformation):\n \n     meta_type = "Dexterity FTI"\n \n-    behaviors_type = "ulines"\n-    if six.PY2:\n-        behaviors_type = "lines"\n-\n     _properties = base.DynamicViewTypeInformation._properties + (\n         {\n             "id": "add_permission",\n@@ -86,7 +82,7 @@ class DexterityFTI(base.DynamicViewTypeInformation):\n         },\n         {\n             "id": "behaviors",\n-            "type": behaviors_type,\n+            "type": "ulines",\n             "mode": "w",\n             "label": "Behaviors",\n             "description": "Names of enabled behaviors type",\n'
+
+Repository: plone.dexterity
+
+
+Branch: refs/heads/master
+Date: 2021-12-21T17:26:23+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.dexterity/commit/e43f08b68a46286ec12423991237c60d102af4fe
+
+Merge pull request #161 from plone/no-ulines
+
+Plone 6: Always use lines property for behaviors, no longer ulines
+
+Files changed:
+A news/3305.bugfix
+M plone/dexterity/fti.py
+
+b'diff --git a/news/3305.bugfix b/news/3305.bugfix\nnew file mode 100644\nindex 0000000..0d4d3c6\n--- /dev/null\n+++ b/news/3305.bugfix\n@@ -0,0 +1,3 @@\n+Plone 6: Always use a lines property for behaviors, no longer the deprecated ulines.\n+Part of `issue 3305 <https://github.com/plone/Products.CMFPlone/issues/3305>`_.\n+[maurits]\ndiff --git a/plone/dexterity/fti.py b/plone/dexterity/fti.py\nindex abea8c2..e918ef4 100644\n--- a/plone/dexterity/fti.py\n+++ b/plone/dexterity/fti.py\n@@ -63,10 +63,6 @@ class DexterityFTI(base.DynamicViewTypeInformation):\n \n     meta_type = "Dexterity FTI"\n \n-    behaviors_type = "ulines"\n-    if six.PY2:\n-        behaviors_type = "lines"\n-\n     _properties = base.DynamicViewTypeInformation._properties + (\n         {\n             "id": "add_permission",\n@@ -86,7 +82,7 @@ class DexterityFTI(base.DynamicViewTypeInformation):\n         },\n         {\n             "id": "behaviors",\n-            "type": behaviors_type,\n+            "type": "ulines",\n             "mode": "w",\n             "label": "Behaviors",\n             "description": "Names of enabled behaviors type",\n'
 
