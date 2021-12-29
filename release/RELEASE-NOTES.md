@@ -1,20 +1,17 @@
-# Release notes for Plone 6.0.0 alpha 2
+# Release notes for Plone 6.0.0 dev
 
-Released: Friday December 3, 2021.
+Last updated: Thursday December 30, 2021.
 
 ## Highlights
 
-Changes since 6.0.0a1:
+Changes since 6.0.0a2:
 
-- Products.CMFPlone: Replace `z3c.autoinclude` with `plone.autoinclude`.  Note: ``includeDependencies`` is no longer supported.  See [Plip 3339](https://github.com/plone/Products.CMFPlone/issues/3339).
-- Products.CMFPlone: On Zope root, create Volto site by default.
-- plone.app.contenttypes: Remove atcontenttypes dependencies and most migration code, and removed backwards compatibility ATContentTypes view name registrations.
-- plone.app.layout: Moved most portlet related code to `plone.app.portlets`.  Removed long deprecated `getIcon` from layout-policy.
-- plone.app.textfield and plone.app.z3cform: Restored ability to enable multiple wysiwyg editors. This change will end up in Plone 5.2.7 as well.
-- plone.app.z3cform: Enable formautofocus for Plone forms. Allow disabling it for specific forms with `enable_autofocus = False`.
-- plone.dexterity: Removed dependency on `plone.synchronize`, and copy its one and only simple `synchronized` function.
-- plone.restapi: Enable table blocks indexing. Return non-batched vocabularies given a query param `b_size=-1`.  Add root (INavigationRoot) for the current object information in @translations endpoint. Implement `IJSONSummarySerializerMetadata` allowing addons to extend the metadata returned by Summary serializer. Enable usage of metadata_fields also for POST calls.
-- plonetheme.barceloneta: Make loading of webfont optional. Move Barceloneta specific styles out of `base.scss`. Update to Bootstrap 5.1.3.
+- Updated the versions of the build requirements: `setuptools` to 59.6.0, `zc.buildout` to 3.0.0rc1, `pip` to 21.3.1.
+- `Products.CMFEditions`: got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
+- `plone.app.linkintegrity`: Track integrity of video and audio files in HTML source tags.
+- `plone.app.uuid`: Speed up `uuidToPhysicalPath` and `uuidToObject`.
+- `plone.namedfile`: Make `DefaultImageScalingFactory` more flexible, with methods you can override.
+- `diazo`: Removed `FormEncode` test dependency.
 
 
 ## Expected
@@ -22,7 +19,7 @@ Changes since 6.0.0a1:
 There are some items that we want to include during the alpha phase, but which are not ready yet:
 
 - Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
-- An updated installation method to more easily combine the node frontend and Python backend. See [community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562).
+- Add `plone.volto` as dependency of the `Plone` package.  See [issue 1](https://github.com/plone/plone.volto/issues/1).
 
 
 ## Installation
@@ -33,7 +30,7 @@ Some documentation about installation:
   https://training.plone.org/5/mastering-plone/installation.html
 - Volto frontend installation:
   https://docs.voltocms.com/getting-started/install/
-- [Community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562) on work in progress.
+- [Community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562) on work in progress with [`plone-kickstarter`](https://github.com/bluedynamics/plone-kickstarter) and [`mxdev`](https://github.com/bluedynamics/mxdev).
 
 If you use Docker, we have some images:
 
