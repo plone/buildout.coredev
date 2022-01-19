@@ -7,11 +7,26 @@ Last updated: Thursday December 30, 2021.
 Changes since 6.0.0a2:
 
 - Updated the versions of the build requirements: `setuptools` to 59.6.0, `zc.buildout` to 3.0.0rc1, `pip` to 21.3.1.
-- `Products.CMFEditions`: got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
+- `Zope` 5.4:
+  - Add support for Python 3.10 (Plone does not have this yet).
+  - WebDAV fixes.
+  - https://zope.dev is now the canonical Zope developer community site.
+- `Products.CMFEditions`:
+  - Got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
+  - The VersionView class is deprecated because it contained just one method that is now part of the @@plone view.
 - `plone.app.linkintegrity`: Track integrity of video and audio files in HTML source tags.
 - `plone.app.uuid`: Speed up `uuidToPhysicalPath` and `uuidToObject`.
 - `plone.namedfile`: Make `DefaultImageScalingFactory` more flexible, with methods you can override.
 - `diazo`: Removed `FormEncode` test dependency.
+- `Pillow` updated to 9.0.0
+- `plone.app.content`: Deprecate the human_readable_size method of the ContentStatusHistoryView class because the one from the @@plone view should be used.
+- `plone.app.layout`: Improved the Global section viewlet:
+  - Catalog based navigation.
+  - Allow more customization by adding methods as hooks.
+  - Various performance optimizations.
+  - Deprecate now unused navtree_depth property.
+- Various packages: No longer use deprecated property types ulines, utext, utoken, and ustring, but their non-unicode variants, without a `u` at the beginning. See [issue 3305](https://github.com/plone/Products.CMFPlone/issues/3305).
+
 
 
 ## Expected
