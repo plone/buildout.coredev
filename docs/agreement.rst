@@ -22,7 +22,7 @@ We ask that before requesting core access you familiarize yourself a little with
 
   You may even be able to get immediate core access at a conference if you are flexing your mad coding skills and the right people are attending.
 
-* Get your feet wet by contributing to the `collective <https://collective.github.com/>`_.
+* Get your feet wet by contributing to the `collective <https://collective.github.io/>`_.
   Don't worry about getting it perfect or asking for help;
   this way you get to know us and we improve our code together as a community.
 
@@ -63,8 +63,8 @@ Before we can merge a pull request, we have to check that the author has signed 
 If they're listed in https://github.com/plone?tab=members, the author has signed so we can go ahead and merge.
 
 If they aren't listed there, there's still a chance they have signed the contributor's agreement.
-
-Check on IRC `#plone-framework <http://webchat.freenode.net?channels=plone-framework>`_.
+ 
+If they have signed before the move to GitHub, you can ask agreements@plone.org to check.
 
 Pull requests without contributor's agreement can only be merged in trivial cases,
 and only by the release manager.
