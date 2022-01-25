@@ -14,10 +14,10 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] If needed, [ask the Plone REST api team](https://github.com/plone/plone.restapi/issues) for a new release of `plone.restapi` and `plone.rest`.
 - [ ] Write an email to the translation team, asking them to do a plone.app.locales release. Or create an issue in https://github.com/collective/plone.app.locales/issues
 - [ ] Update the versions of those packages.
-- [ ] Make an release candidate release of `Products.CMFPlone` (e.g. 5.2.4rc1). Fine to release this on PyPI.
+- [ ] Make a release candidate of `Products.CMFPlone` (e.g. 5.2.4rc1). Fine to release this on PyPI.
 - [ ] Create a coredev branch, named something like `prepare-52x`. Empty the `auto-checkout` list in `checkouts.cfg`.
-- [ ] Create a pending release (directory) on dist.plone.org, e.g. 5.2.4-pending, and gather files to put there:
-  - [ ] Create a unified changelog: `bin/manage changelog --start=5.2.X > changelog.txt`. Remove the uninteresting top lines.
+- [ ] Update the `5.2-dev` directory on dist.plone.org and gather files to put there:
+  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=5.2.X > changelog.txt`. Remove the uninteresting top lines.
   - [ ] Create a `RELEASE-NOTES.txt`. It may be enough to look through the changelog and copy interesting changes.
   - [ ] Gather all package distributions.
         You can use `tox -c release/tox.ini -p auto` to gather them in `release/dist`, together with a few other files.
@@ -28,13 +28,14 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Wait for feedback, preferably at most a few days.
 - [ ] Make final release of `Products.CMFPlone` to PyPI, update `versions.cfg`.
 - [ ] Create tag of the release branch, e.g. 5.2.4, and push to GitHub.
-- [ ] Make final release on dist.plone.org (remove "-pending", make sure updated distributions, versions and constraints are added).
+- [ ] Make final release directory on dist.plone.org, make sure updated distributions, versions and constraints are added).
 - [ ] Update the "-latest" links on dist.plone.org, e.g. `ln -sfT 5.2.5 5.2-latest`
 - [ ] Create new release on launchpad (https://launchpad.net/plone/): `bin/manage launchpad <version>`
 - [ ] Create release page on https://plone.org/download/releases
 - [ ] Announce community.plone.org, with warning that installers are not ready yet.
-- [ ] Send links to [installers list](mailto:plone-installers@lists.sourceforge.net)
-- [ ] Wait for installers to be uploaded to Launchpad, link on plone.org release page
+- [ ] Create an issue or PR for the Unified Installer.  Should be only a search-and-replace.
+      See [PR for Plone 5.2.6](https://github.com/plone/Installers-UnifiedInstaller/pull/119).
+- [ ] Get the new installer from the GitHub Actions artifact of your PR, upload this to Launchpad, link on plone.org release page.
 - [ ] Publish release page on plone.org. If the installer takes too long, publish it anyway. Coordinate with the Marketing Team.
 - [ ] Marketing Team: Send out announcement to plone-announce, Twitter, update #plone irc channel topic, what you want.
 - [ ] Ask the security team to update the https://plone.org/security/hotfixes/ page in the configuration control panel. (Configuration registry: `plone.securitysupport`, `plone.versions`, `plone.activemaintenance`)
