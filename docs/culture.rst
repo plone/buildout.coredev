@@ -11,12 +11,9 @@ Second, please ask for help setting up your environment, in the forum or in chat
 
 Most of our developers work there and you will get the best advice there.
 
-For chat, browse to the `Plone Gitter channel <https://gitter.im/plone/public/>`_.
-To send any messages, you will have to log in using a `GitHub <https://GitHub.com>`_ or `Twitter <https://Twitter.com>`_ account.
-
+For chat, video and screen-sharing opportunities, join our Plone Discord channel.
+More info on how to join Plone Discord can be found under `support/chat on plone.org <http://plone.org/support/chat>`_.
 The people there have mostly been using Plone for a very long time and are happy to help you get going and make the right decisions.
-
-More info on Plone chat can be found at http://plone.org/support/chat.
 
 If you are actively committing code, always keep an eye on our `Jenkins CI <https://jenkins.plone.org/>`_ to know if your recent commits have broken (or fixed!) the build.
 
