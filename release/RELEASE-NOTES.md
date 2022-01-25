@@ -11,6 +11,7 @@ Changes since 6.0.0a2:
   - Add support for Python 3.10 (Plone does not have this yet).
   - WebDAV fixes.
   - https://zope.dev is now the canonical Zope developer community site.
+- `plone.volto`: Removed `collective.folderishtypes` dependency.
 - `Products.CMFEditions`:
   - Got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
   - The VersionView class is deprecated because it contained just one method that is now part of the @@plone view.
@@ -25,8 +26,12 @@ Changes since 6.0.0a2:
   - Allow more customization by adding methods as hooks.
   - Various performance optimizations.
   - Deprecate now unused navtree_depth property.
+- `plone.app.layout`: Removed deprecated methods.
 - Various packages: No longer use deprecated property types ulines, utext, utoken, and ustring, but their non-unicode variants, without a `u` at the beginning. See [issue 3305](https://github.com/plone/Products.CMFPlone/issues/3305).
-
+- `plone.restapi`:
+  - Enhance @addons endpoint to return a list of upgradeable addons.
+  - Add support for DX Plone Site root in Plone 6. Remove blocks behavior hack for site root in Plone 6.
+- Products.CMFPlacefulWorkflow: Removed the ``CMFPlacefulWorkflow`` skin layer.
 
 
 ## Expected
