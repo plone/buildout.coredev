@@ -27,6 +27,7 @@ Changes since 6.0.0a2:
   - Various performance optimizations.
   - Deprecate now unused navtree_depth property.
 - `plone.app.layout`: Removed deprecated methods.
+- `plone.app.layout`: Add viewlet to display customizable favicon.  See the Site Settings.
 - Various packages: No longer use deprecated property types ulines, utext, utoken, and ustring, but their non-unicode variants, without a `u` at the beginning. See [issue 3305](https://github.com/plone/Products.CMFPlone/issues/3305).
 - `plone.restapi`:
   - Enhance @addons endpoint to return a list of upgradeable addons.
