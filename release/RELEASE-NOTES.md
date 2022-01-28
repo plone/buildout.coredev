@@ -6,6 +6,8 @@ Last updated: Thursday December 30, 2021.
 
 Changes since 6.0.0a2:
 
+- `plone.app.contenttypes`: Security fix: prevent cache poisoning with the Referer header.
+  See [security advisory](https://github.com/plone/plone.app.contenttypes/security/advisories/GHSA-f7qw-5fgj-247x).
 - Updated the versions of the build requirements: `setuptools` to 59.6.0, `zc.buildout` to 3.0.0rc1, `pip` to 21.3.1.
 - `Zope` 5.4:
   - Add support for Python 3.10 (Plone does not have this yet).
@@ -17,7 +19,9 @@ Changes since 6.0.0a2:
   - The VersionView class is deprecated because it contained just one method that is now part of the @@plone view.
 - `plone.app.linkintegrity`: Track integrity of video and audio files in HTML source tags.
 - `plone.app.uuid`: Speed up `uuidToPhysicalPath` and `uuidToObject`.
-- `plone.namedfile`: Make `DefaultImageScalingFactory` more flexible, with methods you can override.
+- `plone.namedfile`:
+   - Make `DefaultImageScalingFactory` more flexible, with methods you can override.
+   - Drop support for Python 2.7.  Main target is now Plone 6, but we try to keep it running on Plone 5.2 with Python 3.
 - `diazo`: Removed `FormEncode` test dependency.
 - `Pillow` updated to 9.0.0
 - `plone.app.content`: Deprecate the human_readable_size method of the ContentStatusHistoryView class because the one from the @@plone view should be used.
