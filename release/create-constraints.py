@@ -23,6 +23,7 @@ DENYLIST2 = [
 DENYLIST3 = [
     # These are packages that cannot be installed by pip on Python 3.
     "Products.contentmigration",
+    "typing",
 ]
 
 # We could hardcode paths here, but working directories in tox confuse me.
