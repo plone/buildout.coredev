@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.0 dev
+# Release notes for Plone 6.0.0a3
 
-Last updated: Thursday December 30, 2021.
+Last updated: Friday January 28, 2022.
 
 ## Highlights
 
@@ -45,6 +45,7 @@ There are some items that we want to include during the alpha phase, but which a
 
 - Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
 - Add `plone.volto` as dependency of the `Plone` package.  See [issue 1](https://github.com/plone/plone.volto/issues/1).
+- Add `plone.base` as basic package with shared code.  See [issue 3395](https://github.com/plone/Products.CMFPlone/issues/3395).
 
 
 ## Installation
@@ -79,7 +80,7 @@ Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0-dev/versions.cfg
+extends = https://dist.plone.org/release/6.0.0a3/versions.cfg
 parts = instance
 
 [instance]
@@ -95,7 +96,7 @@ Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0-dev/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0.0a3/requirements.txt
 bin/buildout
 bin/instance fg
 ```
@@ -109,7 +110,7 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0-dev/constraints.txt --use-deprecated legacy-resolver
+bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0.0a3v/constraints.txt --use-deprecated legacy-resolver
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
