@@ -1,36 +1,280 @@
-Repository: plone.app.querystring
+Repository: plone.outputfilters
 
 
 Branch: refs/heads/master
-Date: 2022-01-31T19:50:01+01:00
-Author: Balázs Reé (reebalazs) <ree@greenfinity.hu>
-Commit: https://github.com/plone/plone.app.querystring/commit/2e7e326a4a45abaf2ae22b06987cf52a24d2248f
+Date: 2021-12-27T02:51:07Z
+Author: Rudd-O (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/755188544ddee53b8db28228af4476454c0f6a7f
 
-Add lazy attribute to vocabularies to prevent fetching any results (#104)
+Resolve UID links in &lt;source src= / srcset=&gt; tags
 
-* Add lazy attribute to vocabularies to prevent fetching any results
+Related:
 
-Huge vocabularies cause serious performance problems in the server
-memory, in the network payload, and in the browser, because the large
-result set is fetched pointlessly. An application can set lazy=True
-for such vocabularies, and at the same time override the operations
-from xml to provide an "autocomplete" widget. Such a widget does not
-need any initial results but will search and fetch the vocabulary
-lazily, on demand.
-
-The use case targets Volto sites, but the problem is not specific to
-Volto.
-
-* Update attribute name to fetch_vocabulary, fix tests
-
-- fix tests in registry_testdata.py
-- update attribute name to fetch_vocabulary, default False
+* https://github.com/plone/plone.app.linkintegrity/pull/83
+* https://github.com/collective/collective.exportimport/pull/95
 
 Files changed:
-A news/104.feature
-M plone/app/querystring/interfaces.py
-M plone/app/querystring/registryreader.py
-M plone/app/querystring/tests/registry_testdata.py
+M plone/outputfilters/filters/resolveuid_and_caption.py
 
-b'diff --git a/news/104.feature b/news/104.feature\nnew file mode 100644\nindex 0000000..67df4de\n--- /dev/null\n+++ b/news/104.feature\n@@ -0,0 +1,2 @@\n+- Add lazy attribute to vocabularies to prevent fetching any results\n+  [reebalazs]\ndiff --git a/plone/app/querystring/interfaces.py b/plone/app/querystring/interfaces.py\nindex e6111e6..394e8dc 100644\n--- a/plone/app/querystring/interfaces.py\n+++ b/plone/app/querystring/interfaces.py\n@@ -28,6 +28,7 @@ class IQueryField(Interface):\n     description = Text(title=u"Description")\n     enabled = Bool(title=u"Enabled")\n     sortable = Bool(title=u"Sortable")\n+    fetch_vocabulary = Bool(title=u"Fetch vocabulary", default=True)\n     operations = List(title=u"Operations",\n                       value_type=DottedName(title=u"Operation ID"))\n     vocabulary = TextLine(title=u"Vocabulary")\ndiff --git a/plone/app/querystring/registryreader.py b/plone/app/querystring/registryreader.py\nindex a837f2d..fa5a783 100644\n--- a/plone/app/querystring/registryreader.py\n+++ b/plone/app/querystring/registryreader.py\n@@ -84,6 +84,10 @@ def getVocabularyValues(self, values):\n                 logger.info("%s is missing, ignored." % vocabulary)\n                 continue\n             translated = []\n+            if not field.get(\'fetch_vocabulary\', True):\n+                # Bail out if the annotation is marked not to fetch the vocabulary\n+                # to allow the widget to query the vocabulary as needed\n+                continue\n             for item in utility(self.context):\n                 if isinstance(item.title, Message):\n                     title = translate(item.title, context=self.request)\ndiff --git a/plone/app/querystring/tests/registry_testdata.py b/plone/app/querystring/tests/registry_testdata.py\nindex f826ed1..b03b082 100644\n--- a/plone/app/querystring/tests/registry_testdata.py\n+++ b/plone/app/querystring/tests/registry_testdata.py\n@@ -15,7 +15,8 @@\n                         \'vocabulary\': None,\n                         \'title\': u\'Short Name\',\n                         \'enabled\': True,\n-                        \'sortable\': True\n+                        \'sortable\': True,\n+                        \'fetch_vocabulary\': True\n                     },\n                     \'created\': {\n                         \'operations\': [\n@@ -28,7 +29,8 @@\n                         \'vocabulary\': None,\n                         \'title\': u\'Creation Date\',\n                         \'enabled\': True,\n-                        \'sortable\': False\n+                        \'sortable\': False,\n+                        \'fetch_vocabulary\': True\n                     }\n                 },\n                 \'operation\': {\n'
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 49da81f..45942bb 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -157,6 +157,42 @@ def __call__(self, data):\n                     actual_url = relative_root.absolute_url()\n                     href = urljoin(actual_url + '/', subpath) + appendix\n                 attributes['href'] = href\n+        for elem in soup.find_all(['source']):\n+            attributes = elem.attrs\n+            attrn = 'src'\n+            src = attributes.get(attrn)\n+            # an 'a' anchor element has no href\n+            if not src:\n+                attrn = 'srcset'\n+                src = attributes.get(attrn)\n+                if not src:\n+                    continue\n+            url_parts = urlsplit(src)\n+            scheme = url_parts[0]\n+            # we are only interested in path and beyond /foo/bar?x=2#abc\n+            path_parts = urlunsplit(['', ''] + list(url_parts[2:]))\n+            if not src.startswith('mailto<') \\\n+                    and not src.startswith('mailto:') \\\n+                    and not src.startswith('tel:') \\\n+                    and not src.startswith('#'):\n+                obj, subpath, appendix = self.resolve_link(path_parts)\n+                if obj is not None:\n+                    src = obj.absolute_url()\n+                    if subpath:\n+                        src += '/' + subpath\n+                    src += appendix\n+                elif resolveuid_re.match(src) is None \\\n+                        and not scheme \\\n+                        and not src.startswith('/'):\n+                    # absolutize relative URIs; this text isn't necessarily\n+                    # being rendered in the context where it was stored\n+                    relative_root = self.context\n+                    if not getattr(\n+                            self.context, 'isPrincipiaFolderish', False):\n+                        relative_root = aq_parent(self.context)\n+                    actual_url = relative_root.absolute_url()\n+                    src = urljoin(actual_url + '/', subpath) + appendix\n+                attributes[attrn] = src\n         for elem in soup.find_all('img'):\n             attributes = elem.attrs\n             src = attributes.get('src', '')\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2021-12-28T15:49:23Z
+Author: Rudd-O (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/8115e819774ff6ea5a2c97dc6a88a4907505c395
+
+Also track IFRAMEs with resolveuid.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 45942bb..0784a4a 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -157,7 +157,9 @@ def __call__(self, data):\n                     actual_url = relative_root.absolute_url()\n                     href = urljoin(actual_url + '/', subpath) + appendix\n                 attributes['href'] = href\n-        for elem in soup.find_all(['source']):\n+        for elem in soup.find_all(['source', 'iframe']):\n+            # SOURCE is used for video and audio.\n+            # IFRAME is used to embed PDFs.\n             attributes = elem.attrs\n             attrn = 'src'\n             src = attributes.get(attrn)\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2021-12-28T16:16:28Z
+Author: Rudd-O (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/286aed7599cb85a9f9818f7ac875daee117e6376
+
+Create 47.feature
+
+Files changed:
+A news/47.feature
+
+b'diff --git a/news/47.feature b/news/47.feature\nnew file mode 100644\nindex 0000000..a714a1a\n--- /dev/null\n+++ b/news/47.feature\n@@ -0,0 +1 @@\n+Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-03T22:37:36Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/321b1bb5e2073f33711611bb9ad8be5d6f6d6753
+
+Do not apply mailto case for src.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 0784a4a..2f27d81 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -173,28 +173,24 @@ def __call__(self, data):\n             scheme = url_parts[0]\n             # we are only interested in path and beyond /foo/bar?x=2#abc\n             path_parts = urlunsplit(['', ''] + list(url_parts[2:]))\n-            if not src.startswith('mailto<') \\\n-                    and not src.startswith('mailto:') \\\n-                    and not src.startswith('tel:') \\\n-                    and not src.startswith('#'):\n-                obj, subpath, appendix = self.resolve_link(path_parts)\n-                if obj is not None:\n-                    src = obj.absolute_url()\n-                    if subpath:\n-                        src += '/' + subpath\n-                    src += appendix\n-                elif resolveuid_re.match(src) is None \\\n-                        and not scheme \\\n-                        and not src.startswith('/'):\n-                    # absolutize relative URIs; this text isn't necessarily\n-                    # being rendered in the context where it was stored\n-                    relative_root = self.context\n-                    if not getattr(\n-                            self.context, 'isPrincipiaFolderish', False):\n-                        relative_root = aq_parent(self.context)\n-                    actual_url = relative_root.absolute_url()\n-                    src = urljoin(actual_url + '/', subpath) + appendix\n-                attributes[attrn] = src\n+            obj, subpath, appendix = self.resolve_link(path_parts)\n+            if obj is not None:\n+                src = obj.absolute_url()\n+                if subpath:\n+                    src += '/' + subpath\n+                src += appendix\n+            elif resolveuid_re.match(src) is None \\\n+                    and not scheme \\\n+                    and not src.startswith('/'):\n+                # absolutize relative URIs; this text isn't necessarily\n+                # being rendered in the context where it was stored\n+                relative_root = self.context\n+                if not getattr(\n+                        self.context, 'isPrincipiaFolderish', False):\n+                    relative_root = aq_parent(self.context)\n+                actual_url = relative_root.absolute_url()\n+                src = urljoin(actual_url + '/', subpath) + appendix\n+            attributes[attrn] = src\n         for elem in soup.find_all('img'):\n             attributes = elem.attrs\n             src = attributes.get('src', '')\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-03T22:55:55Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/613241bbe855c49680e2ba3b82cf4c668a1e4bb7
+
+Properly handle SRCSET=
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 2f27d81..45aee25 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -161,36 +161,45 @@ def __call__(self, data):\n             # SOURCE is used for video and audio.\n             # IFRAME is used to embed PDFs.\n             attributes = elem.attrs\n-            attrn = \'src\'\n-            src = attributes.get(attrn)\n-            # an \'a\' anchor element has no href\n-            if not src:\n-                attrn = \'srcset\'\n-                src = attributes.get(attrn)\n-                if not src:\n-                    continue\n-            url_parts = urlsplit(src)\n-            scheme = url_parts[0]\n-            # we are only interested in path and beyond /foo/bar?x=2#abc\n-            path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n-            obj, subpath, appendix = self.resolve_link(path_parts)\n-            if obj is not None:\n-                src = obj.absolute_url()\n-                if subpath:\n-                    src += \'/\' + subpath\n-                src += appendix\n-            elif resolveuid_re.match(src) is None \\\n-                    and not scheme \\\n-                    and not src.startswith(\'/\'):\n-                # absolutize relative URIs; this text isn\'t necessarily\n-                # being rendered in the context where it was stored\n-                relative_root = self.context\n-                if not getattr(\n-                        self.context, \'isPrincipiaFolderish\', False):\n-                    relative_root = aq_parent(self.context)\n-                actual_url = relative_root.absolute_url()\n-                src = urljoin(actual_url + \'/\', subpath) + appendix\n-            attributes[attrn] = src\n+            src = attributes.get(\'src\')\n+            srcs = [(\'src\', src)] if src else []\n+            srcset = attributes.get(\'srcset\')\n+            if srcset:\n+                # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n+                # [(src1, 480w), (src2, 360w)]\n+                srcs += [[\'srcset\'] + s.strip().split() for s in srcset.strip().split(\',\') if s.strip()]\n+            if not srcs:\n+                continue\n+            for n, elm in enumerate(srcs):\n+                src = srcs[1]\n+                url_parts = urlsplit(src)\n+                scheme = url_parts[0]\n+                # we are only interested in path and beyond /foo/bar?x=2#abc\n+                path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n+                obj, subpath, appendix = self.resolve_link(path_parts)\n+                if obj is not None:\n+                    src = obj.absolute_url()\n+                    if subpath:\n+                        src += \'/\' + subpath\n+                    src += appendix\n+                elif resolveuid_re.match(src) is None \\\n+                        and not scheme \\\n+                        and not src.startswith(\'/\'):\n+                    # absolutize relative URIs; this text isn\'t necessarily\n+                    # being rendered in the context where it was stored\n+                    relative_root = self.context\n+                    if not getattr(\n+                            self.context, \'isPrincipiaFolderish\', False):\n+                        relative_root = aq_parent(self.context)\n+                    actual_url = relative_root.absolute_url()\n+                    src = urljoin(actual_url + \'/\', subpath) + appendix\n+                srcs[n][1] = src\n+            src = [s[1] for s in srcs if s[0] == "src"]\n+            if src:\n+                attributes[\'src\'] = src[0]\n+            srcset = ",".join(" ".join(s[1:]) for s in srcs if s[0] == "srcset")\n+            if srcset:\n+                attributes[\'srcset\'] = srcset\n         for elem in soup.find_all(\'img\'):\n             attributes = elem.attrs\n             src = attributes.get(\'src\', \'\')\ndiff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex 0cbab32..bc6dd85 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -358,6 +358,14 @@ def test_image_captioning_resolveuid_no_scale(self):\n         text_out = """<figure class="captioned">\n <img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" title="Image" width="500"/>\n <figcaption class="image-caption">My caption</figcaption>\n+</figure>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_image_captioning_resolveuid_with_srcset_and_src(self):\n+        text_in = """<img class="captioned" src="resolveuid/%s" srcset="resolveuid/%s 480w,resolveuid/%s 360w"/>""" % (self.UID, self.UID, self.UID)\n+        text_out = """<figure class="captioned">\n+<img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/...jpeg 480w,http://nohost/plone/image.jpg/@@images/...jpeg 360w" title="Image" width="500"/>\n+<figcaption class="image-caption">My caption</figcaption>\n </figure>"""\n         self._assertTransformsTo(text_in, text_out)\n \n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-03T23:09:34Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/95d56fa38bb346cc3a650d63417d7acee1e8986a
+
+Reduce code and handle srcset for images and other elements too.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 45aee25..e5e5241 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -125,81 +125,61 @@ def __call__(self, data):\n         data = re.sub(r\'<([^<>\\s]+?)\\s*/>\', self._shorttag_replace, data)\n         soup = BeautifulSoup(safe_unicode(data), \'html.parser\')\n \n+        def r(href):\n+            url_parts = urlsplit(href)\n+            scheme = url_parts[0]\n+            path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n+            obj, subpath, appendix = self.resolve_link(path_parts)\n+            if obj is not None:\n+                href = obj.absolute_url()\n+                if subpath:\n+                    href += \'/\' + subpath\n+                href += appendix\n+            elif resolveuid_re.match(href) is None \\\n+                    and not scheme \\\n+                    and not href.startswith(\'/\'):\n+                # absolutize relative URIs; this text isn\'t necessarily\n+                # being rendered in the context where it was stored\n+                relative_root = self.context\n+                if not getattr(\n+                        self.context, \'isPrincipiaFolderish\', False):\n+                    relative_root = aq_parent(self.context)\n+                actual_url = relative_root.absolute_url()\n+                href = urljoin(actual_url + \'/\', subpath) + appendix\n+            return href\n+\n         for elem in soup.find_all([\'a\', \'area\']):\n             attributes = elem.attrs\n             href = attributes.get(\'href\')\n             # an \'a\' anchor element has no href\n             if not href:\n                 continue\n-            url_parts = urlsplit(href)\n-            scheme = url_parts[0]\n-            # we are only interested in path and beyond /foo/bar?x=2#abc\n-            path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n             if not href.startswith(\'mailto<\') \\\n                     and not href.startswith(\'mailto:\') \\\n                     and not href.startswith(\'tel:\') \\\n                     and not href.startswith(\'#\'):\n-                obj, subpath, appendix = self.resolve_link(path_parts)\n-                if obj is not None:\n-                    href = obj.absolute_url()\n-                    if subpath:\n-                        href += \'/\' + subpath\n-                    href += appendix\n-                elif resolveuid_re.match(href) is None \\\n-                        and not scheme \\\n-                        and not href.startswith(\'/\'):\n-                    # absolutize relative URIs; this text isn\'t necessarily\n-                    # being rendered in the context where it was stored\n-                    relative_root = self.context\n-                    if not getattr(\n-                            self.context, \'isPrincipiaFolderish\', False):\n-                        relative_root = aq_parent(self.context)\n-                    actual_url = relative_root.absolute_url()\n-                    href = urljoin(actual_url + \'/\', subpath) + appendix\n-                attributes[\'href\'] = href\n-        for elem in soup.find_all([\'source\', \'iframe\']):\n+                attributes[\'href\'] = r(href)\n+        for elem in soup.find_all([\'source\', \'iframe\', \'img\']):\n             # SOURCE is used for video and audio.\n             # IFRAME is used to embed PDFs.\n             attributes = elem.attrs\n-            src = attributes.get(\'src\')\n-            srcs = [(\'src\', src)] if src else []\n             srcset = attributes.get(\'srcset\')\n-            if srcset:\n-                # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n-                # [(src1, 480w), (src2, 360w)]\n-                srcs += [[\'srcset\'] + s.strip().split() for s in srcset.strip().split(\',\') if s.strip()]\n-            if not srcs:\n+            if not srcset:\n                 continue\n+            # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n+            # [(src1, 480w), (src2, 360w)]\n+            srcs += [[\'srcset\'] + s.strip().split() for s in srcset.strip().split(\',\') if s.strip()]\n             for n, elm in enumerate(srcs):\n-                src = srcs[1]\n-                url_parts = urlsplit(src)\n-                scheme = url_parts[0]\n-                # we are only interested in path and beyond /foo/bar?x=2#abc\n-                path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n-                obj, subpath, appendix = self.resolve_link(path_parts)\n-                if obj is not None:\n-                    src = obj.absolute_url()\n-                    if subpath:\n-                        src += \'/\' + subpath\n-                    src += appendix\n-                elif resolveuid_re.match(src) is None \\\n-                        and not scheme \\\n-                        and not src.startswith(\'/\'):\n-                    # absolutize relative URIs; this text isn\'t necessarily\n-                    # being rendered in the context where it was stored\n-                    relative_root = self.context\n-                    if not getattr(\n-                            self.context, \'isPrincipiaFolderish\', False):\n-                        relative_root = aq_parent(self.context)\n-                    actual_url = relative_root.absolute_url()\n-                    src = urljoin(actual_url + \'/\', subpath) + appendix\n-                srcs[n][1] = src\n-            src = [s[1] for s in srcs if s[0] == "src"]\n-            if src:\n-                attributes[\'src\'] = src[0]\n-            srcset = ",".join(" ".join(s[1:]) for s in srcs if s[0] == "srcset")\n-            if srcset:\n-                attributes[\'srcset\'] = srcset\n+                srcs[n][1] = r(elm[1])\n+            attributes[\'srcset\'] = \',\'.join(\' \'.join(s[1:]) for s in srcs)\n+        for elem in soup.find_all([\'source\', \'iframe\']):\n+            # SOURCE is used for video and audio.\n+            # IFRAME is used to embed PDFs.\n+            attributes = elem.attrs\n+            src = attributes.get(\'src\')\n+            if not src:\n+                continue\n+            attributes[\'src\'] = r(src)\n         for elem in soup.find_all(\'img\'):\n             attributes = elem.attrs\n             src = attributes.get(\'src\', \'\')\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T00:08:23Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/05b98d4ecb8eb9ee13e840569d082a06d6f70091
+
+Audio/video were missing.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex e5e5241..6151e30 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -159,9 +159,9 @@ def r(href):\n                     and not href.startswith('tel:') \\\n                     and not href.startswith('#'):\n                 attributes['href'] = r(href)\n-        for elem in soup.find_all(['source', 'iframe', 'img']):\n+        for elem in soup.find_all(['source', 'img']):\n             # SOURCE is used for video and audio.\n-            # IFRAME is used to embed PDFs.\n+            # SRCSET specified multiple images (see below).\n             attributes = elem.attrs\n             srcset = attributes.get('srcset')\n             if not srcset:\n@@ -172,8 +172,9 @@ def r(href):\n             for n, elm in enumerate(srcs):\n                 srcs[n][1] = r(elm[1])\n             attributes['srcset'] = ','.join(' '.join(s[1:]) for s in srcs)\n-        for elem in soup.find_all(['source', 'iframe']):\n+        for elem in soup.find_all(['source', 'iframe', 'audio', 'video']):\n             # SOURCE is used for video and audio.\n+            # AUDIO/VIDEO can also have src attribute.\n             # IFRAME is used to embed PDFs.\n             attributes = elem.attrs\n             src = attributes.get('src')\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T00:09:43Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/749b3d4a031a0deee6d5f6ffe7ff372968f9286c
+
+Simplify code a bit.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 6151e30..50964c2 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -168,10 +168,10 @@ def r(href):\n                 continue\n             # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n             # [(src1, 480w), (src2, 360w)]\n-            srcs += [['srcset'] + s.strip().split() for s in srcset.strip().split(',') if s.strip()]\n+            srcs += [s.strip().split() for s in srcset.strip().split(',') if s.strip()]\n             for n, elm in enumerate(srcs):\n-                srcs[n][1] = r(elm[1])\n-            attributes['srcset'] = ','.join(' '.join(s[1:]) for s in srcs)\n+                srcs[n][0] = r(elm[0])\n+            attributes['srcset'] = ','.join(' '.join(s) for s in srcs)\n         for elem in soup.find_all(['source', 'iframe', 'audio', 'video']):\n             # SOURCE is used for video and audio.\n             # AUDIO/VIDEO can also have src attribute.\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T00:15:40Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/1b3d51ce363c7fcd16bba4f3e67dc2fb93c92403
+
+Fix srcs local variable being referenced before assignment.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 50964c2..f7c4cb8 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -168,7 +168,7 @@ def r(href):\n                 continue\n             # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n             # [(src1, 480w), (src2, 360w)]\n-            srcs += [s.strip().split() for s in srcset.strip().split(',') if s.strip()]\n+            srcs = [s.strip().split() for s in srcset.strip().split(',') if s.strip()]\n             for n, elm in enumerate(srcs):\n                 srcs[n][0] = r(elm[0])\n             attributes['srcset'] = ','.join(' '.join(s) for s in srcs)\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T01:49:19Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/c3854b687ba643be65cc1a7f803bff9573476448
+
+Forgot about the dummy content.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex bc6dd85..9382d91 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -362,6 +362,7 @@ def test_image_captioning_resolveuid_no_scale(self):\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_image_captioning_resolveuid_with_srcset_and_src(self):\n+        self._makeDummyContent()\n         text_in = """<img class="captioned" src="resolveuid/%s" srcset="resolveuid/%s 480w,resolveuid/%s 360w"/>""" % (self.UID, self.UID, self.UID)\n         text_out = """<figure class="captioned">\n <img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/...jpeg 480w,http://nohost/plone/image.jpg/@@images/...jpeg 360w" title="Image" width="500"/>\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T02:12:08Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/dfe856709d35cec3bee519437a4580e5040f2d03
+
+Fix test again.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex 9382d91..f4309ad 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -362,8 +362,7 @@ def test_image_captioning_resolveuid_no_scale(self):\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_image_captioning_resolveuid_with_srcset_and_src(self):\n-        self._makeDummyContent()\n-        text_in = """<img class="captioned" src="resolveuid/%s" srcset="resolveuid/%s 480w,resolveuid/%s 360w"/>""" % (self.UID, self.UID, self.UID)\n+        text_in = """<img class="captioned" src="resolveuid/%s/@@images/image" srcset="resolveuid/%s/@@images/image 480w,resolveuid/%s/@@images/image 360w"/>""" % (self.UID, self.UID, self.UID)\n         text_out = """<figure class="captioned">\n <img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/...jpeg 480w,http://nohost/plone/image.jpg/@@images/...jpeg 360w" title="Image" width="500"/>\n <figcaption class="image-caption">My caption</figcaption>\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T02:53:07Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/41089266bab062ad72c8b06c80168c8f8f971272
+
+Add more tests to clarify what is going on.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex f4309ad..2b3fe1a 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -369,6 +369,31 @@ def test_image_captioning_resolveuid_with_srcset_and_src(self):\n </figure>"""\n         self._assertTransformsTo(text_in, text_out)\n \n+    def test_iframe_resolveuid(self):\n+        text_in = """<iframe src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<iframe src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_video_resolveuid(self):\n+        text_in = """<video src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<video src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_audio_resolveuid(self):\n+        text_in = """<audio src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<audio src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_source_resolveuid(self):\n+        text_in = """<video><source src="resolveuid/%s"/></video>""" % self.UID\n+        text_out = """<video><source src="http://nohost/plone/image.jpg/@@images/...jpeg"/></video>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_source_resolveuid_srcset(self):\n+        text_in = """<video><source srcset="resolveuid/%s" mimetype="video/mp4"/></video>""" % self.UID\n+        text_out = """<video><source srcset="http://nohost/plone/image.jpg/@@images/...jpeg" mimetype="video/mp4"/></video>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n     def test_image_captioning_resolveuid_no_scale_plone_namedfile(self):\n         self._makeDummyContent()\n         text_in = """<img class="captioned" src="resolveuid/foo2/@@images/image"/>"""\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T02:54:23Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/d748eb05f7efb114c4eee2f77389572687b61460
+
+Actually the srcset is supposed to be rendered like this, not like the captioned src.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex 2b3fe1a..c537271 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -364,7 +364,7 @@ def test_image_captioning_resolveuid_no_scale(self):\n     def test_image_captioning_resolveuid_with_srcset_and_src(self):\n         text_in = """<img class="captioned" src="resolveuid/%s/@@images/image" srcset="resolveuid/%s/@@images/image 480w,resolveuid/%s/@@images/image 360w"/>""" % (self.UID, self.UID, self.UID)\n         text_out = """<figure class="captioned">\n-<img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/...jpeg 480w,http://nohost/plone/image.jpg/@@images/...jpeg 360w" title="Image" width="500"/>\n+<img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/image 480w,http://nohost/plone/image.jpg/@@images/image 360w" title="Image" width="500"/>\n <figcaption class="image-caption">My caption</figcaption>\n </figure>"""\n         self._assertTransformsTo(text_in, text_out)\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T03:58:40Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/11269fd3f9b965205f59c781b8961d53829a6b74
+
+Fix tests.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex c537271..b399b0e 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -371,27 +371,27 @@ def test_image_captioning_resolveuid_with_srcset_and_src(self):\n \n     def test_iframe_resolveuid(self):\n         text_in = """<iframe src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<iframe src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        text_out = """<iframe src="http://nohost/plone/image.jpg"/>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_video_resolveuid(self):\n         text_in = """<video src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<video src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        text_out = """<video src="http://nohost/plone/image.jpg"/>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_audio_resolveuid(self):\n         text_in = """<audio src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<audio src="http://nohost/plone/image.jpg/@@images/...jpeg"/>"""\n+        text_out = """<audio src="http://nohost/plone/image.jpg"/>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_source_resolveuid(self):\n         text_in = """<video><source src="resolveuid/%s"/></video>""" % self.UID\n-        text_out = """<video><source src="http://nohost/plone/image.jpg/@@images/...jpeg"/></video>"""\n+        text_out = """<video><source src="http://nohost/plone/image.jpg"/></video>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_source_resolveuid_srcset(self):\n         text_in = """<video><source srcset="resolveuid/%s" mimetype="video/mp4"/></video>""" % self.UID\n-        text_out = """<video><source srcset="http://nohost/plone/image.jpg/@@images/...jpeg" mimetype="video/mp4"/></video>"""\n+        text_out = """<video><source srcset="http://nohost/plone/image.jpg" mimetype="video/mp4"/></video>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_image_captioning_resolveuid_no_scale_plone_namedfile(self):\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-04T04:17:32Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/4e91dd8aa07e5efaf88f6872628ac74c2504effb
+
+Normalize tests.
+
+Files changed:
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex b399b0e..ec748f5 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -371,17 +371,17 @@ def test_image_captioning_resolveuid_with_srcset_and_src(self):\n \n     def test_iframe_resolveuid(self):\n         text_in = """<iframe src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<iframe src="http://nohost/plone/image.jpg"/>"""\n+        text_out = """<iframe src="http://nohost/plone/image.jpg"></iframe>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_video_resolveuid(self):\n         text_in = """<video src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<video src="http://nohost/plone/image.jpg"/>"""\n+        text_out = """<video src="http://nohost/plone/image.jpg"></video>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_audio_resolveuid(self):\n         text_in = """<audio src="resolveuid/%s"/>""" % self.UID\n-        text_out = """<audio src="http://nohost/plone/image.jpg"/>"""\n+        text_out = """<audio src="http://nohost/plone/image.jpg"></audio>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_source_resolveuid(self):\n@@ -390,8 +390,8 @@ def test_source_resolveuid(self):\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_source_resolveuid_srcset(self):\n-        text_in = """<video><source srcset="resolveuid/%s" mimetype="video/mp4"/></video>""" % self.UID\n-        text_out = """<video><source srcset="http://nohost/plone/image.jpg" mimetype="video/mp4"/></video>"""\n+        text_in = """<video><source mimetype="video/mp4" srcset="resolveuid/%s"/></video>""" % self.UID\n+        text_out = """<video><source mimetype="video/mp4" srcset="http://nohost/plone/image.jpg"/></video>"""\n         self._assertTransformsTo(text_in, text_out)\n \n     def test_image_captioning_resolveuid_no_scale_plone_namedfile(self):\n'
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-29T00:37:39Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/db65328f28f77e620b6c7e487aec665fcdb49e82
+
+Address review comments (no single char fs vs) and clean code more.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex f7c4cb8..94b6e6f 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -121,33 +121,32 @@ def _shorttag_replace(self, match):\n         else:\n             return '<' + tag + '></' + tag + '>'\n \n+    def _render_resolveuid(href):\n+        url_parts = urlsplit(href)\n+        scheme = url_parts[0]\n+        path_parts = urlunsplit(['', ''] + list(url_parts[2:]))\n+        obj, subpath, appendix = self.resolve_link(path_parts)\n+        if obj is not None:\n+            href = obj.absolute_url()\n+            if subpath:\n+                href += '/' + subpath\n+            href += appendix\n+        elif resolveuid_re.match(href) is None \\\n+                and not scheme \\\n+                and not href.startswith('/'):\n+            # absolutize relative URIs; this text isn't necessarily\n+            # being rendered in the context where it was stored\n+            relative_root = self.context\n+            if not getattr(self.context, 'isPrincipiaFolderish', False):\n+                relative_root = aq_parent(self.context)\n+            actual_url = relative_root.absolute_url()\n+            href = urljoin(actual_url + '/', subpath) + appendix\n+        return href\n+\n     def __call__(self, data):\n         data = re.sub(r'<([^<>\\s]+?)\\s*/>', self._shorttag_replace, data)\n         soup = BeautifulSoup(safe_unicode(data), 'html.parser')\n \n-        def r(href):\n-            url_parts = urlsplit(href)\n-            scheme = url_parts[0]\n-            path_parts = urlunsplit(['', ''] + list(url_parts[2:]))\n-            obj, subpath, appendix = self.resolve_link(path_parts)\n-            if obj is not None:\n-                href = obj.absolute_url()\n-                if subpath:\n-                    href += '/' + subpath\n-                href += appendix\n-            elif resolveuid_re.match(href) is None \\\n-                    and not scheme \\\n-                    and not href.startswith('/'):\n-                # absolutize relative URIs; this text isn't necessarily\n-                # being rendered in the context where it was stored\n-                relative_root = self.context\n-                if not getattr(\n-                        self.context, 'isPrincipiaFolderish', False):\n-                    relative_root = aq_parent(self.context)\n-                actual_url = relative_root.absolute_url()\n-                href = urljoin(actual_url + '/', subpath) + appendix\n-            return href\n-\n         for elem in soup.find_all(['a', 'area']):\n             attributes = elem.attrs\n             href = attributes.get('href')\n@@ -158,7 +157,7 @@ def r(href):\n                     and not href.startswith('mailto:') \\\n                     and not href.startswith('tel:') \\\n                     and not href.startswith('#'):\n-                attributes['href'] = r(href)\n+                attributes['href'] = self._render_resolveuid(href)\n         for elem in soup.find_all(['source', 'img']):\n             # SOURCE is used for video and audio.\n             # SRCSET specified multiple images (see below).\n@@ -168,10 +167,10 @@ def r(href):\n                 continue\n             # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n             # [(src1, 480w), (src2, 360w)]\n-            srcs = [s.strip().split() for s in srcset.strip().split(',') if s.strip()]\n-            for n, elm in enumerate(srcs):\n-                srcs[n][0] = r(elm[0])\n-            attributes['srcset'] = ','.join(' '.join(s) for s in srcs)\n+            srcs = [src.strip().split() for src in srcset.strip().split(',') if src.strip()]\n+            for idx, elm in enumerate(srcs):\n+                srcs[idx][0] = self._render_resolveuid(elm[0])\n+            attributes['srcset'] = ','.join(' '.join(src) for src in srcs)\n         for elem in soup.find_all(['source', 'iframe', 'audio', 'video']):\n             # SOURCE is used for video and audio.\n             # AUDIO/VIDEO can also have src attribute.\n@@ -180,7 +179,7 @@ def r(href):\n             src = attributes.get('src')\n             if not src:\n                 continue\n-            attributes['src'] = r(src)\n+            attributes['src'] = self._render_resolveuid(src)\n         for elem in soup.find_all('img'):\n             attributes = elem.attrs\n             src = attributes.get('src', '')\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-01-29T02:46:36Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/285d4c55d0156582c039906a55cf612ae5e3070e
+
+What a dumb oversight.
+
+Files changed:
+M plone/outputfilters/filters/resolveuid_and_caption.py
+
+b"diff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 94b6e6f..935c926 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -121,7 +121,7 @@ def _shorttag_replace(self, match):\n         else:\n             return '<' + tag + '></' + tag + '>'\n \n-    def _render_resolveuid(href):\n+    def _render_resolveuid(self, href):\n         url_parts = urlsplit(href)\n         scheme = url_parts[0]\n         path_parts = urlunsplit(['', ''] + list(url_parts[2:]))\n"
+
+Repository: plone.outputfilters
+
+
+Branch: refs/heads/master
+Date: 2022-02-01T13:33:29Z
+Author: Rudd-O (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.outputfilters/commit/de86863e46b92f59961a494cf4a6fa2bc2cae28d
+
+Merge pull request #47 from Rudd-O/master
+
+Resolve UID links in &lt;source src= / srcset=&gt; tags
+
+Files changed:
+A news/47.feature
+M plone/outputfilters/filters/resolveuid_and_caption.py
+M plone/outputfilters/tests/test_resolveuid_and_caption.py
+
+b'diff --git a/news/47.feature b/news/47.feature\nnew file mode 100644\nindex 0000000..a714a1a\n--- /dev/null\n+++ b/news/47.feature\n@@ -0,0 +1 @@\n+Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.\ndiff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 49da81f..935c926 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -121,6 +121,28 @@ def _shorttag_replace(self, match):\n         else:\n             return \'<\' + tag + \'></\' + tag + \'>\'\n \n+    def _render_resolveuid(self, href):\n+        url_parts = urlsplit(href)\n+        scheme = url_parts[0]\n+        path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n+        obj, subpath, appendix = self.resolve_link(path_parts)\n+        if obj is not None:\n+            href = obj.absolute_url()\n+            if subpath:\n+                href += \'/\' + subpath\n+            href += appendix\n+        elif resolveuid_re.match(href) is None \\\n+                and not scheme \\\n+                and not href.startswith(\'/\'):\n+            # absolutize relative URIs; this text isn\'t necessarily\n+            # being rendered in the context where it was stored\n+            relative_root = self.context\n+            if not getattr(self.context, \'isPrincipiaFolderish\', False):\n+                relative_root = aq_parent(self.context)\n+            actual_url = relative_root.absolute_url()\n+            href = urljoin(actual_url + \'/\', subpath) + appendix\n+        return href\n+\n     def __call__(self, data):\n         data = re.sub(r\'<([^<>\\s]+?)\\s*/>\', self._shorttag_replace, data)\n         soup = BeautifulSoup(safe_unicode(data), \'html.parser\')\n@@ -131,32 +153,33 @@ def __call__(self, data):\n             # an \'a\' anchor element has no href\n             if not href:\n                 continue\n-            url_parts = urlsplit(href)\n-            scheme = url_parts[0]\n-            # we are only interested in path and beyond /foo/bar?x=2#abc\n-            path_parts = urlunsplit([\'\', \'\'] + list(url_parts[2:]))\n             if not href.startswith(\'mailto<\') \\\n                     and not href.startswith(\'mailto:\') \\\n                     and not href.startswith(\'tel:\') \\\n                     and not href.startswith(\'#\'):\n-                obj, subpath, appendix = self.resolve_link(path_parts)\n-                if obj is not None:\n-                    href = obj.absolute_url()\n-                    if subpath:\n-                        href += \'/\' + subpath\n-                    href += appendix\n-                elif resolveuid_re.match(href) is None \\\n-                        and not scheme \\\n-                        and not href.startswith(\'/\'):\n-                    # absolutize relative URIs; this text isn\'t necessarily\n-                    # being rendered in the context where it was stored\n-                    relative_root = self.context\n-                    if not getattr(\n-                            self.context, \'isPrincipiaFolderish\', False):\n-                        relative_root = aq_parent(self.context)\n-                    actual_url = relative_root.absolute_url()\n-                    href = urljoin(actual_url + \'/\', subpath) + appendix\n-                attributes[\'href\'] = href\n+                attributes[\'href\'] = self._render_resolveuid(href)\n+        for elem in soup.find_all([\'source\', \'img\']):\n+            # SOURCE is used for video and audio.\n+            # SRCSET specified multiple images (see below).\n+            attributes = elem.attrs\n+            srcset = attributes.get(\'srcset\')\n+            if not srcset:\n+                continue\n+            # https://developer.mozilla.org/en-US/docs/Learn/HTML/Multimedia_and_embedding/Responsive_images\n+            # [(src1, 480w), (src2, 360w)]\n+            srcs = [src.strip().split() for src in srcset.strip().split(\',\') if src.strip()]\n+            for idx, elm in enumerate(srcs):\n+                srcs[idx][0] = self._render_resolveuid(elm[0])\n+            attributes[\'srcset\'] = \',\'.join(\' \'.join(src) for src in srcs)\n+        for elem in soup.find_all([\'source\', \'iframe\', \'audio\', \'video\']):\n+            # SOURCE is used for video and audio.\n+            # AUDIO/VIDEO can also have src attribute.\n+            # IFRAME is used to embed PDFs.\n+            attributes = elem.attrs\n+            src = attributes.get(\'src\')\n+            if not src:\n+                continue\n+            attributes[\'src\'] = self._render_resolveuid(src)\n         for elem in soup.find_all(\'img\'):\n             attributes = elem.attrs\n             src = attributes.get(\'src\', \'\')\ndiff --git a/plone/outputfilters/tests/test_resolveuid_and_caption.py b/plone/outputfilters/tests/test_resolveuid_and_caption.py\nindex 0cbab32..ec748f5 100644\n--- a/plone/outputfilters/tests/test_resolveuid_and_caption.py\n+++ b/plone/outputfilters/tests/test_resolveuid_and_caption.py\n@@ -361,6 +361,39 @@ def test_image_captioning_resolveuid_no_scale(self):\n </figure>"""\n         self._assertTransformsTo(text_in, text_out)\n \n+    def test_image_captioning_resolveuid_with_srcset_and_src(self):\n+        text_in = """<img class="captioned" src="resolveuid/%s/@@images/image" srcset="resolveuid/%s/@@images/image 480w,resolveuid/%s/@@images/image 360w"/>""" % (self.UID, self.UID, self.UID)\n+        text_out = """<figure class="captioned">\n+<img alt="My caption" height="331" src="http://nohost/plone/image.jpg/@@images/...jpeg" srcset="http://nohost/plone/image.jpg/@@images/image 480w,http://nohost/plone/image.jpg/@@images/image 360w" title="Image" width="500"/>\n+<figcaption class="image-caption">My caption</figcaption>\n+</figure>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_iframe_resolveuid(self):\n+        text_in = """<iframe src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<iframe src="http://nohost/plone/image.jpg"></iframe>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_video_resolveuid(self):\n+        text_in = """<video src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<video src="http://nohost/plone/image.jpg"></video>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_audio_resolveuid(self):\n+        text_in = """<audio src="resolveuid/%s"/>""" % self.UID\n+        text_out = """<audio src="http://nohost/plone/image.jpg"></audio>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_source_resolveuid(self):\n+        text_in = """<video><source src="resolveuid/%s"/></video>""" % self.UID\n+        text_out = """<video><source src="http://nohost/plone/image.jpg"/></video>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n+    def test_source_resolveuid_srcset(self):\n+        text_in = """<video><source mimetype="video/mp4" srcset="resolveuid/%s"/></video>""" % self.UID\n+        text_out = """<video><source mimetype="video/mp4" srcset="http://nohost/plone/image.jpg"/></video>"""\n+        self._assertTransformsTo(text_in, text_out)\n+\n     def test_image_captioning_resolveuid_no_scale_plone_namedfile(self):\n         self._makeDummyContent()\n         text_in = """<img class="captioned" src="resolveuid/foo2/@@images/image"/>"""\n'
 
