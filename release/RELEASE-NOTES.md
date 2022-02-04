@@ -1,43 +1,15 @@
-# Release notes for Plone 6.0.0a3
+# Release notes for Plone 6.0-dev
 
-Last updated: Friday January 28, 2022.
+Last updated: Friday February 4, 2022.
 
 ## Highlights
 
-Changes since 6.0.0a2:
+Changes since 6.0.0a3:
 
-- `plone.app.contenttypes`: Security fix: prevent cache poisoning with the Referer header.
-  See [security advisory](https://github.com/plone/plone.app.contenttypes/security/advisories/GHSA-f7qw-5fgj-247x).
-- Updated the versions of the build requirements: `setuptools` to 59.6.0, `zc.buildout` to 3.0.0rc1, `pip` to 21.3.1.
-- `Zope` 5.4:
-  - Add support for Python 3.10 (Plone does not have this yet).
-  - WebDAV fixes.
-  - https://zope.dev is now the canonical Zope developer community site.
-- `plone.volto`: Removed `collective.folderishtypes` dependency.
-- `Products.CMFEditions`:
-  - Got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
-  - The VersionView class is deprecated because it contained just one method that is now part of the @@plone view.
-- `plone.app.linkintegrity`: Track integrity of video and audio files in HTML source tags.
-- `plone.app.uuid`: Speed up `uuidToPhysicalPath` and `uuidToObject`.
-- `plone.namedfile`:
-   - Make `DefaultImageScalingFactory` more flexible, with methods you can override.
-   - Drop support for Python 2.7.  Main target is now Plone 6, but we try to keep it running on Plone 5.2 with Python 3.
-- `diazo`: Removed `FormEncode` test dependency.
-- `Pillow` updated to 9.0.0
-- `plone.app.content`: Deprecate the human_readable_size method of the ContentStatusHistoryView class because the one from the @@plone view should be used.
-- `plone.app.layout`: Improved the Global section viewlet:
-  - Catalog based navigation.
-  - Allow more customization by adding methods as hooks.
-  - Various performance optimizations.
-  - Deprecate now unused navtree_depth property.
-- `plone.app.layout`: Removed deprecated methods.
-- `plone.app.layout`: Add viewlet to display customizable favicon.  See the Site Settings.
-- Various packages: No longer use deprecated property types ulines, utext, utoken, and ustring, but their non-unicode variants, without a `u` at the beginning. See [issue 3305](https://github.com/plone/Products.CMFPlone/issues/3305).
-- `plone.restapi`:
-  - Enhance @addons endpoint to return a list of upgradeable addons.
-  - Add support for DX Plone Site root in Plone 6. Remove blocks behavior hack for site root in Plone 6.
-- Products.CMFPlacefulWorkflow: Removed the ``CMFPlacefulWorkflow`` skin layer.
-
+- collective.recipe.template = 2.2
+- plone.app.querystring = 1.5.0
+- plone.app.versioningbehavior = 1.4.6
+- plone.app.tiles = 3.3.0
 
 ## Expected
 
