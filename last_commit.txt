@@ -1,32 +1,23 @@
-Repository: documentation
+Repository: plone.restapi
 
 
-Branch: refs/heads/6-dev
-Date: 2022-02-20T13:52:04-08:00
-Author: Steve Piercy (stevepiercy) <web@stevepiercy.com>
-Commit: https://github.com/plone/documentation/commit/4a4b6230e1247a142cc549810130d447111d3435
+Branch: refs/heads/master
+Date: 2022-02-21T09:39:27+01:00
+Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/11d3bfa906c678277fb416bb2eaf75e84e3fb1c3
 
-Volto docs use a prefix of "docs-" on all make targets
+Improve handling of linking translations taking into account the stat… (#1330)
 
-Files changed:
-M docs/contributing/index.md
+* Improve handling of linking translations taking into account the state of the target. Restricting it completely for LRFs. Adding a transaction note to the action if it succeeds.
 
-b'diff --git a/docs/contributing/index.md b/docs/contributing/index.md\nindex 33e60702..e35df7a6 100644\n--- a/docs/contributing/index.md\n+++ b/docs/contributing/index.md\n@@ -217,9 +217,11 @@ These branches may change as we get closer to a production release.\n \n     ```shell\n     # Optionally clean the builds to avoid cache issues\n-    make clean\n-    make html\n-    make linkcheck\n+    # Note that for the Volto docs only, we use "docs-" as a prefix for make targets\n+    # because it has so many of them and to avoid a conflict with the core application.\n+    make docs-clean\n+    make docs-html\n+    make docs-linkcheck\n     ```\n \n 1.  Back in `submodules/volto`, commit and push your changes to the remote.\n'
+* Fix the mess, now proper code and tests
 
-Repository: documentation
-
-
-Branch: refs/heads/6-dev
-Date: 2022-02-20T20:54:31-08:00
-Author: Steve Piercy (stevepiercy) <web@stevepiercy.com>
-Commit: https://github.com/plone/documentation/commit/d3cd4590d7b7164dbe37ce5a3e1f23c59fecfccc
-
-Merge pull request #1189 from plone/contributing-volto-make-commands
-
-Volto docs use a prefix of "docs-" on all make targets
+* Fix black
 
 Files changed:
-M docs/contributing/index.md
+A news/1329.bugfix
+M src/plone/restapi/services/multilingual/pam.py
+M src/plone/restapi/tests/test_translations.py
 
-b'diff --git a/docs/contributing/index.md b/docs/contributing/index.md\nindex 33e60702..e35df7a6 100644\n--- a/docs/contributing/index.md\n+++ b/docs/contributing/index.md\n@@ -217,9 +217,11 @@ These branches may change as we get closer to a production release.\n \n     ```shell\n     # Optionally clean the builds to avoid cache issues\n-    make clean\n-    make html\n-    make linkcheck\n+    # Note that for the Volto docs only, we use "docs-" as a prefix for make targets\n+    # because it has so many of them and to avoid a conflict with the core application.\n+    make docs-clean\n+    make docs-html\n+    make docs-linkcheck\n     ```\n \n 1.  Back in `submodules/volto`, commit and push your changes to the remote.\n'
+b'diff --git a/news/1329.bugfix b/news/1329.bugfix\nnew file mode 100644\nindex 000000000..cc56797ef\n--- /dev/null\n+++ b/news/1329.bugfix\n@@ -0,0 +1,2 @@\n+Improve handling of linking translations taking into account the state of the target. Restricting it completely for LRFs. Adding a transaction note to the action if it succeeds.\n+[sneridagh]\ndiff --git a/src/plone/restapi/services/multilingual/pam.py b/src/plone/restapi/services/multilingual/pam.py\nindex 534dfe0ce..3dcece9d6 100644\n--- a/src/plone/restapi/services/multilingual/pam.py\n+++ b/src/plone/restapi/services/multilingual/pam.py\n@@ -13,6 +13,7 @@\n from zope.interface import Interface\n \n import plone.protect.interfaces\n+import transaction\n \n \n @implementer(IExpandableElement)\n@@ -95,22 +96,48 @@ def reply(self):\n         if target is None:\n             self.request.response.setStatus(400)\n             return dict(error=dict(type="BadRequest", message="Content does not exist"))\n+        elif target.portal_type == "LRF":\n+            self.request.response.setStatus(400)\n+            return dict(\n+                error=dict(\n+                    type="BadRequest",\n+                    message="Language Root Folders can only be linked between each other",\n+                )\n+            )\n \n         target_language = ILanguage(target).get_language()\n         manager = ITranslationManager(self.context)\n         current_translation = manager.get_translation(target_language)\n+        target_manager = ITranslationManager(target)\n+        target_translation = target_manager.get_translation(self.context.language)\n         if current_translation is not None:\n             self.request.response.setStatus(400)\n             return dict(\n                 error=dict(\n                     type="BadRequest",\n-                    message="Already translated into language {}".format(\n+                    message="Source already translated into language {}".format(\n+                        target_language\n+                    ),\n+                )\n+            )\n+        if target_translation is not None:\n+            self.request.response.setStatus(400)\n+            return dict(\n+                error=dict(\n+                    type="BadRequest",\n+                    message="Target already translated into language {}".format(\n                         target_language\n                     ),\n                 )\n             )\n \n         manager.register_translation(target_language, target)\n+        # We want to leave a log in the transaction that the link has been executed\n+        ts = transaction.get()\n+        ts.note(\n+            f\'Linked translation {"/".join(self.context.getPhysicalPath())} ({self.context.language}) -> {"/".join(target.getPhysicalPath())} ({target_language})\'\n+        )\n+\n         self.request.response.setStatus(201)\n         self.request.response.setHeader("Location", self.context.absolute_url())\n         return {}\n@@ -160,4 +187,10 @@ def reply(self):\n             )\n \n         manager.remove_translation(language)\n+        # We want to leave a log in the transaction that the unlink has been executed\n+        ts = transaction.get()\n+        ts.note(\n+            f\'Unlinked translation for {language} in {"/".join(self.context.getPhysicalPath())} ({self.context.language})\'\n+        )\n+\n         return self.reply_no_content()\ndiff --git a/src/plone/restapi/tests/test_translations.py b/src/plone/restapi/tests/test_translations.py\nindex 68147c3f1..fb8a7e290 100644\n--- a/src/plone/restapi/tests/test_translations.py\n+++ b/src/plone/restapi/tests/test_translations.py\n@@ -172,6 +172,58 @@ def test_get_translations_on_content_with_no_permissions(self):\n         response = response.json()\n         self.assertTrue(len(response["items"]) == 0)\n \n+    def test_link_translation_with_an_already_translated_content_returns_400(self):\n+        ITranslationManager(self.en_content).register_translation("es", self.es_content)\n+        transaction.commit()\n+        response = requests.post(\n+            f"{self.en_content.absolute_url()}/@translations",\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+            json={"id": self.es_content.absolute_url()},\n+        )\n+        self.assertEqual(400, response.status_code)\n+        self.assertEqual(\n+            response.json()["error"]["message"],\n+            "Source already translated into language es",\n+        )\n+\n+    def test_link_translation_with_target_already_linked_to_other_object_returns_400(\n+        self,\n+    ):\n+        self.en_content_2 = createContentInContainer(\n+            self.portal["en"], "Document", title="Test document 2"\n+        )\n+        ITranslationManager(self.en_content_2).register_translation(\n+            "es", self.es_content\n+        )\n+        transaction.commit()\n+        response = requests.post(\n+            f"{self.en_content.absolute_url()}/@translations",\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+            json={"id": self.es_content.absolute_url()},\n+        )\n+        self.assertEqual(400, response.status_code)\n+        self.assertEqual(\n+            response.json()["error"]["message"],\n+            "Target already translated into language es",\n+        )\n+\n+    def test_link_translation_with_LFRs_not_possible_since_they_are_protected_returns_400(\n+        self,\n+    ):\n+        response = requests.post(\n+            f"{self.es_content.absolute_url()}/@translations",\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+            json={"id": self.portal["en"].absolute_url()},\n+        )\n+        self.assertEqual(400, response.status_code)\n+        self.assertEqual(\n+            response.json()["error"]["message"],\n+            "Language Root Folders can only be linked between each other",\n+        )\n+\n \n class TestUnLinkContentTranslations(unittest.TestCase):\n     layer = PLONE_RESTAPI_DX_PAM_FUNCTIONAL_TESTING\n'
 
