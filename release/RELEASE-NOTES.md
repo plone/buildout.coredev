@@ -10,6 +10,19 @@ Changes since 6.0.0a3:
 - Update waitress to version 2.1.1 to mitigate a vulnerability in that package.
 - Zope 5.5.1: Enhance cookie support.
 - The big one: Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+- Products.CMFPlone:
+  - Remove RequireJS.
+  - Remove default resource jQuery. It is added to the global namespace via the bundle.
+  - Remove support for conditional comments in script and style tags.  It's not supported since IE10.
+  - Remove dependency on mockup. Mockup is now a npm package only and as such a dependency of plone.staticresources.
+  - New resource registry to simplify CSS/JS registration.
+  - Only "bundles" are registered - support of "resources" and "bundle resources" is removed.
+  - Removed TTW compilation of bundles via r.js and less.js.
+  - Property `merge_with` is no longer needed in HTTP/2 times and merging here unsupported.
+  - Unique key for delivery is based on hash of bundle file, `last_compilation` property is deprecated.
+  - PLIP #3279: Implement modern images scales. Add huge (1600px), great (1200px), larger (1000px), teaser (600px). Amend preview and mini (remove height constraint).
+  - Add TinyMCE template plugin to the plugins vocabulary.
+  - Add TinyMCE alignment classes, to avoid style usage.
 - `plone.volto` is now a dependency of the `Plone` package.
 - plone.recipe.zope2instance: by default do not create a temporary storage.
 - plone.scale: Removed deprecated `factory` argument from `scale` method.
