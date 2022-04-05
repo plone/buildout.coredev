@@ -6,18 +6,42 @@ Last updated: Friday February 4, 2022.
 
 Changes since 6.0.0a3:
 
-- collective.recipe.template = 2.2
-- plone.app.querystring = 1.5.0
-- plone.app.versioningbehavior = 1.4.6
-- plone.app.tiles = 3.3.0
+- Update waitress to version 2.1.1 to mitigate a vulnerability in that package.
+- Zope 5.5.1: Enhance cookie support.
+- The big one: Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+- `plone.volto` is now a dependency of the `Plone` package.
+- plone.recipe.zope2instance: by default do not create a temporary storage.
+- plone.scale: Removed deprecated `factory` argument from `scale` method.
+- plone.app.linkintegrity: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
+- plone.outputfilters: Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.
+- plone.app.querystring: Add lazy attribute to vocabularies to prevent fetching any results.
+- plone.app.theming:
+  - Deactivate copy button and modal in theming control panel.
+  - Remove all thememapper functionality from theming control panel, including Inspect/Modify theme and the Preview.
+- plone.app.users: Show unfiltered member fields for manager in user profile page.
+- plone.app.widgets:
+  - Remove implicit dependency on Mockup.  Mockup is no longer a Python package, only an npm package.
+  - Update datetime pattern options for Patternslib pat-date-picker/pat-datetime-picker.
+- plone.autoform:
+  - Fixes for latest z3c.form.
+  - Reimplementation of ObjectSubForm and ISubformFactory, backported from older z3c.form.
+- plone.app.z3cform:
+  - Use better types for inputs.
+  - Use browser native date and datetime-local input together with patternslib date-picker.
+  - Implement TimeWidget which renders `<input type="time" />`.
+  - Use pat-validation in forms.
+  - Fixed for latest z3c.form
+- plone.z3cform: compatibility with latest z3c.form.
+- plone.namedfile: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from ``plone.scale``.  Use this adapter in our scaling functions when we store or get an image scale.
+- Products.PlonePAS: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form.  Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
+
 
 ## Expected
 
-There are some items that we want to include during the alpha phase, but which are not ready yet:
+There are some items that we want to include during the alpha phase, but which need review:
 
-- Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
-- Add `plone.volto` as dependency of the `Plone` package.  See [issue 1](https://github.com/plone/plone.volto/issues/1).
 - Add `plone.base` as basic package with shared code.  See [issue 3395](https://github.com/plone/Products.CMFPlone/issues/3395).
+- Merge collective.dexteritytextindexer into core.  See [issue 2780](https://github.com/plone/Products.CMFPlone/issues/2780)
 
 
 ## Installation
@@ -59,9 +83,7 @@ parts = instance
 recipe = plone.recipe.zope2instance
 eggs =
     Plone
-    plone.volto
 user = admin:admin
-zodb-temporary-storage = off
 ```
 
 Install it with:
@@ -82,10 +104,13 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0.0a3v/constraints.txt --use-deprecated legacy-resolver
+bin/pip install Plone -c https://dist.plone.org/release/6.0.0a3/constraints.txt
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
+
+Note: you may need to edit `etc/zope.conf` to add a `blob-dir`.
+See [issue 3345](https://github.com/plone/Products.CMFPlone/issues/3345#issuecomment-953700024)
 
 
 ## Create Plone backend
