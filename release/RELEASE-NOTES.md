@@ -1,16 +1,16 @@
-# Release notes for Plone 6.0-dev
+# Release notes for Plone 6.0.0a4
 
-Last updated: Wednesday April 6, 2022.
+Released: Friday April 8, 2022.
 
 
 ## Highlights
 
 Changes since 6.0.0a3:
 
-- Update waitress to version 2.1.1 to mitigate a vulnerability in that package.
-- Zope 5.5.1: Enhance cookie support.
-- The big one: Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
-- Products.CMFPlone:
+- Update `waitress` to version 2.1.1 to mitigate a vulnerability in that package.
+- `Zope` 5.5.1: Enhance cookie support.
+- `plone.staticresources`: The big one: Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+- `Products.CMFPlone`:
   - Remove RequireJS.
   - Remove default resource jQuery. It is added to the global namespace via the bundle.
   - Remove support for conditional comments in script and style tags.  It's not supported since IE10.
@@ -24,6 +24,10 @@ Changes since 6.0.0a3:
   - Add TinyMCE template plugin to the plugins vocabulary.
   - Add TinyMCE alignment classes, to avoid style usage.
 - `plone.volto` is now a dependency of the `Plone` package.
+- PLIP 2780: Move features of `collective.dexteritytextindexer` to core.
+- `plone.app.dexterity`:
+   - Remove JavaScript from this package and move it to Mockup.
+   - Modeleditor: Use pat-code-editor from Patternslib instead ACE.  Make the model editing form usable without JavaScript.  Allow editing the form even with XML errors to be able to fix the problem.
 - plone.recipe.zope2instance: by default do not create a temporary storage.
 - plone.scale: Removed deprecated `factory` argument from `scale` method.
 - plone.app.linkintegrity: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
@@ -48,7 +52,12 @@ Changes since 6.0.0a3:
 - plone.z3cform: compatibility with latest z3c.form.
 - plone.namedfile: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from ``plone.scale``.  Use this adapter in our scaling functions when we store or get an image scale.
 - Products.PlonePAS: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form.  Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
+- `plone.app.layout`:
+   - Restructure global sections and searchbox markup for mobile navigation as offcanvas sidebar.
+   - LiveSearch with support for images in search results.
+- `plonetheme.barceloneta`: sticky footer.
 
+Note that changes may be mentioned only once, even when they involve multiple packages.
 
 ## Expected
 
@@ -90,7 +99,7 @@ Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0.0a3/versions.cfg
+extends = https://dist.plone.org/release/6.0.0a4/versions.cfg
 parts = instance
 
 [instance]
@@ -104,7 +113,7 @@ Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0.0a3/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0.0a4/requirements.txt
 bin/buildout
 bin/instance fg
 ```
@@ -118,7 +127,7 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone -c https://dist.plone.org/release/6.0.0a3/constraints.txt
+bin/pip install Plone -c https://dist.plone.org/release/6.0.0a4/constraints.txt
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
