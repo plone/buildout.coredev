@@ -1,68 +1,79 @@
-# Release notes for Plone 6.0.0a3
+# Release notes for Plone 6.0.0a4
 
-Last updated: Friday January 28, 2022.
+Released: Friday April 8, 2022.
 
 ## Highlights
 
-Changes since 6.0.0a2:
+Changes since 6.0.0a3:
 
-- `plone.app.contenttypes`: Security fix: prevent cache poisoning with the Referer header.
-  See [security advisory](https://github.com/plone/plone.app.contenttypes/security/advisories/GHSA-f7qw-5fgj-247x).
-- Updated the versions of the build requirements: `setuptools` to 59.6.0, `zc.buildout` to 3.0.0rc1, `pip` to 21.3.1.
-- `Zope` 5.4:
-  - Add support for Python 3.10 (Plone does not have this yet).
-  - WebDAV fixes.
-  - https://zope.dev is now the canonical Zope developer community site.
-- `plone.volto`: Removed `collective.folderishtypes` dependency.
-- `Products.CMFEditions`:
-  - Got rid of the skins directory.  Most items in here have been moved to browser views.  Some were no longer used, or had an alternative, and were removed.
-  - The VersionView class is deprecated because it contained just one method that is now part of the @@plone view.
-- `plone.app.linkintegrity`: Track integrity of video and audio files in HTML source tags.
-- `plone.app.uuid`: Speed up `uuidToPhysicalPath` and `uuidToObject`.
-- `plone.namedfile`:
-   - Make `DefaultImageScalingFactory` more flexible, with methods you can override.
-   - Drop support for Python 2.7.  Main target is now Plone 6, but we try to keep it running on Plone 5.2 with Python 3.
-- `diazo`: Removed `FormEncode` test dependency.
-- `Pillow` updated to 9.0.0
-- `plone.app.content`: Deprecate the human_readable_size method of the ContentStatusHistoryView class because the one from the @@plone view should be used.
-- `plone.app.layout`: Improved the Global section viewlet:
-  - Catalog based navigation.
-  - Allow more customization by adding methods as hooks.
-  - Various performance optimizations.
-  - Deprecate now unused navtree_depth property.
-- `plone.app.layout`: Removed deprecated methods.
-- `plone.app.layout`: Add viewlet to display customizable favicon.  See the Site Settings.
-- Various packages: No longer use deprecated property types ulines, utext, utoken, and ustring, but their non-unicode variants, without a `u` at the beginning. See [issue 3305](https://github.com/plone/Products.CMFPlone/issues/3305).
-- `plone.restapi`:
-  - Enhance @addons endpoint to return a list of upgradeable addons.
-  - Add support for DX Plone Site root in Plone 6. Remove blocks behavior hack for site root in Plone 6.
-- Products.CMFPlacefulWorkflow: Removed the ``CMFPlacefulWorkflow`` skin layer.
+* Use `zc.buildout 3.0.0rc3` and `setuptools` 62.0.0 by default.
+* Update `waitress` to version 2.1.1 to mitigate a vulnerability in that package.
+* `Zope` 5.5.1: Enhance cookie support.
+* `plone.staticresources`: The big one: Updated JavaScript for Plone Classic, using ES6 modules. No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+* `Products.CMFPlone`:
+  * Remove RequireJS.
+  * Remove default resource jQuery. It is added to the global namespace via the bundle.
+  * Remove support for conditional comments in script and style tags. It's not supported since IE10.
+  * Remove dependency on mockup. Mockup is now a npm package only and as such a dependency of plone.staticresources.
+  * New resource registry to simplify CSS/JS registration.
+  * Only "bundles" are registered - support of "resources" and "bundle resources" is removed.
+  * Removed TTW compilation of bundles via r.js and less.js.
+  * Property `merge_with` is no longer needed in HTTP/2 times and merging here unsupported.
+  * Unique key for delivery is based on hash of bundle file, `last_compilation` property is deprecated.
+  * PLIP #3279: Implement modern images scales. Add huge (1600px), great (1200px), larger (1000px), teaser (600px). Amend preview and mini (remove height constraint).
+  * Add TinyMCE template plugin to the plugins vocabulary.
+  * Add TinyMCE alignment classes, to avoid style usage.
+* `plone.volto` is now a dependency of the `Plone` package.
+* PLIP 2780: Move features of `collective.dexteritytextindexer` to core.
+* `plone.app.dexterity`:
+  * Remove JavaScript from this package and move it to Mockup.
+  * Modeleditor: Use pat-code-editor from Patternslib instead ACE. Make the model editing form usable without JavaScript. Allow editing the form even with XML errors to be able to fix the problem.
+* `plone.recipe.zope2instance`: by default do not create a temporary storage.
+* `plone.scale`: Removed deprecated `factory` argument from `scale` method.
+* `plone.app.linkintegrity`: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
+* `plone.outputfilters`: Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.
+* `plone.app.querystring`: Add lazy attribute to vocabularies to prevent fetching any results.
+* `plone.app.theming`:
+  * Deactivate copy button and modal in theming control panel.
+  * Remove all thememapper functionality from theming control panel, including Inspect/Modify theme and the Preview.
+* `plone.app.users`: Show unfiltered member fields for manager in user profile page.
+* `plone.app.widgets`:
+  * Remove implicit dependency on Mockup. Mockup is no longer a Python package, only an npm package.
+  * Update datetime pattern options for Patternslib pat-date-picker/pat-datetime-picker.
+* `plone.autoform`:
+  * Fixes for latest z3c.form.
+  * Reimplementation of ObjectSubForm and ISubformFactory, backported from older z3c.form.
+* `plone.app.z3cform`:
+  * Use better types for inputs.
+  * Use browser native date and datetime-local input together with patternslib date-picker.
+  * Implement TimeWidget which renders `<input type="time" />`.
+  * Use pat-validation in forms.
+  * Fixed for latest z3c.form
+* `plone.z3cform`: compatibility with latest z3c.form.
+* `plone.namedfile`: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from `plone.scale`. Use this adapter in our scaling functions when we store or get an image scale.
+* `Products.PlonePAS`: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form. Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
+* `plone.app.layout`:
+  * Restructure global sections and searchbox markup for mobile navigation as offcanvas sidebar.
+  * LiveSearch with support for images in search results.
+* `plonetheme.barceloneta`: sticky footer.
 
-
-## Expected
-
-There are some items that we want to include during the alpha phase, but which are not ready yet:
-
-- Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
-- Add `plone.volto` as dependency of the `Plone` package.  See [issue 1](https://github.com/plone/plone.volto/issues/1).
-- Add `plone.base` as basic package with shared code.  See [issue 3395](https://github.com/plone/Products.CMFPlone/issues/3395).
-
+Note that changes may be mentioned only once, even when they involve multiple packages.
 
 ## Installation
 
 Some documentation about installation:
 
-- Installation instructions from the Mastering Plone 6 training:
-  https://training.plone.org/5/mastering-plone/installation.html
-- Volto frontend installation:
-  https://docs.voltocms.com/getting-started/install/
-- [Community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562) on work in progress with [`plone-kickstarter`](https://github.com/bluedynamics/plone-kickstarter) and [`mxdev`](https://github.com/bluedynamics/mxdev).
+* Installation instructions from the Mastering Plone 6 training:
+https://training.plone.org/5/mastering-plone/installation.html
+* Volto frontend installation:
+https://docs.voltocms.com/getting-started/install/
+* [Community post](https://community.plone.org/t/our-pip-based-development-workflow-for-plone/14562) on work in progress with [`plone-kickstarter`](https://github.com/bluedynamics/plone-kickstarter) and [`mxdev`](https://github.com/bluedynamics/mxdev).
 
 If you use Docker, we have some images:
 
-- `plone/plone-backend` (5.2 and 6.0)
-- `plone/plone-frontend` (Volto)
-- `plone/plone-haproxy`
+* `plone/plone-backend` (5.2 and 6.0)
+* `plone/plone-frontend` (Volto)
+* `plone/plone-haproxy`
 
 If you don't do Docker, you will have to do the backend by hand.
 The links above should give you information on how to install the prerequisites, like Python, also on Windows.
@@ -73,34 +84,30 @@ The steps are:
 * Create the Plone Site in the browser.
 * Install the Plone frontend (Volto) with node.
 
-
 ## Install backend with buildout
 
 Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0.0a3/versions.cfg
+extends = https://dist.plone.org/release/6.0.0a4/versions.cfg
 parts = instance
 
 [instance]
 recipe = plone.recipe.zope2instance
 eggs =
     Plone
-    plone.volto
 user = admin:admin
-zodb-temporary-storage = off
 ```
 
 Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0.0a3/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0.0a4/requirements.txt
 bin/buildout
 bin/instance fg
 ```
-
 
 ## Install backend with pip
 
@@ -110,11 +117,13 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone plone.volto -c https://dist.plone.org/release/6.0.0a3v/constraints.txt --use-deprecated legacy-resolver
+bin/pip install Plone -c https://dist.plone.org/release/6.0.0a4/constraints.txt
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
 
+Note: you may need to edit `etc/zope.conf` to add a `blob-dir`.
+See [issue 3345](https://github.com/plone/Products.CMFPlone/issues/3345#issuecomment-953700024)
 
 ## Create Plone backend
 
@@ -123,12 +132,11 @@ Click 'Create a new Plone site' to prepare for the new Volto frontend.
 If you want Plone Classic instead, click 'Create Classic Plone site'.
 (If this button is not available, then you did not install `plone.volto` with buildout or pip. 'Create a new Plone site' will create a Classic site then.)
 
-Note: For Volto, make sure the Path identifier is Plone.  You can change this, but then you need to change some Volto frontend configuration as well.
+Note: For Volto, make sure the Path identifier is Plone. You can change this, but then you need to change some Volto frontend configuration as well.
 
 Submit the form and your backend is ready.
 If you want Classic Plone, you are done.
 If you want the full Plone 6 with Volto, read on.
-
 
 ## Frontend with node
 
@@ -157,6 +165,6 @@ Go to that directory and start the frontend:
 yarn start
 ```
 
-In your browser go to http://localhost:3000.
+In your browser go to [http://localhost:3000](http://localhost:3000/).
 
-You are done.  Welcome to Plone 6!
+You are done. Welcome to Plone 6!
