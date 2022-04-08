@@ -7,6 +7,7 @@ Released: Friday April 8, 2022.
 
 Changes since 6.0.0a3:
 
+- Use `zc.buildout 3.0.0rc3` and `setuptools` 62.0.0 by default.
 - Update `waitress` to version 2.1.1 to mitigate a vulnerability in that package.
 - `Zope` 5.5.1: Enhance cookie support.
 - `plone.staticresources`: The big one: Updated JavaScript for Plone Classic, using ES6 modules.  No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
@@ -28,44 +29,36 @@ Changes since 6.0.0a3:
 - `plone.app.dexterity`:
    - Remove JavaScript from this package and move it to Mockup.
    - Modeleditor: Use pat-code-editor from Patternslib instead ACE.  Make the model editing form usable without JavaScript.  Allow editing the form even with XML errors to be able to fix the problem.
-- plone.recipe.zope2instance: by default do not create a temporary storage.
-- plone.scale: Removed deprecated `factory` argument from `scale` method.
-- plone.app.linkintegrity: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
-- plone.outputfilters: Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.
-- plone.app.querystring: Add lazy attribute to vocabularies to prevent fetching any results.
-- plone.app.theming:
+- `plone.recipe.zope2instance`: by default do not create a temporary storage.
+- `plone.scale`: Removed deprecated `factory` argument from `scale` method.
+- `plone.app.linkintegrity`: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
+- `plone.outputfilters`: Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.
+- `plone.app.querystring`: Add lazy attribute to vocabularies to prevent fetching any results.
+- `plone.app.theming`:
   - Deactivate copy button and modal in theming control panel.
   - Remove all thememapper functionality from theming control panel, including Inspect/Modify theme and the Preview.
-- plone.app.users: Show unfiltered member fields for manager in user profile page.
-- plone.app.widgets:
+- `plone.app.users`: Show unfiltered member fields for manager in user profile page.
+- `plone.app.widgets`:
   - Remove implicit dependency on Mockup.  Mockup is no longer a Python package, only an npm package.
   - Update datetime pattern options for Patternslib pat-date-picker/pat-datetime-picker.
-- plone.autoform:
+- `plone.autoform`:
   - Fixes for latest z3c.form.
   - Reimplementation of ObjectSubForm and ISubformFactory, backported from older z3c.form.
-- plone.app.z3cform:
+- `plone.app.z3cform`:
   - Use better types for inputs.
   - Use browser native date and datetime-local input together with patternslib date-picker.
   - Implement TimeWidget which renders `<input type="time" />`.
   - Use pat-validation in forms.
   - Fixed for latest z3c.form
-- plone.z3cform: compatibility with latest z3c.form.
-- plone.namedfile: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from ``plone.scale``.  Use this adapter in our scaling functions when we store or get an image scale.
-- Products.PlonePAS: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form.  Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
+- `plone.z3cform`: compatibility with latest z3c.form.
+- `plone.namedfile`: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from ``plone.scale``.  Use this adapter in our scaling functions when we store or get an image scale.
+- `Products.PlonePAS`: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form.  Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
 - `plone.app.layout`:
    - Restructure global sections and searchbox markup for mobile navigation as offcanvas sidebar.
    - LiveSearch with support for images in search results.
 - `plonetheme.barceloneta`: sticky footer.
 
 Note that changes may be mentioned only once, even when they involve multiple packages.
-
-## Expected
-
-There are some items that we want to include during the alpha phase, but which need review:
-
-- Add `plone.base` as basic package with shared code.  See [issue 3395](https://github.com/plone/Products.CMFPlone/issues/3395).
-- Merge collective.dexteritytextindexer into core.  See [issue 2780](https://github.com/plone/Products.CMFPlone/issues/2780)
-
 
 ## Installation
 
