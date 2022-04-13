@@ -25,6 +25,7 @@ if not len(sys.argv) == 3:
     print("ERROR. Usage: create-constraints.py buildout.cfg constraints.txt")
     sys.exit(1)
 config_file = sys.argv[1]
+config_file = os.path.realpath(config_file)
 constraints_file = sys.argv[2]
 constraints_file = os.path.realpath(os.path.join(os.getcwd(), constraints_file))
 config = buildout.Buildout(config_file, [])
