@@ -1,108 +1,36 @@
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2022-04-13T17:53:38+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a13731457cdb1dec9c647cc2efcb579b73f0aa54
+Date: 2022-04-14T21:29:24+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.dexterity/commit/6755e6583cc83928b0fa921c8da4a5b2e8e852b1
 
-fix resource viewlet cache
+Replaced use of plone.api.
+
+That should not be done in Plone core.
 
 Files changed:
-M Products/CMFPlone/resources/browser/resource.py
+A news/346.bugfix
+M plone/app/dexterity/textindexer/converters.py
 
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex 403057745f..aefaf67019 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -6,16 +6,15 @@\n from plone.app.theming.utils import theming_policy\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n-from Products.CMFCore.Expression import createExprContext\n-from Products.CMFCore.Expression import Expression\n-from Products.CMFCore.utils import getToolByName\n-from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n+from zope.component.hooks import getSite\n \n+import hashlib\n import logging\n import webresource\n \n+\n logger = logging.getLogger(__name__)\n \n REQUEST_CACHE_KEY = "_WEBRESOURCE_CACHE_"\n@@ -35,19 +34,39 @@ class ResourceBase:\n     initialization.\n     """\n \n+    def _request_bundles(self):\n+        request = self.request\n+        request_enabled_bundles = set(getattr(request, "enabled_bundles", []))\n+        request_disabled_bundles = set(getattr(request, "disabled_bundles", []))\n+        # include sub/parent request\n+        while request.get("PARENT_REQUEST", None):\n+            request = request["PARENT_REQUEST"]\n+            request_enabled_bundles.update(getattr(request, "enabled_bundles", []))\n+            request_disabled_bundles.update(getattr(request, "disabled_bundles", []))\n+        return request_enabled_bundles, request_disabled_bundles\n+\n+    def _cache_attr_name(self, site):\n+        hashtool = hashlib.sha256()\n+        hashtool.update(self.__class__.__name__)\n+        hashtool.update(site.absolute_url())\n+        e_bundles, d_bundles = self._request_bundles()\n+        for bundle in e_bundles + d_bundles:\n+            hashtool.update(bundle)\n+        return f"_v_renderend_cache_{hashtool.hexdigest()}"\n+\n     @property\n     def _rendered_cache(self):\n         if getConfiguration().debug_mode:\n             return\n         self.registry = getUtility(IRegistry)\n         if not self.registry["plone.resources.development"]:\n-            return getattr(\n-                self.context, f"_v_renderend_cached_{self.__class__.__name__}", None\n-            )\n+            site = getSite()\n+            return getattr(site, self._cache_attr_name(site), None)\n \n     @_rendered_cache.setter\n     def _rendered_cache(self, value):\n-        setattr(self.context, f"_v_renderend_cached_{self.__class__.__name__}", value)\n+        site = getSite()\n+        setattr(site, self._cache_attr_name(site), value)\n \n     def update(self):\n         # cache on request\n@@ -87,15 +106,7 @@ def update(self):\n \n         theme_enabled_bundles = getattr(theme, "enabled_bundles", [])\n         theme_disabled_bundles = getattr(theme, "disabled_bundles", [])\n-\n-        # include sub/parent request\n-        request = self.request\n-        request_enabled_bundles = set(getattr(request, "enabled_bundles", []))\n-        request_disabled_bundles = set(getattr(request, "disabled_bundles", []))\n-        while request.get("PARENT_REQUEST", None):\n-            request = request["PARENT_REQUEST"]\n-            request_enabled_bundles.update(getattr(request, "enabled_bundles", []))\n-            request_disabled_bundles.update(getattr(request, "disabled_bundles", []))\n+        request_enabled_bundles = request_disabled_bundles = self._request_bundles()\n \n         # collect names\n         js_names = {name for name, rec in records.items() if rec.jscompilation}\n'
+b'diff --git a/news/346.bugfix b/news/346.bugfix\nnew file mode 100644\nindex 0000000..a37009f\n--- /dev/null\n+++ b/news/346.bugfix\n@@ -0,0 +1,3 @@\n+Replaced use of ``plone.api``.\n+That should not be done in Plone core.\n+[maurits]\ndiff --git a/plone/app/dexterity/textindexer/converters.py b/plone/app/dexterity/textindexer/converters.py\nindex 437ecdf..e0e994f 100644\n--- a/plone/app/dexterity/textindexer/converters.py\n+++ b/plone/app/dexterity/textindexer/converters.py\n@@ -4,11 +4,11 @@\n converter only enabled when plone.namedfile is installed\n """\n \n-from plone import api\n from plone.app.dexterity.textindexer import interfaces\n from plone.app.textfield.interfaces import IRichText\n from plone.dexterity.interfaces import IDexterityContent\n from plone.namedfile.interfaces import INamedFileField\n+from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.utils import safe_unicode\n from z3c.form.interfaces import IWidget\n from ZODB.POSException import ConflictError\n@@ -40,7 +40,7 @@ def __init__(self, context, field, widget):\n     def convert(self):\n         """Convert the adapted field value to text/plain for indexing"""\n         html = self.widget.render().strip()\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype="text/html")\n         return stream.getData().strip()\n \n@@ -63,7 +63,7 @@ def convert(self):\n         if textvalue is None:\n             return ""\n         html = safe_unicode(textvalue.output)\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype=textvalue.mimeType)\n         return stream.getData().strip()\n \n@@ -87,7 +87,7 @@ def convert(self):\n             return data.data\n \n         # if there is no path to text/plain, do nothing\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n \n         # pylint: disable=W0212\n         # W0212: Access to a protected member _findPath of a client class\n'
 
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2022-04-13T18:02:35+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/233d2b7a5e5d30d046e0cfecfd7296f207f273fa
+Date: 2022-04-14T22:41:00+02:00
+Author: Philip Bauer (pbauer) <bauer@starzel.de>
+Commit: https://github.com/plone/plone.app.dexterity/commit/1f4374d3b3e5429faf3282644d986f564677080f
 
-hashlib loves binary
+Merge pull request #346 from plone/maurits-no-plone-api
 
-Files changed:
-M Products/CMFPlone/resources/browser/resource.py
-
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex aefaf67019..d98fdcf2f5 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -47,11 +47,11 @@ def _request_bundles(self):\n \n     def _cache_attr_name(self, site):\n         hashtool = hashlib.sha256()\n-        hashtool.update(self.__class__.__name__)\n-        hashtool.update(site.absolute_url())\n+        hashtool.update(self.__class__.__name__.encode(\'utf8\'))\n+        hashtool.update(site.absolute_url().encode(\'utf8\'))\n         e_bundles, d_bundles = self._request_bundles()\n         for bundle in e_bundles + d_bundles:\n-            hashtool.update(bundle)\n+            hashtool.update(bundle.encode(\'utf8\'))\n         return f"_v_renderend_cache_{hashtool.hexdigest()}"\n \n     @property\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2022-04-13T18:07:17+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/3d3be5843029b5d5922f23078046f8ae1e9d11ae
-
-unused variable removed
+Replaced use of plone.api.
 
 Files changed:
-M Products/CMFPlone/resources/browser/resource.py
+A news/346.bugfix
+M plone/app/dexterity/textindexer/converters.py
 
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex d98fdcf2f5..d9e2d65162 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -145,7 +145,7 @@ def update(self):\n                         )\n                         depends = graceful_depends\n                 external = record.jscompilation.startswith("http")\n-                resource = PloneScriptResource(\n+                PloneScriptResource(\n                     context=self.context,\n                     name=name,\n                     depends=depends,\n@@ -181,7 +181,7 @@ def update(self):\n                         )\n                         depends = graceful_depends\n                 external = record.csscompilation.startswith("http")\n-                resource = PloneStyleResource(\n+                PloneStyleResource(\n                     context=self.context,\n                     name=name,\n                     depends=depends,\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2022-04-13T18:07:50+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/a04d79991c90e906c0ae21c7e3109244095da4d9
-
-sets need other operator
-
-Files changed:
-M Products/CMFPlone/resources/browser/resource.py
-
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex d9e2d65162..b2efbe73d9 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -50,7 +50,7 @@ def _cache_attr_name(self, site):\n         hashtool.update(self.__class__.__name__.encode(\'utf8\'))\n         hashtool.update(site.absolute_url().encode(\'utf8\'))\n         e_bundles, d_bundles = self._request_bundles()\n-        for bundle in e_bundles + d_bundles:\n+        for bundle in e_bundles | d_bundles:\n             hashtool.update(bundle.encode(\'utf8\'))\n         return f"_v_renderend_cache_{hashtool.hexdigest()}"\n \n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2022-04-13T18:10:37+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/649eb469757aab4520a0ce32089ad8e2d5d8a531
-
-add news file
-
-Files changed:
-A news/3503.bugfix
-
-b'diff --git a/news/3503.bugfix b/news/3503.bugfix\nnew file mode 100644\nindex 0000000000..6c2deda046\n--- /dev/null\n+++ b/news/3503.bugfix\n@@ -0,0 +1,3 @@\n+Bugfix: Resource viewlet cache took not enough factors into account (like base url).\n+[jnsens]\n+\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2022-04-14T13:10:41+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/2a4edbe70fc54f48944fbdb6b30245a8d2eb68b1
-
-typo, must be an unpack
-
-Files changed:
-M Products/CMFPlone/resources/browser/resource.py
-
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex b2efbe73d9..bc42561754 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -106,7 +106,7 @@ def update(self):\n \n         theme_enabled_bundles = getattr(theme, "enabled_bundles", [])\n         theme_disabled_bundles = getattr(theme, "disabled_bundles", [])\n-        request_enabled_bundles = request_disabled_bundles = self._request_bundles()\n+        request_enabled_bundles, request_disabled_bundles = self._request_bundles()\n \n         # collect names\n         js_names = {name for name, rec in records.items() if rec.jscompilation}\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2022-04-14T15:20:20+03:00
-Author: Maik Derstappen (MrTango) <md@derico.de>
-Commit: https://github.com/plone/Products.CMFPlone/commit/9ca65c8cd65bd17c243c961cfb42f38d1200112e
-
-Merge pull request #3503 from plone/fix-resource-viewlet-cache
-
-Fix resource viewlet cache
-
-Files changed:
-A news/3503.bugfix
-M Products/CMFPlone/resources/browser/resource.py
-
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex 403057745f..bc42561754 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -6,16 +6,15 @@\n from plone.app.theming.utils import theming_policy\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n-from Products.CMFCore.Expression import createExprContext\n-from Products.CMFCore.Expression import Expression\n-from Products.CMFCore.utils import getToolByName\n-from Products.CMFPlone.resources import RESOURCE_DEVELOPMENT_MODE\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n+from zope.component.hooks import getSite\n \n+import hashlib\n import logging\n import webresource\n \n+\n logger = logging.getLogger(__name__)\n \n REQUEST_CACHE_KEY = "_WEBRESOURCE_CACHE_"\n@@ -35,19 +34,39 @@ class ResourceBase:\n     initialization.\n     """\n \n+    def _request_bundles(self):\n+        request = self.request\n+        request_enabled_bundles = set(getattr(request, "enabled_bundles", []))\n+        request_disabled_bundles = set(getattr(request, "disabled_bundles", []))\n+        # include sub/parent request\n+        while request.get("PARENT_REQUEST", None):\n+            request = request["PARENT_REQUEST"]\n+            request_enabled_bundles.update(getattr(request, "enabled_bundles", []))\n+            request_disabled_bundles.update(getattr(request, "disabled_bundles", []))\n+        return request_enabled_bundles, request_disabled_bundles\n+\n+    def _cache_attr_name(self, site):\n+        hashtool = hashlib.sha256()\n+        hashtool.update(self.__class__.__name__.encode(\'utf8\'))\n+        hashtool.update(site.absolute_url().encode(\'utf8\'))\n+        e_bundles, d_bundles = self._request_bundles()\n+        for bundle in e_bundles | d_bundles:\n+            hashtool.update(bundle.encode(\'utf8\'))\n+        return f"_v_renderend_cache_{hashtool.hexdigest()}"\n+\n     @property\n     def _rendered_cache(self):\n         if getConfiguration().debug_mode:\n             return\n         self.registry = getUtility(IRegistry)\n         if not self.registry["plone.resources.development"]:\n-            return getattr(\n-                self.context, f"_v_renderend_cached_{self.__class__.__name__}", None\n-            )\n+            site = getSite()\n+            return getattr(site, self._cache_attr_name(site), None)\n \n     @_rendered_cache.setter\n     def _rendered_cache(self, value):\n-        setattr(self.context, f"_v_renderend_cached_{self.__class__.__name__}", value)\n+        site = getSite()\n+        setattr(site, self._cache_attr_name(site), value)\n \n     def update(self):\n         # cache on request\n@@ -87,15 +106,7 @@ def update(self):\n \n         theme_enabled_bundles = getattr(theme, "enabled_bundles", [])\n         theme_disabled_bundles = getattr(theme, "disabled_bundles", [])\n-\n-        # include sub/parent request\n-        request = self.request\n-        request_enabled_bundles = set(getattr(request, "enabled_bundles", []))\n-        request_disabled_bundles = set(getattr(request, "disabled_bundles", []))\n-        while request.get("PARENT_REQUEST", None):\n-            request = request["PARENT_REQUEST"]\n-            request_enabled_bundles.update(getattr(request, "enabled_bundles", []))\n-            request_disabled_bundles.update(getattr(request, "disabled_bundles", []))\n+        request_enabled_bundles, request_disabled_bundles = self._request_bundles()\n \n         # collect names\n         js_names = {name for name, rec in records.items() if rec.jscompilation}\n@@ -134,7 +145,7 @@ def update(self):\n                         )\n                         depends = graceful_depends\n                 external = record.jscompilation.startswith("http")\n-                resource = PloneScriptResource(\n+                PloneScriptResource(\n                     context=self.context,\n                     name=name,\n                     depends=depends,\n@@ -170,7 +181,7 @@ def update(self):\n                         )\n                         depends = graceful_depends\n                 external = record.csscompilation.startswith("http")\n-                resource = PloneStyleResource(\n+                PloneStyleResource(\n                     context=self.context,\n                     name=name,\n                     depends=depends,\ndiff --git a/news/3503.bugfix b/news/3503.bugfix\nnew file mode 100644\nindex 0000000000..6c2deda046\n--- /dev/null\n+++ b/news/3503.bugfix\n@@ -0,0 +1,3 @@\n+Bugfix: Resource viewlet cache took not enough factors into account (like base url).\n+[jnsens]\n+\n'
+b'diff --git a/news/346.bugfix b/news/346.bugfix\nnew file mode 100644\nindex 0000000..a37009f\n--- /dev/null\n+++ b/news/346.bugfix\n@@ -0,0 +1,3 @@\n+Replaced use of ``plone.api``.\n+That should not be done in Plone core.\n+[maurits]\ndiff --git a/plone/app/dexterity/textindexer/converters.py b/plone/app/dexterity/textindexer/converters.py\nindex 437ecdf..e0e994f 100644\n--- a/plone/app/dexterity/textindexer/converters.py\n+++ b/plone/app/dexterity/textindexer/converters.py\n@@ -4,11 +4,11 @@\n converter only enabled when plone.namedfile is installed\n """\n \n-from plone import api\n from plone.app.dexterity.textindexer import interfaces\n from plone.app.textfield.interfaces import IRichText\n from plone.dexterity.interfaces import IDexterityContent\n from plone.namedfile.interfaces import INamedFileField\n+from Products.CMFCore.utils import getToolByName\n from Products.CMFPlone.utils import safe_unicode\n from z3c.form.interfaces import IWidget\n from ZODB.POSException import ConflictError\n@@ -40,7 +40,7 @@ def __init__(self, context, field, widget):\n     def convert(self):\n         """Convert the adapted field value to text/plain for indexing"""\n         html = self.widget.render().strip()\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype="text/html")\n         return stream.getData().strip()\n \n@@ -63,7 +63,7 @@ def convert(self):\n         if textvalue is None:\n             return ""\n         html = safe_unicode(textvalue.output)\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype=textvalue.mimeType)\n         return stream.getData().strip()\n \n@@ -87,7 +87,7 @@ def convert(self):\n             return data.data\n \n         # if there is no path to text/plain, do nothing\n-        transforms = api.portal.get_tool("portal_transforms")\n+        transforms = getToolByName(self.context, "portal_transforms")\n \n         # pylint: disable=W0212\n         # W0212: Access to a protected member _findPath of a client class\n'
 
