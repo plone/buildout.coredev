@@ -1,0 +1,12 @@
+./bin/plone-compile-resources -b plone-base
+./bin/plone-compile-resources -b plone
+./bin/plone-compile-resources -b plone-moment
+./bin/plone-compile-resources -b plone-logged-in
+./bin/plone-compile-resources -b plone-editor-tools
+./bin/plone-compile-resources -b plone-tinymce
+./bin/plone-compile-resources -b plone-datatables
+./bin/plone-compile-resources -b plone-fontello
+./bin/plone-compile-resources -b plone-glyphicons
+./bin/plone-compile-resources -b resourceregistry
+./bin/plone-compile-resources -b thememapper
+./bin/plone-compile-resources -b filemanager
