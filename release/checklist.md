@@ -17,8 +17,8 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Make a release candidate of `Products.CMFPlone` (e.g. 5.2.4rc1). Fine to release this on PyPI.
 - [ ] Update coredev branch [`5.2-dev`](https://github.com/plone/buildout.coredev/tree/release/5.2-dev). Empty the `auto-checkout` list in `checkouts.cfg`.
 - [ ] Update the `5.2-dev` directory on dist.plone.org and gather files to put there:
-  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=5.2.X > changelog.txt`. Remove the uninteresting top lines.
-  - [ ] Create a `RELEASE-NOTES.txt`. It may be enough to look through the changelog and copy interesting changes.
+  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=5.2.X > release/changelog.txt`. Remove the uninteresting top lines.  Edit the Zope information.
+  - [ ] Create a `release/RELEASE-NOTES.md`. It may be enough to look through the changelog and copy interesting changes.
   - [ ] Gather all package distributions.
         You can use `tox -c release/tox.ini -p auto` to gather them in `release/dist`, together with a few other files.
   - [ ] Get the versions.cfg file from coredev.
