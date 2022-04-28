@@ -1,9 +1,10 @@
-Release notes for Plone 5.2-dev
-===============================
+# Release notes for Plone 5.2-dev
 
 Last updated: Friday April 29, 2022.
 
-Some highlights of this release are:
+## Highlights
+
+Interesting changes since 5.2.7:
 
 * `Zope`: Enhance cookie support. For details, see [issue 1010](https://github.com/zopefoundation/Zope/issues/1010)
   For more changes see https://zope.readthedocs.io/en/4.x/changes.html
