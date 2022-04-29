@@ -57,35 +57,36 @@ for package, version in c38.items():
 combi = []
 for package, versions in pins.items():
     py2_version = versions.pop(2, None)
-    if not versions:
-        # Python 2 only
-        combi.append(f'{package}=={py2_version}; python_version < "3.0"')
-        continue
     py36_version = versions.pop(36, None)
-    if py2_version == py36_version:
-        # Python 2 and 3 have same version pin.
-        combi.append(f"{package}=={py2_version}")
-        continue
-    # Python 2 and 3 have different version pin.
-    # Add both, starting with Python 2.
-    if py2_version is not None:
-        combi.append(f'{package}=={py2_version}; python_version < "3.0"')
-    # But 36, 37 and 38 may still have differences.
     py37_version = versions.pop(37, None)
     py38_version = versions.pop(38, None)
+    if py2_version == py36_version == py37_version == py38_version:
+        # All versions are the same.
+        combi.append(f'{package}=={py2_version}')
+        continue
+    # Some versions are different or missing.
+    # Start with Python 2.
+    if py2_version is not None:
+        combi.append(f'{package}=={py2_version}; python_version < "3.0"')
+    if not (py36_version or py37_version or py38_version):
+        continue
     if py36_version == py37_version == py38_version:
         # All Py3 versions are the same.
         combi.append(f'{package}=={py36_version}; python_version >= "3.0"')
         continue
-    # 36, 37 and 38 have differences.
-    if py36_version != py37_version:
+    if py36_version is not None:
         combi.append(f'{package}=={py36_version}; python_version == "3.6"')
-    if py37_version == py38_version:
+    if py37_version == py38_version and py37_version is not None:
         combi.append(f'{package}=={py37_version}; python_version > "3.6"')
         continue
-    combi.append(f'{package}=={py37_version}; python_version == "3.7"')
-    combi.append(f'{package}=={py38_version}; python_version == "3.8"')
+    if py37_version is not None:
+        combi.append(f'{package}=={py37_version}; python_version == "3.7"')
+    if py38_version is not None:
+        combi.append(f'{package}=={py38_version}; python_version == "3.8"')
 
+output = "\n".join(combi) + "\n"
+# sanity check:
+assert "==None" not in output
 with open(constraints, "w") as myfile:
-    myfile.write("\n".join(combi) + "\n")
-print(f"Wrote combined Python 2 and 3 constraints to {constraints}.")
+    myfile.write(output)
+print(f"Wrote combined constraints for all Python versions to {constraints}.")
