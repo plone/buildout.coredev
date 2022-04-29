@@ -18,6 +18,7 @@ import sys
 # This is for when we have no control over it: the pin is in Zope versions.
 DENYLIST2 = [
     # These are packages that cannot be installed by pip on Python 2.
+    "charset-normalizer",
     "sphinxcontrib-serializinghtml",
 ]
 DENYLIST3 = [

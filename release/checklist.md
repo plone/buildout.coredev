@@ -9,16 +9,16 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Check Jenkins Status: should be green. (This should be checked often during the release process.)
 - [ ] In coredev, check packages for updates: `bin/manage report --interactive`
 - [ ] Release individual packages from `checkouts.cfg`.
-- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/5.2.x/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v52/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
+- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/5.2.x/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/2.x/plone/app/upgrade/v52/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
 - [ ] If unsure, ask if `mockup` and `plone.staticresources` are in sync and can be released. Example: https://github.com/plone/mockup/issues/1026
 - [ ] If needed, [ask the Plone REST api team](https://github.com/plone/plone.restapi/issues) for a new release of `plone.restapi` and `plone.rest`.
 - [ ] Write an email to the translation team, asking them to do a plone.app.locales release. Or create an issue in https://github.com/collective/plone.app.locales/issues
 - [ ] Update the versions of those packages.
 - [ ] Make a release candidate of `Products.CMFPlone` (e.g. 5.2.4rc1). Fine to release this on PyPI.
-- [ ] Create a coredev branch, named something like `prepare-52x`. Empty the `auto-checkout` list in `checkouts.cfg`.
+- [ ] Update coredev branch [`5.2-dev`](https://github.com/plone/buildout.coredev/tree/release/5.2-dev). Empty the `auto-checkout` list in `checkouts.cfg`.
 - [ ] Update the `5.2-dev` directory on dist.plone.org and gather files to put there:
-  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=5.2.X > changelog.txt`. Remove the uninteresting top lines.
-  - [ ] Create a `RELEASE-NOTES.txt`. It may be enough to look through the changelog and copy interesting changes.
+  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=5.2.X > release/changelog.txt`. Remove the uninteresting top lines.  Edit the Zope information.
+  - [ ] Create a `release/RELEASE-NOTES.md`. It may be enough to look through the changelog and copy interesting changes.
   - [ ] Gather all package distributions.
         You can use `tox -c release/tox.ini -p auto` to gather them in `release/dist`, together with a few other files.
   - [ ] Get the versions.cfg file from coredev.
