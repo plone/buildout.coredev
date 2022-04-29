@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Combine constraints2.txt and constraints3.txt into constraints.txt.
+"""Combine all constraints*.txt into one constraints.txt.
 
 See tox.ini.
 This is Python 3 only.
@@ -8,6 +8,7 @@ from collections import defaultdict
 
 import os
 import sys
+
 
 if not len(sys.argv) == 2:
     print("ERROR. Usage: combine-constraints.py <directory with contraints files>")
@@ -34,7 +35,9 @@ constraints2 = os.path.join(directory, "constraints2.txt")
 for filename in (constraints2, constraints36, constraints37, constraints38):
     if not os.path.exists(filename):
         print(f"ERROR: {filename} does not exist.")
-        print("Run: tox -p auto -e constraints2,constraints36,constraints37,constraints38,constraints")
+        print(
+            "Run: tox -p auto -e constraints2,constraints36,constraints37,constraints38,constraints"
+        )
         sys.exit(1)
 
 c2 = parse_file(constraints2)
@@ -62,7 +65,7 @@ for package, versions in pins.items():
     py38_version = versions.pop(38, None)
     if py2_version == py36_version == py37_version == py38_version:
         # All versions are the same.
-        combi.append(f'{package}=={py2_version}')
+        combi.append(f"{package}=={py2_version}")
         continue
     # Some versions are different or missing.
     # Start with Python 2.
