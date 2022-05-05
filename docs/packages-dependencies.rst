@@ -29,7 +29,7 @@ Nevertheless we have indirection on all other levels. Since Plone consists of a 
 Mental Model
 ============
 
-A base mental model for how Plone is organized in Plone 6 since alpha 4 is like so:""
+A base mental model for how Plone is organized in Plone 6 since alpha 4 is like so::
 
     ┌────────────────────────────┐
     │                            │
