@@ -1,6 +1,6 @@
-# Release notes for Plone 5.2-dev
+# Release notes for Plone 5.2.8
 
-Last updated: Saturday May 14, 2022.
+Released: Saturday May 14, 2022.
 
 ## Highlights
 
