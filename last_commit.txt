@@ -1,50 +1,62 @@
-Repository: plone.z3cform
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2022-06-08T09:52:36+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.z3cform/commit/9802317ad5c1eefafe89b6c21cb9d16d999469cb
+Date: 2022-06-10T13:50:16+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.discussion/commit/266d87b3b92a4d08765e6a92020029eefad43153
 
-Fix traversal to z3c.form.widget.MultiWidget widgets since z3c.form &gt;= 4.x
+Test-only fix: normalize white space when comparing output of comment.getText().
 
-This is especially needed for collective.z3cform.datagridfield
+Needed to not fail with newer `plone.outputfilters` from this PR: https://github.com/plone/plone.outputfilters/pull/49
+Comments go through the outputfilters, and the new branch calls `soup.prettify()` from `Beautifulsoup`, leading to more white space.
+Sample test failures on Jenkins, see https://jenkins.plone.org/job/plip-plip-image-srcsets-3.8/5/#showFailuresLink
+
+```
+'&lt;p&gt;\n Go to http://www.plone.org\n&lt;/p&gt;' != '&lt;p&gt;Go to http://www.plone.org&lt;/p&gt;'
+- &lt;p&gt;
+-  Go to http://www.plone.org
+? ^                          ^
++ &lt;p&gt;Go to http://www.plone.org&lt;/p&gt;? ^^^                          ^^^^
+- &lt;/p&gt;
+
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 60, in testPartExecutor
+    yield
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 676, in run
+    self._callTestMethod(testMethod)
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 633, in _callTestMethod
+    method()
+  File "/home/jenkins/.buildout/eggs/cp38/plone.app.discussion-4.0.0a7-py3.8.egg/plone/app/discussion/tests/test_comment.py", line 180, in test_getText_doesnt_link
+    self.assertEqual(
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 912, in assertEqual
+    assertion_func(first, second, msg=msg)
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 1292, in assertMultiLineEqual
+    self.fail(self._formatMessage(msg, standardMsg))
+  File "/srv/python3.8/lib/python3.8/unittest/case.py", line 753, in fail
+    raise self.failureException(msg)
+```
 
 Files changed:
-M src/plone/z3cform/traversal.py
+A news/49.bugfix
+M plone/app/discussion/tests/test_comment.py
 
-b'diff --git a/src/plone/z3cform/traversal.py b/src/plone/z3cform/traversal.py\nindex 305740e..e9b2adb 100644\n--- a/src/plone/z3cform/traversal.py\n+++ b/src/plone/z3cform/traversal.py\n@@ -82,6 +82,9 @@ def traverse(self, name, ignored):\n                                 if w.name == full_name]\n                     if len(filtered) == 1:\n                         target = filtered[0]\n+                        # we have to pop "widgets" from parts here\n+                        # this is since z3c.form.widget.MultiWidget >= 4.x\n+                        parts.remove("widgets")\n                     else:\n                         raise TraversalError("\'" + part + "\' not valid index")\n             elif hasattr(target, \'widgets\'):  # Either base form, or subform\n'
+b'diff --git a/news/49.bugfix b/news/49.bugfix\nnew file mode 100644\nindex 00000000..99c82635\n--- /dev/null\n+++ b/news/49.bugfix\n@@ -0,0 +1,3 @@\n+Test-only fix: normalize white space when comparing output of ``comment.getText()``.\n+Needed to not fail with newer ``plone.outputfilters``.\n+[maurits]\ndiff --git a/plone/app/discussion/tests/test_comment.py b/plone/app/discussion/tests/test_comment.py\nindex 17bcb648..a0a06696 100644\n--- a/plone/app/discussion/tests/test_comment.py\n+++ b/plone/app/discussion/tests/test_comment.py\n@@ -18,6 +18,22 @@\n logger.addHandler(logging.StreamHandler())\n \n \n+def normalize(value):\n+    # Strip all white spaces of every line, then join on one line.\n+    # But try to avoid getting \'Go to<a href\' instead of \'Go to <a href\'.\n+    lines = []\n+    for line in value.splitlines():\n+        line = line.strip()\n+        if (\n+            line.startswith("<")\n+            and not line.startswith("</")\n+            and not line.startswith("<br")\n+        ):\n+            line = " " + line\n+        lines.append(line)\n+    return "".join(lines).strip()\n+\n+\n class CommentTest(unittest.TestCase):\n \n     layer = PLONE_APP_DISCUSSION_INTEGRATION_TESTING\n@@ -156,15 +172,15 @@ def test_getText(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "First paragraph\\n\\nSecond_paragraph"\n         self.assertEqual(\n-            "".join(comment1.getText().split()),\n-            "<p>Firstparagraph<br><br>Second_paragraph</p>",\n+            normalize(comment1.getText()),\n+            "<p>First paragraph<br><br>Second_paragraph</p>",\n         )\n \n     def test_getText_escapes_HTML(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "<b>Got HTML?</b>"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             "<p>&lt;b&gt;Got HTML?&lt;/b&gt;</p>",\n         )\n \n@@ -172,13 +188,13 @@ def test_getText_with_non_ascii_characters(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "Umlaute sind \xc3\xa4, \xc3\xb6 und \xc3\xbc."\n         out = b"<p>Umlaute sind \\xc3\\xa4, \\xc3\\xb6 und \\xc3\\xbc.</p>"\n-        self.assertEqual(comment1.getText(), out.decode("utf8"))\n+        self.assertEqual(normalize(comment1.getText()), out.decode("utf8"))\n \n     def test_getText_doesnt_link(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "Go to http://www.plone.org"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             "<p>Go to http://www.plone.org</p>",\n         )\n \n@@ -187,7 +203,7 @@ def test_getText_uses_comment_mime_type(self):\n         comment1.text = "Go to http://www.plone.org"\n         comment1.mime_type = "text/x-web-intelligent"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             \'Go to <a href="http://www.plone.org" \'\n             + \'rel="nofollow">http://www.plone.org</a>\',\n         )\n@@ -197,7 +213,7 @@ def test_getText_uses_comment_mime_type_html(self):\n         comment1.text = \'Go to <a href="http://www.plone.org">plone.org</a>\'\n         comment1.mime_type = "text/html"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             \'Go to <a href="http://www.plone.org">plone.org</a>\',\n         )\n \n'
 
-Repository: plone.z3cform
+Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2022-06-08T09:57:32+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.z3cform/commit/081e839f0b9c030878774dd8bf518cd680f6065d
+Date: 2022-06-10T15:41:00+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.discussion/commit/3cc1efa8a8975611be01b7eb992a602035b12155
 
-changelog
+Merge pull request #202 from plone/maurits-normalize-gettext-tests
 
-Files changed:
-A news/22.bugfix
-
-b'diff --git a/news/22.bugfix b/news/22.bugfix\nnew file mode 100644\nindex 0000000..9b76f0e\n--- /dev/null\n+++ b/news/22.bugfix\n@@ -0,0 +1,2 @@\n+Fix traversal to `z3c.form.widget.MultiWidget` widgets.\n+[petschki]\n'
-
-Repository: plone.z3cform
-
-
-Branch: refs/heads/master
-Date: 2022-06-10T10:09:04+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.z3cform/commit/28401b170ba3d255fca2478bca4ff716130f7583
-
-Merge pull request #22 from plone/petschki-widget-traversal
-
-Fix ++widget++ traversal to `z3c.form.widget.MultiWidget`
+Test-only fix: normalize white space when comparing output of getText
 
 Files changed:
-A news/22.bugfix
-M src/plone/z3cform/traversal.py
+A news/49.bugfix
+M plone/app/discussion/tests/test_comment.py
 
-b'diff --git a/news/22.bugfix b/news/22.bugfix\nnew file mode 100644\nindex 0000000..9b76f0e\n--- /dev/null\n+++ b/news/22.bugfix\n@@ -0,0 +1,2 @@\n+Fix traversal to `z3c.form.widget.MultiWidget` widgets.\n+[petschki]\ndiff --git a/src/plone/z3cform/traversal.py b/src/plone/z3cform/traversal.py\nindex 305740e..e9b2adb 100644\n--- a/src/plone/z3cform/traversal.py\n+++ b/src/plone/z3cform/traversal.py\n@@ -82,6 +82,9 @@ def traverse(self, name, ignored):\n                                 if w.name == full_name]\n                     if len(filtered) == 1:\n                         target = filtered[0]\n+                        # we have to pop "widgets" from parts here\n+                        # this is since z3c.form.widget.MultiWidget >= 4.x\n+                        parts.remove("widgets")\n                     else:\n                         raise TraversalError("\'" + part + "\' not valid index")\n             elif hasattr(target, \'widgets\'):  # Either base form, or subform\n'
+b'diff --git a/news/49.bugfix b/news/49.bugfix\nnew file mode 100644\nindex 00000000..99c82635\n--- /dev/null\n+++ b/news/49.bugfix\n@@ -0,0 +1,3 @@\n+Test-only fix: normalize white space when comparing output of ``comment.getText()``.\n+Needed to not fail with newer ``plone.outputfilters``.\n+[maurits]\ndiff --git a/plone/app/discussion/tests/test_comment.py b/plone/app/discussion/tests/test_comment.py\nindex 17bcb648..a0a06696 100644\n--- a/plone/app/discussion/tests/test_comment.py\n+++ b/plone/app/discussion/tests/test_comment.py\n@@ -18,6 +18,22 @@\n logger.addHandler(logging.StreamHandler())\n \n \n+def normalize(value):\n+    # Strip all white spaces of every line, then join on one line.\n+    # But try to avoid getting \'Go to<a href\' instead of \'Go to <a href\'.\n+    lines = []\n+    for line in value.splitlines():\n+        line = line.strip()\n+        if (\n+            line.startswith("<")\n+            and not line.startswith("</")\n+            and not line.startswith("<br")\n+        ):\n+            line = " " + line\n+        lines.append(line)\n+    return "".join(lines).strip()\n+\n+\n class CommentTest(unittest.TestCase):\n \n     layer = PLONE_APP_DISCUSSION_INTEGRATION_TESTING\n@@ -156,15 +172,15 @@ def test_getText(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "First paragraph\\n\\nSecond_paragraph"\n         self.assertEqual(\n-            "".join(comment1.getText().split()),\n-            "<p>Firstparagraph<br><br>Second_paragraph</p>",\n+            normalize(comment1.getText()),\n+            "<p>First paragraph<br><br>Second_paragraph</p>",\n         )\n \n     def test_getText_escapes_HTML(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "<b>Got HTML?</b>"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             "<p>&lt;b&gt;Got HTML?&lt;/b&gt;</p>",\n         )\n \n@@ -172,13 +188,13 @@ def test_getText_with_non_ascii_characters(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "Umlaute sind \xc3\xa4, \xc3\xb6 und \xc3\xbc."\n         out = b"<p>Umlaute sind \\xc3\\xa4, \\xc3\\xb6 und \\xc3\\xbc.</p>"\n-        self.assertEqual(comment1.getText(), out.decode("utf8"))\n+        self.assertEqual(normalize(comment1.getText()), out.decode("utf8"))\n \n     def test_getText_doesnt_link(self):\n         comment1 = createObject("plone.Comment")\n         comment1.text = "Go to http://www.plone.org"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             "<p>Go to http://www.plone.org</p>",\n         )\n \n@@ -187,7 +203,7 @@ def test_getText_uses_comment_mime_type(self):\n         comment1.text = "Go to http://www.plone.org"\n         comment1.mime_type = "text/x-web-intelligent"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             \'Go to <a href="http://www.plone.org" \'\n             + \'rel="nofollow">http://www.plone.org</a>\',\n         )\n@@ -197,7 +213,7 @@ def test_getText_uses_comment_mime_type_html(self):\n         comment1.text = \'Go to <a href="http://www.plone.org">plone.org</a>\'\n         comment1.mime_type = "text/html"\n         self.assertEqual(\n-            comment1.getText(),\n+            normalize(comment1.getText()),\n             \'Go to <a href="http://www.plone.org">plone.org</a>\',\n         )\n \n'
 
