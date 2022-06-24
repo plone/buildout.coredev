@@ -6,6 +6,7 @@ Last updated: Friday June 24, 2022.
 
 Major changes since 6.0.0a4:
 
+* The `versions.cfg` file on dist.plone.org now only contains versions needed for core Plone.  We used to pin some often used "ecosystem" packages like `plone.app.tiles`.  Those pins are now in `versions-ecosystem.cfg`.  Several other pins, mostly for tools like `zest.releaser`, are now in `versions-extra.cfg`.
 * `plone.app.caching`: Remove unmaintained Split-View profile.
 * `plone.app.content`:
   * Remove unused `container` and `item` modules.
