@@ -2,15 +2,33 @@ Repository: plone.app.upgrade
 
 
 Branch: refs/heads/master
-Date: 2022-06-24T17:02:05+02:00
+Date: 2022-06-24T19:36:37+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.upgrade/commit/4cc64a7fdcd0252172329fe40be4e52793b6e42b
+Commit: https://github.com/plone/plone.app.upgrade/commit/7cc4d2a3ef9b62640842779a53224014594eb8d8
 
-Update the profile versions that we explicitly upgrade to.
+update_catalog_metadata: catch and log ComponentLookupError when getting indexable object.
 
 Files changed:
-M plone/app/upgrade/v60/alphas.py
-M plone/app/upgrade/v60/tests.py
+A news/3521.bugfix
+M plone/app/upgrade/utils.py
 
-b'diff --git a/plone/app/upgrade/v60/alphas.py b/plone/app/upgrade/v60/alphas.py\nindex ec380c11..d3f1c966 100644\n--- a/plone/app/upgrade/v60/alphas.py\n+++ b/plone/app/upgrade/v60/alphas.py\n@@ -402,21 +402,21 @@ def upgrade_plone_module_profiles(context):\n     """\n     profile_versions = (\n         ("Products.CMFEditions:CMFEditions", "11"),\n-        ("Products.CMFPlacefulWorkflow:CMFPlacefulWorkflow", "1000"),\n+        ("Products.CMFPlacefulWorkflow:CMFPlacefulWorkflow", "1001"),\n         # Do NOT add Products.CMFPlone:plone in here: it leads to recursion.\n         ("Products.PlonePAS:PlonePAS", "5"),\n         ("plone.app.caching:default", "3"),\n         ("plone.app.contenttypes:default", "3000"),\n-        ("plone.app.dexterity:default", "2006"),\n-        ("plone.app.discussion:default", "1004"),\n+        ("plone.app.dexterity:default", "2007"),\n+        ("plone.app.discussion:default", "2000"),\n         ("plone.app.event:default", "15"),\n-        ("plone.app.iterate:default", "121"),\n-        ("plone.app.multilingual:default", "4"),\n-        ("plone.app.querystring:default", "13"),\n+        ("plone.app.iterate:plone.app.iterate", "121"),\n+        ("plone.app.multilingual:default", "1000"),\n+        ("plone.app.querystring:default", "14"),\n         ("plone.app.theming:default", "1002"),\n         ("plone.app.users:default", "1"),\n         ("plone.restapi:default", "0006"),\n-        ("plone.staticresources:default", "209"),\n+        ("plone.staticresources:default", "210"),\n         ("plone.volto:default", "1016"),\n     )\n     for profile_id, version in profile_versions:\ndiff --git a/plone/app/upgrade/v60/tests.py b/plone/app/upgrade/v60/tests.py\nindex 4d801ea7..49847df1 100644\n--- a/plone/app/upgrade/v60/tests.py\n+++ b/plone/app/upgrade/v60/tests.py\n@@ -99,27 +99,27 @@ def test_upgrade_plone_module_profiles_dexterity(self):\n         portal = self.layer["portal"]\n         setup = getToolByName(portal, "portal_setup")\n \n-        # We expect plone.app.dexterity to be at least at version 2006.\n-        # The version is a tuple like ("2006",)\n+        # We expect plone.app.dexterity to be at least at version 2007.\n+        # The version is a tuple like ("2007",)\n         profile_id = "plone.app.dexterity:default"\n-        self.assertGreaterEqual(setup.getLastVersionForProfile(profile_id), ("2006",))\n+        self.assertGreaterEqual(setup.getLastVersionForProfile(profile_id), ("2007",))\n \n         # Calling the upgrade step should not change this.\n         upgrade_plone_module_profiles(setup)\n-        self.assertGreaterEqual(setup.getLastVersionForProfile(profile_id), ("2006",))\n+        self.assertGreaterEqual(setup.getLastVersionForProfile(profile_id), ("2007",))\n \n         # Pretend that we are at an earlier version.\n         # This should result in an upgrade to the exact requested version,\n         # even when steps exist to upgrade it to a much newer version.\n         setup.setLastVersionForProfile(profile_id, "2005")\n         upgrade_plone_module_profiles(setup)\n-        self.assertEqual(setup.getLastVersionForProfile(profile_id), ("2006",))\n+        self.assertEqual(setup.getLastVersionForProfile(profile_id), ("2007",))\n \n         # Pretend that we are at a later version.\n         # The version should stay the same then, no downgrading.\n-        setup.setLastVersionForProfile(profile_id, "2007")\n+        setup.setLastVersionForProfile(profile_id, "9999")\n         upgrade_plone_module_profiles(setup)\n-        self.assertEqual(setup.getLastVersionForProfile(profile_id), ("2007",))\n+        self.assertEqual(setup.getLastVersionForProfile(profile_id), ("9999",))\n \n     def test_upgrade_plone_module_profiles_multilingual(self):\n         from plone.app.upgrade.v60.alphas import upgrade_plone_module_profiles\n'
+b'diff --git a/news/3521.bugfix b/news/3521.bugfix\nnew file mode 100644\nindex 00000000..1fd110da\n--- /dev/null\n+++ b/news/3521.bugfix\n@@ -0,0 +1,2 @@\n+``update_catalog_metadata``: catch and log ``ComponentLookupError`` when getting indexable object.\n+[maurits]\ndiff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py\nindex 6a7bc0c5..2541eec8 100644\n--- a/plone/app/upgrade/utils.py\n+++ b/plone/app/upgrade/utils.py\n@@ -12,6 +12,7 @@\n from Products.ZCatalog.ProgressHandler import ZLogHandler\n from types import ModuleType\n from ZODB.POSException import ConflictError\n+from zope.component import ComponentLookupError\n from zope.component import getMultiAdapter\n \n import logging\n@@ -389,7 +390,12 @@ def update_catalog_metadata(context, column=None):\n             record = metadata[rid]\n             old_value = record[column_position]\n             # see CMFPlone/catalog.zcml\n-            wrapper = getMultiAdapter((obj, catalog), IIndexableObject)\n+            try:\n+                wrapper = getMultiAdapter((obj, catalog), IIndexableObject)\n+            except ComponentLookupError:\n+                # I have seen the portal_catalog as brain in the portal_catalog...\n+                logger.exception(obj)\n+                continue\n             # See ZCatalog/Catalog.py:recordify\n             new_value = getattr(wrapper, column, MV)\n             if (new_value is not MV and safe_callable(new_value)):\n'
+
+Repository: plone.app.upgrade
+
+
+Branch: refs/heads/master
+Date: 2022-06-24T19:38:27+02:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/plone.app.upgrade/commit/b518410043f7f6b5c4ed62d92000ff4541e048e8
+
+Merge pull request #293 from plone/maurits-componentlookuperror
+
+update_catalog_metadata: catch ComponentLookupError
+
+Files changed:
+A news/3521.bugfix
+M plone/app/upgrade/utils.py
+
+b'diff --git a/news/3521.bugfix b/news/3521.bugfix\nnew file mode 100644\nindex 00000000..1fd110da\n--- /dev/null\n+++ b/news/3521.bugfix\n@@ -0,0 +1,2 @@\n+``update_catalog_metadata``: catch and log ``ComponentLookupError`` when getting indexable object.\n+[maurits]\ndiff --git a/plone/app/upgrade/utils.py b/plone/app/upgrade/utils.py\nindex 6a7bc0c5..2541eec8 100644\n--- a/plone/app/upgrade/utils.py\n+++ b/plone/app/upgrade/utils.py\n@@ -12,6 +12,7 @@\n from Products.ZCatalog.ProgressHandler import ZLogHandler\n from types import ModuleType\n from ZODB.POSException import ConflictError\n+from zope.component import ComponentLookupError\n from zope.component import getMultiAdapter\n \n import logging\n@@ -389,7 +390,12 @@ def update_catalog_metadata(context, column=None):\n             record = metadata[rid]\n             old_value = record[column_position]\n             # see CMFPlone/catalog.zcml\n-            wrapper = getMultiAdapter((obj, catalog), IIndexableObject)\n+            try:\n+                wrapper = getMultiAdapter((obj, catalog), IIndexableObject)\n+            except ComponentLookupError:\n+                # I have seen the portal_catalog as brain in the portal_catalog...\n+                logger.exception(obj)\n+                continue\n             # See ZCatalog/Catalog.py:recordify\n             new_value = getattr(wrapper, column, MV)\n             if (new_value is not MV and safe_callable(new_value)):\n'
 
