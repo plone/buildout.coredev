@@ -1,65 +1,28 @@
-# Release notes for Plone 6.0.0a4
+# Release notes for Plone 6.0.0a5 dev
 
-Released: Friday April 8, 2022.
+Last updated: Friday June 24, 2022.
 
 ## Highlights
 
-Changes since 6.0.0a3:
+Major changes since 6.0.0a4:
 
-* Use `zc.buildout 3.0.0rc3` and `setuptools` 62.0.0 by default.
-* Update `waitress` to version 2.1.1 to mitigate a vulnerability in that package.
-* `Zope` 5.5.1: Enhance cookie support.
-* `plone.staticresources`: The big one: Updated JavaScript for Plone Classic, using ES6 modules. No more through-the-web compiling of JavaScript. See [PLIP 3211](https://github.com/plone/Products.CMFPlone/issues/3211).
+* `plone.app.caching`: Remove unmaintained Split-View profile.
+* `plone.app.content`:
+  * Remove unused `container` and `item` modules.
+  * Remove unused `IReindexOnModify`.
+* `plone.app.i18n` and `plone.i18n`: Use SVG Flags in Language Selector, update name of flags, and prepare to use the Icon Resolver.
+* `plone.app.upgrade`:
+  * Removed old code, aliases and dependencies.  We only support upgrading from Plone 5.2 Python 3.
+  * Upgrade profiles of core Plone modules to specific versions in the upgrade to alpha 5.  This way, when later upgrading a site from 5.2 to 6.1, these initial upgrades are done at the end of the alpha phase, instead of completely at the end.  This should avoid some surprises.
 * `Products.CMFPlone`:
-  * Remove RequireJS.
-  * Remove default resource jQuery. It is added to the global namespace via the bundle.
-  * Remove support for conditional comments in script and style tags. It's not supported since IE10.
-  * Remove dependency on mockup. Mockup is now a npm package only and as such a dependency of plone.staticresources.
-  * New resource registry to simplify CSS/JS registration.
-  * Only "bundles" are registered - support of "resources" and "bundle resources" is removed.
-  * Removed TTW compilation of bundles via r.js and less.js.
-  * Property `merge_with` is no longer needed in HTTP/2 times and merging here unsupported.
-  * Unique key for delivery is based on hash of bundle file, `last_compilation` property is deprecated.
-  * PLIP #3279: Implement modern images scales. Add huge (1600px), great (1200px), larger (1000px), teaser (600px). Amend preview and mini (remove height constraint).
-  * Add TinyMCE template plugin to the plugins vocabulary.
-  * Add TinyMCE alignment classes, to avoid style usage.
-* `plone.volto` is now a dependency of the `Plone` package.
-* PLIP 2780: Move features of `collective.dexteritytextindexer` to core.
-* `plone.app.dexterity`:
-  * Remove JavaScript from this package and move it to Mockup.
-  * Modeleditor: Use pat-code-editor from Patternslib instead ACE. Make the model editing form usable without JavaScript. Allow editing the form even with XML errors to be able to fix the problem.
-* `plone.recipe.zope2instance`: by default do not create a temporary storage.
-* `plone.scale`: Removed deprecated `factory` argument from `scale` method.
-* `plone.app.linkintegrity`: Track link integrity of referenced PDFs and other site objects in IFRAME SRC references.
-* `plone.outputfilters`: Resolve UIDs in SRC= attribute of of SOURCE and IFRAME elements.
-* `plone.app.querystring`: Add lazy attribute to vocabularies to prevent fetching any results.
-* `plone.app.theming`:
-  * Deactivate copy button and modal in theming control panel.
-  * Remove all thememapper functionality from theming control panel, including Inspect/Modify theme and the Preview.
-* `plone.app.users`: Show unfiltered member fields for manager in user profile page.
-* `plone.app.widgets`:
-  * Remove implicit dependency on Mockup. Mockup is no longer a Python package, only an npm package.
-  * Update datetime pattern options for Patternslib pat-date-picker/pat-datetime-picker.
-* `plone.autoform`:
-  * Fixes for latest z3c.form.
-  * Reimplementation of ObjectSubForm and ISubformFactory, backported from older z3c.form.
-* `plone.app.z3cform`:
-  * Use better types for inputs.
-  * Use browser native date and datetime-local input together with patternslib date-picker.
-  * Implement TimeWidget which renders `<input type="time" />`.
-  * Use pat-validation in forms.
-  * Fixed for latest z3c.form
-* `plone.z3cform`: compatibility with latest z3c.form.
-* `plone.namedfile`: Register `AnnotationStorage` as `IImageScaleStorage` multi adapter, both from `plone.scale`. Use this adapter in our scaling functions when we store or get an image scale.
-* `Products.PlonePAS`: Add separate `GenericSetup` profile to switch the Zope root `/acl_users` to use a simple cookie login form. Useful when Zope root login and logout need to synchronize authentication state between multiple plugins, which is not possible with HTTP Basic authentication.
-* `plone.app.layout`:
-  * Restructure global sections and searchbox markup for mobile navigation as offcanvas sidebar.
-  * LiveSearch with support for images in search results.
-* `plonetheme.barceloneta`: sticky footer.
-
-Note that changes may be mentioned only once, even when they involve multiple packages.
+  * Remove Archetypes specific code: ``isIDAutoGenerated``, ``PloneFolder``, ``DublinCore.py``.
+  * Moved discussion Key to ``plone.app.discussion``.
 
 ## Installation
+
+Installation instructions are being added in this [documentation pull request](https://github.com/plone/documentation/pull/1260).  You can see a [preview](https://deploy-preview-1260--6-dev-docs-plone-org.netlify.app/install/index.html).
+
+If you cannot follow these docs in progress, the following older notes can be useful.
 
 Some documentation about installation:
 
@@ -90,7 +53,7 @@ Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0.0a4/versions.cfg
+extends = https://dist.plone.org/release/6.0.0a5/versions.cfg
 parts = instance
 
 [instance]
@@ -104,7 +67,7 @@ Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0.0a4/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0.0a5/requirements.txt
 bin/buildout
 bin/instance fg
 ```
@@ -117,7 +80,7 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone -c https://dist.plone.org/release/6.0.0a4/constraints.txt
+bin/pip install Plone -c https://dist.plone.org/release/6.0.0a5/constraints.txt
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
