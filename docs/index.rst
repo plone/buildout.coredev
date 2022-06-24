@@ -38,6 +38,7 @@ Contents
    release
    updateme
    git
+   package-dependencies
 
 
 Additional Material
