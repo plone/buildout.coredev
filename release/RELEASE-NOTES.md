@@ -6,7 +6,7 @@ Released: Monday June 27, 2022.
 
 Major changes since 6.0.0a4:
 
-* Wait, is there no alpha 5?  No.  We created an alpha 5 of `Products.CMFPlone`, which is the main package.  Before wrapping up a full Plone release, an important problem was fixes, which required a new release of this package.  So now we jump from alpha 4 to alpha 6.
+* Wait, is there no alpha 5?  No.  We created an alpha 5 of `Products.CMFPlone`, which is the main package.  Before wrapping up a full Plone release, an important problem was fixed, which required a new release of this package.  So now we jump from alpha 4 to alpha 6.
 * The `versions.cfg` file on dist.plone.org now only contains versions needed for core Plone.  We used to pin some often used "ecosystem" packages like `plone.app.tiles`.  Those pins are now in `versions-ecosystem.cfg`.  Several other pins, mostly for tools like `zest.releaser`, are now in `versions-extra.cfg`.
 * `plone.app.caching`: Remove unmaintained Split-View profile.
 * `plone.app.content`:
