@@ -1,11 +1,12 @@
-# Release notes for Plone 6.0.0a5 dev
+# Release notes for Plone 6.0.0a6
 
-Last updated: Friday June 24, 2022.
+Released: Monday June 27, 2022.
 
 ## Highlights
 
 Major changes since 6.0.0a4:
 
+* Wait, is there no alpha 5?  No.  We created an alpha 5 of `Products.CMFPlone`, which is the main package.  Before wrapping up a full Plone release, an important problem was fixes, which required a new release of this package.  So now we jump from alpha 4 to alpha 6.
 * The `versions.cfg` file on dist.plone.org now only contains versions needed for core Plone.  We used to pin some often used "ecosystem" packages like `plone.app.tiles`.  Those pins are now in `versions-ecosystem.cfg`.  Several other pins, mostly for tools like `zest.releaser`, are now in `versions-extra.cfg`.
 * `plone.app.caching`: Remove unmaintained Split-View profile.
 * `plone.app.content`:
@@ -66,7 +67,9 @@ Major changes since 6.0.0a4:
   * Create CSS variables for Plone colors.
   * Update to Bootstrap 5.2.0-beta1 and make use of CSS variables.
   * Global sections: add support for css variables and color modes barceloneta, dark, light
-
+* `plone.volto`:
+  * Add form `@@migrate_richtext` to migrate `html-richtext` to slate blocks or draftjs blocks.
+  * Add `@@migrate_to_volto` to prepare existing sites for Volto.
 
 
 ## Installation
