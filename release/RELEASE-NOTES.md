@@ -107,7 +107,7 @@ Change to a new directory and put a file `buildout.cfg` in it:
 
 ```
 [buildout]
-extends = https://dist.plone.org/release/6.0.0a5/versions.cfg
+extends = https://dist.plone.org/release/6.0.0a6/versions.cfg
 parts = instance
 
 [instance]
@@ -121,7 +121,7 @@ Install it with:
 
 ```
 python3.9 -m venv .
-bin/pip install -r https://dist.plone.org/release/6.0.0a5/requirements.txt
+bin/pip install -r https://dist.plone.org/release/6.0.0a6/requirements.txt
 bin/buildout
 bin/instance fg
 ```
@@ -134,7 +134,7 @@ Change to a new directory and then:
 ```
 python3.9 -m venv .
 bin/pip install -U pip setuptools wheel
-bin/pip install Plone -c https://dist.plone.org/release/6.0.0a5/constraints.txt
+bin/pip install Plone -c https://dist.plone.org/release/6.0.0a6/constraints.txt
 bin/mkwsgiinstance -u admin:admin -d .
 bin/runwsgi -v etc/zope.ini
 ```
