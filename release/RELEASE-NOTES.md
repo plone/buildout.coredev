@@ -1,6 +1,6 @@
 # Release notes for Plone 5.2.9
 
-Last updated: Monday July 18, 2022.
+Released: Thursday July 21, 2022.
 
 ## Python compatibility
 
