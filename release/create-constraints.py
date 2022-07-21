@@ -20,6 +20,13 @@ DENYLIST2 = [
     # These are packages that cannot be installed by pip on Python 2.
     "charset-normalizer",
     "sphinxcontrib-serializinghtml",
+    "sphinxcontrib-applehelp",
+    "sphinxcontrib-devhelp",
+    "sphinxcontrib-htmlhelp",
+    "sphinxcontrib-jsmath",
+    "sphinxcontrib-qthelp",
+    "sphinxcontrib-serializinghtml",
+    "sphinxcontrib-websupport",
 ]
 DENYLIST3 = [
     # These are packages that cannot be installed by pip on Python 3.
