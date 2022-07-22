@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.0-dev
+# Release notes for Plone 6.0.0b1
 
-Last updated: Friday July 22, 2022.
+Released: Saturday July 23, 2022.
 
 ## Highlights
 
