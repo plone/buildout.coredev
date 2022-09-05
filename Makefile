@@ -40,3 +40,14 @@ test: ## Run tests
 test-acceptance: ## Run acceptance tests
 	@echo "$(GREEN)==> Run Acceptance Tests$(RESET)"
 	export ROBOTSUITE_PREFIX=ONLYROBOT && bin/alltests -t ONLYROBOT --all --xml
+
+.PHONY: html_meta
+html_meta: ## Add meta data headers to all Markdown pages
+	python ./addMetaData.py
+
+.PHONY: conversion-to-myst
+conversion-to-myst:
+	bin/pip install "rst-to-myst[sphinx]"
+	-bin/rst2myst convert -R docs/*.rst
+#	-bin/rst2myst convert -R docs/**/*.rst
+#	python fix-converted-myst.py
