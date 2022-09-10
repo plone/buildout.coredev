@@ -36,7 +36,7 @@ for filename in (constraints37, constraints38, constraints39, constraints310):
     if not os.path.exists(filename):
         print(f"ERROR: {filename} does not exist.")
         print(
-            "Run: tox -p auto -e constraints2,constraints36,constraints37,constraints38,constraints"
+            "Run: tox -p auto -e constraints2,constraints37,constraints38,constraints39,constraints310,constraints"
         )
         sys.exit(1)
 
@@ -75,7 +75,7 @@ for package, versions in pins.items():
         continue
     if py38_version == py39_version == py310_version:
         # All higher Python versions are the same.
-        combi.append(f'{package}=={py36_version}; python_version >= "3.8"')
+        combi.append(f'{package}=={py38_version}; python_version >= "3.8"')
         continue
     if py38_version is not None:
         combi.append(f'{package}=={py38_version}; python_version == "3.8"')
