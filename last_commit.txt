@@ -1,20 +1,62 @@
-Repository: plone.outputfilters
+Repository: plone.base
 
 
-Branch: refs/heads/master
-Date: 2022-09-09T14:34:34+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.outputfilters/commit/223c96204e37ca1fcd4a8ac878f5a6a5b4059e40
+Branch: refs/heads/main
+Date: 2022-09-09T22:01:05Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.base/commit/f54f18bd9a3619e0f3e37e77a4ae6dfcd1cee36b
 
-Revert uuidToObject change.
+Fix traversal during get_top_site_from_url.
 
-It causes test failures in plone.outputfilters, plone.restapi and plone.volto.
+My previous fix broke several tests.  This appears to be the result of trying to
+traverse iteratively through the structure of a site (which my code does and the
+previous code does not do in the same way), and encountering `Unauthorized`
+exceptions during traversal (which is a legitimate thing to get, as /a/b/c may
+be accessible to user XXX, but /a/b may not necessarily be).
+
+The fix is to use unrestricted traversal (bypassing security), and then to return
+the selected object by using *restricted* traversal in that case.
+
+I am confident this should not result in a security issue — however I ask the
+true expert Plonistas to verify this confidence is warranted.  Thanks.
+
+And sorry for the breakage.  We need CI tests in `plone.base`.
 
 Files changed:
-M plone/outputfilters/browser/resolveuid.py
-M plone/outputfilters/filters/resolveuid_and_caption.py
-M setup.py
-D news/52.bugfix
+M src/plone/base/utils.py
 
-b'diff --git a/news/52.bugfix b/news/52.bugfix\ndeleted file mode 100644\nindex fba7aff..0000000\n--- a/news/52.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Use our new version of uuidToObject() from plone.app.uuid.utils\n-[anirudhhkashyap] \n\\ No newline at end of file\ndiff --git a/plone/outputfilters/browser/resolveuid.py b/plone/outputfilters/browser/resolveuid.py\nindex 85179a5..8c1e05b 100644\n--- a/plone/outputfilters/browser/resolveuid.py\n+++ b/plone/outputfilters/browser/resolveuid.py\n@@ -5,7 +5,6 @@\n from zope.interface import implementer\n from zope.publisher.browser import BrowserView\n from zope.publisher.interfaces import IPublishTraverse\n-from plone.app.uuid.utils import uuidToObject\n \n \n try:\n@@ -23,10 +22,16 @@ def uuidToURL(uuid):\n         return res[0].getURL()\n \n \n-@deprecate("Import from plone.app.uuid.utils instead. To be removed in version 6.")\n+@deprecate(\n+    "Please use plone.app.uuid.utils.uuidToObject instead. "\n+    "But be aware that this does an extra security check."\n+)\n def uuidToObject(uuid):\n-    """Resolves a UUID to an object via the Physical Path"""\n-    return uuidToObject(uuid, unrestricted=True)\n+    """Resolves a UUID to an object via the UID index of portal_catalog."""\n+    catalog = getToolByName(getSite(), "portal_catalog")\n+    res = catalog.unrestrictedSearchResults(UID=uuid)\n+    if res:\n+        return res[0]._unrestrictedGetObject()\n \n \n try:\ndiff --git a/plone/outputfilters/filters/resolveuid_and_caption.py b/plone/outputfilters/filters/resolveuid_and_caption.py\nindex 6d3b10b..fc2b411 100644\n--- a/plone/outputfilters/filters/resolveuid_and_caption.py\n+++ b/plone/outputfilters/filters/resolveuid_and_caption.py\n@@ -6,7 +6,7 @@\n from DocumentTemplate.DT_Var import newline_to_br\n from DocumentTemplate.html_quote import html_quote\n from plone.base.utils import safe_text\n-from plone.app.uuid.utils import uuidToObject\n+from plone.outputfilters.browser.resolveuid import uuidToObject\n from plone.outputfilters.interfaces import IFilter\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.interfaces import IContentish\n@@ -274,8 +274,7 @@ def resolve_link(self, href):\n             match = resolveuid_re.match(subpath)\n             if match is not None:\n                 uid, _subpath = match.groups()\n-                # Getting URL of an object from it\'s UUID needs no permission checks\n-                obj = uuidToObject(uid, unrestricted=True)\n+                obj = uuidToObject(uid)\n                 if obj is not None:\n                     subpath = _subpath\n \ndiff --git a/setup.py b/setup.py\nindex 07074c3..ad55727 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -64,7 +64,7 @@ def read(filename):\n         "Products.MimetypesRegistry",\n         "Products.PortalTransforms>=2.0",\n         "plone.namedfile",\n-        "plone.app.uuid>=2.2.0",\n+        "plone.app.uuid",\n         "setuptools",\n         "unidecode",\n         "zope.deprecation",\n'
+b'diff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 1d817d5..f96cf5d 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -246,7 +246,7 @@ def get_top_site_from_url(context, request):\n     """\n     Find the first ISite object that appears in the pre-virtual-hosting URL\n     path, falling back to the object pointed by the virtual hosting root.\n-    \n+\n     Use this method if you need a "root object" reference to generate URLs\n     that will be used by, and will work correctly from the standpoint of,\n     *browser* code (JavaScript / XML HTTP requests) after virtual hosting has\n@@ -312,7 +312,11 @@ def get_top_site_from_url(context, request):\n         for idx in range(len(url_path)):\n             _path = "/".join(url_path[: idx + 1]) or "/"\n             site_path = "/".join(request.physicalPathFromURL(_path)) or "/"\n-            _site = context.restrictedTraverse(site_path)\n+            # The following line is fine.  We do a restrictedTraverse\n+            # below to resolve the actual object, so the user (technically,\n+            # the browser) cannot ever get a reference to an object it does\n+            # not have permission to.\n+            _site = context.unrestrictedTraverse(site_path)\n             if ISite.providedBy(_site):\n                 subsites.append(idx)\n             else:\n'
+
+Repository: plone.base
+
+
+Branch: refs/heads/main
+Date: 2022-09-09T22:09:46Z
+Author: Manuel Amador (Rudd-O) (Rudd-O) <rudd-o@rudd-o.com>
+Commit: https://github.com/plone/plone.base/commit/b2a6076daef62a5709aa217d18a8793b8e9cf56b
+
+Add towncrier.
+
+Files changed:
+A news/19.bugfix
+
+b'diff --git a/news/19.bugfix b/news/19.bugfix\nnew file mode 100644\nindex 0000000..8a6ad58\n--- /dev/null\n+++ b/news/19.bugfix\n@@ -0,0 +1 @@\n+* Fix issue with traversal introduced by [Rudd-O] in `get_top_site_from_url()` [Rudd-O]\n'
+
+Repository: plone.base
+
+
+Branch: refs/heads/main
+Date: 2022-09-10T02:19:42+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.base/commit/0444db414b31e709d59d6d8940e35761f594b2f4
+
+Merge pull request #19 from plone/myfix
+
+Fix permissions during traversal executed from `get_top_site_from_url()`.
+
+Files changed:
+A news/19.bugfix
+M src/plone/base/utils.py
+
+b'diff --git a/news/19.bugfix b/news/19.bugfix\nnew file mode 100644\nindex 0000000..8a6ad58\n--- /dev/null\n+++ b/news/19.bugfix\n@@ -0,0 +1 @@\n+* Fix issue with traversal introduced by [Rudd-O] in `get_top_site_from_url()` [Rudd-O]\ndiff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 1d817d5..f96cf5d 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -246,7 +246,7 @@ def get_top_site_from_url(context, request):\n     """\n     Find the first ISite object that appears in the pre-virtual-hosting URL\n     path, falling back to the object pointed by the virtual hosting root.\n-    \n+\n     Use this method if you need a "root object" reference to generate URLs\n     that will be used by, and will work correctly from the standpoint of,\n     *browser* code (JavaScript / XML HTTP requests) after virtual hosting has\n@@ -312,7 +312,11 @@ def get_top_site_from_url(context, request):\n         for idx in range(len(url_path)):\n             _path = "/".join(url_path[: idx + 1]) or "/"\n             site_path = "/".join(request.physicalPathFromURL(_path)) or "/"\n-            _site = context.restrictedTraverse(site_path)\n+            # The following line is fine.  We do a restrictedTraverse\n+            # below to resolve the actual object, so the user (technically,\n+            # the browser) cannot ever get a reference to an object it does\n+            # not have permission to.\n+            _site = context.unrestrictedTraverse(site_path)\n             if ISite.providedBy(_site):\n                 subsites.append(idx)\n             else:\n'
 
