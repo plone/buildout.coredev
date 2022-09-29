@@ -1,6 +1,6 @@
 #!/bin/sh
 # This script uses pyenv to install specific virtualenv
-PY="3.8.8"
+PY="3.10.6"
 VENVBASE="plone-coredev-6.0"
 
 eval "$(pyenv init -)"
