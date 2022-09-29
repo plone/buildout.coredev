@@ -2,19 +2,22 @@ Repository: plone.volto
 
 
 Branch: refs/heads/main
-Date: 2022-09-29T16:17:17+02:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.volto/commit/0a5406be36bbc6ee6ed751dd1915722bc9efc286
+Date: 2022-09-29T14:19:10Z
+Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
+Commit: https://github.com/plone/plone.volto/commit/016bd73d7c413956c261a8d321c27f9060f6f5ba
 
-fix indexers when there is a broken preview_image_link (#91)
+Preserve order during folderish types migration (#86)
 
-* fix indexers when there is a broken preview_image_link
+* preserve order during migrations
 
-* changelog
+* add changelog
+
+Co-authored-by: Alin Voinea &lt;contact@avoinea.com&gt;
+Co-authored-by: Timo Stollenwerk &lt;tisto@users.noreply.github.com&gt;
 
 Files changed:
-A news/91.bugfix
-M src/plone/volto/indexers.py
+A news/86.bugfix
+M src/plone/volto/upgrades.py
 
-b'diff --git a/news/91.bugfix b/news/91.bugfix\nnew file mode 100644\nindex 0000000..7e86e24\n--- /dev/null\n+++ b/news/91.bugfix\n@@ -0,0 +1,2 @@\n+- Fix hasPreviewImage and image_field indexers when the preview_image_link\n+  relation is broken. [davisagli]\ndiff --git a/src/plone/volto/indexers.py b/src/plone/volto/indexers.py\nindex 9ecd181..b8e92ff 100644\n--- a/src/plone/volto/indexers.py\n+++ b/src/plone/volto/indexers.py\n@@ -10,7 +10,9 @@ def hasPreviewImage(obj):\n     Indexer for knowing in a catalog search if a content with the IPreview behavior has\n     a preview_image\n     """\n-    if obj.aq_base.preview_image or obj.aq_base.preview_image_link:\n+    if obj.aq_base.preview_image or (\n+        obj.aq_base.preview_image_link and not obj.preview_image_link.isBroken()\n+    ):\n         return True\n     return False\n \n@@ -23,7 +25,10 @@ def image_field_indexer(obj):\n     image_field = ""\n     if getattr(base_obj, "preview_image", False):\n         image_field = "preview_image"\n-    elif getattr(base_obj, "preview_image_link", False):\n+    elif (\n+        getattr(base_obj, "preview_image_link", False)\n+        and not base_obj.preview_image_link.isBroken()\n+    ):\n         image_field = "preview_image_link"\n     elif getattr(base_obj, "image", False):\n         image_field = "image"\n'
+b'diff --git a/news/86.bugfix b/news/86.bugfix\nnew file mode 100644\nindex 0000000..830bac4\n--- /dev/null\n+++ b/news/86.bugfix\n@@ -0,0 +1 @@\n+Keep folder order when migrating from folderishtypes [cekk]\ndiff --git a/src/plone/volto/upgrades.py b/src/plone/volto/upgrades.py\nindex 4d8862c..ba6ea09 100644\n--- a/src/plone/volto/upgrades.py\n+++ b/src/plone/volto/upgrades.py\n@@ -1,4 +1,5 @@\n from copy import deepcopy\n+from OFS.interfaces import IOrderedContainer\n from plone import api\n from plone.registry import field\n from plone.registry.interfaces import IRegistry\n@@ -21,10 +22,10 @@\n def migrate_content_classes(context):\n     """Migrate content created with collective.folderishtypes to plone.volto."""\n     interface = "collective.folderishtypes.interfaces.IFolderishType"\n-    idxs = [\n-        "object_provides",\n-    ]\n-    brains = api.content.find(object_provides=interface)\n+    idxs = ["object_provides", "getObjPositionInParent"]\n+    brains = api.content.find(\n+        object_provides=interface, sort_on="getObjPositionInParent"\n+    )\n     total_brains = len(brains)\n     logger.info(f"Migration: {total_brains} contents to be migrated.")\n     for idx, brain in enumerate(brains):\n@@ -32,9 +33,16 @@ def migrate_content_classes(context):\n         content_id = content.getId()\n         content.__class__ = MIGRATION[content.portal_type]\n         parent = content.aq_parent\n+        ordered = IOrderedContainer(parent, None)\n+        if ordered is not None:\n+            order = ordered.getObjectPosition(content.getId())\n+            if order == 1:\n+                # can be the default one and we will lose the ordering\n+                order = ordered.keys().index(content.getId())\n         parent._delOb(content_id)\n         parent._setOb(content_id, content)\n         content = parent[content_id]\n+        ordered.moveObjectToPosition(content.getId(), order)\n         content.reindexObject(idxs=idxs)\n \n         if idx and idx % 100 == 0:\n'
 
