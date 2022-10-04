@@ -1,57 +1,61 @@
-# Release notes for Plone 6.0.0b2
+# Release notes for Plone 6.0.0b3
 
-Released: Saturday September 10, 2022.
+Released: Tuesday October 4, 2022.
 
 ## Highlights
 
-Most important change is that this release officially **drops Python 3.7 support**.
-Currently everything still work in 3.7, all tests pass, but beta 2 is the last release where this is the case.
-See discussion in [this issue](https://github.com/plone/Products.CMFPlone/issues/3635) and especially [this community poll](https://community.plone.org/t/plone-6-0-drop-support-for-python-3-7-and-3-8/15549).
+Major changes since 6.0.0b2:
 
-Python 3.8, 3.9 and 3.10 are supported.  Python 3.11 support will likely be added after the final release.  Most work for this is being done in the Zope packages.  Note that Plone add-ons may choose to support less Python versions, especially dropping 3.8.  You are encouraged to **use Python 3.10**, which is also the fastest supported Python.
+* `Products.PlonePAS`: Increase the minimum password length to 8 characters.
 
-Other major changes since 6.0.0b2:
-
-* `plone.session`:
-
-  * Creating per-user keyrings in order to have session invalidation on log-out (server-side logout).
-  * Cookie attribute SameSite is set to "Lax".
+* `pip`: We have actually *downgraded* `pip` because version 22.2 and higher have an incompatibility with Buildout.  Buildout works, but it cannot read the information about which Python versions are required for a package.  If you do not use Buildout, feel free to use the latest `pip` version.
 
 * `plone.restapi`:
 
-  * Add `@portrait` endpoint.
-  * Add support for importing profiles in `@addons` endpoint.
-  * Add support to search for fullname, email, id on the `@users` endpoint with `"?search="`.
+  * Add `@userschema` endpoint for getting the user schema.
 
-* `plone.volto`:
+  * Add `@transactions` endpoint to fetch transactions that have been made through the Plone website.
 
-  * Added preview image link behavior.
-  * Use slate as default text block in default contents for ``default-homepage`` and
-  ``multilingual`` profile.
+  * Added `@aliases` endpoint with GET/POST/DELETE.
 
-* `plone.app.z3cform`:
+  * Improve performance of serializing image scales.
 
-  * Add `default_time` attribute/argument to Date- and DatetimeWidget to allow the converter to set a custom time when nothing was given.
-  * Customizable DateWidget formatter length.
+* `TinyMCE` rich text editor updates in various packages:
 
-* `plone.i18n`:
+  * Disable `advlist` plugin by default, it produces unclean inline styles.
 
-  * Add some more native names to language-country combinations
-  * Fix the missing native names for language-country variants.
+  * Add `inserttable` to toolbar.
 
-* `plone.app.robotframework`: Add keyword 'Wait For Elements'.  Here the requested element is allowed to match multiple times.
+  * Add and improve table styles.
+
+  * Add UI styles in non-inline mode.
+
+  * Actually load theme-specified styles CSS in TinyMCE.
+
+* `plone.staticresources`:
+
+  * Use successor repository of `svg-country-flags`.
+
+  * Upgrade to Bootstrap 5.2.2.
+
+  * Upgrade to Mockup 5.0.0-alpha.24.
+
+* `plonetheme.barceloneta`:
+
+  * Bootstrap 5.2.2
+
+* `plone.app.layout`: Use a variable to allow customization of the image scale used for social tags
 
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.0.0-alpha.30](https://www.npmjs.com/package/@plone/volto/v/16.0.0-alpha.30).
-See the [changelog](https://github.com/plone/volto/blob/16.0.0-alpha.30/CHANGELOG.md).
+The default frontend for Plone 6 is Volto. Latest release is [16.0.0-alpha.40](https://www.npmjs.com/package/@plone/volto/v/16.0.0-alpha.40).
+See the [changelog](https://github.com/plone/volto/blob/16.0.0-alpha.40/CHANGELOG.md).
 
 
 ## Python compatibility
 
 This release supports Python 3.8, 3.9, and 3.10.
-As said, technically 3.7 still works, but it is not supported anymore.
 
 
 ## Installation
