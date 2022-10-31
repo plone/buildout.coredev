@@ -27,6 +27,7 @@ DENYLIST2 = [
     "sphinxcontrib-qthelp",
     "sphinxcontrib-serializinghtml",
     "sphinxcontrib-websupport",
+    "typing-extensions",
 ]
 DENYLIST3 = [
     # These are packages that cannot be installed by pip on Python 3.

@@ -1,12 +1,14 @@
-# Release notes for Plone 5.2.9
+# Release notes for Plone 5.2.10
 
-Released: Thursday July 21, 2022.
+Released: Monday October 31, 2022.
 
 ## Python compatibility
 
-As usual, this release supports Python 2.7, 3.6, 3.7, and 3.8.
+This release supports Python 2.7, 3.7, and 3.8.
 
-But note that both Python 2.7 and 3.6 have reached end of life.
+**Python 3.6 is no longer supported.**
+See the [community announcement](https://community.plone.org/t/plone-5-2-drops-python-3-6-support/15706).
+Note that both Python 2.7 and 3.6 have reached end of life.
 This means the wider Python community no longer supports it.
 For example, the default WSGI server used by Plone, which is `waitress`, has a security problem that is only solved on Python 3.7 and higher.  If you use `waitress` on earlier Python versions, you are vulnerable.
 
@@ -18,13 +20,8 @@ Especially Python 2.7 should only be used as a temporary stepping stone before y
 
 ## Highlights
 
-Interesting changes since 5.2.8:
+Interesting changes since 5.2.9:
 
-* `waitress`: Updated to version 2.1.2, which has a bugfix for the previous security fix.
-  Version 2.1.1 could cause Plone to crash and restart.  See also remark above on Python compatibility.
-* `plone.app.querystring`:
-  * Add negation-query operators `string.isNot` and `selection.none`.
-  * Make SearchableText work when using `and` and `or` as search items.
-* `zodbverify`: Improve debugging output: show all objects that reference an oid.
-  See [Philip's blog post](https://www.starzel.de/blog/zodb-debugging)
-  and [discussion in pull request](https://github.com/plone/zodbverify/pull/8) for more information.
+* `Products.PluggableAuthService`: Set the Cookie Auth Helper cookies with `SameSite` set to `Lax` by default and allow admins to change the setting as well as the secure flag from the Properties tab in the ZMI.
+* i18ndude: Add boolean `--no-line-numbers` option to `rebuild-pot`.  Use this to prevent including line numbers in pot files.
+* diazo: Remove dependency on `future` package.
