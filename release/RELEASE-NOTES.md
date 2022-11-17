@@ -1,61 +1,53 @@
-# Release notes for Plone 6.0.0b3
+# Release notes for Plone 6.0.0rc1 (unreleased)
 
-Released: Tuesday October 4, 2022.
+Updated: Thursday November 17, 2022.
 
 ## Highlights
 
-Major changes since 6.0.0b2:
+Major changes since 6.0.0b3:
 
-* `Products.PlonePAS`: Increase the minimum password length to 8 characters.
+* Various packages: updates to support Python 3.11.  See below.
 
-* `pip`: We have actually *downgraded* `pip` because version 22.2 and higher have an incompatibility with Buildout.  Buildout works, but it cannot read the information about which Python versions are required for a package.  If you do not use Buildout, feel free to use the latest `pip` version.
+* `zc.buildout`: After long development this has a final release.  We use version 3.0.1, which now works nicely with latest pip (using 22.3.1).
+  Note that it is usually fine if you use different versions of `zc.buildout`, `pip`, `setuptools`, and `wheel`.  We just pin versions that we know work at the moment.
 
 * `plone.restapi`:
 
-  * Add `@userschema` endpoint for getting the user schema.
+  * Added `@upgrade` endpoint to preview or run an upgrade of a Plone instance.
 
-  * Add `@transactions` endpoint to fetch transactions that have been made through the Plone website.
+  * Added `@rules` endpoint with GET/POST/DELETE/PATCH.
 
-  * Added `@aliases` endpoint with GET/POST/DELETE.
+  * Added link integrity support for slate blocks.
 
-  * Improve performance of serializing image scales.
-
-* `TinyMCE` rich text editor updates in various packages:
-
-  * Disable `advlist` plugin by default, it produces unclean inline styles.
-
-  * Add `inserttable` to toolbar.
-
-  * Add and improve table styles.
-
-  * Add UI styles in non-inline mode.
-
-  * Actually load theme-specified styles CSS in TinyMCE.
-
-* `plone.staticresources`:
-
-  * Use successor repository of `svg-country-flags`.
-
-  * Upgrade to Bootstrap 5.2.2.
-
-  * Upgrade to Mockup 5.0.0-alpha.24.
-
-* `plonetheme.barceloneta`:
-
-  * Bootstrap 5.2.2
-
-* `plone.app.layout`: Use a variable to allow customization of the image scale used for social tags
+* `plone.scale`: Add support for animated GIFs.
 
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.0.0-alpha.40](https://www.npmjs.com/package/@plone/volto/v/16.0.0-alpha.40).
-See the [changelog](https://github.com/plone/volto/blob/16.0.0-alpha.40/CHANGELOG.md).
+The default frontend for Plone 6 is Volto. Latest release is [16.0.0-alpha.50](https://www.npmjs.com/package/@plone/volto/v/16.0.0-alpha.50).
+See the [changelog](https://github.com/plone/volto/blob/16.0.0-alpha.50/CHANGELOG.md).
 
 
 ## Python compatibility
 
-This release supports Python 3.8, 3.9, and 3.10.
+This release supports Python 3.8, 3.9, 3.10, and 3.11.
+
+Python 3.11.0 was released in October and we are proud to already be able to say Plone supports it!  All tests pass.
+This is expected to be faster than other Python versions.
+Note that not all add-ons may work yet on 3.11, but in most cases the needed changes should be small.
+
+A big thank you for this goes to the Zope part of the Plone community, especially Jens Vagelpohl and Michael Howitz.
+The trickiest parts of the fixes for 3.11 were needed on the Zope level, for example `RestrictedPython` and packages with C code.
+
+A word of warning: Plone on 3.11 should work fine on Linux, but you may have *trouble installing it on Windows and Mac*.
+Forgive me for using some technical terms here.
+The problem is Python packages that have C code.  Not all these packages may have "wheels" (a Python distribution file) available for your operating system and architecture.
+
+* On Windows you may not be able to install the `lxml` dependency.  A new 4.9.2 release should fix this.
+
+* On Mac, a package may have a wheel for the Intel architecture and not for ARM, or the other way around, or your Mac may need an unavailable "universal2" wheel.
+
+In all cases, if you have the right compilers and other development tools available, then you should be able to get it working on Windows and Mac, but this can be tricky.  If you don't want to spend hours, you may want to wait a bit.
 
 
 ## Installation
