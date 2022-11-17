@@ -8,6 +8,9 @@ Major changes since 6.0.0b3:
 
 * Various packages: updates to support Python 3.11.  See below.
 
+* Zope 5.7: This feature release adds full support for Python 3.11 and a ZPublisher encoder for inputting JSON data.
+  See the [Zope changelog](https://github.com/zopefoundation/Zope/blob/5.7/CHANGES.rst) for details.
+
 * `zc.buildout`: After long development this has a final release.  We use version 3.0.1, which now works nicely with latest pip (using 22.3.1).
   Note that it is usually fine if you use different versions of `zc.buildout`, `pip`, `setuptools`, and `wheel`.  We just pin versions that we know work at the moment.
 
