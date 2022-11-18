@@ -27,8 +27,8 @@ Major changes since 6.0.0b3:
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.0.0-alpha.51](https://www.npmjs.com/package/@plone/volto/v/16.0.0-alpha.51).
-See the [changelog](https://github.com/plone/volto/blob/16.0.0-alpha.51/CHANGELOG.md).
+The default frontend for Plone 6 is Volto. Latest release is [16.0.0-rc.1](https://www.npmjs.com/package/@plone/volto/v/16.0.0-rc.1).
+See the [changelog](https://github.com/plone/volto/blob/16.0.0-rc.1/CHANGELOG.md).
 
 
 ## Python compatibility
