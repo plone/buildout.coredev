@@ -51,5 +51,5 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Update the https://plone.org/security/hotfixes/ page in the configuration control panel. This is done in the configuration registry: `plone.securitysupport`, `plone.versions`, `plone.activemaintenance`.  You could ask the security team.
 - [ ] Publish release page on plone.org.
-- Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
+- [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Announce on community.plone.org.
