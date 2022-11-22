@@ -1,34 +1,20 @@
-# Release notes for Plone 6.0.0rc1
+# Release notes for Plone 6.0.0rc2 (unreleased)
 
-Released: Friday November 18, 2022.
+Last updated: Tuesday November 22, 2022.
 
 ## Highlights
 
-Major changes since 6.0.0b3:
+Major changes since 6.0.0rc1:
 
-* Various packages: updates to support Python 3.11.  See below.
+* `plone.namedfile` 6.0.0: various bug fixes.
 
-* Zope 5.7: This feature release adds full support for Python 3.11 and a ZPublisher encoder for inputting JSON data.
-  See the [Zope changelog](https://github.com/zopefoundation/Zope/blob/5.7/CHANGES.rst) for details.
-
-* `zc.buildout`: After long development this has a final release.  We use version 3.0.1, which now works nicely with latest pip (using 22.3.1).
-  Note that it is usually fine if you use different versions of `zc.buildout`, `pip`, `setuptools`, and `wheel`.  We just pin versions that we know work at the moment.
-
-* `plone.restapi`:
-
-  * Added `@upgrade` endpoint to preview or run an upgrade of a Plone instance.
-
-  * Added `@rules` endpoint with GET/POST/DELETE/PATCH.
-
-  * Added link integrity support for slate blocks.
-
-* `plone.scale`: Add support for animated GIFs.
+* The Volto frontend has a final release: 16.0.0.
 
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.0.0-rc.1](https://www.npmjs.com/package/@plone/volto/v/16.0.0-rc.1).
-See the [changelog](https://github.com/plone/volto/blob/16.0.0-rc.1/CHANGELOG.md).
+The default frontend for Plone 6 is Volto. Latest release is [16.0.0](https://www.npmjs.com/package/@plone/volto/v/16.0.0).
+See the [changelog](https://github.com/plone/volto/blob/16.0.0/CHANGELOG.md) containing all the changes compared to Volto 15.
 
 
 ## Python compatibility
