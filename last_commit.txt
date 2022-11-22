@@ -2,40 +2,31 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2022-11-21T19:39:16-08:00
-Author: Balázs Reé (reebalazs) <ree@greenfinity.hu>
-Commit: https://github.com/plone/plone.restapi/commit/f77182b5700d059b6aee0f8f0bcc7a3fa29e3696
+Date: 2022-11-22T04:57:38+01:00
+Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
+Commit: https://github.com/plone/plone.restapi/commit/90ca7b11d666b58ba67b2be6e7825792dd55628e
 
-Fortify user api against missing user data (None) (#1535)
-
-* Fortify user api against missing user data (None)
-
-Real project produced user data None (possibly via ldap plugin) which
-breaks the api. As we never would want to display such user data, we
-fortify the api and filter None.
-
-Note this cannot normally happen via the restapi, so it's untestable
-with a traditional functional test.
-
-* Fix CI python3.9
-
-* Disable test that breaks due to timezone ambiguity
-
-* Add unittests
-
-* Simplify sorting which now is not allowed to accept None as user data.
-
-- also add type hint
-
-* Restore previous state of test_documentation_workingcopy_get
-
-Co-authored-by: Timo Stollenwerk &lt;tisto@users.noreply.github.com&gt;
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Preparing release 8.32.3
 
 Files changed:
-A news/1534.bugfix
-M src/plone/restapi/services/users/get.py
-M src/plone/restapi/tests/test_services_users.py
+M CHANGES.rst
+M setup.py
+D news/1534.bugfix
 
-b'diff --git a/news/1534.bugfix b/news/1534.bugfix\nnew file mode 100644\nindex 000000000..9aa8dabf9\n--- /dev/null\n+++ b/news/1534.bugfix\n@@ -0,0 +1 @@\n+Fortify user api against missing user data (None) @reebalazs\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/services/users/get.py b/src/plone/restapi/services/users/get.py\nindex 60cc3aedf..b593f93d1 100644\n--- a/src/plone/restapi/services/users/get.py\n+++ b/src/plone/restapi/services/users/get.py\n@@ -17,7 +17,8 @@\n from zope.component.hooks import getSite\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n-\n+from Products.PlonePAS.tools.memberdata import MemberData\n+from typing import Sequence, Iterable\n \n DEFAULT_SEARCH_RESULTS_LIMIT = 25\n \n@@ -69,12 +70,11 @@ def _get_user(self, user_id):\n         return self.portal_membership.getMemberById(user_id)\n \n     @staticmethod\n-    def _sort_users(users):\n-        users.sort(\n-            key=lambda x: x is not None\n-            and normalizeString(x.getProperty("fullname", ""))\n+    def _sort_users(users: Iterable[MemberData]) -> Sequence[MemberData]:\n+        """users is an iterable of MemberData objects, None is not accepted"""\n+        return sorted(\n+            users, key=lambda x: normalizeString(x.getProperty("fullname", ""))\n         )\n-        return users\n \n     def _principal_search_results(\n         self, search_for_principal, get_principal_by_id, principal_type, id_key\n@@ -91,7 +91,9 @@ def _principal_search_results(\n \n     def _get_users(self, **kw):\n         results = {user["userid"] for user in self.acl_users.searchUsers(**kw)}\n-        users = [self.portal_membership.getMemberById(userid) for userid in results]\n+        users = (self.portal_membership.getMemberById(userid) for userid in results)\n+        # Filtering for None which might happen due to some unknown condition\n+        users = filter(lambda x: x is not None, users)\n         return self._sort_users(users)\n \n     def _user_search_results(self):\ndiff --git a/src/plone/restapi/tests/test_services_users.py b/src/plone/restapi/tests/test_services_users.py\nindex 956ca1259..fac664ae2 100644\n--- a/src/plone/restapi/tests/test_services_users.py\n+++ b/src/plone/restapi/tests/test_services_users.py\n@@ -13,6 +13,7 @@\n from Products.MailHost.interfaces import IMailHost\n from zope.component import getAdapter\n from zope.component import getUtility\n+from plone.restapi.services.users.get import UsersGet\n \n import os\n import re\n@@ -1097,3 +1098,40 @@ def test_user_with_datetime(self):\n         self.assertEqual(200, response.status_code)\n         self.assertIn("birthdate", response.json())\n         self.assertIn("registration_datetime", response.json())\n+\n+    # Not testable via the service, hence unittest\n+    def test_get_users_filtering(self):\n+        class MockUsersGet(UsersGet):\n+            def __init__(self):\n+                class MockUser(object):\n+                    def __init__(self, userid):\n+                        self.userid = userid\n+\n+                    def getProperty(self, key, default):\n+                        return "Full Name " + self.userid\n+\n+                class MockAclUsers(object):\n+                    def searchUsers(self, **kw):\n+                        return [\n+                            {"userid": "user2"},\n+                            {"userid": "user1"},\n+                            {"userid": "NONEUSER"},\n+                        ]\n+\n+                self.acl_users = MockAclUsers()\n+\n+                class MockPortalMembership(object):\n+                    def getMemberById(self, userid):\n+                        if userid == "NONEUSER":\n+                            return None\n+                        else:\n+                            return MockUser(userid)\n+\n+                self.portal_membership = MockPortalMembership()\n+\n+        mockService = MockUsersGet()\n+        users = mockService._get_users(foo="bar")\n+        # Sorted by full name. None does not break and is filtered.\n+        self.assertEqual(len(users), 2)\n+        self.assertEqual(users[0].userid, "user1")\n+        self.assertEqual(users[1].userid, "user2")\n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 580c73eda..5a3ba4e47 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,15 @@ Changelog\n \n .. towncrier release notes start\n \n+8.32.3 (2022-11-22)\n+-------------------\n+\n+Bug fixes:\n+\n+\n+- Fortify user api against missing user data (None) @reebalazs (#1534)\n+\n+\n 8.32.2 (2022-11-18)\n -------------------\n \ndiff --git a/news/1534.bugfix b/news/1534.bugfix\ndeleted file mode 100644\nindex 9aa8dabf9..000000000\n--- a/news/1534.bugfix\n+++ /dev/null\n@@ -1 +0,0 @@\n-Fortify user api against missing user data (None) @reebalazs\n\\ No newline at end of file\ndiff --git a/setup.py b/setup.py\nindex ba8218adc..e71e5517d 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,7 +1,7 @@\n from setuptools import setup, find_packages\n import sys\n \n-version = "8.32.3.dev0"\n+version = "8.32.3"\n \n assert sys.version_info >= (\n     3,\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/master
+Date: 2022-11-22T04:58:23+01:00
+Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
+Commit: https://github.com/plone/plone.restapi/commit/46120c4d31b942769fd15e6ca8dc7ea4677b2872
+
+Back to development: 8.32.4
+
+Files changed:
+M setup.py
+
+b'diff --git a/setup.py b/setup.py\nindex e71e5517d..4731f9c35 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,7 +1,7 @@\n from setuptools import setup, find_packages\n import sys\n \n-version = "8.32.3"\n+version = "8.32.4.dev0"\n \n assert sys.version_info >= (\n     3,\n'
 
