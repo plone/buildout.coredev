@@ -1,6 +1,13 @@
 # Release notes for Plone 6.0.0rc2
 
-Released: Monday December 5, 2022.
+Release date: Monday December 5, 2022.
+
+Release schedule: https://plone.org/download/release-schedule
+
+For technical wizards who want to jump straight in, here are two important links:
+
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.0rc2/constraints.txt](https://dist.plone.org/release/6.0.0rc1/constraints.txt)
+* With Buildout you can use the versions file at https://dist.plone.org/release/6.0.0rc2/versions.cfg plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.0rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.0rc2/versions-ecosystem.cfg).
 
 
 ## Highlights
