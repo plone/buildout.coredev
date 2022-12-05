@@ -1,45 +1,39 @@
-# Release notes for Plone 6.0.0rc2 (unreleased)
+# Release notes for Plone 6.0.0rc2
 
-Last updated: Tuesday November 22, 2022.
+Released: Monday December 5, 2022.
+
 
 ## Highlights
 
 Major changes since 6.0.0rc1:
 
-* `plone.namedfile` 6.0.0: various bug fixes.
+* None really.  Lots of packages have gotten a final release, losing their alpha, beta or release candidate markers.
 
-* The Volto frontend has a final release: 16.0.0.
+We are in a bugfix-only mode.  An upgrade from rc1 to rc2 should be painless and is recommended for everyone.
 
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.0.0](https://www.npmjs.com/package/@plone/volto/v/16.0.0).
-See the [changelog](https://github.com/plone/volto/blob/16.0.0/CHANGELOG.md) containing all the changes compared to Volto 15.
+The default frontend for Plone 6 is Volto. Latest release is [16.3.0](https://www.npmjs.com/package/@plone/volto/v/16.3.0).  See the [changelog](https://github.com/plone/volto/blob/16.3.0/CHANGELOG.md).
+Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
+The ClassicUI is still available when you only run the Python process.
 
 
 ## Python compatibility
 
 This release supports Python 3.8, 3.9, 3.10, and 3.11.
 
-Python 3.11.0 was released in October and we are proud to already be able to say Plone supports it!  All tests pass.
-This is expected to be faster than other Python versions.
-Note that not all add-ons may work yet on 3.11, but in most cases the needed changes should be small.
-
-A big thank you for this goes to the Zope part of the Plone community, especially Jens Vagelpohl and Michael Howitz.
-The trickiest parts of the fixes for 3.11 were needed on the Zope level, for example `RestrictedPython` and packages with C code.
-
-A word of warning: Plone on 3.11 should work fine on Linux, but you may have *trouble installing it on Windows and Mac*.
-Forgive me for using some technical terms here.
-The problem is Python packages that have C code.  Not all these packages may have "wheels" (a Python distribution file) available for your operating system and architecture.
-
-* On Windows you may not be able to install the `lxml` dependency.  A new 4.9.2 release should fix this.
-
-* On Mac, a package may have a wheel for the Intel architecture and not for ARM, or the other way around, or your Mac may need an unavailable "universal2" wheel.
-
-In all cases, if you have the right compilers and other development tools available, then you should be able to get it working on Windows and Mac, but this can be tricky.  If you don't want to spend hours, you may want to wait a bit.
-
 
 ## Installation
 
 For installation instructions, see the [documentation](https://6.dev-docs.plone.org/install/index.html).
 This documentation is under development, but this should get you up and running.  No worries.
+We expect to switch https://docs.plone.org to show the Plone 6 documentation sometime this week.
+
+
+## Final release date: December 12, 2022
+
+Unless blocking issues are found that require more work, we expect to release Plone 6.0.0 final one week from now:
+December 12, 2022.
+
+If you find any issues, blocking or not, please report them in the [main issue tracker](https://github.com/plone/Products.CMFPlone/issues).
