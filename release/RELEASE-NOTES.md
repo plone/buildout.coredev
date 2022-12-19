@@ -1,6 +1,6 @@
 # Release notes for Plone 5.2.10.1
 
-* Released: Friday December 16, 2022
+* Released: Monday December 19, 2022
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://5.docs.plone.org/manage/upgrading/version_specific_migration/upgrade_to_52.html), explaining the biggest changes compared to 5.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/5.2.10.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.10.1/changelog.txt).
@@ -15,7 +15,7 @@ For technical wizards who want to jump straight in, here are two important links
 
 Major changes since 5.2.10:
 
-* Zope: Security fix for a Cross Site Scripting vulnerability. See [announcement](https://community.plone.org/t/zope-4-8-4-and-5-7-1-released/15992).
+* Zope: Security fix for a Cross Site Scripting vulnerability. See [announcement](https://community.plone.org/t/zope-4-8-4-and-5-7-1-released/15992).  The security fix is in Zope 4.8.4, but there were a few regressions, so we use 4.8.6.
 * plone.protect: fix test that failed after the security fix.
 
 
