@@ -23,6 +23,7 @@ Major changes since 6.0.0:
   * Add pt_BR and fr translations.
 * `plone.base`: Add missing TinyMCE plugin `autolink` to selectable plugins.
 * `Products.CMFPlone`: When autologin after password reset is enabled (this is the default), use the same adapters as during normal login. Specifically: the `IInitialLogin` and `IRedirectAfterLogin` adapters.
+* `plone.recipe.zope2instance`: Add new option `asyncore_use_poll` to waitress config file. You might need this when you have fast-listen enabled, which is the default, and run into [100% cpu usage on all Plone instances](https://github.com/plone/plone.recipe.zope2instance/issues/188).  But investigation on that problem is ongoing.
 * More Zope community packages have gotten official, tested Python 3.11 support.
 
 
