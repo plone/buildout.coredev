@@ -1,3 +1,5 @@
 #/bin/sh
 `which python3.11` -m venv .
-./bin/pip install -r ../../requirements.txt
+cd ../../
+./venvs/311/bin/pip install -r
+./venvs/311/bin/pip install -r requirements-plone.txt
