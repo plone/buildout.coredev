@@ -18,11 +18,11 @@ for (key, value) in buildout["remotes"].items():
 
 checkouts = configparser.ConfigParser()
 checkouts.read("checkouts.cfg")
-auto_checkouts = checkouts["buildout"]["auto-checkout"].splitlines()
-
+auto_checkouts = checkouts["buildout"]["auto-checkout"].lower().splitlines()
 for (key, value) in buildout["sources"].items():
     # Something like:
     # ('docs', 'git ${remotes:plone}/documentation.git pushurl=${remotes:plone_push}/documentation.git egg=false branch=6-dev path=${buildout:docs-directory}')
+    key = key.lower()
     if key not in mxdev.sections():
         mxdev.add_section(key)
     section = mxdev[key]
