@@ -6,7 +6,8 @@ python3.11 -mvenv .
 bin/pip install -U pip setuptools wheel -c https://dist.plone.org/release/6.0.1/constraints.txt
 bin/pip install Plone -c https://dist.plone.org/release/6.0.1/constraints.txt
 bin/pip freeze --exclude-editable > installed.txt
-curl -o zope.txt https://zopefoundation.github.io/Zope/releases/5.8/constraints.txt
+# We actually download and commit the Zope constraints now.
+# curl -o zope-constraints.txt https://zopefoundation.github.io/Zope/releases/5.8/constraints.txt
 
 Usage:
 
@@ -17,7 +18,7 @@ TODO: use tomli to directly write it.
 """
 with open("installed.txt") as myfile:
     installed = myfile.read().splitlines()
-with open("zope.txt") as myfile:
+with open("zope-constraints.txt") as myfile:
     zope = myfile.read().splitlines()
 dependencies = []
 for package in installed:
