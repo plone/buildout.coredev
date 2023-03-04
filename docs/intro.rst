@@ -42,13 +42,13 @@ The first step in fixing a bug is getting this `buildout <https://github.com/plo
 We recommend fixing the bug on the latest branch and then `backporting <http://en.wikipedia.org/wiki/Backporting>`_ as necessary.
 `GitHub <https://github.com/plone/buildout.coredev/>`_ by default always points to the currently active branch.
 Dependent on the current development cycle there may exist a future branch.
-I.e. 5.2 is the actively maintained stable branch and 6.0 is the future, currently unstable, active development branch.
+I.e. 6.0 is the actively maintained stable branch and 6.1 is the future, currently unstable, active development branch.
 More information on switching release branches is below.
 
 To set up a plone 6 development environment::
 
   > cd ~/buildouts # or wherever you want to put things
-  > git clone -b 6.0 https://github.com/plone/buildout.coredev ./plone6devel
+  > git clone -b 6.1 https://github.com/plone/buildout.coredev ./plone6devel
   > cd ./plone6devel
   > ./bootstrap.sh
 

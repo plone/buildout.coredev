@@ -1,7 +1,7 @@
 #!/bin/sh
 # This script uses pyenv to install specific virtualenv
-PY="3.10.6"
-VENVBASE="plone-coredev-6.0"
+PY="3.11.2"
+VENVBASE="plone-coredev-6.1"
 
 eval "$(pyenv init -)"
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
