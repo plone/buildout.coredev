@@ -1,33 +1,82 @@
-Repository: plone.restapi
+Repository: plone.app.multilingual
 
 
 Branch: refs/heads/master
-Date: 2023-03-10T06:39:25+01:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.restapi/commit/09e6a31ea978115f2cb3348b5bd613acbfa5697a
+Date: 2023-03-09T16:44:31-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/2f714bd31cb77c01cbc3fb934398131dd2c25531
 
-Preparing release 8.35.2
+Only copy language-independent field values if they have changed
 
 Files changed:
-M CHANGES.rst
-M setup.py
-D news/4395.bugfix
-D news/903.bugfix
+M src/plone/app/multilingual/dx/cloner.py
+M src/plone/app/multilingual/tests/test_lif.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 1d1356755..95343488b 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,18 @@ Changelog\n \n .. towncrier release notes start\n \n+8.35.2 (2023-03-10)\n+-------------------\n+\n+Bug fixes:\n+\n+\n+- Fix missing `Decimal` field deserializer.\n+  [jensens] (#903)\n+- Fix translation of the error message for a password that is too short while\n+  adding a user. [davisagli] (#4395)\n+\n+\n 8.35.1 (2023-03-02)\n -------------------\n \ndiff --git a/news/4395.bugfix b/news/4395.bugfix\ndeleted file mode 100644\nindex 0101d1241..000000000\n--- a/news/4395.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Fix translation of the error message for a password that is too short while\n-adding a user. [davisagli]\ndiff --git a/news/903.bugfix b/news/903.bugfix\ndeleted file mode 100644\nindex 3a0b13b66..000000000\n--- a/news/903.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Fix missing `Decimal` field deserializer.\n-[jensens]\ndiff --git a/setup.py b/setup.py\nindex 064675183..fadb00150 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,7 +1,7 @@\n from setuptools import setup, find_packages\n import sys\n \n-version = "8.35.2.dev0"\n+version = "8.35.2"\n \n assert sys.version_info >= (\n     3,\n'
+b'diff --git a/src/plone/app/multilingual/dx/cloner.py b/src/plone/app/multilingual/dx/cloner.py\nindex c556be9ce..907622121 100644\n--- a/src/plone/app/multilingual/dx/cloner.py\n+++ b/src/plone/app/multilingual/dx/cloner.py\n@@ -50,19 +50,26 @@ def copy_relation(self, relation_value, target_language):\n         return RelationValue(intids.getId(obj))\n \n     def copy_fields(self, translation):\n-        doomed = False\n+        changed = False\n \n         target_language = queryAdapter(translation, ILanguage).get_language()\n \n         for schema in iterSchemata(self.context):\n             for field_name in schema:\n+                context_adapter = None\n+                translation_adapter = None\n                 if ILanguageIndependentField.providedBy(schema[field_name]):\n-                    value = getattr(schema(self.context), field_name, _marker)\n+                    if context_adapter is None:\n+                        context_adapter = schema(self.context)\n+                    value = getattr(context_adapter, field_name, _marker)\n+                    field_changed = None\n                     if value == _marker:\n                         continue\n                     elif IRelationValue.providedBy(value):\n+                        field_changed = True\n                         value = self.copy_relation(value, target_language)\n                     elif IRelationList.providedBy(schema[field_name]):\n+                        field_changed = True\n                         if not value:\n                             value = []\n                         else:\n@@ -75,10 +82,21 @@ def copy_fields(self, translation):\n                                     new_value.append(copied_relation)\n                             value = new_value\n \n-                    doomed = True\n-                    setattr(schema(translation), field_name, safe_unicode(value))\n+                    if translation_adapter is None:\n+                        translation_adapter = schema(translation)\n+\n+                    # We only want to store a new value if it has changed.\n+                    # In general we can compare equality of the new value to the one on the translation.\n+                    # But RelationValue.__eq__ is broken if the relation doesn\'t have a from_object,\n+                    # so for now we force field_changed to True for relations above.\n+                    if field_changed is None:\n+                        translation_value = getattr(translation_adapter, field_name, _marker)\n+                        field_changed = value != translation_value\n+                    if field_changed:\n+                        changed = True\n+                        setattr(translation_adapter, field_name, safe_unicode(value))\n \n         # If at least one field has been copied over to the translation\n         # we need to inform subscriber to trigger an ObjectModifiedEvent\n         # on that translation.\n-        return doomed\n+        return changed\ndiff --git a/src/plone/app/multilingual/tests/test_lif.py b/src/plone/app/multilingual/tests/test_lif.py\nindex f007c2992..31ddc4957 100644\n--- a/src/plone/app/multilingual/tests/test_lif.py\n+++ b/src/plone/app/multilingual/tests/test_lif.py\n@@ -14,11 +14,12 @@\n from zope.event import notify\n from zope.interface import alsoProvides\n from zope.interface import noLongerProvides\n-from zope.lifecycleevent import ObjectModifiedEvent\n+from zope.lifecycleevent import ObjectModifiedEvent, modified\n from zope.pagetemplate.interfaces import IPageTemplate\n from zope.publisher.interfaces.browser import IDefaultBrowserLayer\n from zope.schema._bootstrapinterfaces import RequiredMissing\n \n+import transaction\n import unittest\n \n \n@@ -148,6 +149,26 @@ def test_input_widget_does_not_render_textarea_but_span(self):\n         )\n         self.assertNotIn("<textarea", widget_template(self.widget))\n \n+    def test_field_copied_to_translation_when_modified(self):\n+        en_feedback = self.portal.en["test-feedback"]\n+        ca_feedback = api.translate(en_feedback, "ca")\n+        del en_feedback.REQUEST.translation_info\n+\n+        en_feedback.mandatory_feedback = "modified"\n+        modified(en_feedback)\n+        self.assertEqual(ca_feedback.mandatory_feedback, "modified")\n+\n+    def test_field_not_copied_if_not_modified(self):\n+        en_feedback = self.portal.en["test-feedback"]\n+        ca_feedback = api.translate(en_feedback, "ca")\n+        del en_feedback.REQUEST.translation_info\n+\n+        # commit changes so far, so that we can check to see\n+        # if the translation was updated\n+        transaction.commit()\n+        modified(en_feedback)\n+        self.assertNotIn(ca_feedback, self.portal._p_jar._registered_objects)\n+\n \n class TestLanguageIndependentRelationField(unittest.TestCase):\n \n'
 
-Repository: plone.restapi
+Repository: plone.app.multilingual
 
 
 Branch: refs/heads/master
-Date: 2023-03-10T06:41:35+01:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.restapi/commit/0752f0213cf5cf354ebffe8368d3cf7b0eca96f4
+Date: 2023-03-09T16:47:21-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/f0afc9a8f0946e9467a9c511f39409a9a737a184
 
-Back to development: 8.35.3
+changelog
 
 Files changed:
-M setup.py
+A news/408.bugfix
 
-b'diff --git a/setup.py b/setup.py\nindex fadb00150..e6cd84959 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,7 +1,7 @@\n from setuptools import setup, find_packages\n import sys\n \n-version = "8.35.2"\n+version = "8.35.3.dev0"\n \n assert sys.version_info >= (\n     3,\n'
+b'diff --git a/news/408.bugfix b/news/408.bugfix\nnew file mode 100644\nindex 000000000..75411c536\n--- /dev/null\n+++ b/news/408.bugfix\n@@ -0,0 +1 @@\n+When an item is modified, only copy language-independent field values to translations if they have changed. [davisagli]\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2023-03-09T16:55:24-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/ebde67998b69ef4034cdb88cb5d382e852c27b14
+
+Fix my optimization for adapter lookups
+
+Files changed:
+M src/plone/app/multilingual/dx/cloner.py
+
+b'diff --git a/src/plone/app/multilingual/dx/cloner.py b/src/plone/app/multilingual/dx/cloner.py\nindex 90762212..2a776fef 100644\n--- a/src/plone/app/multilingual/dx/cloner.py\n+++ b/src/plone/app/multilingual/dx/cloner.py\n@@ -55,9 +55,9 @@ def copy_fields(self, translation):\n         target_language = queryAdapter(translation, ILanguage).get_language()\n \n         for schema in iterSchemata(self.context):\n+            context_adapter = None\n+            translation_adapter = None\n             for field_name in schema:\n-                context_adapter = None\n-                translation_adapter = None\n                 if ILanguageIndependentField.providedBy(schema[field_name]):\n                     if context_adapter is None:\n                         context_adapter = schema(self.context)\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2023-03-10T07:29:48-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/037f5a9a5d72c16829b7628f09f464c660dcf9ed
+
+Update src/plone/app/multilingual/tests/test_lif.py
+
+Co-authored-by: Jens W. Klein &lt;jk@kleinundpartner.at&gt;
+
+Files changed:
+M src/plone/app/multilingual/tests/test_lif.py
+
+b'diff --git a/src/plone/app/multilingual/tests/test_lif.py b/src/plone/app/multilingual/tests/test_lif.py\nindex 31ddc495..1943a6b2 100644\n--- a/src/plone/app/multilingual/tests/test_lif.py\n+++ b/src/plone/app/multilingual/tests/test_lif.py\n@@ -14,7 +14,8 @@\n from zope.event import notify\n from zope.interface import alsoProvides\n from zope.interface import noLongerProvides\n-from zope.lifecycleevent import ObjectModifiedEvent, modified\n+from zope.lifecycleevent import modified\n+from zope.lifecycleevent import ObjectModifiedEvent\n from zope.pagetemplate.interfaces import IPageTemplate\n from zope.publisher.interfaces.browser import IDefaultBrowserLayer\n from zope.schema._bootstrapinterfaces import RequiredMissing\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2023-03-10T07:30:24-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/eef38d678ed7534bd15906aa92b0bb032d0cb22b
+
+Merge pull request #409 from plone/davisagli-perf-lif
+
+Performance: Avoid unnecessary work copying unchanged language-independent fields
+
+Files changed:
+A news/408.bugfix
+M src/plone/app/multilingual/dx/cloner.py
+M src/plone/app/multilingual/tests/test_lif.py
+
+b'diff --git a/news/408.bugfix b/news/408.bugfix\nnew file mode 100644\nindex 000000000..75411c536\n--- /dev/null\n+++ b/news/408.bugfix\n@@ -0,0 +1 @@\n+When an item is modified, only copy language-independent field values to translations if they have changed. [davisagli]\ndiff --git a/src/plone/app/multilingual/dx/cloner.py b/src/plone/app/multilingual/dx/cloner.py\nindex c556be9ce..2a776fef5 100644\n--- a/src/plone/app/multilingual/dx/cloner.py\n+++ b/src/plone/app/multilingual/dx/cloner.py\n@@ -50,19 +50,26 @@ def copy_relation(self, relation_value, target_language):\n         return RelationValue(intids.getId(obj))\n \n     def copy_fields(self, translation):\n-        doomed = False\n+        changed = False\n \n         target_language = queryAdapter(translation, ILanguage).get_language()\n \n         for schema in iterSchemata(self.context):\n+            context_adapter = None\n+            translation_adapter = None\n             for field_name in schema:\n                 if ILanguageIndependentField.providedBy(schema[field_name]):\n-                    value = getattr(schema(self.context), field_name, _marker)\n+                    if context_adapter is None:\n+                        context_adapter = schema(self.context)\n+                    value = getattr(context_adapter, field_name, _marker)\n+                    field_changed = None\n                     if value == _marker:\n                         continue\n                     elif IRelationValue.providedBy(value):\n+                        field_changed = True\n                         value = self.copy_relation(value, target_language)\n                     elif IRelationList.providedBy(schema[field_name]):\n+                        field_changed = True\n                         if not value:\n                             value = []\n                         else:\n@@ -75,10 +82,21 @@ def copy_fields(self, translation):\n                                     new_value.append(copied_relation)\n                             value = new_value\n \n-                    doomed = True\n-                    setattr(schema(translation), field_name, safe_unicode(value))\n+                    if translation_adapter is None:\n+                        translation_adapter = schema(translation)\n+\n+                    # We only want to store a new value if it has changed.\n+                    # In general we can compare equality of the new value to the one on the translation.\n+                    # But RelationValue.__eq__ is broken if the relation doesn\'t have a from_object,\n+                    # so for now we force field_changed to True for relations above.\n+                    if field_changed is None:\n+                        translation_value = getattr(translation_adapter, field_name, _marker)\n+                        field_changed = value != translation_value\n+                    if field_changed:\n+                        changed = True\n+                        setattr(translation_adapter, field_name, safe_unicode(value))\n \n         # If at least one field has been copied over to the translation\n         # we need to inform subscriber to trigger an ObjectModifiedEvent\n         # on that translation.\n-        return doomed\n+        return changed\ndiff --git a/src/plone/app/multilingual/tests/test_lif.py b/src/plone/app/multilingual/tests/test_lif.py\nindex f007c2992..1943a6b21 100644\n--- a/src/plone/app/multilingual/tests/test_lif.py\n+++ b/src/plone/app/multilingual/tests/test_lif.py\n@@ -14,11 +14,13 @@\n from zope.event import notify\n from zope.interface import alsoProvides\n from zope.interface import noLongerProvides\n+from zope.lifecycleevent import modified\n from zope.lifecycleevent import ObjectModifiedEvent\n from zope.pagetemplate.interfaces import IPageTemplate\n from zope.publisher.interfaces.browser import IDefaultBrowserLayer\n from zope.schema._bootstrapinterfaces import RequiredMissing\n \n+import transaction\n import unittest\n \n \n@@ -148,6 +150,26 @@ def test_input_widget_does_not_render_textarea_but_span(self):\n         )\n         self.assertNotIn("<textarea", widget_template(self.widget))\n \n+    def test_field_copied_to_translation_when_modified(self):\n+        en_feedback = self.portal.en["test-feedback"]\n+        ca_feedback = api.translate(en_feedback, "ca")\n+        del en_feedback.REQUEST.translation_info\n+\n+        en_feedback.mandatory_feedback = "modified"\n+        modified(en_feedback)\n+        self.assertEqual(ca_feedback.mandatory_feedback, "modified")\n+\n+    def test_field_not_copied_if_not_modified(self):\n+        en_feedback = self.portal.en["test-feedback"]\n+        ca_feedback = api.translate(en_feedback, "ca")\n+        del en_feedback.REQUEST.translation_info\n+\n+        # commit changes so far, so that we can check to see\n+        # if the translation was updated\n+        transaction.commit()\n+        modified(en_feedback)\n+        self.assertNotIn(ca_feedback, self.portal._p_jar._registered_objects)\n+\n \n class TestLanguageIndependentRelationField(unittest.TestCase):\n \n'
 
