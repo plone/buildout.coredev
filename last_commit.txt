@@ -1,38 +1,74 @@
-Repository: plone.base
+Repository: plone.session
 
 
-Branch: refs/heads/main
-Date: 2023-03-10T20:39:32+01:00
+Branch: refs/heads/master
+Date: 2023-03-11T18:03:19+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.base/commit/b6c0c16098318cc8a6e4e0423a0f7eed2a5fb546
+Commit: https://github.com/plone/plone.session/commit/71ab353880c6e814d767e6393d61a6afea450b1d
 
-Move plone.app.layout.navigation.root to here
+Fix circular dependency on CMFPlone.
 
 Files changed:
-A news/navigationroot.feature
-A src/plone/base/navigationroot.py
-M README.rst
-M setup.cfg
+M plone/session/configure.zcml
+M plone/session/hiddenprofiles.py
+M plone/session/profiles/default/registry.xml
+M plone/session/profiles/uninstall/registry.xml
+M setup.py
 
-b'diff --git a/README.rst b/README.rst\nindex c926b40..12d5a07 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -31,6 +31,10 @@ In details this package contains:\n     A subset of commonly used and low-dependency utilities.\n     In Plone 5 and below those been at ``Products.CMFPlone.utils`` (but not all were moved).\n \n+``navigationroot`` (module)\n+    Plone specific handling of navigation roots.\n+    Before those been at ``plone.app.layout.navigation.root``.\n+\n ``__init__``\n     ``PloneMessageFactory`` with ``plone`` i18n-domain and ``PloneLocalesMessageFactory`` with ``plonelocales`` domain.\n     In Plone 5 and below this was at ``Products.CMFPlone.__init__``.\ndiff --git a/news/navigationroot.feature b/news/navigationroot.feature\nnew file mode 100644\nindex 0000000..40b7224\n--- /dev/null\n+++ b/news/navigationroot.feature\n@@ -0,0 +1,4 @@\n+Move `plone.app.layout.navigation.root.getNavigationRoot` to `.navigationroot.get_navigation_root`.\n+Move `plone.app.layout.navigation.root.getNavigationRootObject` to `.navigationroot.get_navigation_root_object`.\n+Both are essential basic functions in Plone and not layout related at all.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/setup.cfg b/setup.cfg\nindex 6bf840a..729d58c 100644\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1,5 +1,5 @@\n [metadata]\n-version = 1.0.4.dev0\n+version = 1.1.0.dev0\n name = plone.base\n description = Plone Interface contracts, plus basic features and utilities\n long_description = file: README.rst, CHANGES.rst\ndiff --git a/src/plone/base/navigationroot.py b/src/plone/base/navigationroot.py\nnew file mode 100644\nindex 0000000..47d3cb5\n--- /dev/null\n+++ b/src/plone/base/navigationroot.py\n@@ -0,0 +1,64 @@\n+from Acquisition import aq_base\n+from Acquisition import aq_inner\n+from Acquisition import aq_parent\n+from plone.base.interfaces import INavigationRoot\n+from plone.registry.interfaces import IRegistry\n+from Products.CMFCore.utils import getToolByName\n+from zope.component import getUtility\n+from zope.component.hooks import getSite\n+\n+\n+def get_navigation_root(context, relativeRoot=None):\n+    """Get the path to the root of the navigation tree.\n+\n+    If a relativeRoot argument is provided, navigation root is computed from\n+    portal path and this relativeRoot.\n+\n+    If no relativeRoot argument is provided, and there is a root value set in\n+    portal_properties, navigation root path is computed from\n+    portal path and this root value.\n+\n+    IMPORTANT !!!\n+    Previous paragraphs imply relativeRoot is relative to the Plone portal.\n+\n+    Else, a root must be computed: loop from the context to the portal,\n+    through parents, looking for an object implementing INavigationRoot.\n+    Return the path of that root.\n+    """\n+    try:\n+        # URLTool is a portal tool from CMFCore\n+        portal_url = getToolByName(context, "portal_url")\n+    except AttributeError:\n+        return "/".join(getSite().getPhysicalPath())\n+\n+    if relativeRoot is None:\n+        # fetch from portal_properties\n+        registry = getUtility(IRegistry)\n+        relativeRoot = registry.get("plone.root", None)\n+\n+    # if relativeRoot has a meaningful value,\n+    if relativeRoot and relativeRoot != "/":\n+        # use it\n+\n+        # while taking care of case where\n+        # relativeRoot is not starting with a \'/\'\n+        if relativeRoot[0] != "/":\n+            relativeRoot = "/" + relativeRoot\n+\n+        portalPath = portal_url.getPortalPath()\n+        return portalPath + relativeRoot\n+\n+    # compute the root\n+    portal = portal_url.getPortalObject()\n+    root = get_navigation_root_object(context, portal)\n+    return "/".join(root.getPhysicalPath())\n+\n+\n+def get_navigation_root_object(context, portal):\n+    obj = context\n+    while not INavigationRoot.providedBy(obj) and aq_base(obj) is not aq_base(portal):\n+        parent = aq_parent(aq_inner(obj))\n+        if parent is None:\n+            return obj\n+        obj = parent\n+    return obj\n'
+b'diff --git a/plone/session/configure.zcml b/plone/session/configure.zcml\nindex 0b40a0e..844cbb2 100644\n--- a/plone/session/configure.zcml\n+++ b/plone/session/configure.zcml\n@@ -12,7 +12,7 @@\n   <include file="resources.zcml" />\n   <include\n       file="profiles.zcml"\n-      zcml:condition="installed Products.CMFPlone"\n+      zcml:condition="installed plone.base"\n   />\n \n </configure>\ndiff --git a/plone/session/hiddenprofiles.py b/plone/session/hiddenprofiles.py\nindex 1068269..a950d72 100644\n--- a/plone/session/hiddenprofiles.py\n+++ b/plone/session/hiddenprofiles.py\n@@ -1,4 +1,4 @@\n-from Products.CMFPlone.interfaces import INonInstallable\n+from plone.base.interfaces import INonInstallable\n from zope.interface import implementer\n \n \ndiff --git a/plone/session/profiles/default/registry.xml b/plone/session/profiles/default/registry.xml\nindex 2031f0e..f3426b8 100644\n--- a/plone/session/profiles/default/registry.xml\n+++ b/plone/session/profiles/default/registry.xml\n@@ -6,7 +6,7 @@\n   ===============================\n   -->\n   <records\n-      interface="Products.CMFPlone.interfaces.IBundleRegistry"\n+      interface="plone.base.interfaces.IBundleRegistry"\n       prefix="plone.bundles/plone-session">\n     <value key="enabled">True</value>\n     <value key="jscompilation">++resource++plone.session.refreshsupport.js</value>\ndiff --git a/plone/session/profiles/uninstall/registry.xml b/plone/session/profiles/uninstall/registry.xml\nindex 6dfe299..f82bf15 100644\n--- a/plone/session/profiles/uninstall/registry.xml\n+++ b/plone/session/profiles/uninstall/registry.xml\n@@ -2,7 +2,7 @@\n <registry>\n \n   <records\n-      interface="Products.CMFPlone.interfaces.IBundleRegistry"\n+      interface="plone.base.interfaces.IBundleRegistry"\n       prefix="plone.bundles/plone-session"\n       remove="true">\n   </records>\ndiff --git a/setup.py b/setup.py\nindex 5a10e4f..6447eeb 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -45,15 +45,11 @@\n         ]\n     ),\n     install_requires=[\n-        "AccessControl",\n         "plone.keyring",\n         "plone.protect",\n         "Products.GenericSetup",\n-        "Products.CMFPlone",\n         "Products.PluggableAuthService",\n         "setuptools",\n-        "zope.component",\n-        "zope.interface",\n         "Zope",\n     ],\n )\n'
 
-Repository: plone.base
+Repository: plone.session
 
 
-Branch: refs/heads/main
-Date: 2023-03-11T10:23:31+01:00
+Branch: refs/heads/master
+Date: 2023-03-11T18:04:05+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.base/commit/c7ef3df4b35bbdbeff7bb14721b1678654f657c4
+Commit: https://github.com/plone/plone.session/commit/866bfceaddd288b1931d278745068808c3574b27
 
-Merge pull request #30 from plone/navroot
-
-Move plone.app.layout.navigation.root to here
+black
 
 Files changed:
-A news/navigationroot.feature
-A src/plone/base/navigationroot.py
-M README.rst
-M setup.cfg
+M plone/session/tests/testPAS.py
+M plone/session/tktauth.py
 
-b'diff --git a/README.rst b/README.rst\nindex c926b40..12d5a07 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -31,6 +31,10 @@ In details this package contains:\n     A subset of commonly used and low-dependency utilities.\n     In Plone 5 and below those been at ``Products.CMFPlone.utils`` (but not all were moved).\n \n+``navigationroot`` (module)\n+    Plone specific handling of navigation roots.\n+    Before those been at ``plone.app.layout.navigation.root``.\n+\n ``__init__``\n     ``PloneMessageFactory`` with ``plone`` i18n-domain and ``PloneLocalesMessageFactory`` with ``plonelocales`` domain.\n     In Plone 5 and below this was at ``Products.CMFPlone.__init__``.\ndiff --git a/news/navigationroot.feature b/news/navigationroot.feature\nnew file mode 100644\nindex 0000000..40b7224\n--- /dev/null\n+++ b/news/navigationroot.feature\n@@ -0,0 +1,4 @@\n+Move `plone.app.layout.navigation.root.getNavigationRoot` to `.navigationroot.get_navigation_root`.\n+Move `plone.app.layout.navigation.root.getNavigationRootObject` to `.navigationroot.get_navigation_root_object`.\n+Both are essential basic functions in Plone and not layout related at all.\n+[jensens]\n\\ No newline at end of file\ndiff --git a/setup.cfg b/setup.cfg\nindex 6bf840a..729d58c 100644\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1,5 +1,5 @@\n [metadata]\n-version = 1.0.4.dev0\n+version = 1.1.0.dev0\n name = plone.base\n description = Plone Interface contracts, plus basic features and utilities\n long_description = file: README.rst, CHANGES.rst\ndiff --git a/src/plone/base/navigationroot.py b/src/plone/base/navigationroot.py\nnew file mode 100644\nindex 0000000..47d3cb5\n--- /dev/null\n+++ b/src/plone/base/navigationroot.py\n@@ -0,0 +1,64 @@\n+from Acquisition import aq_base\n+from Acquisition import aq_inner\n+from Acquisition import aq_parent\n+from plone.base.interfaces import INavigationRoot\n+from plone.registry.interfaces import IRegistry\n+from Products.CMFCore.utils import getToolByName\n+from zope.component import getUtility\n+from zope.component.hooks import getSite\n+\n+\n+def get_navigation_root(context, relativeRoot=None):\n+    """Get the path to the root of the navigation tree.\n+\n+    If a relativeRoot argument is provided, navigation root is computed from\n+    portal path and this relativeRoot.\n+\n+    If no relativeRoot argument is provided, and there is a root value set in\n+    portal_properties, navigation root path is computed from\n+    portal path and this root value.\n+\n+    IMPORTANT !!!\n+    Previous paragraphs imply relativeRoot is relative to the Plone portal.\n+\n+    Else, a root must be computed: loop from the context to the portal,\n+    through parents, looking for an object implementing INavigationRoot.\n+    Return the path of that root.\n+    """\n+    try:\n+        # URLTool is a portal tool from CMFCore\n+        portal_url = getToolByName(context, "portal_url")\n+    except AttributeError:\n+        return "/".join(getSite().getPhysicalPath())\n+\n+    if relativeRoot is None:\n+        # fetch from portal_properties\n+        registry = getUtility(IRegistry)\n+        relativeRoot = registry.get("plone.root", None)\n+\n+    # if relativeRoot has a meaningful value,\n+    if relativeRoot and relativeRoot != "/":\n+        # use it\n+\n+        # while taking care of case where\n+        # relativeRoot is not starting with a \'/\'\n+        if relativeRoot[0] != "/":\n+            relativeRoot = "/" + relativeRoot\n+\n+        portalPath = portal_url.getPortalPath()\n+        return portalPath + relativeRoot\n+\n+    # compute the root\n+    portal = portal_url.getPortalObject()\n+    root = get_navigation_root_object(context, portal)\n+    return "/".join(root.getPhysicalPath())\n+\n+\n+def get_navigation_root_object(context, portal):\n+    obj = context\n+    while not INavigationRoot.providedBy(obj) and aq_base(obj) is not aq_base(portal):\n+        parent = aq_parent(aq_inner(obj))\n+        if parent is None:\n+            return obj\n+        obj = parent\n+    return obj\n'
+b'diff --git a/plone/session/tests/testPAS.py b/plone/session/tests/testPAS.py\nindex 97674f8..8872042 100644\n--- a/plone/session/tests/testPAS.py\n+++ b/plone/session/tests/testPAS.py\n@@ -27,7 +27,6 @@ def setCookie(\n \n \n class TestSessionPlugin(unittest.TestCase):\n-\n     layer = PLONE_SEESION_FUNCTIONAL_TESTING\n     userid = "jbloggs"\n \ndiff --git a/plone/session/tktauth.py b/plone/session/tktauth.py\nindex 85b817f..0637c09 100755\n--- a/plone/session/tktauth.py\n+++ b/plone/session/tktauth.py\n@@ -163,7 +163,7 @@ def safe_text(value, encoding="utf-8"):\n     elif isinstance(value, bytes):\n         try:\n             value = str(value, encoding)\n-        except (UnicodeDecodeError):\n+        except UnicodeDecodeError:\n             value = value.decode("utf-8", "replace")\n     return value\n \n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2023-03-11T18:04:51+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.session/commit/e4eada2bc54e98277dc5a3fc050f81cfb5ddde3c
+
+document changes
+
+Files changed:
+A news/38.bugfix
+
+b'diff --git a/news/38.bugfix b/news/38.bugfix\nnew file mode 100644\nindex 0000000..ead4a22\n--- /dev/null\n+++ b/news/38.bugfix\n@@ -0,0 +1,2 @@\n+Remove circular dependency on Products.CMFPlone. Use moved imports from plone.base instead.\n+[jensens]\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2023-03-11T22:49:56+01:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/c9bd6da9319cfced7513ec9a1d4c2b67e8fe1882
+
+Merge pull request #38 from plone/fix-circular-dependency-CMFPlone
+
+Fix circular dependency on CMFPlone.
+
+Files changed:
+A news/38.bugfix
+M plone/session/configure.zcml
+M plone/session/hiddenprofiles.py
+M plone/session/profiles/default/registry.xml
+M plone/session/profiles/uninstall/registry.xml
+M plone/session/tests/testPAS.py
+M plone/session/tktauth.py
+M setup.py
+
+b'diff --git a/news/38.bugfix b/news/38.bugfix\nnew file mode 100644\nindex 0000000..ead4a22\n--- /dev/null\n+++ b/news/38.bugfix\n@@ -0,0 +1,2 @@\n+Remove circular dependency on Products.CMFPlone. Use moved imports from plone.base instead.\n+[jensens]\ndiff --git a/plone/session/configure.zcml b/plone/session/configure.zcml\nindex 0b40a0e..844cbb2 100644\n--- a/plone/session/configure.zcml\n+++ b/plone/session/configure.zcml\n@@ -12,7 +12,7 @@\n   <include file="resources.zcml" />\n   <include\n       file="profiles.zcml"\n-      zcml:condition="installed Products.CMFPlone"\n+      zcml:condition="installed plone.base"\n   />\n \n </configure>\ndiff --git a/plone/session/hiddenprofiles.py b/plone/session/hiddenprofiles.py\nindex 1068269..a950d72 100644\n--- a/plone/session/hiddenprofiles.py\n+++ b/plone/session/hiddenprofiles.py\n@@ -1,4 +1,4 @@\n-from Products.CMFPlone.interfaces import INonInstallable\n+from plone.base.interfaces import INonInstallable\n from zope.interface import implementer\n \n \ndiff --git a/plone/session/profiles/default/registry.xml b/plone/session/profiles/default/registry.xml\nindex 2031f0e..f3426b8 100644\n--- a/plone/session/profiles/default/registry.xml\n+++ b/plone/session/profiles/default/registry.xml\n@@ -6,7 +6,7 @@\n   ===============================\n   -->\n   <records\n-      interface="Products.CMFPlone.interfaces.IBundleRegistry"\n+      interface="plone.base.interfaces.IBundleRegistry"\n       prefix="plone.bundles/plone-session">\n     <value key="enabled">True</value>\n     <value key="jscompilation">++resource++plone.session.refreshsupport.js</value>\ndiff --git a/plone/session/profiles/uninstall/registry.xml b/plone/session/profiles/uninstall/registry.xml\nindex 6dfe299..f82bf15 100644\n--- a/plone/session/profiles/uninstall/registry.xml\n+++ b/plone/session/profiles/uninstall/registry.xml\n@@ -2,7 +2,7 @@\n <registry>\n \n   <records\n-      interface="Products.CMFPlone.interfaces.IBundleRegistry"\n+      interface="plone.base.interfaces.IBundleRegistry"\n       prefix="plone.bundles/plone-session"\n       remove="true">\n   </records>\ndiff --git a/plone/session/tests/testPAS.py b/plone/session/tests/testPAS.py\nindex 97674f8..8872042 100644\n--- a/plone/session/tests/testPAS.py\n+++ b/plone/session/tests/testPAS.py\n@@ -27,7 +27,6 @@ def setCookie(\n \n \n class TestSessionPlugin(unittest.TestCase):\n-\n     layer = PLONE_SEESION_FUNCTIONAL_TESTING\n     userid = "jbloggs"\n \ndiff --git a/plone/session/tktauth.py b/plone/session/tktauth.py\nindex 85b817f..0637c09 100755\n--- a/plone/session/tktauth.py\n+++ b/plone/session/tktauth.py\n@@ -163,7 +163,7 @@ def safe_text(value, encoding="utf-8"):\n     elif isinstance(value, bytes):\n         try:\n             value = str(value, encoding)\n-        except (UnicodeDecodeError):\n+        except UnicodeDecodeError:\n             value = value.decode("utf-8", "replace")\n     return value\n \ndiff --git a/setup.py b/setup.py\nindex 5a10e4f..6447eeb 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -45,15 +45,11 @@\n         ]\n     ),\n     install_requires=[\n-        "AccessControl",\n         "plone.keyring",\n         "plone.protect",\n         "Products.GenericSetup",\n-        "Products.CMFPlone",\n         "Products.PluggableAuthService",\n         "setuptools",\n-        "zope.component",\n-        "zope.interface",\n         "Zope",\n     ],\n )\n'
 
