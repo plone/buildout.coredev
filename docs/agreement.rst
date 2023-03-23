@@ -60,7 +60,7 @@ Dealing with pull requests on GitHub
 
 Before we can merge a pull request, we have to check that the author has signed the contributor's agreement.
 
-If they're listed in https://github.com/plone?tab=members, the author has signed so we can go ahead and merge.
+If they're listed in https://github.com/orgs/plone/teams/developers, the author has signed so we can go ahead and merge.
 
 If they aren't listed there, there's still a chance they have signed the contributor's agreement.
 
