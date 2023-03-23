@@ -57,7 +57,7 @@ zc.buildout==3.0.1
 
 In general you are free to use whatever versions work for you, especially newer ones, but these worked for us.
 
-Note that `setuptools` 66 is more strict with what versions it can recognize.  If you run `pip` or `buildout` and it suddenly cannot find a package with a non-standard version, then this may be the cause.
+Note that `setuptools` 66 is more strict with what versions it can recognize.  If you run `pip` or `buildout` and it suddenly cannot find a package with a non-standard version, then this may be the cause.  This is why we stayed at version 65 for this release.
 This already needed a fix in `Products.GenericSetup` in the code that ordered upgrade steps.
 
 
