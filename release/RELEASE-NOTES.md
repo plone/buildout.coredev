@@ -1,33 +1,40 @@
-# Release notes for Plone 6.0.2
+# Release notes for Plone 6.0.3rc1
 
-* Released: Monday February 27, 2023
+* Released: Thursday March 23, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
 
 For technical wizards who want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.2/constraints.txt](https://dist.plone.org/release/6.0.2/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.2/versions.cfg](https://dist.plone.org/release/6.0.2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.1:
+Major changes since 6.0.2:
 
-* `plone.rest`: Change the HTTP status from 301 (Moved Permanently) to 302 (Found) for GET requests and to 307 (Temporary Redirect) for other request methods.  This fixes problems when an existing redirect is re-used.
+* `plone.base`: Move `plone.app.layout.navigation.root.getNavigationRoot` to `.navigationroot.get_navigation_root`.
+  Move `plone.app.layout.navigation.root.getNavigationRootObject` to `.navigationroot.get_navigation_root_object`.
+  Both are essential basic functions in Plone and not layout related at all.
+* `Zope`: Replace `cgi.FieldStorage` by `multipart` avoiding the `cgi` module deprecated by Python 3.11.
+  Mark binary converters with a true ``binary`` attribute.
+  Fix encoding handling and ``:bytes`` converter.
+  This affects the way Zope handles request data, but in core Plone no changes were needed, except in a few tests.
 * `plone.restapi`:
-  * Request of own user data provides joined groups.
-  * Implement `IPurgePaths` for RestAPI traversal (`++api++`).
-  * Implement `IRuleAction` and `IRuleCondition` schema serialization in `@controlpanels/content-rules/` endpoint.
-* `plone.staticresources`: Upgrade Mockup to 5.0.5.
-* `plone.app.locales`: Update translations for tr, es, eu, de.
-* Various packages: drop support for older Python, Zope or Plone versions, declare dependencies better, cleanup code.
+  * Fix missing `Decimal` field deserializer.
+  * Fix translation of the error message for a password that is too short while adding a user.
+  * Provide slateTable block serializer/deserializer to properly convert URLs to uids.
+* `plone.staticresources`: Upgrade Mockup to 5.0.6.  This introduces the `pat-checklist` pattern.
+* `Products.CMFPlone`: Use the new ``pat-checklist`` for groupuser management, and fix userlisting batch/showAll in group membership template.
+* `plone.app.locales`: Update translations for pt_BR.
+* Various packages: drop support for older Python, Zope or Plone versions, declare dependencies better, fix deprecation warnings, cleanup code.
 
 
 ## Volto frontend
 
-The default frontend for Plone 6 is Volto. Latest release is [16.11.0](https://www.npmjs.com/package/@plone/volto/v/16.11.0).  See the [changelog](https://github.com/plone/volto/blob/16.11.0/CHANGELOG.md).
+The default frontend for Plone 6 is Volto. Latest release is [16.18.0](https://www.npmjs.com/package/@plone/volto/v/16.18.0).  See the [changelog](https://github.com/plone/volto/blob/16.18.0/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 The Classic UI is still available when you only run the Python process.
 
@@ -35,6 +42,23 @@ The Classic UI is still available when you only run the Python process.
 ## Python compatibility
 
 This release supports Python 3.8, 3.9, 3.10, and 3.11.
+
+
+## pip, buildout, setuptools
+
+In Plone core we use these versions to install Plone:
+
+```
+pip==22.3.1
+setuptools==65.7.0
+wheel==0.38.4
+zc.buildout==3.0.1
+```
+
+In general you are free to use whatever versions work for you, especially newer ones, but these worked for us.
+
+Note that `setuptools` 66 is more strict with what versions it can recognize.  If you run `pip` or `buildout` and it suddenly cannot find a package with a non-standard version, then this may be the cause.
+This already needed a fix in `Products.GenericSetup` in the code that ordered upgrade steps.
 
 
 ## Installation
