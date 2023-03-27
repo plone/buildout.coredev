@@ -40,13 +40,10 @@ Note that this is a JavaScript frontend that you need to run in a separate proce
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
 
-When you use containers, you need both `plone/plone-backend` and `plone/plone-frontend`.
 
+## Classic UI
 
-## ClassicUI
-
-The Classic UI is still available as an option, especially for existing sites.
-When you use containers, you only need `plone/plone-backend`.
+The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available  and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.  Support for Classic UI is especially relevant for existing Plone sites which for whatever reason or requirements are not yet ready to be upgraded to the Volto frontend.
 
 
 ## Python compatibility
