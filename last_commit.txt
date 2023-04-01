@@ -1,43 +1,82 @@
-Repository: Products.CMFPlone
+Repository: plone.app.contentrules
 
 
 Branch: refs/heads/master
-Date: 2023-03-30T15:42:14+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/dc43f729ab555807590bdf50f83332e5ae8da7ce
+Date: 2023-03-30T13:02:57+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/22f1ecca7a257b9dc5e7741c22e35ace28eddb08
 
-Fixed encoding issue on Python 3 for some mail servers.
-
-This could result in missing characters in an email body.
-See https://github.com/plone/Products.CMFPlone/issues/3754
+be explicit about exclude_actor not being required
 
 Files changed:
-A news/3754.bugfix
-M Products/CMFPlone/RegistrationTool.py
-M Products/CMFPlone/browser/contact_info.py
-M Products/CMFPlone/browser/login/login_help.py
-M Products/CMFPlone/tests/mails.txt
+M plone/app/contentrules/actions/mail.py
 
-b'diff --git a/Products/CMFPlone/RegistrationTool.py b/Products/CMFPlone/RegistrationTool.py\nindex 976f7d3f04..b79cfc1ea4 100644\n--- a/Products/CMFPlone/RegistrationTool.py\n+++ b/Products/CMFPlone/RegistrationTool.py\n@@ -7,7 +7,6 @@\n from AccessControl.SecurityManagement import setSecurityManager\n from Acquisition import aq_base\n from Acquisition import aq_chain\n-from email import message_from_string\n from hashlib import md5\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import ISecuritySchema\n@@ -34,6 +33,13 @@\n import random\n import re\n \n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n \n # - remove \'1\', \'l\', and \'I\' to avoid confusion\n # - remove \'0\', \'O\', and \'Q\' to avoid confusion\ndiff --git a/Products/CMFPlone/browser/contact_info.py b/Products/CMFPlone/browser/contact_info.py\nindex 1b70a775a6..c1cec8398c 100644\n--- a/Products/CMFPlone/browser/contact_info.py\n+++ b/Products/CMFPlone/browser/contact_info.py\n@@ -1,4 +1,3 @@\n-from email.mime.text import MIMEText\n from plone.autoform.form import AutoExtensibleForm\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces.controlpanel import IMailSchema\n@@ -14,6 +13,15 @@\n from zope.component.hooks import getSite\n \n import logging\n+import warnings\n+\n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n \n \n log = logging.getLogger(__name__)\n@@ -50,9 +58,19 @@ def handle_send(self, action):\n         self.send_feedback()\n         self.success = True\n \n-    def generate_mail(self, variables, encoding=\'utf-8\'):\n+    def generate_mail(self, variables, encoding=None):\n         template = self.context.restrictedTraverse(self.template_mailview)\n-        return template(self.context, **variables).encode(encoding)\n+        result = template(self.context, **variables)\n+        if encoding is not None:\n+            # Maybe someone has customized \'send_message\'\n+            # and still expects to get an encoded answer back.\n+            warnings.warn(\n+                "Calling generate_mail with an encoding argument is deprecated. "\n+                "You can leave it out, and get text (string) as result.",\n+                DeprecationWarning,\n+            )\n+            result = result.encode(encoding)\n+        return result\n \n     def send_message(self, data):\n         subject = data.get(\'subject\')\n@@ -67,8 +85,12 @@ def send_message(self, data):\n         host = getToolByName(self.context, \'MailHost\')\n \n         data[\'url\'] = portal.absolute_url()\n-        message = self.generate_mail(data, encoding)\n-        message = MIMEText(message, \'plain\', encoding)\n+        message = self.generate_mail(data)\n+        if isinstance(message, bytes):\n+            # Maybe someone has customized \'generate_mail\'\n+            # and still handles the encoding keyword argument.\n+            message = message.decode(encoding)\n+        message = message_from_string(message)\n         message[\'Reply-To\'] = data[\'sender_from_address\']\n \n         try:\ndiff --git a/Products/CMFPlone/browser/login/login_help.py b/Products/CMFPlone/browser/login/login_help.py\nindex 3ad0c50189..c151141547 100644\n--- a/Products/CMFPlone/browser/login/login_help.py\n+++ b/Products/CMFPlone/browser/login/login_help.py\n@@ -1,4 +1,3 @@\n-from email import message_from_string\n from email.header import Header\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import ILoginHelpForm\n@@ -22,6 +21,14 @@\n \n import logging\n \n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n+\n \n SEND_USERNAME_TEMPLATE = _("mailtemplate_username_info", default="""From: {encoded_mail_sender}\n To: {email}\ndiff --git a/Products/CMFPlone/tests/mails.txt b/Products/CMFPlone/tests/mails.txt\nindex 756208fa87..fa292aef7b 100644\n--- a/Products/CMFPlone/tests/mails.txt\n+++ b/Products/CMFPlone/tests/mails.txt\n@@ -6,6 +6,7 @@ Some initial setup:\n   >>> from plone.testing.zope import Browser\n   >>> app = layer[\'app\']\n   >>> browser = Browser(app)\n+  >>> browser.handleErrors = False\n \n \n Contact form\n@@ -58,12 +59,18 @@ We expect the headers to be properly header encoded (7-bit):\n   >>> b\'Subject: =?utf-8?q?Some_t=C3=A4st_subject=2E?=\' in msg\n   True\n \n-The output should be encoded in a reasonable manner (in this case\n-quoted-printable).  There may be some small differences in where\n-exactly the lines are cut off, depending on whether you use five.pt\n-(in Zope 2.13) or not, so we turn the message into one line first:\n+The output should be encoded in a reasonable manner, in this case quoted-printable.\n+On Python 3 there may be problems with quoted printable messages on some mail servers.\n+See https://github.com/zopefoundation/Products.MailHost/issues/35\n+When \'\\r\\n\' is used as line ending, all is well.\n \n-  >>> msg.replace(b\'=\\n\', b\'\').replace(b\'\\n\', b\' \')\n+  >>> msg.count(b\'\\r\\n\') > 0\n+  True\n+\n+There may be some small differences in where exactly the lines are cut off,\n+so we turn the message into one line first:\n+\n+  >>> msg.replace(b\'=\\r\\n\', b\'\').replace(b\'\\r\\n\', b\' \')\n   b\'...Another t=C3=A4st message...You are receiving this mail because T=C3=A4st user test@plone.test...is sending feedback about the site you administer at...\'\n \n We can also decode the string, though we should still be careful about\ndiff --git a/news/3754.bugfix b/news/3754.bugfix\nnew file mode 100644\nindex 0000000000..efbee7ec87\n--- /dev/null\n+++ b/news/3754.bugfix\n@@ -0,0 +1,3 @@\n+Fixed encoding issue on Python 3 for some mail servers.\n+This could result in missing characters in an email body.\n+[maurits]\n'
+b'diff --git a/plone/app/contentrules/actions/mail.py b/plone/app/contentrules/actions/mail.py\nindex 92211f5..fec6b45 100644\n--- a/plone/app/contentrules/actions/mail.py\n+++ b/plone/app/contentrules/actions/mail.py\n@@ -53,6 +53,7 @@ class IMailAction(Interface):\n     exclude_actor = schema.Bool(\n         title=_("Exclude actor from recipients"),\n         description=_("Do not send the email to the user that did the action."),\n+        required=False,\n     )\n     message = schema.Text(\n         title=_("Message"),\n'
 
-Repository: Products.CMFPlone
+Repository: plone.app.contentrules
 
 
 Branch: refs/heads/master
-Date: 2023-03-30T23:55:03+02:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/8d33738b058b2e9d8d73566d4a161a3379b79c81
+Date: 2023-03-30T13:02:57+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/3c62a7796ad22d91393531fcdd119d867c069635
 
-Merge pull request #3760 from plone/maurits-message-from-string-mailhost-60
+Revert "be explicit about exclude_actor not being required"
 
-Fixed encoding issue on Python 3 for some mail servers. [6.0]
+This reverts commit 35ff7458d88057bb181f4e38cd9f537c12e4bc95.
 
 Files changed:
-A news/3754.bugfix
-M Products/CMFPlone/RegistrationTool.py
-M Products/CMFPlone/browser/contact_info.py
-M Products/CMFPlone/browser/login/login_help.py
-M Products/CMFPlone/tests/mails.txt
+M plone/app/contentrules/actions/mail.py
 
-b'diff --git a/Products/CMFPlone/RegistrationTool.py b/Products/CMFPlone/RegistrationTool.py\nindex 976f7d3f04..b79cfc1ea4 100644\n--- a/Products/CMFPlone/RegistrationTool.py\n+++ b/Products/CMFPlone/RegistrationTool.py\n@@ -7,7 +7,6 @@\n from AccessControl.SecurityManagement import setSecurityManager\n from Acquisition import aq_base\n from Acquisition import aq_chain\n-from email import message_from_string\n from hashlib import md5\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import ISecuritySchema\n@@ -34,6 +33,13 @@\n import random\n import re\n \n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n \n # - remove \'1\', \'l\', and \'I\' to avoid confusion\n # - remove \'0\', \'O\', and \'Q\' to avoid confusion\ndiff --git a/Products/CMFPlone/browser/contact_info.py b/Products/CMFPlone/browser/contact_info.py\nindex 1b70a775a6..c1cec8398c 100644\n--- a/Products/CMFPlone/browser/contact_info.py\n+++ b/Products/CMFPlone/browser/contact_info.py\n@@ -1,4 +1,3 @@\n-from email.mime.text import MIMEText\n from plone.autoform.form import AutoExtensibleForm\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces.controlpanel import IMailSchema\n@@ -14,6 +13,15 @@\n from zope.component.hooks import getSite\n \n import logging\n+import warnings\n+\n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n \n \n log = logging.getLogger(__name__)\n@@ -50,9 +58,19 @@ def handle_send(self, action):\n         self.send_feedback()\n         self.success = True\n \n-    def generate_mail(self, variables, encoding=\'utf-8\'):\n+    def generate_mail(self, variables, encoding=None):\n         template = self.context.restrictedTraverse(self.template_mailview)\n-        return template(self.context, **variables).encode(encoding)\n+        result = template(self.context, **variables)\n+        if encoding is not None:\n+            # Maybe someone has customized \'send_message\'\n+            # and still expects to get an encoded answer back.\n+            warnings.warn(\n+                "Calling generate_mail with an encoding argument is deprecated. "\n+                "You can leave it out, and get text (string) as result.",\n+                DeprecationWarning,\n+            )\n+            result = result.encode(encoding)\n+        return result\n \n     def send_message(self, data):\n         subject = data.get(\'subject\')\n@@ -67,8 +85,12 @@ def send_message(self, data):\n         host = getToolByName(self.context, \'MailHost\')\n \n         data[\'url\'] = portal.absolute_url()\n-        message = self.generate_mail(data, encoding)\n-        message = MIMEText(message, \'plain\', encoding)\n+        message = self.generate_mail(data)\n+        if isinstance(message, bytes):\n+            # Maybe someone has customized \'generate_mail\'\n+            # and still handles the encoding keyword argument.\n+            message = message.decode(encoding)\n+        message = message_from_string(message)\n         message[\'Reply-To\'] = data[\'sender_from_address\']\n \n         try:\ndiff --git a/Products/CMFPlone/browser/login/login_help.py b/Products/CMFPlone/browser/login/login_help.py\nindex 3ad0c50189..c151141547 100644\n--- a/Products/CMFPlone/browser/login/login_help.py\n+++ b/Products/CMFPlone/browser/login/login_help.py\n@@ -1,4 +1,3 @@\n-from email import message_from_string\n from email.header import Header\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import ILoginHelpForm\n@@ -22,6 +21,14 @@\n \n import logging\n \n+try:\n+    # Products.MailHost has a patch to fix quoted-printable soft line breaks.\n+    # See https://github.com/zopefoundation/Products.MailHost/issues/35\n+    from Products.MailHost.MailHost import message_from_string\n+except ImportError:\n+    # If the patch is ever removed, we fall back to the standard library.\n+    from email import message_from_string\n+\n \n SEND_USERNAME_TEMPLATE = _("mailtemplate_username_info", default="""From: {encoded_mail_sender}\n To: {email}\ndiff --git a/Products/CMFPlone/tests/mails.txt b/Products/CMFPlone/tests/mails.txt\nindex 756208fa87..fa292aef7b 100644\n--- a/Products/CMFPlone/tests/mails.txt\n+++ b/Products/CMFPlone/tests/mails.txt\n@@ -6,6 +6,7 @@ Some initial setup:\n   >>> from plone.testing.zope import Browser\n   >>> app = layer[\'app\']\n   >>> browser = Browser(app)\n+  >>> browser.handleErrors = False\n \n \n Contact form\n@@ -58,12 +59,18 @@ We expect the headers to be properly header encoded (7-bit):\n   >>> b\'Subject: =?utf-8?q?Some_t=C3=A4st_subject=2E?=\' in msg\n   True\n \n-The output should be encoded in a reasonable manner (in this case\n-quoted-printable).  There may be some small differences in where\n-exactly the lines are cut off, depending on whether you use five.pt\n-(in Zope 2.13) or not, so we turn the message into one line first:\n+The output should be encoded in a reasonable manner, in this case quoted-printable.\n+On Python 3 there may be problems with quoted printable messages on some mail servers.\n+See https://github.com/zopefoundation/Products.MailHost/issues/35\n+When \'\\r\\n\' is used as line ending, all is well.\n \n-  >>> msg.replace(b\'=\\n\', b\'\').replace(b\'\\n\', b\' \')\n+  >>> msg.count(b\'\\r\\n\') > 0\n+  True\n+\n+There may be some small differences in where exactly the lines are cut off,\n+so we turn the message into one line first:\n+\n+  >>> msg.replace(b\'=\\r\\n\', b\'\').replace(b\'\\r\\n\', b\' \')\n   b\'...Another t=C3=A4st message...You are receiving this mail because T=C3=A4st user test@plone.test...is sending feedback about the site you administer at...\'\n \n We can also decode the string, though we should still be careful about\ndiff --git a/news/3754.bugfix b/news/3754.bugfix\nnew file mode 100644\nindex 0000000000..efbee7ec87\n--- /dev/null\n+++ b/news/3754.bugfix\n@@ -0,0 +1,3 @@\n+Fixed encoding issue on Python 3 for some mail servers.\n+This could result in missing characters in an email body.\n+[maurits]\n'
+b'diff --git a/plone/app/contentrules/actions/mail.py b/plone/app/contentrules/actions/mail.py\nindex fec6b45..92211f5 100644\n--- a/plone/app/contentrules/actions/mail.py\n+++ b/plone/app/contentrules/actions/mail.py\n@@ -53,7 +53,6 @@ class IMailAction(Interface):\n     exclude_actor = schema.Bool(\n         title=_("Exclude actor from recipients"),\n         description=_("Do not send the email to the user that did the action."),\n-        required=False,\n     )\n     message = schema.Text(\n         title=_("Message"),\n'
+
+Repository: plone.app.contentrules
+
+
+Branch: refs/heads/master
+Date: 2023-03-30T13:02:57+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/10e9a8396e85dd838e7aaeeb0b72483e0c036acd
+
+be explicit about exclude_actor not being required
+
+Files changed:
+M plone/app/contentrules/actions/mail.py
+
+b'diff --git a/plone/app/contentrules/actions/mail.py b/plone/app/contentrules/actions/mail.py\nindex 92211f5..fec6b45 100644\n--- a/plone/app/contentrules/actions/mail.py\n+++ b/plone/app/contentrules/actions/mail.py\n@@ -53,6 +53,7 @@ class IMailAction(Interface):\n     exclude_actor = schema.Bool(\n         title=_("Exclude actor from recipients"),\n         description=_("Do not send the email to the user that did the action."),\n+        required=False,\n     )\n     message = schema.Text(\n         title=_("Message"),\n'
+
+Repository: plone.app.contentrules
+
+
+Branch: refs/heads/master
+Date: 2023-03-30T13:02:57+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/2d315a3829f116e93c8fd21ed1de063e86efdee3
+
+changelog
+
+changelog
+
+Files changed:
+A news/77.bugfix
+
+b'diff --git a/news/77.bugfix b/news/77.bugfix\nnew file mode 100644\nindex 0000000..660d08a\n--- /dev/null\n+++ b/news/77.bugfix\n@@ -0,0 +1,2 @@\n+Explicitly mark exclude_actor as not-required\n+[erral]\n'
+
+Repository: plone.app.contentrules
+
+
+Branch: refs/heads/master
+Date: 2023-04-01T10:19:18+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.contentrules/commit/81a6f369832d5ab052efffb63a7546d4050e72e0
+
+Merge pull request #80 from plone/erral-issue-77
+
+Explicitly mark exclude_actor as not-required
+
+Files changed:
+A news/77.bugfix
+M plone/app/contentrules/actions/mail.py
+
+b'diff --git a/news/77.bugfix b/news/77.bugfix\nnew file mode 100644\nindex 0000000..660d08a\n--- /dev/null\n+++ b/news/77.bugfix\n@@ -0,0 +1,2 @@\n+Explicitly mark exclude_actor as not-required\n+[erral]\ndiff --git a/plone/app/contentrules/actions/mail.py b/plone/app/contentrules/actions/mail.py\nindex 92211f5..fec6b45 100644\n--- a/plone/app/contentrules/actions/mail.py\n+++ b/plone/app/contentrules/actions/mail.py\n@@ -53,6 +53,7 @@ class IMailAction(Interface):\n     exclude_actor = schema.Bool(\n         title=_("Exclude actor from recipients"),\n         description=_("Do not send the email to the user that did the action."),\n+        required=False,\n     )\n     message = schema.Text(\n         title=_("Message"),\n'
 
