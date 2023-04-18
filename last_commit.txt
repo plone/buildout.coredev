@@ -1,113 +1,37 @@
-Repository: Products.CMFPlone
+Repository: plone.base
 
 
-Branch: refs/heads/master
-Date: 2023-04-14T19:04:08+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/7a5d9ad660e51b7bb0e4a289fbdbd9777e163539
+Branch: refs/heads/main
+Date: 2023-04-18T09:03:15+02:00
+Author: Laurent Lasudry (laulaz) <lasudry@gmail.com>
+Commit: https://github.com/plone/plone.base/commit/e736c4ef7d40ff82c8310fa888e184ef65d15303
 
-Clear the resource viewlet cache when changing the resource registry or activating an add-on.
+Improve check on created content ID
 
-This avoids needing a restart before seeing changes when you run in production mode.
-Fixes [issue 3505](https://github.com/plone/Products.CMFPlone/issues/3505).
-
-Files changed:
-A Products/CMFPlone/resources/eventhandlers.py
-A news/3505.bugfix
-M Products/CMFPlone/controlpanel/browser/resourceregistry.py
-M Products/CMFPlone/resources/browser/resource.py
-M Products/CMFPlone/resources/configure.zcml
-
-b'diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\nindex e097435ad7..eebcedd0b1 100644\n--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n+++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n@@ -2,6 +2,7 @@\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n+from Products.CMFPlone.resources.browser.resource import clear_resource_viewlet_caches\n from Products.Five.browser import BrowserView\n from Products.statusmessages.interfaces import IStatusMessage\n from zope.component import getUtility\n@@ -149,4 +150,5 @@ def process_form(self):\n             self._switch_cache(False)\n         else:\n             raise ValueError("Invalid form data")\n+        clear_resource_viewlet_caches()\n         self.request.response.redirect(self.request["ACTUAL_URL"])\ndiff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex c07f71f20a..57654a740a 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -19,7 +19,7 @@\n logger = logging.getLogger(__name__)\n \n REQUEST_CACHE_KEY = "_WEBRESOURCE_CACHE_"\n-\n+SITE_ROOT_CACHE_KEY_PREFIX = "_v_rendered_cache_"\n GRACEFUL_DEPENDENCY_REWRITE = {\n     "plone-base": "plone",\n     "plone-legacy": "plone",\n@@ -59,7 +59,7 @@ def _cache_attr_name(self, site):\n         for bundle in e_bundles | d_bundles:\n             hashtool.update(bundle.encode(\'utf8\'))\n         hashtool.update(self._user_local_roles(site).encode("utf8"))\n-        return f"_v_renderend_cache_{hashtool.hexdigest()}"\n+        return f"{SITE_ROOT_CACHE_KEY_PREFIX}{hashtool.hexdigest()}"\n \n     @property\n     def _rendered_cache(self):\n@@ -313,3 +313,26 @@ def index(self):\n             rendered = self.renderer["css"].render()\n             self._rendered_cache = rendered\n         return rendered\n+\n+\n+def clear_resource_viewlet_caches():\n+    """Remove volatile cache of resource viewlets.\n+\n+    See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n+    """\n+    site = getSite()\n+\n+    # I don\'t trust removing keys from a dict when iterating over this dict,\n+    # so gather them in a list first.\n+    to_remove = [\n+        name for name in site.__dict__\n+        if name.startswith(SITE_ROOT_CACHE_KEY_PREFIX)\n+    ]\n+    for name in to_remove:\n+        # The attribute is volatile, meaning it may disappear at any time,\n+        # so we catch errors.\n+        try:\n+            delattr(site, name)\n+        except AttributeError:\n+            pass\n+    logger.info("Cleared resource viewlet caches.")\ndiff --git a/Products/CMFPlone/resources/configure.zcml b/Products/CMFPlone/resources/configure.zcml\nindex 0bec1224e4..faf47d627e 100644\n--- a/Products/CMFPlone/resources/configure.zcml\n+++ b/Products/CMFPlone/resources/configure.zcml\n@@ -3,5 +3,6 @@\n     i18n_domain="plone.registry">\n \n     <include package=".browser" />\n+    <subscriber handler=".eventhandlers.check_registry_update" />\n \n </configure>\ndiff --git a/Products/CMFPlone/resources/eventhandlers.py b/Products/CMFPlone/resources/eventhandlers.py\nnew file mode 100644\nindex 0000000000..4bd76de4ba\n--- /dev/null\n+++ b/Products/CMFPlone/resources/eventhandlers.py\n@@ -0,0 +1,16 @@\n+from Products.CMFPlone.resources.browser.resource import clear_resource_viewlet_caches\n+from Products.GenericSetup.interfaces import IProfileImportedEvent\n+from zope.component import adapter\n+\n+\n+@adapter(IProfileImportedEvent)\n+def check_registry_update(event):\n+    """Check if a profile import may have updated the configuration registry.\n+\n+    Main concern for now is: the resource registries may have changed.\n+    This means the resource viewlet caches should be cleared.\n+    See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n+    """\n+    if not (event.full_import or "plone.app.registry" in event.steps):\n+        return\n+    clear_resource_viewlet_caches()\ndiff --git a/news/3505.bugfix b/news/3505.bugfix\nnew file mode 100644\nindex 0000000000..da1ed7a2c3\n--- /dev/null\n+++ b/news/3505.bugfix\n@@ -0,0 +1,4 @@\n+Clear the resource viewlet cache when changing the resource registry or activating an add-on.\n+This avoids needing a restart before seeing changes when you run in production mode.\n+Fixes [issue 3505](https://github.com/plone/Products.CMFPlone/issues/3505).\n+[maurits]\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2023-04-17T23:52:45+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/58b1d5f867a7fb4c565d8757430641930546659b
-
-Add a last modification time of the resource registry.
-
-We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.
-This avoids needing a restart before seeing changes when you run in production mode.
+We need to check for container field / attribute when trying to create content with same id
+This refs #35
 
 Files changed:
-M Products/CMFPlone/controlpanel/browser/resourceregistry.py
-M Products/CMFPlone/resources/browser/resource.py
-M Products/CMFPlone/resources/eventhandlers.py
-M news/3505.bugfix
+A news/35.bugfix
+M src/plone/base/utils.py
 
-b'diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\nindex eebcedd0b1..4277e9d221 100644\n--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n+++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n@@ -2,7 +2,7 @@\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n-from Products.CMFPlone.resources.browser.resource import clear_resource_viewlet_caches\n+from Products.CMFPlone.resources.browser.resource import update_resource_registry_mtime\n from Products.Five.browser import BrowserView\n from Products.statusmessages.interfaces import IStatusMessage\n from zope.component import getUtility\n@@ -150,5 +150,5 @@ def process_form(self):\n             self._switch_cache(False)\n         else:\n             raise ValueError("Invalid form data")\n-        clear_resource_viewlet_caches()\n+        update_resource_registry_mtime()\n         self.request.response.redirect(self.request["ACTUAL_URL"])\ndiff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex 57654a740a..685a325eae 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -7,6 +7,7 @@\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n+from time import time\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n from zope.component.hooks import getSite\n@@ -19,7 +20,7 @@\n logger = logging.getLogger(__name__)\n \n REQUEST_CACHE_KEY = "_WEBRESOURCE_CACHE_"\n-SITE_ROOT_CACHE_KEY_PREFIX = "_v_rendered_cache_"\n+_RESOURCE_REGISTRY_MTIME = "__RESOURCE_REGISTRY_MTIME"\n GRACEFUL_DEPENDENCY_REWRITE = {\n     "plone-base": "plone",\n     "plone-legacy": "plone",\n@@ -59,7 +60,12 @@ def _cache_attr_name(self, site):\n         for bundle in e_bundles | d_bundles:\n             hashtool.update(bundle.encode(\'utf8\'))\n         hashtool.update(self._user_local_roles(site).encode("utf8"))\n-        return f"{SITE_ROOT_CACHE_KEY_PREFIX}{hashtool.hexdigest()}"\n+        if not getattr(self, "registry", None):\n+            self.registry = getUtility(IRegistry)\n+            mtime = getattr(self.registry, _RESOURCE_REGISTRY_MTIME, None)\n+            if mtime is not None:\n+                hashtool.update(str(mtime).encode(\'utf8\'))\n+        return f"_v_rendered_cache_{hashtool.hexdigest()}"\n \n     @property\n     def _rendered_cache(self):\n@@ -315,24 +321,14 @@ def index(self):\n         return rendered\n \n \n-def clear_resource_viewlet_caches():\n-    """Remove volatile cache of resource viewlets.\n+def update_resource_registry_mtime():\n+    """Update the last modification time of the resource registry.\n \n+    Call this when you change anything that may influence the resource registry\n+    and any of its rendered cache.\n     See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n+    and https://github.com/plone/Products.CMFPlone/pull/3771\n     """\n-    site = getSite()\n-\n-    # I don\'t trust removing keys from a dict when iterating over this dict,\n-    # so gather them in a list first.\n-    to_remove = [\n-        name for name in site.__dict__\n-        if name.startswith(SITE_ROOT_CACHE_KEY_PREFIX)\n-    ]\n-    for name in to_remove:\n-        # The attribute is volatile, meaning it may disappear at any time,\n-        # so we catch errors.\n-        try:\n-            delattr(site, name)\n-        except AttributeError:\n-            pass\n-    logger.info("Cleared resource viewlet caches.")\n+    registry = getUtility(IRegistry)\n+    setattr(registry, _RESOURCE_REGISTRY_MTIME, time())\n+    logger.info("Updated resource registry mtime.")\ndiff --git a/Products/CMFPlone/resources/eventhandlers.py b/Products/CMFPlone/resources/eventhandlers.py\nindex 4bd76de4ba..dae5a5ba7f 100644\n--- a/Products/CMFPlone/resources/eventhandlers.py\n+++ b/Products/CMFPlone/resources/eventhandlers.py\n@@ -1,4 +1,4 @@\n-from Products.CMFPlone.resources.browser.resource import clear_resource_viewlet_caches\n+from Products.CMFPlone.resources.browser.resource import update_resource_registry_mtime\n from Products.GenericSetup.interfaces import IProfileImportedEvent\n from zope.component import adapter\n \n@@ -13,4 +13,4 @@ def check_registry_update(event):\n     """\n     if not (event.full_import or "plone.app.registry" in event.steps):\n         return\n-    clear_resource_viewlet_caches()\n+    update_resource_registry_mtime()\ndiff --git a/news/3505.bugfix b/news/3505.bugfix\nindex da1ed7a2c3..5cb726e238 100644\n--- a/news/3505.bugfix\n+++ b/news/3505.bugfix\n@@ -1,4 +1,5 @@\n-Clear the resource viewlet cache when changing the resource registry or activating an add-on.\n+Add a last modification time of the resource registry.\n+We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.\n This avoids needing a restart before seeing changes when you run in production mode.\n Fixes [issue 3505](https://github.com/plone/Products.CMFPlone/issues/3505).\n [maurits]\n'
+b'diff --git a/news/35.bugfix b/news/35.bugfix\nnew file mode 100644\nindex 0000000..ac5a5cd\n--- /dev/null\n+++ b/news/35.bugfix\n@@ -0,0 +1 @@\n+Check for container field / attribute when trying to create content with same id [laulaz]\n\\ No newline at end of file\ndiff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 08c006f..c191f72 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -506,6 +506,10 @@ def _check_for_collision(contained_by, cid, **kwargs):\n                 mapping={"name": cid},\n             )\n \n+    # containers may have a field / attribute of the same name\n+    if base_hasattr(contained_by, cid):\n+        return _("${name} is reserved.", mapping={"name": cid})\n+\n     # containers may implement this hook to further restrict ids\n     if getattr(aq_base(contained_by), "checkValidId", _marker) is not _marker:\n         try:\n'
 
-Repository: Products.CMFPlone
+Repository: plone.base
 
 
-Branch: refs/heads/master
-Date: 2023-04-18T00:04:02+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/440da1c1ab3d0cb3de3f8c040b6cb486eb883b44
-
-Changes in resource settings ARE applied directly, also in production mode.
-
-So remove this from the status message that you see on the resource registry control panel.
-
-Files changed:
-M Products/CMFPlone/controlpanel/browser/resourceregistry.pt
-
-b'diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.pt b/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\nindex 071d03817f..4279bdb02b 100644\n--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\n+++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\n@@ -68,7 +68,6 @@\n         <span class="content"\n               i18n:translate="">\n             Resources are fast and hashes are cached in Plone.\n-            Changes in resource settings are not applied directly.\n         </span>\n       </div>\n     </form>\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2023-04-18T00:04:41+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/1575a6ab664492be470bfde988850fe174f74edf
-
-Merge branch 'master' into maurits-clear-resource-viewlet-caches
-
-Files changed:
-A news/3753.bugfix
-M Products/CMFPlone/browser/search.py
-
-b"diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py\nindex 4d3e25cd2d..902d052720 100644\n--- a/Products/CMFPlone/browser/search.py\n+++ b/Products/CMFPlone/browser/search.py\n@@ -2,6 +2,7 @@\n from plone.app.contentlisting.interfaces import IContentListing\n from plone.app.layout.navigation.interfaces import INavigationRoot\n from plone.base.batch import Batch\n+from plone.base.interfaces.siteroot import IPloneSiteRoot\n from plone.base.interfaces import ISearchSchema\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n@@ -142,8 +143,8 @@ def _filter_query(self, query):\n         query['portal_type'] = self.filter_types(types)\n         # respect effective/expiration date\n         query['show_inactive'] = False\n-        # respect navigation root\n-        if 'path' not in query:\n+        # respect navigation root if we're not at the site root.\n+        if 'path' not in query and not IPloneSiteRoot.providedBy(self.context):\n             query['path'] = getNavigationRoot(self.context)\n \n         if 'sort_order' in query and not query['sort_order']:\ndiff --git a/news/3753.bugfix b/news/3753.bugfix\nnew file mode 100644\nindex 0000000000..3069245b55\n--- /dev/null\n+++ b/news/3753.bugfix\n@@ -0,0 +1,2 @@\n+Removed path query from search view when context is site root.\n+[malthe]\n"
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2023-04-18T14:43:05+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/Products.CMFPlone/commit/32db13272a5345ce19a35440587a990ae4015497
-
-Registry utility may not exist, especially at site creation time.
-
-Files changed:
-M Products/CMFPlone/resources/browser/resource.py
-
-b'diff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex 685a325eae..07369c6176 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -10,6 +10,7 @@\n from time import time\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n+from zope.component import queryUtility\n from zope.component.hooks import getSite\n \n import hashlib\n@@ -329,6 +330,9 @@ def update_resource_registry_mtime():\n     See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n     and https://github.com/plone/Products.CMFPlone/pull/3771\n     """\n-    registry = getUtility(IRegistry)\n+    registry = queryUtility(IRegistry)\n+    if registry is None:\n+        # This can happen for example during site creation.\n+        return\n     setattr(registry, _RESOURCE_REGISTRY_MTIME, time())\n     logger.info("Updated resource registry mtime.")\n'
-
-Repository: Products.CMFPlone
-
-
-Branch: refs/heads/master
-Date: 2023-04-18T16:28:51+02:00
+Branch: refs/heads/main
+Date: 2023-04-18T16:26:02+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/9c2e5191ff78ab6001391a38583a0b9d10fa30bf
+Commit: https://github.com/plone/plone.base/commit/b588a0cc5bc0a32c54b34916b1e544678a1fa06e
 
-Merge pull request #3771 from plone/maurits-clear-resource-viewlet-caches
+Merge pull request #37 from plone/improve_content_id_check
 
-Clear the resource viewlet cache on relevant changes
+Improve check on created content ID
 
 Files changed:
-A Products/CMFPlone/resources/eventhandlers.py
-A news/3505.bugfix
-M Products/CMFPlone/controlpanel/browser/resourceregistry.pt
-M Products/CMFPlone/controlpanel/browser/resourceregistry.py
-M Products/CMFPlone/resources/browser/resource.py
-M Products/CMFPlone/resources/configure.zcml
+A news/35.bugfix
+M src/plone/base/utils.py
 
-b'diff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.pt b/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\nindex 071d03817f..4279bdb02b 100644\n--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\n+++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.pt\n@@ -68,7 +68,6 @@\n         <span class="content"\n               i18n:translate="">\n             Resources are fast and hashes are cached in Plone.\n-            Changes in resource settings are not applied directly.\n         </span>\n       </div>\n     </form>\ndiff --git a/Products/CMFPlone/controlpanel/browser/resourceregistry.py b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\nindex e097435ad7..4277e9d221 100644\n--- a/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n+++ b/Products/CMFPlone/controlpanel/browser/resourceregistry.py\n@@ -2,6 +2,7 @@\n from plone.base import PloneMessageFactory as _\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n+from Products.CMFPlone.resources.browser.resource import update_resource_registry_mtime\n from Products.Five.browser import BrowserView\n from Products.statusmessages.interfaces import IStatusMessage\n from zope.component import getUtility\n@@ -149,4 +150,5 @@ def process_form(self):\n             self._switch_cache(False)\n         else:\n             raise ValueError("Invalid form data")\n+        update_resource_registry_mtime()\n         self.request.response.redirect(self.request["ACTUAL_URL"])\ndiff --git a/Products/CMFPlone/resources/browser/resource.py b/Products/CMFPlone/resources/browser/resource.py\nindex c07f71f20a..07369c6176 100644\n--- a/Products/CMFPlone/resources/browser/resource.py\n+++ b/Products/CMFPlone/resources/browser/resource.py\n@@ -7,8 +7,10 @@\n from plone.base.interfaces import IBundleRegistry\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n+from time import time\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n+from zope.component import queryUtility\n from zope.component.hooks import getSite\n \n import hashlib\n@@ -19,7 +21,7 @@\n logger = logging.getLogger(__name__)\n \n REQUEST_CACHE_KEY = "_WEBRESOURCE_CACHE_"\n-\n+_RESOURCE_REGISTRY_MTIME = "__RESOURCE_REGISTRY_MTIME"\n GRACEFUL_DEPENDENCY_REWRITE = {\n     "plone-base": "plone",\n     "plone-legacy": "plone",\n@@ -59,7 +61,12 @@ def _cache_attr_name(self, site):\n         for bundle in e_bundles | d_bundles:\n             hashtool.update(bundle.encode(\'utf8\'))\n         hashtool.update(self._user_local_roles(site).encode("utf8"))\n-        return f"_v_renderend_cache_{hashtool.hexdigest()}"\n+        if not getattr(self, "registry", None):\n+            self.registry = getUtility(IRegistry)\n+            mtime = getattr(self.registry, _RESOURCE_REGISTRY_MTIME, None)\n+            if mtime is not None:\n+                hashtool.update(str(mtime).encode(\'utf8\'))\n+        return f"_v_rendered_cache_{hashtool.hexdigest()}"\n \n     @property\n     def _rendered_cache(self):\n@@ -313,3 +320,19 @@ def index(self):\n             rendered = self.renderer["css"].render()\n             self._rendered_cache = rendered\n         return rendered\n+\n+\n+def update_resource_registry_mtime():\n+    """Update the last modification time of the resource registry.\n+\n+    Call this when you change anything that may influence the resource registry\n+    and any of its rendered cache.\n+    See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n+    and https://github.com/plone/Products.CMFPlone/pull/3771\n+    """\n+    registry = queryUtility(IRegistry)\n+    if registry is None:\n+        # This can happen for example during site creation.\n+        return\n+    setattr(registry, _RESOURCE_REGISTRY_MTIME, time())\n+    logger.info("Updated resource registry mtime.")\ndiff --git a/Products/CMFPlone/resources/configure.zcml b/Products/CMFPlone/resources/configure.zcml\nindex 0bec1224e4..faf47d627e 100644\n--- a/Products/CMFPlone/resources/configure.zcml\n+++ b/Products/CMFPlone/resources/configure.zcml\n@@ -3,5 +3,6 @@\n     i18n_domain="plone.registry">\n \n     <include package=".browser" />\n+    <subscriber handler=".eventhandlers.check_registry_update" />\n \n </configure>\ndiff --git a/Products/CMFPlone/resources/eventhandlers.py b/Products/CMFPlone/resources/eventhandlers.py\nnew file mode 100644\nindex 0000000000..dae5a5ba7f\n--- /dev/null\n+++ b/Products/CMFPlone/resources/eventhandlers.py\n@@ -0,0 +1,16 @@\n+from Products.CMFPlone.resources.browser.resource import update_resource_registry_mtime\n+from Products.GenericSetup.interfaces import IProfileImportedEvent\n+from zope.component import adapter\n+\n+\n+@adapter(IProfileImportedEvent)\n+def check_registry_update(event):\n+    """Check if a profile import may have updated the configuration registry.\n+\n+    Main concern for now is: the resource registries may have changed.\n+    This means the resource viewlet caches should be cleared.\n+    See discussion in https://github.com/plone/Products.CMFPlone/issues/3505\n+    """\n+    if not (event.full_import or "plone.app.registry" in event.steps):\n+        return\n+    update_resource_registry_mtime()\ndiff --git a/news/3505.bugfix b/news/3505.bugfix\nnew file mode 100644\nindex 0000000000..5cb726e238\n--- /dev/null\n+++ b/news/3505.bugfix\n@@ -0,0 +1,5 @@\n+Add a last modification time of the resource registry.\n+We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.\n+This avoids needing a restart before seeing changes when you run in production mode.\n+Fixes [issue 3505](https://github.com/plone/Products.CMFPlone/issues/3505).\n+[maurits]\n'
+b'diff --git a/news/35.bugfix b/news/35.bugfix\nnew file mode 100644\nindex 0000000..ac5a5cd\n--- /dev/null\n+++ b/news/35.bugfix\n@@ -0,0 +1 @@\n+Check for container field / attribute when trying to create content with same id [laulaz]\n\\ No newline at end of file\ndiff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 08c006f..c191f72 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -506,6 +506,10 @@ def _check_for_collision(contained_by, cid, **kwargs):\n                 mapping={"name": cid},\n             )\n \n+    # containers may have a field / attribute of the same name\n+    if base_hasattr(contained_by, cid):\n+        return _("${name} is reserved.", mapping={"name": cid})\n+\n     # containers may implement this hook to further restrict ids\n     if getattr(aq_base(contained_by), "checkValidId", _marker) is not _marker:\n         try:\n'
 
