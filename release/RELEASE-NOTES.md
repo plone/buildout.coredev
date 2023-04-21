@@ -15,20 +15,27 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.3:
 
-
 * `plone.app.event` and `plone.app.multilingual`: Breaking dependency cleanup: move declaration of language independence of IEventBasic fields from `plone.app.event` to `plone.app.multilingual`.
-
+* `plone.app.locales`: Updated translations for `es` and `eu`.
+* `plone.base`: Check for container field / attribute when trying to create content with same id.
+* `plone.restapi`:
+  * Apply a cache ruleset to the `/@querystring-search` endpoint.
+  * Add `UID` to `relationvalue_converter` summary.
+  * Add `querystring_search` `GET` method.
 * `plone.schema`:
-
   * Introduce extras `plone.schema[supermodel]` and `plone.schema[schemaeditor]`.
   * The package now works in its vanilla installation as an addon for z3c.form, without any other plone dependencies.
-
-* `plone.staticresources`: Update to `mockup` 5.0.8. Fixes `pat-recurrence` UI issues.
+* `plone.staticresources`: Update to `mockup` 5.0.9. Fixes `pat-recurrence` UI issues.
+* `Products.CMFPlone`:
+  * Add a last modification time to the resource registry.
+    We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.
+    This avoids needing a restart before seeing changes when you run in production mode.
+  * Mockup TinyMCE settings: Fix URLs in TinyMCE `external_plugins` settings.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.18.0](https://www.npmjs.com/package/@plone/volto/v/16.18.0).  See the [changelog](https://github.com/plone/volto/blob/16.18.0/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.20.4](https://www.npmjs.com/package/@plone/volto/v/16.20.4).  See the [changelog](https://github.com/plone/volto/blob/16.20.4/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
