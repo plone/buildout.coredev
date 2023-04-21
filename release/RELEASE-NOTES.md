@@ -1,14 +1,14 @@
-# Release notes for Plone 5.2.12rc1
+# Release notes for Plone 5.2.12
 
-* Released: Wednesday April 19, 2023
+* Released: Friday April 21, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://5.docs.plone.org/manage/upgrading/version_specific_migration/upgrade_to_52.html), explaining the biggest changes compared to 5.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/5.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/5.2.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.12/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/5.2-dev/constraints.txt](https://dist.plone.org/release/5.2-dev/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2-dev/versions.cfg](https://dist.plone.org/release/5.2-dev/versions.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/5.2.12/constraints.txt](https://dist.plone.org/release/5.2.12/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2.12/versions.cfg](https://dist.plone.org/release/5.2.12/versions.cfg).
 
 
 ## Highlights
