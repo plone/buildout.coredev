@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.4 (unreleased)
+# Release notes for Plone 6.0.4rc1
 
-* Updated: Thursday April 6, 2023
+* Updated: Friday April 21, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -13,7 +13,8 @@ If you want to jump straight in, here are two important links:
 
 ## Highlights
 
-Major changes since 6.0.2:
+Major changes since 6.0.3:
+
 
 * `plone.app.event` and `plone.app.multilingual`: Breaking dependency cleanup: move declaration of language independence of IEventBasic fields from `plone.app.event` to `plone.app.multilingual`.
 
