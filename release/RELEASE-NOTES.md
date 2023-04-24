@@ -25,7 +25,7 @@ Major changes since 6.0.3:
 * `plone.schema`:
   * Introduce extras `plone.schema[supermodel]` and `plone.schema[schemaeditor]`.
   * The package now works in its vanilla installation as an addon for z3c.form, without any other plone dependencies.
-* `plone.staticresources`: Update to `mockup` 5.0.9. Fixes `pat-recurrence` UI issues.
+* `plone.staticresources`: Update to `mockup` 5.0.10. Fixes `pat-recurrence` UI issues.
 * `Products.CMFPlone`:
   * Add a last modification time to the resource registry.
     We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.
