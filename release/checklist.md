@@ -41,7 +41,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
 - [ ] Create tag of the `release/6.0-dev` branch, e.g. 6.0.0a1, and push to GitHub.
 - [ ] Make final release directory on dist.plone.org, with versions, requirements, constraints, changelog, release notes.
 - [ ] Update the "-latest" links on dist.plone.org, e.g. `ln -sfT 6.0.0a1 6.0-latest`
-- [ ] Notify Erico, perhaps on the `#install-and-deploy` Discord channel, that there is a new release.  He can create Docker images then.
+- [ ] Notify Erico Andrei and/or Fred van Dijk, for example the `#release-team` Discord channel, that there is a new release, so they can create Docker images then.  Sample changes: [`README.md`](https://github.com/plone/plone-backend/commit/0e3ce3c190677c04874ebed6b527a845cc075bca) and [`version.txt`](https://github.com/plone/plone-backend/commit/cee1e0bbb17ed24c64cd42342929a020346e1da1).
 
 ## Announcements
 
@@ -54,3 +54,5 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
+- [ ] Update Plone version in documentation.  Ask Steve Piercy or do it yourself.  Here is a [sample PR](https://github.com/plone/documentation/pull/1492/files).
+- [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).
