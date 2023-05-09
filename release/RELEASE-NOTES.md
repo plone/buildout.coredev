@@ -18,6 +18,7 @@ Major changes since 6.0.4:
 * `plone.app.caching`: Update the resourceRegistries ETag to use the config registry modification time.  This time is set since Plone 6.0.4.
 * `plone.app.dexterity`: Content types control panel: Show behavior name and interface.
 * `plone.app.z3cform`: Merge utils and base classes from  `plone.app.widgets` and do not depend on it anymore.
+* `plone.recipe.zeoserver`: Fix lost dependencies when defining additional `eggs` in buildout part.
 * Several packages: Fix cyclic dependencies, drop Python 2 or Plone 5.2 support.
 
 
