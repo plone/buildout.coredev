@@ -3,6 +3,11 @@
 PY="3.11.2"
 VENVBASE="plone-coredev-6.1"
 
+if ! which pyenv &> /dev/null; then
+  echo "Error: pyenv script is not installed." >&2
+  exit 1
+fi
+
 eval "$(pyenv init -)"
 export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 eval "$(pyenv virtualenv-init -)"
