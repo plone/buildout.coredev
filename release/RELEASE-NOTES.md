@@ -1,41 +1,44 @@
-# Release notes for Plone 6.0.4
+# Release notes for Plone 6.0.5
 
-* Updated: Monday April 24, 2023
+* Released: Tuesday May 30, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.4/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.4/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.5/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.5/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.4/constraints.txt](https://dist.plone.org/release/6.0.4/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.4/versions.cfg](https://dist.plone.org/release/6.0.4/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.4/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.4/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.5/constraints.txt](https://dist.plone.org/release/6.0.5/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.5/versions.cfg](https://dist.plone.org/release/6.0.5/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.5/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.5/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.3:
+Major changes since 6.0.4:
 
-* `plone.app.event` and `plone.app.multilingual`: Breaking dependency cleanup: move declaration of language independence of IEventBasic fields from `plone.app.event` to `plone.app.multilingual`.
-* `plone.app.locales`: Updated translations for `es` and `eu`.
-* `plone.base`: Check for container field / attribute when trying to create content with same id.
+* `Zope`: Do not break on requests that pass both a query string and a `Content-Type` header or request body.
+* `Products.CMFPlone`: Do not truncate the sortable_title index.
+* `plone.app.caching`: Update the resourceRegistries ETag to use the config registry modification time.  This time is set since Plone 6.0.4.
+* `plone.app.dexterity`: Content types control panel: Show behavior name and interface.
+* `plone.app.z3cform`:
+  * Merge utils and base classes from  `plone.app.widgets` and do not depend on it anymore.
+  * Remove invalid unicode control characters for `TextareaWidget`.
+* `plone.recipe.zeoserver`: Fix lost dependencies when defining additional `eggs` in buildout part.
 * `plone.restapi`:
-  * Apply a cache ruleset to the `/@querystring-search` endpoint.
-  * Add `UID` to `relationvalue_converter` summary.
-  * Add `querystring_search` `GET` method.
-* `plone.schema`:
-  * Introduce extras `plone.schema[supermodel]` and `plone.schema[schemaeditor]`.
-  * The package now works in its vanilla installation as an addon for z3c.form, without any other plone dependencies.
-* `plone.staticresources`: Update to `mockup` 5.0.10. Fixes `pat-recurrence` UI issues.
-* `Products.CMFPlone`:
-  * Add a last modification time to the resource registry.
-    We update this when changing anything related: when changing the resource registry in its control panel or activating an add-on.
-    This avoids needing a restart before seeing changes when you run in production mode.
-  * Mockup TinyMCE settings: Fix URLs in TinyMCE `external_plugins` settings.
+  * Create relations service. Query, add, delete.
+  * Add portal_type title (`type_title`) to content response.
+  * Added support for nested schemas with resolveuid deserializer.
+* `plone.staticresources`: Update `mockup` from 5.0.10 to 5.0.12:
+  * pat markspeciallinks: Fix selector for tests.
+  * pat recurrence: Fix default selected range option if there's no "repeat forever" button (which is default in the event behavior).
+  * pat textareamimetypeselector: Async initialization of textareas. Fixes TinyMCE in modals not showing up (see Mosaic).
+  * pat tinymce: Add urlconverter_callback and do not convert external links/images urls
+  * pat tinymce: Do not remove current paragraph when inserting image.
+* Several packages: Fix cyclic dependencies, drop Python 2 or Plone 5.2 support.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.20.4](https://www.npmjs.com/package/@plone/volto/v/16.20.4).  See the [changelog](https://github.com/plone/volto/blob/16.20.4/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.20.7](https://www.npmjs.com/package/@plone/volto/v/16.20.7).  See the [changelog](https://github.com/plone/volto/blob/16.20.7/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
