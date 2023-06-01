@@ -1,39 +1,22 @@
-# Release notes for Plone 6.0.5
+# Release notes for Plone 6.0.6 (unreleased)
 
-* Released: Tuesday May 30, 2023
+* Last updated: Thursday June 1, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.5/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.5/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.5/constraints.txt](https://dist.plone.org/release/6.0.5/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.5/versions.cfg](https://dist.plone.org/release/6.0.5/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.5/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.5/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.4:
+Major changes since 6.0.5:
 
-* `Zope`: Do not break on requests that pass both a query string and a `Content-Type` header or request body.
-* `Products.CMFPlone`: Do not truncate the sortable_title index.
-* `plone.app.caching`: Update the resourceRegistries ETag to use the config registry modification time.  This time is set since Plone 6.0.4.
-* `plone.app.dexterity`: Content types control panel: Show behavior name and interface.
-* `plone.app.z3cform`:
-  * Merge utils and base classes from  `plone.app.widgets` and do not depend on it anymore.
-  * Remove invalid unicode control characters for `TextareaWidget`.
-* `plone.recipe.zeoserver`: Fix lost dependencies when defining additional `eggs` in buildout part.
-* `plone.restapi`:
-  * Create relations service. Query, add, delete.
-  * Add portal_type title (`type_title`) to content response.
-  * Added support for nested schemas with resolveuid deserializer.
-* `plone.staticresources`: Update `mockup` from 5.0.10 to 5.0.12:
-  * pat markspeciallinks: Fix selector for tests.
-  * pat recurrence: Fix default selected range option if there's no "repeat forever" button (which is default in the event behavior).
-  * pat textareamimetypeselector: Async initialization of textareas. Fixes TinyMCE in modals not showing up (see Mosaic).
-  * pat tinymce: Add urlconverter_callback and do not convert external links/images urls
-  * pat tinymce: Do not remove current paragraph when inserting image.
-* Several packages: Fix cyclic dependencies, drop Python 2 or Plone 5.2 support.
+* `plone.app.relationfield`: Removed unneeded dependency on plone.app.dexterity.
+   This fixes a cyclic dependency: `plone.app.dexterity` depends on `plone.app.layout` which depends on `plone.app.relationfield`.
 
 
 ## Volto frontend
