@@ -1,65 +1,51 @@
-Repository: plone.app.querystring
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2023-06-14T13:59:00-07:00
+Date: 2023-06-13T16:50:27-07:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.querystring/commit/f618dd87a970a18a4e4be0fea8963f0a68933e66
+Commit: https://github.com/plone/plone.namedfile/commit/a09498b93a880555294a559192ee4aefc3feefc1
 
-Merge multiple range queries
+Handle missing subpath for @@images view
 
 Files changed:
-M plone/app/querystring/queryparser.py
-M plone/app/querystring/tests/testQueryParser.py
+A news/144.bugfix
+M plone/namedfile/scaling.py
+M plone/namedfile/tests/test_scaling_functional.py
 
-b'diff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py\nindex bdc5175..e30e4b0 100644\n--- a/plone/app/querystring/queryparser.py\n+++ b/plone/app/querystring/queryparser.py\n@@ -37,7 +37,6 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):\n             index=row.get("i", None), operator=function_path, values=row.get("v", None)\n         )\n \n-        kwargs = {}\n         parser = resolve(row.operator)\n         kwargs = parser(context, row)\n \n@@ -49,10 +48,30 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):\n                 query[path_index]["query"].extend(kwargs[path_index]["query"])\n             else:\n                 query.update(kwargs)\n+            continue\n         elif len(path_index) > 1:\n             raise IndexError("Too many path indices in one row.")\n-        else:\n-            query.update(kwargs)\n+\n+        for index, value in kwargs.items():\n+            # Merge range queries on the same index\n+            if isinstance(value, dict) and "range" in value:\n+                existing = query.get(index)\n+                if isinstance(existing, dict) and "range" in existing:\n+                    existing_query = existing["query"]\n+                    if not isinstance(existing_query, list):\n+                        existing_query = [existing_query]\n+                    new_query = value["query"]\n+                    if not isinstance(new_query, list):\n+                        new_query = [new_query]\n+                    existing["query"] = sorted(existing_query + new_query)\n+                    if (\n+                        (existing["range"] == "min" and value["range"] == "max") or\n+                        (existing["range"] == "max" and value["range"] == "min")\n+                    ):\n+                        existing["range"] = "minmax"\n+                    continue\n+            # Other cases: simply overwrite the query for the index\n+            query[index] = value\n \n     if not query:\n         # If the query is empty fall back onto the equality query\ndiff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py\nindex c183398..5074b69 100644\n--- a/plone/app/querystring/tests/testQueryParser.py\n+++ b/plone/app/querystring/tests/testQueryParser.py\n@@ -285,6 +285,22 @@ def test_multi_path_with_depth_computet(self):\n             },\n         )\n \n+    def test_merge_ranges(self):\n+        data = [\n+            {\n+                "i": "modified",\n+                "o": "plone.app.querystring.operation.int.largerThan",\n+                "v": 10,\n+            },\n+            {\n+                "i": "modified",\n+                "o": "plone.app.querystring.operation.int.lessThan",\n+                "v": 20,\n+            },\n+        ]\n+        parsed = queryparser.parseFormquery(MockSite(), data)\n+        self.assertEqual(parsed, {"modified": {"query": [10, 20], "range": "minmax"}})\n+\n \n class TestQueryGenerators(TestQueryParserBase):\n     def test__between(self):\n'
+b'diff --git a/news/144.bugfix b/news/144.bugfix\nnew file mode 100644\nindex 0000000..613382a\n--- /dev/null\n+++ b/news/144.bugfix\n@@ -0,0 +1 @@\n+Return a 400 Bad Request response if the `@@images` view is published without a subpath. @davisagli\ndiff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex c21e8c8..28e1f7e 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -21,6 +21,7 @@\n from Products.CMFPlone.utils import safe_encode\n from Products.Five import BrowserView\n from xml.sax.saxutils import quoteattr\n+from zExceptions import BadRequest\n from zExceptions import Unauthorized\n from ZODB.blob import BlobFile\n from ZODB.POSException import ConflictError\n@@ -452,6 +453,10 @@ def traverse(self, name, furtherPath):\n             return image.tag()\n         raise TraversalError(self, name)\n \n+    def __call__(self):\n+        # There\'s nothing in the path after /@@images\n+        raise BadRequest("Missing image scale path")\n+\n     _sizes = None\n \n     @deprecate("use property available_sizes instead")\ndiff --git a/plone/namedfile/tests/test_scaling_functional.py b/plone/namedfile/tests/test_scaling_functional.py\nindex b9610ad..bf8f1fd 100644\n--- a/plone/namedfile/tests/test_scaling_functional.py\n+++ b/plone/namedfile/tests/test_scaling_functional.py\n@@ -10,6 +10,7 @@\n from plone.namedfile.testing import PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n from plone.namedfile.tests import getFile\n from plone.testing.zope import Browser\n+from zExceptions import BadRequest\n from zope.annotation import IAttributeAnnotatable\n from zope.interface import implementer\n \n@@ -215,6 +216,11 @@ def testSVGPublishThumbViaName(self):\n         self.assertEqual("image/svg+xml", self.browser.headers["content-type"])\n         self.assertEqual(self.browser.contents, data)\n \n+    def testImagesViewWithNoSubpath(self):\n+        transaction.commit()\n+        with self.assertRaises(BadRequest):\n+            self.browser.open(self.layer["app"].absolute_url() + "/item/@@images")\n+\n \n def test_suite():\n     from unittest import defaultTestLoader\n'
 
-Repository: plone.app.querystring
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2023-06-14T13:59:00-07:00
+Date: 2023-06-14T14:08:48-07:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.querystring/commit/71a48db74d9ae7508771a698e020fed977fab039
+Commit: https://github.com/plone/plone.namedfile/commit/b2dc69f99ee6625baa513ca086bbcb300c1c5e52
 
-changelog
+block publishing of @@images without making it callable in page templates
 
 Files changed:
-A news/132.bugfix
+M plone/namedfile/scaling.py
 
-b'diff --git a/news/132.bugfix b/news/132.bugfix\nnew file mode 100644\nindex 0000000..9074cbe\n--- /dev/null\n+++ b/news/132.bugfix\n@@ -0,0 +1 @@\n+Merge range queries on the same index instead of overwriting. @davisagli\n'
+b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex 28e1f7e..9ec3bd0 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -31,7 +31,7 @@\n from zope.deprecation import deprecate\n from zope.interface import alsoProvides\n from zope.interface import implementer\n-from zope.publisher.interfaces import IPublishTraverse\n+from zope.publisher.interfaces.browser import IBrowserPublisher\n from zope.publisher.interfaces import NotFound\n from zope.traversing.interfaces import ITraversable\n from zope.traversing.interfaces import TraversalError\n@@ -391,7 +391,7 @@ def __call__(\n         return value, format_, dimensions\n \n \n-@implementer(ITraversable, IPublishTraverse)\n+@implementer(ITraversable, IBrowserPublisher)\n class ImageScaling(BrowserView):\n     """view used for generating (and storing) image scales"""\n \n@@ -435,6 +435,10 @@ def publishTraverse(self, request, name):\n             return scale_view\n         raise NotFound(self, name, self.request)\n \n+    def browserDefault(self, request):\n+        # There\'s nothing in the path after /@@images\n+        raise BadRequest("Missing image scale path")\n+\n     def traverse(self, name, furtherPath):\n         """used for path traversal, i.e. in zope page templates"""\n         # validate access\n@@ -453,10 +457,6 @@ def traverse(self, name, furtherPath):\n             return image.tag()\n         raise TraversalError(self, name)\n \n-    def __call__(self):\n-        # There\'s nothing in the path after /@@images\n-        raise BadRequest("Missing image scale path")\n-\n     _sizes = None\n \n     @deprecate("use property available_sizes instead")\n'
 
-Repository: plone.app.querystring
+Repository: plone.namedfile
 
 
 Branch: refs/heads/master
-Date: 2023-06-14T13:59:00-07:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.querystring/commit/41025866534f6a7a41de65f47ed001fb8d31add5
+Date: 2023-06-16T15:04:05+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.namedfile/commit/1ba19d137bac2e720b969ebe85b3b394932a5c2f
 
-lint
+Merge pull request #145 from plone/fix-error-missing-images-subpath
 
-Files changed:
-M plone/app/querystring/queryparser.py
-
-b'diff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py\nindex e30e4b0..a4ab776 100644\n--- a/plone/app/querystring/queryparser.py\n+++ b/plone/app/querystring/queryparser.py\n@@ -64,9 +64,8 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):\n                     if not isinstance(new_query, list):\n                         new_query = [new_query]\n                     existing["query"] = sorted(existing_query + new_query)\n-                    if (\n-                        (existing["range"] == "min" and value["range"] == "max") or\n-                        (existing["range"] == "max" and value["range"] == "min")\n+                    if (existing["range"] == "min" and value["range"] == "max") or (\n+                        existing["range"] == "max" and value["range"] == "min"\n                     ):\n                         existing["range"] = "minmax"\n                     continue\n'
-
-Repository: plone.app.querystring
-
-
-Branch: refs/heads/master
-Date: 2023-06-15T08:36:46-07:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.app.querystring/commit/8d9896e243741595deef8a8dd0deb94acda70c4b
-
-Merge pull request #132 from plone/merge-range-queries
-
-Merge multiple range queries
+Handle missing subpath for @@images view
 
 Files changed:
-A news/132.bugfix
-M plone/app/querystring/queryparser.py
-M plone/app/querystring/tests/testQueryParser.py
+A news/144.bugfix
+M plone/namedfile/scaling.py
+M plone/namedfile/tests/test_scaling_functional.py
 
-b'diff --git a/news/132.bugfix b/news/132.bugfix\nnew file mode 100644\nindex 0000000..9074cbe\n--- /dev/null\n+++ b/news/132.bugfix\n@@ -0,0 +1 @@\n+Merge range queries on the same index instead of overwriting. @davisagli\ndiff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py\nindex bdc5175..a4ab776 100644\n--- a/plone/app/querystring/queryparser.py\n+++ b/plone/app/querystring/queryparser.py\n@@ -37,7 +37,6 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):\n             index=row.get("i", None), operator=function_path, values=row.get("v", None)\n         )\n \n-        kwargs = {}\n         parser = resolve(row.operator)\n         kwargs = parser(context, row)\n \n@@ -49,10 +48,29 @@ def parseFormquery(context, formquery, sort_on=None, sort_order=None):\n                 query[path_index]["query"].extend(kwargs[path_index]["query"])\n             else:\n                 query.update(kwargs)\n+            continue\n         elif len(path_index) > 1:\n             raise IndexError("Too many path indices in one row.")\n-        else:\n-            query.update(kwargs)\n+\n+        for index, value in kwargs.items():\n+            # Merge range queries on the same index\n+            if isinstance(value, dict) and "range" in value:\n+                existing = query.get(index)\n+                if isinstance(existing, dict) and "range" in existing:\n+                    existing_query = existing["query"]\n+                    if not isinstance(existing_query, list):\n+                        existing_query = [existing_query]\n+                    new_query = value["query"]\n+                    if not isinstance(new_query, list):\n+                        new_query = [new_query]\n+                    existing["query"] = sorted(existing_query + new_query)\n+                    if (existing["range"] == "min" and value["range"] == "max") or (\n+                        existing["range"] == "max" and value["range"] == "min"\n+                    ):\n+                        existing["range"] = "minmax"\n+                    continue\n+            # Other cases: simply overwrite the query for the index\n+            query[index] = value\n \n     if not query:\n         # If the query is empty fall back onto the equality query\ndiff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py\nindex c183398..5074b69 100644\n--- a/plone/app/querystring/tests/testQueryParser.py\n+++ b/plone/app/querystring/tests/testQueryParser.py\n@@ -285,6 +285,22 @@ def test_multi_path_with_depth_computet(self):\n             },\n         )\n \n+    def test_merge_ranges(self):\n+        data = [\n+            {\n+                "i": "modified",\n+                "o": "plone.app.querystring.operation.int.largerThan",\n+                "v": 10,\n+            },\n+            {\n+                "i": "modified",\n+                "o": "plone.app.querystring.operation.int.lessThan",\n+                "v": 20,\n+            },\n+        ]\n+        parsed = queryparser.parseFormquery(MockSite(), data)\n+        self.assertEqual(parsed, {"modified": {"query": [10, 20], "range": "minmax"}})\n+\n \n class TestQueryGenerators(TestQueryParserBase):\n     def test__between(self):\n'
+b'diff --git a/news/144.bugfix b/news/144.bugfix\nnew file mode 100644\nindex 0000000..613382a\n--- /dev/null\n+++ b/news/144.bugfix\n@@ -0,0 +1 @@\n+Return a 400 Bad Request response if the `@@images` view is published without a subpath. @davisagli\ndiff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex c21e8c8..9ec3bd0 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -21,6 +21,7 @@\n from Products.CMFPlone.utils import safe_encode\n from Products.Five import BrowserView\n from xml.sax.saxutils import quoteattr\n+from zExceptions import BadRequest\n from zExceptions import Unauthorized\n from ZODB.blob import BlobFile\n from ZODB.POSException import ConflictError\n@@ -30,7 +31,7 @@\n from zope.deprecation import deprecate\n from zope.interface import alsoProvides\n from zope.interface import implementer\n-from zope.publisher.interfaces import IPublishTraverse\n+from zope.publisher.interfaces.browser import IBrowserPublisher\n from zope.publisher.interfaces import NotFound\n from zope.traversing.interfaces import ITraversable\n from zope.traversing.interfaces import TraversalError\n@@ -390,7 +391,7 @@ def __call__(\n         return value, format_, dimensions\n \n \n-@implementer(ITraversable, IPublishTraverse)\n+@implementer(ITraversable, IBrowserPublisher)\n class ImageScaling(BrowserView):\n     """view used for generating (and storing) image scales"""\n \n@@ -434,6 +435,10 @@ def publishTraverse(self, request, name):\n             return scale_view\n         raise NotFound(self, name, self.request)\n \n+    def browserDefault(self, request):\n+        # There\'s nothing in the path after /@@images\n+        raise BadRequest("Missing image scale path")\n+\n     def traverse(self, name, furtherPath):\n         """used for path traversal, i.e. in zope page templates"""\n         # validate access\ndiff --git a/plone/namedfile/tests/test_scaling_functional.py b/plone/namedfile/tests/test_scaling_functional.py\nindex b9610ad..bf8f1fd 100644\n--- a/plone/namedfile/tests/test_scaling_functional.py\n+++ b/plone/namedfile/tests/test_scaling_functional.py\n@@ -10,6 +10,7 @@\n from plone.namedfile.testing import PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n from plone.namedfile.tests import getFile\n from plone.testing.zope import Browser\n+from zExceptions import BadRequest\n from zope.annotation import IAttributeAnnotatable\n from zope.interface import implementer\n \n@@ -215,6 +216,11 @@ def testSVGPublishThumbViaName(self):\n         self.assertEqual("image/svg+xml", self.browser.headers["content-type"])\n         self.assertEqual(self.browser.contents, data)\n \n+    def testImagesViewWithNoSubpath(self):\n+        transaction.commit()\n+        with self.assertRaises(BadRequest):\n+            self.browser.open(self.layer["app"].absolute_url() + "/item/@@images")\n+\n \n def test_suite():\n     from unittest import defaultTestLoader\n'
 
