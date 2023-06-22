@@ -16,7 +16,7 @@ If you want to jump straight in, here are two important links:
 Major changes since 6.0.5:
 
 * `plonetheme.barceloneta` and `plone.staticresources`: Update to Bootstrap 5.3 release.  Adopt colormode related variables from Bootstrap 5.3.
-   See note below: Must update custom themes.
+   You may need to update your custom themes.  See note below.
 * `plone.restapi`: Added `@site` and `@navroot` endpoints.
 * `plone.app.relationfield`: Removed unneeded dependency on plone.app.dexterity.
    This fixes a cyclic dependency: `plone.app.dexterity` depends on `plone.app.layout` which depends on `plone.app.relationfield`.
@@ -39,11 +39,42 @@ Also, existing Plone sites need some or more extensive changes to be upgraded be
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available  and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.  Support for Classic UI is especially relevant for existing Plone sites which for whatever reason or requirements are not yet ready to be upgraded to the Volto frontend.
 
 
-## Must update custom themes
+## Updating custom themes
 
-You may need to update your custom theme.
-See https://github.com/plone/bobtemplates.plone/pull/550#issuecomment-1594445727
-TODO: add that inline in these release notes.
+Now that Bootstrap 5.3 is available, you may need to update your custom theme for Classic UI.
+This is *not* caused by Plone 6.0.6 moving to Bootstrap 5.3.
+You could stay on Plone 6.0.5, and *still* have a problem with your custom theme, simply because Bootstrap 5.3 is available.
+
+The problem is described in this [`bobtemplates.plone` issue](https://github.com/plone/plonetheme.barceloneta/issues/335).
+Let's assume that a while ago you have followed the [theming training](https://training.plone.org/theming/preparation.html) to create a theme based on the standard Barceloneta theme.  All is working fine.
+But now you want to have a fresh install, so you remove `node_modules` and `package-lock.json`.
+You run `npm install`, still fine.
+Then you run `npm run build` and get an error:
+
+```
+Error: Undefined variable.
+   ╷
+55 │     "primary": $primary-text-emphasis-dark,
+```
+
+The problem here is that you get Bootstrap 5.3, but your theme expects 5.2.
+There are two ways to solve this.
+
+If you want to keep using Bootstrap 5.2:
+
+* Edit `package.json` and let the `dependencies` contain this: `"@plone/plonetheme-barceloneta-base": "~3.0.3"`.
+  This version has a proper pin so you stay on Bootstrap 5.2.
+* Run `rm -rf node_modules package-lock.json && npm install && npm run build`.
+* If you want to create a new theme based on Bootstrap 5.2, make sure to use `bobtemplates.plone==6.2.7`.
+
+If you are fine with upgrading to Bootstrap 5.3:
+
+* Edit `package.json` and let the `dependencies` contain this: `"@plone/plonetheme-barceloneta-base": "~3.1.0"`.
+* In `styles/theme.scss` add two imports in part 3:
+  * After `variables.colors.plone` add this line: `@import "@plone/plonetheme-barceloneta-base/scss/variables.colors.dark.plone";`
+  * After `bootstrap/scss/variables` add this line: `@import "bootstrap/scss/variables-dark";`
+* Run `rm -rf node_modules package-lock.json && npm install && npm run build`.
+* If you want to create a new theme based on Bootstrap 5.3, make sure to use `bobtemplates.plone>=6.3`.
 
 
 ## Python compatibility
