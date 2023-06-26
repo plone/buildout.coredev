@@ -1,18 +1,32 @@
-Repository: plone.outputfilters
+Repository: plone.restapi
 
 
 Branch: refs/heads/master
-Date: 2023-06-26T17:10:51+02:00
-Author: Godefroid Chapelle (gotcha) <gotcha@bubblenet.be>
-Commit: https://github.com/plone/plone.outputfilters/commit/e2043ba8ca2e66156e84122d464f50bb7c9a5e83
+Date: 2023-06-26T15:17:11-07:00
+Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/eb102ccc1befd99a10ecf8086a1b82b63eb8c86b
 
-Query registry once
+handle suffix with not traversable objects (#1649)
 
-instead of querying it for each img tag.
+* handle suffix with @@ that are not traversable
+
+* blacked
+
+* fix suffix segements order
+
+* comments
+
+* add changelog
+
+---------
+
+Co-authored-by: Mauro Amico &lt;mauro.amico@gmail.com&gt;
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-A news/less_call_to_registry.internal
-M plone/outputfilters/filters/picture_variants.py
+A news/1649.bugfix
+M src/plone/restapi/deserializer/utils.py
+M src/plone/restapi/tests/test_resolveuid.py
 
-b'diff --git a/news/less_call_to_registry.internal b/news/less_call_to_registry.internal\nnew file mode 100644\nindex 0000000..41bd799\n--- /dev/null\n+++ b/news/less_call_to_registry.internal\n@@ -0,0 +1,2 @@\n+Call registry once per filter rather than for each img tag.\n+[gotcha]\ndiff --git a/plone/outputfilters/filters/picture_variants.py b/plone/outputfilters/filters/picture_variants.py\nindex 2e39deb..8718bc7 100644\n--- a/plone/outputfilters/filters/picture_variants.py\n+++ b/plone/outputfilters/filters/picture_variants.py\n@@ -25,6 +25,7 @@ def __init__(self, context=None, request=None):\n         self.context = context\n         self.request = request\n         self.img2picturetag = Img2PictureTag()\n+        self.all_picture_variants = get_picture_variants()\n \n     def __call__(self, data):\n         soup = BeautifulSoup(safe_text(data), "html.parser")\n@@ -33,7 +34,9 @@ def __call__(self, data):\n             picture_variant_name = elem.attrs.get("data-picturevariant", "")\n             if not picture_variant_name:\n                 continue\n-            picture_variants_config = get_picture_variants().get(picture_variant_name)\n+            picture_variants_config = self.all_picture_variants.get(\n+                picture_variant_name\n+            )\n             if not picture_variants_config:\n                 logger.warning(\n                     "Could not find the given picture_variant_name {}, leave tag untouched!".format(\n'
+b'diff --git a/news/1649.bugfix b/news/1649.bugfix\nnew file mode 100644\nindex 000000000..14a226f0c\n--- /dev/null\n+++ b/news/1649.bugfix\n@@ -0,0 +1 @@\n+Fix path2uid method, to handle suffix with non-traversable objects. @cekk @mamico\ndiff --git a/src/plone/restapi/deserializer/utils.py b/src/plone/restapi/deserializer/utils.py\nindex 7b9c206cc..04438be76 100644\n--- a/src/plone/restapi/deserializer/utils.py\n+++ b/src/plone/restapi/deserializer/utils.py\n@@ -23,16 +23,22 @@ def path2uid(context, link):\n         path = "{portal_path}/{path}".format(\n             portal_path=portal_path, path=path.lstrip("/")\n         )\n+\n+    # handle edge-case when we have non traversable path like /@@download/file\n+    if "/@@" in path:\n+        path, suffix = path.split("/@@", 1)\n+        suffix = "/@@" + suffix\n+    else:\n+        suffix = ""\n     obj = portal.unrestrictedTraverse(path, None)\n     if obj is None or obj == portal:\n         return link\n     segments = path.split("/")\n-    suffix = ""\n     while not IUUIDAware.providedBy(obj):\n         obj = aq_parent(obj)\n         if obj is None:\n             break\n-        suffix += "/" + segments.pop()\n+        suffix = "/" + segments.pop() + suffix\n     # check if obj is wrong because of acquisition\n     if not obj or "/".join(obj.getPhysicalPath()) != "/".join(segments):\n         return link\ndiff --git a/src/plone/restapi/tests/test_resolveuid.py b/src/plone/restapi/tests/test_resolveuid.py\nindex d1c2788ae..404639be8 100644\n--- a/src/plone/restapi/tests/test_resolveuid.py\n+++ b/src/plone/restapi/tests/test_resolveuid.py\n@@ -11,6 +11,7 @@\n from plone.restapi.interfaces import IFieldSerializer\n from plone.restapi.testing import PLONE_RESTAPI_BLOCKS_FUNCTIONAL_TESTING\n from plone.restapi.testing import PLONE_RESTAPI_BLOCKS_INTEGRATION_TESTING\n+from plone.restapi.tests.performance import set_file\n from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n from unittest import TestCase\n@@ -537,11 +538,37 @@ def test_path_keeps_suffix(self):\n             ]["url"],\n             f"../resolveuid/{uid}/view",\n         )\n+\n+    def test_path_keeps_suffix_also_with_non_traversable_items(self):\n+        self.portal.invokeFactory("File", id="file", title="File")\n+        file_obj = self.portal.file\n+        set_file(file_obj)\n+        uid = IUUID(file_obj)\n+\n+        blocks = {\n+            "effbdcdc-253c-41a7-841e-5edb3b56ce32": {\n+                "@type": "text",\n+                "text": {\n+                    "entityMap": {\n+                        "0": {\n+                            "data": {\n+                                "href": file_obj.absolute_url() + "/@@download/file",\n+                                "rel": "nofollow",\n+                                "url": file_obj.absolute_url() + "/@@download/file",\n+                            },\n+                            "mutability": "MUTABLE",\n+                            "type": "LINK",\n+                        }\n+                    }\n+                },\n+            }\n+        }\n+        value = self.deserialize("blocks", blocks)\n         self.assertEqual(\n             value["effbdcdc-253c-41a7-841e-5edb3b56ce32"]["text"]["entityMap"]["0"][\n                 "data"\n             ]["url"],\n-            f"../resolveuid/{uid}/view",\n+            f"../resolveuid/{uid}/@@download/file",\n         )\n \n     def test_blocks_field_serialization_resolves_uids_with_primary_field_url(self):\n'
 
