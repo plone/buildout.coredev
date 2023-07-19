@@ -1,41 +1,36 @@
-# Release notes for Plone 5.2.12
+# Release notes for Plone 5.2.13
 
-* Released: Friday April 21, 2023
+* Released: Thursday July 20, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://5.docs.plone.org/manage/upgrading/version_specific_migration/upgrade_to_52.html), explaining the biggest changes compared to 5.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/5.2.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.12/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/5.2.13/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.13/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/5.2.12/constraints.txt](https://dist.plone.org/release/5.2.12/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2.12/versions.cfg](https://dist.plone.org/release/5.2.12/versions.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/5.2.13/constraints.txt](https://dist.plone.org/release/5.2.13/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2.13/versions.cfg](https://dist.plone.org/release/5.2.13/versions.cfg).
 
 
 ## Highlights
 
-Major changes since 5.2.11:
+Major changes since 5.2.12:
 
-* `plone.recipe.zope2instance`: Add new option `asyncore_use_poll` to waitress config file.
-* `plone.app.locales`: Update Turkish translations.
-* `plone.app.users`: For user schemas use a volatile cache on the request instead of on the portal.
-  This prevents seeing an empty user profile when you have custom user schemas.
-* `plonetheme.barceloneta`: Fix Diazo rule problem with undefined footer_portlets and footer_portlets_count variables.
-* `Products.CMFPlone`:
-  * Show warning in Site Setup when using an unsupported Plone or Python version.
-  * Removed path query from search view when context is site root.
-  * Fixed encoding issue on Python 3 for some mail servers.  This could result in missing characters in an email body.
+* `plone.app.locales`: Update Italian translations.
+* `Products.CMFPlone`: Drop Python 3.7 support.
 
 
 ## Python compatibility
 
-This release supports Python 2.7, 3.7, and 3.8.
+This release supports Python 2.7 and 3.8.
 
-**Important: This is the last release that officially supports Python 3.7.**
-The next Plone 5.2 release is expected in July, but Python 3.7 will reach end-of-life in June.
-We will stop testing on 3.7 and stop providing specific version pins for 3.7 (none are needed at the moment though).  This means that things may start breaking without being noticed.  If something breaks and you can supply a fix, we are happy to include it in the next release though.
+**Important: This release no longer officially supports Python 3.7.**
+Python 3.7 has reached end-of-life in June.
+We have stopped testing on 3.7 and no longer provide specific version pins for 3.7 (none seem needed at the moment though).  This means that things may start breaking without being noticed.  If something breaks and you can supply a fix, we are happy to include it in the next release though.
 
-Python 3.6 support was [dropped in Plone 5.2.10](https://community.plone.org/t/plone-5-2-drops-python-3-6-support/15706).
-Plone 5.2 supports Python 2.7, but this is end-of-life since 2020.  It should only be used as a temporary stepping stone before you migrate your Plone site to Python 3.
+Plone 5.2 still supports Python 2.7, but this is end-of-life since 2020.  It should only be used as a temporary stepping stone before you migrate your Plone site to Python 3.
+
+The next release is scheduled for October 2023, and is planned to be the last regular release of Plone 5.2.
+After that release, there is still one year of security support.
 
 
 ## Versions of pip, zc.buildout, setuptools
