@@ -1,99 +1,36 @@
-Repository: plone.app.linkintegrity
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2023-07-31T13:05:08+02:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/39b594dfe13571d09084be9149d5f699e5a8b5d0
+Date: 2023-08-16T13:34:16-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.querystring/commit/26d6e565f874d9104133339e1aef3c45416c11a7
 
-Remove outgoing RelationValues from catalog after deleting content item.
-
-ingoing RelationValues are unindexed in updateRelations of z3c.relationfield.
+Fix currentUser operation
 
 Files changed:
-M plone/app/linkintegrity/configure.zcml
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/tests/test_references.py
+A news/135.bugfix
+M plone/app/querystring/queryparser.py
+M plone/app/querystring/tests/testQueryParser.py
 
-b'diff --git a/plone/app/linkintegrity/configure.zcml b/plone/app/linkintegrity/configure.zcml\nindex d11d5ef..e3fa781 100644\n--- a/plone/app/linkintegrity/configure.zcml\n+++ b/plone/app/linkintegrity/configure.zcml\n@@ -33,6 +33,14 @@\n       handler=".handlers.modifiedContent"\n       />\n \n+  <!-- Not zope.lifecycleevent.interfaces.IObjectRemovedEvent!\n+    That\'s too late to grep the intId. -->\n+  <subscriber\n+      for="plone.app.relationfield.interfaces.IDexterityHasRelations\n+           OFS.interfaces.IObjectWillBeRemovedEvent"\n+      handler=".handlers.removedContent"\n+      />\n+\n   <genericsetup:registerProfile\n       name="default"\n       title="plone.app.linkintegrity"\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex f9423b1..600723c 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -78,7 +78,10 @@ def findObject(base, path):\n \n \n def getObjectsFromLinks(base, links):\n-    """determine actual objects referred to by given links"""\n+    """Determine actual objects referred to by given links.\n+\n+    return set of RelationValue\n+    """\n     intids = getUtility(IIntIds)\n     objects = set()\n     url = base.absolute_url()\n@@ -111,6 +114,25 @@ def modifiedContent(obj, event):\n         updateReferences(obj, refs)\n \n \n+def removedContent(obj, event):\n+    if not check_linkintegrity_dependencies(obj):\n+        return\n+\n+    int_id = ensure_intid(obj)\n+    if int_id is None:\n+        return\n+\n+    catalog = getUtility(ICatalog)\n+    if catalog is None:\n+        return\n+\n+    rels = catalog.findRelations(\n+        {"from_id": int_id, "from_attribute": referencedRelationship}\n+    )\n+    for rel in list(rels):\n+        catalog.unindex(rel)\n+\n+\n # BBB\n modifiedArchetype = modifiedContent\n modifiedDexterity = modifiedContent\ndiff --git a/plone/app/linkintegrity/tests/test_references.py b/plone/app/linkintegrity/tests/test_references.py\nindex 41aecdf..7e1eb19 100644\n--- a/plone/app/linkintegrity/tests/test_references.py\n+++ b/plone/app/linkintegrity/tests/test_references.py\n@@ -137,6 +137,32 @@ def test_broken_references(self):\n             _marker = dict()\n             self.assertEqual(getattr(obj, "aq_parent", _marker), _marker)\n \n+    def test_catalog_cleaned_up(self):\n+        doc1 = self.portal.doc1\n+        # Create a temporary document to test with.\n+        doc_temp = testing.create(self.portal, "Document", id="doc_temp")\n+\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 0)\n+        set_text(doc_temp, \'<a href="doc1">Doc 1</a>\')\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 1)\n+        self.assertEqual(\n+            [link.from_object for link in getIncomingLinks(doc1)], [self.portal.doc_temp]\n+        )\n+\n+        catalog = getUtility(ICatalog)\n+        rels = list(catalog.findRelations())\n+        self.assertEqual(len(rels), 1)\n+\n+        # Now delete the source item.\n+        self.portal._delObject(doc_temp.id)\n+\n+        # Test, if relation is removed from the relation catalog.\n+        catalog = getUtility(ICatalog)\n+        rels = list(catalog.findRelations())\n+        self.assertEqual(len(rels), 0)\n+\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 0)\n+\n     def test_relative_upwards_link_generates_matching_reference(self):\n         doc1 = self.portal.doc1\n         doc3 = self.portal.folder1.doc3\n'
+b'diff --git a/news/135.bugfix b/news/135.bugfix\nnew file mode 100644\nindex 0000000..20bbce6\n--- /dev/null\n+++ b/news/135.bugfix\n@@ -0,0 +1 @@\n+Fix the currentUser operation when the current user\'s username is different from their user id. @davisagli\ndiff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py\nindex a4ab776..4ade30e 100644\n--- a/plone/app/querystring/queryparser.py\n+++ b/plone/app/querystring/queryparser.py\n@@ -213,7 +213,7 @@ def _currentUser(context, row):\n     """Current user lookup"""\n     mt = getToolByName(context, "portal_membership")\n     user = mt.getAuthenticatedMember()\n-    return {row.index: {"query": user.getUserName()}}\n+    return {row.index: {"query": user.getId()}}\n \n \n def _showInactive(context, row):\ndiff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py\nindex 5074b69..d195218 100644\n--- a/plone/app/querystring/tests/testQueryParser.py\n+++ b/plone/app/querystring/tests/testQueryParser.py\n@@ -116,14 +116,12 @@ class MockNavRoot(MockObject):\n \n \n class MockUser:\n-    def __init__(self, username=None, roles=None):\n-        self.username = "Anonymous User"\n-        if username:\n-            self.username = username\n+    def __init__(self, userid=None, roles=None):\n+        self.userid = userid or "Anonymous User"\n         self.roles = roles or "Anonymous"\n \n-    def getUserName(self):\n-        return self.username\n+    def getId(self):\n+        return self.userid\n \n     def getRoles(self):\n         return self.roles\n@@ -466,7 +464,7 @@ def test__currentUser(self):\n         self.assertEqual(parsed, expected)\n \n         # Logged in user \'admin\'\n-        u = MockUser(username="admin")\n+        u = MockUser(userid="admin")\n         pm = MockPortal_membership(user=u)\n         context = MockSite(portal_membership=pm)\n         data = Row(index="Creator", operator="_currentUser", values=None)\n@@ -486,7 +484,7 @@ def test__showInactive(self):\n         self.assertEqual(parsed, expected)\n \n         # Logged in user \'admin\'\n-        u = MockUser(username="admin", roles=("Manager",))\n+        u = MockUser(userid="admin", roles=("Manager",))\n         pm = MockPortal_membership(user=u)\n         context = MockSite(portal_membership=pm)\n         data = Row(index="show_inactive", operator="_showInactive", values=["Manager"])\n'
 
-Repository: plone.app.linkintegrity
+Repository: plone.app.querystring
 
 
 Branch: refs/heads/master
-Date: 2023-07-31T13:11:45+02:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/6cf3f921fe350b4ed05d2c17ec0b2172ee7d7117
+Date: 2023-08-17T09:52:10-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.querystring/commit/2a5a5cd8c03582f287a169a276b6f9f5a5d47937
 
-Create 93.bugfix
+Merge pull request #136 from plone/fix-currentUser
 
-Files changed:
-A news/93.bugfix
-
-b"diff --git a/news/93.bugfix b/news/93.bugfix\nnew file mode 100644\nindex 0000000..b8c7791\n--- /dev/null\n+++ b/news/93.bugfix\n@@ -0,0 +1,2 @@\n+Remove outgoing 'isReferencing' RelationValues from catalog on deleting content item.\n+[ksuess]\n\\ No newline at end of file\n"
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2023-07-31T13:19:20+02:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/a07a364e992fa03a3457870ef7ea857bbdc11233
-
-black (tox)
+Fix currentUser operation
 
 Files changed:
-M plone/app/linkintegrity/tests/test_references.py
+A news/135.bugfix
+M plone/app/querystring/queryparser.py
+M plone/app/querystring/tests/testQueryParser.py
 
-b'diff --git a/plone/app/linkintegrity/tests/test_references.py b/plone/app/linkintegrity/tests/test_references.py\nindex 7e1eb19..f3b1deb 100644\n--- a/plone/app/linkintegrity/tests/test_references.py\n+++ b/plone/app/linkintegrity/tests/test_references.py\n@@ -146,7 +146,8 @@ def test_catalog_cleaned_up(self):\n         set_text(doc_temp, \'<a href="doc1">Doc 1</a>\')\n         self.assertEqual(len(list(getIncomingLinks(doc1))), 1)\n         self.assertEqual(\n-            [link.from_object for link in getIncomingLinks(doc1)], [self.portal.doc_temp]\n+            [link.from_object for link in getIncomingLinks(doc1)],\n+            [self.portal.doc_temp],\n         )\n \n         catalog = getUtility(ICatalog)\n'
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2023-08-14T09:07:14+02:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/93ec389958cc93816a8e9cc554e932a7d28149c1
-
-Fix removedContent handler: Do nothing if item not registered in intIds
-
-Files changed:
-M plone/app/linkintegrity/handlers.py
-
-b'diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex 600723c..d3af1ee 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -118,8 +118,12 @@ def removedContent(obj, event):\n     if not check_linkintegrity_dependencies(obj):\n         return\n \n-    int_id = ensure_intid(obj)\n-    if int_id is None:\n+    intids = getUtility(IIntIds, None)\n+    if intids is None:\n+        return\n+    try:\n+        int_id = intids.getId(obj)\n+    except KeyError:\n         return\n \n     catalog = getUtility(ICatalog)\n'
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2023-08-14T09:19:03+02:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/76ebdbfb2d4c351f4c704fe9c1ee4475589dc3a0
-
-Remove outgoing RelationValues from catalog after deleting content item.
-
-Files changed:
-M plone/app/linkintegrity/handlers.py
-
-b'diff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex d3af1ee..29c02de 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -118,18 +118,13 @@ def removedContent(obj, event):\n     if not check_linkintegrity_dependencies(obj):\n         return\n \n-    intids = getUtility(IIntIds, None)\n-    if intids is None:\n-        return\n+    intids = getUtility(IIntIds)\n     try:\n         int_id = intids.getId(obj)\n     except KeyError:\n         return\n \n     catalog = getUtility(ICatalog)\n-    if catalog is None:\n-        return\n-\n     rels = catalog.findRelations(\n         {"from_id": int_id, "from_attribute": referencedRelationship}\n     )\n'
-
-Repository: plone.app.linkintegrity
-
-
-Branch: refs/heads/master
-Date: 2023-08-14T10:13:04-07:00
-Author: David Glick (davisagli) <david.glick@plone.org>
-Commit: https://github.com/plone/plone.app.linkintegrity/commit/35a8617e5144c4d53aadbdeff8f76563fcba2954
-
-Merge pull request #94 from plone/update-relations-after-deleting-item
-
-Remove outgoing RelationValues from catalog after deleting content item.
-
-Files changed:
-A news/93.bugfix
-M plone/app/linkintegrity/configure.zcml
-M plone/app/linkintegrity/handlers.py
-M plone/app/linkintegrity/tests/test_references.py
-
-b'diff --git a/news/93.bugfix b/news/93.bugfix\nnew file mode 100644\nindex 0000000..b8c7791\n--- /dev/null\n+++ b/news/93.bugfix\n@@ -0,0 +1,2 @@\n+Remove outgoing \'isReferencing\' RelationValues from catalog on deleting content item.\n+[ksuess]\n\\ No newline at end of file\ndiff --git a/plone/app/linkintegrity/configure.zcml b/plone/app/linkintegrity/configure.zcml\nindex d11d5ef..e3fa781 100644\n--- a/plone/app/linkintegrity/configure.zcml\n+++ b/plone/app/linkintegrity/configure.zcml\n@@ -33,6 +33,14 @@\n       handler=".handlers.modifiedContent"\n       />\n \n+  <!-- Not zope.lifecycleevent.interfaces.IObjectRemovedEvent!\n+    That\'s too late to grep the intId. -->\n+  <subscriber\n+      for="plone.app.relationfield.interfaces.IDexterityHasRelations\n+           OFS.interfaces.IObjectWillBeRemovedEvent"\n+      handler=".handlers.removedContent"\n+      />\n+\n   <genericsetup:registerProfile\n       name="default"\n       title="plone.app.linkintegrity"\ndiff --git a/plone/app/linkintegrity/handlers.py b/plone/app/linkintegrity/handlers.py\nindex f9423b1..29c02de 100644\n--- a/plone/app/linkintegrity/handlers.py\n+++ b/plone/app/linkintegrity/handlers.py\n@@ -78,7 +78,10 @@ def findObject(base, path):\n \n \n def getObjectsFromLinks(base, links):\n-    """determine actual objects referred to by given links"""\n+    """Determine actual objects referred to by given links.\n+\n+    return set of RelationValue\n+    """\n     intids = getUtility(IIntIds)\n     objects = set()\n     url = base.absolute_url()\n@@ -111,6 +114,24 @@ def modifiedContent(obj, event):\n         updateReferences(obj, refs)\n \n \n+def removedContent(obj, event):\n+    if not check_linkintegrity_dependencies(obj):\n+        return\n+\n+    intids = getUtility(IIntIds)\n+    try:\n+        int_id = intids.getId(obj)\n+    except KeyError:\n+        return\n+\n+    catalog = getUtility(ICatalog)\n+    rels = catalog.findRelations(\n+        {"from_id": int_id, "from_attribute": referencedRelationship}\n+    )\n+    for rel in list(rels):\n+        catalog.unindex(rel)\n+\n+\n # BBB\n modifiedArchetype = modifiedContent\n modifiedDexterity = modifiedContent\ndiff --git a/plone/app/linkintegrity/tests/test_references.py b/plone/app/linkintegrity/tests/test_references.py\nindex 41aecdf..f3b1deb 100644\n--- a/plone/app/linkintegrity/tests/test_references.py\n+++ b/plone/app/linkintegrity/tests/test_references.py\n@@ -137,6 +137,33 @@ def test_broken_references(self):\n             _marker = dict()\n             self.assertEqual(getattr(obj, "aq_parent", _marker), _marker)\n \n+    def test_catalog_cleaned_up(self):\n+        doc1 = self.portal.doc1\n+        # Create a temporary document to test with.\n+        doc_temp = testing.create(self.portal, "Document", id="doc_temp")\n+\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 0)\n+        set_text(doc_temp, \'<a href="doc1">Doc 1</a>\')\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 1)\n+        self.assertEqual(\n+            [link.from_object for link in getIncomingLinks(doc1)],\n+            [self.portal.doc_temp],\n+        )\n+\n+        catalog = getUtility(ICatalog)\n+        rels = list(catalog.findRelations())\n+        self.assertEqual(len(rels), 1)\n+\n+        # Now delete the source item.\n+        self.portal._delObject(doc_temp.id)\n+\n+        # Test, if relation is removed from the relation catalog.\n+        catalog = getUtility(ICatalog)\n+        rels = list(catalog.findRelations())\n+        self.assertEqual(len(rels), 0)\n+\n+        self.assertEqual(len(list(getIncomingLinks(doc1))), 0)\n+\n     def test_relative_upwards_link_generates_matching_reference(self):\n         doc1 = self.portal.doc1\n         doc3 = self.portal.folder1.doc3\n'
+b'diff --git a/news/135.bugfix b/news/135.bugfix\nnew file mode 100644\nindex 0000000..20bbce6\n--- /dev/null\n+++ b/news/135.bugfix\n@@ -0,0 +1 @@\n+Fix the currentUser operation when the current user\'s username is different from their user id. @davisagli\ndiff --git a/plone/app/querystring/queryparser.py b/plone/app/querystring/queryparser.py\nindex a4ab776..4ade30e 100644\n--- a/plone/app/querystring/queryparser.py\n+++ b/plone/app/querystring/queryparser.py\n@@ -213,7 +213,7 @@ def _currentUser(context, row):\n     """Current user lookup"""\n     mt = getToolByName(context, "portal_membership")\n     user = mt.getAuthenticatedMember()\n-    return {row.index: {"query": user.getUserName()}}\n+    return {row.index: {"query": user.getId()}}\n \n \n def _showInactive(context, row):\ndiff --git a/plone/app/querystring/tests/testQueryParser.py b/plone/app/querystring/tests/testQueryParser.py\nindex 5074b69..d195218 100644\n--- a/plone/app/querystring/tests/testQueryParser.py\n+++ b/plone/app/querystring/tests/testQueryParser.py\n@@ -116,14 +116,12 @@ class MockNavRoot(MockObject):\n \n \n class MockUser:\n-    def __init__(self, username=None, roles=None):\n-        self.username = "Anonymous User"\n-        if username:\n-            self.username = username\n+    def __init__(self, userid=None, roles=None):\n+        self.userid = userid or "Anonymous User"\n         self.roles = roles or "Anonymous"\n \n-    def getUserName(self):\n-        return self.username\n+    def getId(self):\n+        return self.userid\n \n     def getRoles(self):\n         return self.roles\n@@ -466,7 +464,7 @@ def test__currentUser(self):\n         self.assertEqual(parsed, expected)\n \n         # Logged in user \'admin\'\n-        u = MockUser(username="admin")\n+        u = MockUser(userid="admin")\n         pm = MockPortal_membership(user=u)\n         context = MockSite(portal_membership=pm)\n         data = Row(index="Creator", operator="_currentUser", values=None)\n@@ -486,7 +484,7 @@ def test__showInactive(self):\n         self.assertEqual(parsed, expected)\n \n         # Logged in user \'admin\'\n-        u = MockUser(username="admin", roles=("Manager",))\n+        u = MockUser(userid="admin", roles=("Manager",))\n         pm = MockPortal_membership(user=u)\n         context = MockSite(portal_membership=pm)\n         data = Row(index="show_inactive", operator="_showInactive", values=["Manager"])\n'
 
