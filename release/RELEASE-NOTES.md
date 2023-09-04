@@ -33,6 +33,11 @@ Major changes since 6.0.6:
 * `Products.CMFCore`:
   * Improve handling of PortalFolder filter input.
   * Provide a way to not publish items that are acquired.
+* `plone.restapi`:
+  * Allow passing additional parameters to the delete users endpoint to request not to delete local roles and memberareas.
+  * When serializing blocks, `image_scales` is now added to blocks that contain a resolveuid-based `url`.
+  * When deserializing blocks, `image_scales` is removed.
+  * Add `visit_blocks` util for finding all nested blocks.
 
 
 ## Volto frontend
