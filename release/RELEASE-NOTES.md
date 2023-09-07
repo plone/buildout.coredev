@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0-dev
 
-* Last updated: Monday September 4, 2023
+* Last updated: Thursday September 7, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -15,6 +15,7 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.6:
 
+* `Zope`: Security fixes in `AccessControl` and `RestrictedPython`.  See [community announcement](https://community.plone.org/t/zope-4-8-9-and-5-8-4-released-with-a-security-fix/17849).
 * `plone.app.widgets`: Make this package deprecated. It still works, and is included in Plone 6.0, but Plone 6.1 will not ship with it.
   Widget base classes have been moved to ``plone.app.z3cform.widgets.patterns``.
   Also see ``plone.app.widgets.utils`` for information about moving utility methods to their new location.
