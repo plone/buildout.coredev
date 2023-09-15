@@ -19,6 +19,7 @@ Major changes since 6.0.6:
 * `plone.namedfile`:
   * Add internal modification timestamp with fallback to _p_mtime.
   * Use new internal modification timestamp as part of the hash key for scales.
+* `plone.dexterity`: Fix a memory leak. For details see [issue 3829](https://github.com/plone/Products.CMFPlone/issues/3829).
 * `plone.app.widgets`: Make this package deprecated. It still works, and is included in Plone 6.0, but Plone 6.1 will not ship with it.
   Widget base classes have been moved to ``plone.app.z3cform.widgets.patterns``.
   Also see ``plone.app.widgets.utils`` for information about moving utility methods to their new location.
