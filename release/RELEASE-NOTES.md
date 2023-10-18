@@ -10,6 +10,8 @@ If you want to jump straight in, here are two important links:
 * With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt)
 * With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
 
+At the moment a few internal release are used that are not on PyPI, so you need some find-links, but this is arranged in `versions.cfg` and `constraints.txt`.
+
 
 ## Highlights
 

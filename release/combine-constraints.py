@@ -58,6 +58,8 @@ for package, version in c311.items():
 
 # Combine them.
 combi = []
+# TEMPORARILY add a find-links option:
+combi.append("-f https://dist.plone.org/release/6.1-dev/")
 for package, versions in pins.items():
     py38_version = versions.pop(38, None)
     py39_version = versions.pop(39, None)
