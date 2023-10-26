@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.8 pending
+# Release notes for Plone 6.0.8rc1
 
-* Last updated: Wednesday October 25, 2023
+* Last updated: Friday October 27, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -15,7 +15,42 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.7:
 
-* TODO
+* `plone.scale`: Keep scaled WEBP images in WEBP format instead of converting to JPEG.
+* `plone.recipe.zope2instance`: Add `dos_protection` config.  See "Error when uploading large files" below.
+* `Zope`:
+  * Make sure the object title in the ZMI breadcrumbs is quoted to prevent a cross-site scripting issue.
+  * Base the inline/attachment logic developed for CVE-2023-42458 on the media type proper (ignore parameters and whitespace and normalize to lowercase).
+* `plone.base`: Move interface `INameFromTitle` from `plone.app.content` here.
+  This helps avoiding a circular dependency between `plone.app.dexterity` and `plone.app.content`.
+* `plone.app.querystring`: Add a way to specify a context for getting vocabularies in the QuerystringRegistryReader.
+  See [PR 137](https://github.com/plone/plone.app.querystring/pull/137).
+
+
+## Error when uploading large files
+
+With Zope 5.8.4+ (included in Plone 6.0.7) you may get `zExceptions.BadRequest: data exceeds memory limit` when uploading an image or file of more than 1 MB.  This is at least true when you have `plone.restapi` installed, which is the case if you use the default frontend (Volto).
+You have various ways to increase this limit.
+
+If you use Buildout, you can add this in your instance/zeoclient recipe, and choose your own limit:
+
+```
+zope-conf-additional =
+    <dos_protection>
+      form-memory-limit 4MB
+    </dos_protection>
+```
+
+If you used [`cookiecutter-zope-instance`](https://github.com/plone/cookiecutter-zope-instance) to create a Plone site, you can add these lines to `etc/zope.conf`, just like the latest development version [offers](https://github.com/plone/cookiecutter-zope-instance/pull/12/files):
+
+```
+<dos_protection>
+  form-memory-limit 4MB
+</dos_protection>
+```
+
+Of course you are free to choose a higher or lower limit.
+
+
 
 ## Volto frontend
 
@@ -36,7 +71,7 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 This release supports Python 3.8, 3.9, 3.10, and 3.11.
 
-There is preliminary support for Python 3.12, but this is not officially recommended yet.  Especially some changes in ``RestrictedPython`` may need to happen still.
+There is preliminary support for Python 3.12, but this is not officially recommended yet.  Especially some changes in `RestrictedPython` may need to happen still.
 
 
 ## pip, buildout, setuptools
