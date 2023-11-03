@@ -20,6 +20,12 @@ Major changes since 6.0.7:
 * `Zope`:
   * Make sure the object title in the ZMI breadcrumbs is quoted to prevent a cross-site scripting issue.
   * Base the inline/attachment logic developed for CVE-2023-42458 on the media type proper (ignore parameters and whitespace and normalize to lowercase).
+* `plone.restapi`:
+  - Remove deprecated @unlock, @refresh-lock endpoints
+  - Remove `plone.tiles` and the `@tiles` endpoint.
+  - Change the @linkintegrity endpoint to add `items_total`, the number of contained items which would be deleted.
+  - The default branch was renamed from `master` to `main`.
+  - Add support for getting the `/@querystring` endpoint in a specific context.
 * `plone.base`: Move interface `INameFromTitle` from `plone.app.content` here.
   This helps avoiding a circular dependency between `plone.app.dexterity` and `plone.app.content`.
 * `plone.app.querystring`: Add a way to specify a context for getting vocabularies in the QuerystringRegistryReader.
