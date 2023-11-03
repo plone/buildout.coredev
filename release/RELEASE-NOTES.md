@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0.8rc1
 
-* Last updated: Friday October 27, 2023
+* Last updated: Friday November 3, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -50,6 +50,12 @@ If you used [`cookiecutter-zope-instance`](https://github.com/plone/cookiecutter
 
 Of course you are free to choose a higher or lower limit.
 
+
+## Advice: use named behaviors always
+
+Most content types have the "name from title" behavior: when you create a page "Hello World" this will get the id "hello-world".  The `INameFromTitle` interface that does this, was moved from `plone.app.content` to `plone.base` here.  This move helps in avoiding a circular dependency between two core packages.
+There have always been two ways to refer to this behavior: by interface (`plone.app.content.interfaces.INameFromTitle`) and by name (`plone.namefromtitle`).  But with the first version of this move, we saw that if you specify the interface, it no longer worked.  We fixed this, as this is not the kind of thing we want to break in a Plone bugfix release.
+But the advice is to **specify all behaviors by name**, not by interface.  This will continue to work in all Plone versions, no matter if we move interfaces around or not.  In fact, in Plone 5.2 there is already an upgrade that automatically changes this for all types, but of course we cannot control what add-on packages do when you install them fresh.
 
 
 ## Volto frontend
