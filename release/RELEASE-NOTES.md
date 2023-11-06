@@ -1,14 +1,14 @@
-# Release notes for Plone 6.0.8rc1
+# Release notes for Plone 6.0.8
 
-* Last updated: Monday November 6, 2023
+* Released: Monday November 6, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.8/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.8/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.8/constraints.txt](https://dist.plone.org/release/6.0.8/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.8/versions.cfg](https://dist.plone.org/release/6.0.8/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.8/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.8/versions-ecosystem.cfg).
 
 
 ## Highlights
@@ -72,7 +72,7 @@ But the advice is to **specify all behaviors by name**, not by interface.  This 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.25.0](https://www.npmjs.com/package/@plone/volto/v/16.25.0).  See the [changelog](https://github.com/plone/volto/blob/16.25.0/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.26.0](https://www.npmjs.com/package/@plone/volto/v/16.26.0).  See the [changelog](https://github.com/plone/volto/blob/16.26.0/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
