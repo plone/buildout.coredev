@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0.8rc1
 
-* Last updated: Friday November 3, 2023
+* Last updated: Monday November 6, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -26,6 +26,7 @@ Major changes since 6.0.7:
   - Change the @linkintegrity endpoint to add `items_total`, the number of contained items which would be deleted.
   - The default branch was renamed from `master` to `main`.
   - Add support for getting the `/@querystring` endpoint in a specific context.
+  - Temporarily disable form memory limit checking for files and images.  This fixes upload of files and images larger than 1MB.  See below.
 * `plone.base`: Move interface `INameFromTitle` from `plone.app.content` here.
   This helps avoiding a circular dependency between `plone.app.dexterity` and `plone.app.content`.
 * `plone.app.querystring`: Add a way to specify a context for getting vocabularies in the QuerystringRegistryReader.
@@ -35,7 +36,12 @@ Major changes since 6.0.7:
 ## Error when uploading large files
 
 With Zope 5.8.4+ (included in Plone 6.0.7) you may get `zExceptions.BadRequest: data exceeds memory limit` when uploading an image or file of more than 1 MB.  This is at least true when you have `plone.restapi` installed, which is the case if you use the default frontend (Volto).
-You have various ways to increase this limit.
+
+In `plone.restapi` 9.1.2 (included in Plone 6.0.8) we have effectively disabled this check, because it had a bad effect on a central part of the restapi code.  The limit is still used, but in less conditions.
+We intend to [fix this](https://github.com/plone/plone.restapi/pull/1731) in a better way, but that needs more work and testing.
+
+Regardless of which plone.restapi version is used, you can change this and other limits defined in Zope.
+See `dos_protection` in the [Zope configuration reference](https://zope.readthedocs.io/en/latest/operation.html#zope-configuration-reference) for explanation of this and other options.
 
 If you use Buildout, you can add this in your instance/zeoclient recipe, and choose your own limit:
 
