@@ -1,4 +1,4 @@
-# Release notes for Plone 6.0.rc1
+# Release notes for Plone 6.0.9rc1
 
 * Released: Thursday December 14 6, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
