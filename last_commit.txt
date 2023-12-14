@@ -1,23 +1,36 @@
-Repository: plone.app.theming
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/master
-Date: 2023-12-13T20:57:55+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.theming/commit/342cbb9ed967132855518bb6d8225785d76abeb5
+Branch: refs/heads/6.0.x
+Date: 2023-11-29T12:39:52+01:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/9c2ec1e3a1490d9df2d6aaae74b1af3b4b525f60
 
-Fix AttributeError in custom.css: "module 'wsgiref' has no attribute 'handlers'". (#231)
-
-This problem is usually hidden if `plone.app.caching` is available.
-Fixes https://github.com/plone/plone.app.theming/issues/230
-
-And this PR adds the first test for `custom.css`, which indeed shows this problem.
-This fixes https://github.com/plone/plone.app.theming/issues/190
+handle parenthesis inside quotes
 
 Files changed:
-A news/230.bugfix
-M src/plone/app/theming/browser/custom_css.py
-M src/plone/app/theming/tests/test_controlpanel.py
+A news/3879.bugfix
+M Products/CMFPlone/browser/search.py
+M Products/CMFPlone/tests/testSearch.py
 
-b'diff --git a/news/230.bugfix b/news/230.bugfix\nnew file mode 100644\nindex 00000000..05ffb7c6\n--- /dev/null\n+++ b/news/230.bugfix\n@@ -0,0 +1,2 @@\n+Fix AttributeError in ``custom.css``: "module \'wsgiref\' has no attribute \'handlers\'".\n+[maurits]\ndiff --git a/src/plone/app/theming/browser/custom_css.py b/src/plone/app/theming/browser/custom_css.py\nindex 135da816..bf252db3 100644\n--- a/src/plone/app/theming/browser/custom_css.py\n+++ b/src/plone/app/theming/browser/custom_css.py\n@@ -1,11 +1,11 @@\n from plone.app.theming.interfaces import IThemeSettings\n from plone.registry.interfaces import IRegistry\n from Products.Five.browser import BrowserView\n+from wsgiref.handlers import format_date_time\n from zope.component import getUtility\n \n import dateutil\n import time\n-import wsgiref\n \n \n class CustomCSSView(BrowserView):\n@@ -27,6 +27,6 @@ def __call__(self):\n         # Format a Python datetime object as an RFC1123 date.\n         self.request.response.setHeader(\n             "Last-Modified",\n-            wsgiref.handlers.format_date_time(time.mktime(dt.timetuple())),\n+            format_date_time(time.mktime(dt.timetuple())),\n         )\n         return theme_settings.custom_css\ndiff --git a/src/plone/app/theming/tests/test_controlpanel.py b/src/plone/app/theming/tests/test_controlpanel.py\nindex c56ab854..327ca6c7 100644\n--- a/src/plone/app/theming/tests/test_controlpanel.py\n+++ b/src/plone/app/theming/tests/test_controlpanel.py\n@@ -86,3 +86,27 @@ def test_upload_theme_file_withdata(self):\n             \'{"failure": "error"}\',  # TODO: Should be {\'success\':\'create\'}\n             str(self.browser.contents),\n         )\n+\n+    def test_custom_css(self):\n+        # By default custom.css is empty.\n+        self.browser.handleErrors = False\n+        self.browser.open("custom.css")\n+        self.assertEqual(self.browser.contents, "")\n+        self.assertEqual(\n+            self.browser.headers["Content-Type"],\n+            "text/css; charset=utf-8",\n+        )\n+\n+        # Go to the control panel and add custom css.\n+        self.goto_controlpanel()\n+        css = "body {background-color: blue;}"\n+        self.browser.getControl(name="custom_css").value = css\n+        self.browser.getControl(name="form.button.AdvancedSave").click()\n+\n+        # Check that the css is available.\n+        self.browser.open("custom.css")\n+        self.assertEqual(self.browser.contents, css)\n+        self.assertEqual(\n+            self.browser.headers["Content-Type"],\n+            "text/css; charset=utf-8",\n+        )\n'
+b'diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py\nindex 108a8f0b54..84503505dd 100644\n--- a/Products/CMFPlone/browser/search.py\n+++ b/Products/CMFPlone/browser/search.py\n@@ -45,10 +45,11 @@ def quote(term):\n     # being parsed as logical query atoms.\n     if term.lower() in ("and", "or", "not"):\n         term = \'"%s"\' % term\n-    return term\n+    return quote_chars(term)\n \n \n def munge_search_term(query):\n+    original_query = query\n     for char in BAD_CHARS:\n         query = query.replace(char, " ")\n \n@@ -67,7 +68,7 @@ def munge_search_term(query):\n \n     r += map(quote, query.strip().split())\n     r = " AND ".join(r)\n-    r = quote_chars(r) + ("*" if r and not r.endswith(\'"\') else "")\n+    r = r + ("*" if r and not original_query.endswith(\'"\') else "")\n     return r\n \n \ndiff --git a/Products/CMFPlone/tests/testSearch.py b/Products/CMFPlone/tests/testSearch.py\nindex 54b43d8861..e1d00b8567 100644\n--- a/Products/CMFPlone/tests/testSearch.py\n+++ b/Products/CMFPlone/tests/testSearch.py\n@@ -364,6 +364,21 @@ def test_munge_search_term(self):\n                 \'" spam ham   "\',\n                 \'"spam ham"\',\n             ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"spam (ham)"\',\n+                \'"spam (ham)"\',\n+            ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"spam" (ham)\',\n+                \'"spam" AND "("ham")"*\',\n+            ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"(spam ham)"\',\n+                \'"(spam ham)"\',\n+            ),\n             (\n                 # mixed cases\n                 "Spam hAm",\ndiff --git a/news/3879.bugfix b/news/3879.bugfix\nnew file mode 100644\nindex 0000000000..2b1cb9b691\n--- /dev/null\n+++ b/news/3879.bugfix\n@@ -0,0 +1,2 @@\n+Handle catalog queries with parenthesis inside quotes\n+[erral]\n'
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/6.0.x
+Date: 2023-12-14T12:19:38+01:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/Products.CMFPlone/commit/a91b86bdbc20376d6ac7933b79209e90ada13af0
+
+Merge pull request #3880 from plone/erral-issue-3879
+
+Handle parenthesis inside quotes
+
+Files changed:
+A news/3879.bugfix
+M Products/CMFPlone/browser/search.py
+M Products/CMFPlone/tests/testSearch.py
+
+b'diff --git a/Products/CMFPlone/browser/search.py b/Products/CMFPlone/browser/search.py\nindex 108a8f0b54..84503505dd 100644\n--- a/Products/CMFPlone/browser/search.py\n+++ b/Products/CMFPlone/browser/search.py\n@@ -45,10 +45,11 @@ def quote(term):\n     # being parsed as logical query atoms.\n     if term.lower() in ("and", "or", "not"):\n         term = \'"%s"\' % term\n-    return term\n+    return quote_chars(term)\n \n \n def munge_search_term(query):\n+    original_query = query\n     for char in BAD_CHARS:\n         query = query.replace(char, " ")\n \n@@ -67,7 +68,7 @@ def munge_search_term(query):\n \n     r += map(quote, query.strip().split())\n     r = " AND ".join(r)\n-    r = quote_chars(r) + ("*" if r and not r.endswith(\'"\') else "")\n+    r = r + ("*" if r and not original_query.endswith(\'"\') else "")\n     return r\n \n \ndiff --git a/Products/CMFPlone/tests/testSearch.py b/Products/CMFPlone/tests/testSearch.py\nindex 54b43d8861..e1d00b8567 100644\n--- a/Products/CMFPlone/tests/testSearch.py\n+++ b/Products/CMFPlone/tests/testSearch.py\n@@ -364,6 +364,21 @@ def test_munge_search_term(self):\n                 \'" spam ham   "\',\n                 \'"spam ham"\',\n             ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"spam (ham)"\',\n+                \'"spam (ham)"\',\n+            ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"spam" (ham)\',\n+                \'"spam" AND "("ham")"*\',\n+            ),\n+            (\n+                # quoted term with inner parenthesis\n+                \'"(spam ham)"\',\n+                \'"(spam ham)"\',\n+            ),\n             (\n                 # mixed cases\n                 "Spam hAm",\ndiff --git a/news/3879.bugfix b/news/3879.bugfix\nnew file mode 100644\nindex 0000000000..2b1cb9b691\n--- /dev/null\n+++ b/news/3879.bugfix\n@@ -0,0 +1,2 @@\n+Handle catalog queries with parenthesis inside quotes\n+[erral]\n'
 
