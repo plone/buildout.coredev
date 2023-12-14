@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0.9rc1
 
-* Released: Thursday December 14 6, 2023
+* Released: Thursday December 14, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -15,6 +15,7 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.8:
 
+* Plone 6.0.9 is the first release to officially support Python 3.12!
 * `Zope`: Officially support Python 3.12.
 * `plone.restapi`:
   - Added preview_image and preview_image_link to the list of smart fields for resolveuid and link integrity.
@@ -28,9 +29,10 @@ Major changes since 6.0.8:
     We will likely pin the new version for all Python versions in the next Ploen bugfix release.
   - See the [ZEO 6.0.0 changelog](https://github.com/zopefoundation/ZEO/blob/6.0.0/CHANGES.rst)
 
+
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.26.0](https://www.npmjs.com/package/@plone/volto/v/16.26.0).  See the [changelog](https://github.com/plone/volto/blob/16.26.0/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.30.0](https://www.npmjs.com/package/@plone/volto/v/16.30.0).  See the [changelog](https://github.com/plone/volto/blob/16.30.0/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -45,9 +47,10 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 ## Python compatibility
 
-This release supports Python 3.8, 3.9, 3.10, and 3.11.
+This release supports Python 3.8, 3.9, 3.10, 3.11, and 3.12.
 
-There is preliminary support for Python 3.12, but this is not officially recommended yet.  Especially some changes in `RestrictedPython` may need to happen still.
+Plone 6.0.9 is the first release that officially supports Python 3.12.  This is made possible by recent changes in `Zope` and `RestrictedPython`.
+Note that Plone 6.0 is tested on Python 3.8 and 3.11 on every change to core packages.  For the other Python versions we run the tests once a week.
 
 
 ## pip, buildout, setuptools
