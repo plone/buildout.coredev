@@ -1,78 +1,41 @@
-# Release notes for Plone 6.0.8
+# Release notes for Plone 6.0.9
 
-* Released: Monday November 6, 2023
+* Released: Tuesday December 19, 2023
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.8/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.8/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.9/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.9/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.8/constraints.txt](https://dist.plone.org/release/6.0.8/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.8/versions.cfg](https://dist.plone.org/release/6.0.8/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.8/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.8/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.9/constraints.txt](https://dist.plone.org/release/6.0.9/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.9/versions.cfg](https://dist.plone.org/release/6.0.9/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.9/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.9/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.7:
+Major changes since 6.0.8:
 
-* `plone.scale`: Keep scaled WEBP images in WEBP format instead of converting to JPEG.
-* `plone.recipe.zope2instance`: Add `dos_protection` config.  See "Error when uploading large files" below.
-* `Zope`:
-  * Make sure the object title in the ZMI breadcrumbs is quoted to prevent a cross-site scripting issue.
-  * Base the inline/attachment logic developed for CVE-2023-42458 on the media type proper (ignore parameters and whitespace and normalize to lowercase).
+* Plone 6.0.9 is the first release that can run on Python 3.12!
+  Unfortunately, there are [reports](https://github.com/zopefoundation/Zope/issues/1188) that on Python 3.12.1 the tests fail.
+  This should be only a problem in the tests, but it is hard to be completely sure.
+  So we cannot officially recommend Python 3.12 yet.
+* `Zope`: Support Python 3.12.
 * `plone.restapi`:
-  - Remove deprecated @unlock, @refresh-lock endpoints
-  - Remove `plone.tiles` and the `@tiles` endpoint.
-  - Change the @linkintegrity endpoint to add `items_total`, the number of contained items which would be deleted.
-  - The default branch was renamed from `master` to `main`.
-  - Add support for getting the `/@querystring` endpoint in a specific context.
-  - Temporarily disable form memory limit checking for files and images.  This fixes upload of files and images larger than 1MB.  See below.
-* `plone.base`: Move interface `INameFromTitle` from `plone.app.content` here.
-  This helps avoiding a circular dependency between `plone.app.dexterity` and `plone.app.content`.
-* `plone.app.querystring`: Add a way to specify a context for getting vocabularies in the QuerystringRegistryReader.
-  See [PR 137](https://github.com/plone/plone.app.querystring/pull/137).
-
-
-## Error when uploading large files
-
-With Zope 5.8.4+ (included in Plone 6.0.7) you may get `zExceptions.BadRequest: data exceeds memory limit` when uploading an image or file of more than 1 MB.  This is at least true when you have `plone.restapi` installed, which is the case if you use the default frontend (Volto).
-
-In `plone.restapi` 9.1.2 (included in Plone 6.0.8) we have effectively disabled this check, because it had a bad effect on a central part of the restapi code.  The limit is still used, but in less conditions.
-We intend to [fix this](https://github.com/plone/plone.restapi/pull/1731) in a better way, but that needs more work and testing.
-
-Regardless of which plone.restapi version is used, you can change this and other limits defined in Zope.
-See `dos_protection` in the [Zope configuration reference](https://zope.readthedocs.io/en/latest/operation.html#zope-configuration-reference) for explanation of this and other options.
-
-If you use Buildout, you can add this in your instance/zeoclient recipe, and choose your own limit:
-
-```
-zope-conf-additional =
-    <dos_protection>
-      form-memory-limit 4MB
-    </dos_protection>
-```
-
-If you used [`cookiecutter-zope-instance`](https://github.com/plone/cookiecutter-zope-instance) to create a Plone site, you can add these lines to `etc/zope.conf`, just like the latest development version [offers](https://github.com/plone/cookiecutter-zope-instance/pull/12/files):
-
-```
-<dos_protection>
-  form-memory-limit 4MB
-</dos_protection>
-```
-
-Of course you are free to choose a higher or lower limit.
-
-
-## Advice: use named behaviors always
-
-Most content types have the "name from title" behavior: when you create a page "Hello World" this will get the id "hello-world".  The `INameFromTitle` interface that does this, was moved from `plone.app.content` to `plone.base` here.  This move helps in avoiding a circular dependency between two core packages.
-There have always been two ways to refer to this behavior: by interface (`plone.app.content.interfaces.INameFromTitle`) and by name (`plone.namefromtitle`).  But with the first version of this move, we saw that if you specify the interface, it no longer worked.  We fixed this, as this is not the kind of thing we want to break in a Plone bugfix release.
-But the advice is to **specify all behaviors by name**, not by interface.  This will continue to work in all Plone versions, no matter if we move interfaces around or not.  In fact, in Plone 5.2 there is already an upgrade that automatically changes this for all types, but of course we cannot control what add-on packages do when you install them fresh.
+  - Added preview_image and preview_image_link to the list of smart fields for resolveuid and link integrity.
+* ZEO:
+  - Version 6.0.0 supports Python 3.12.
+  - It also switches "to using `async/await` directly instead of `@coroutine/yield`".
+  - That last change sounds like it could potentially have unforeseen side effects, so it would be good to get this more field tested.
+    (I may be too cautious here.)
+  - So for Python 3.11 and lower we pin 5.4.1, and on Python 3.12 we pin 6.0.0.
+    You are encouraged to try out the newer version on all Python versions, and report any problems.
+    We will likely pin the new version for all Python versions in the next Ploen bugfix release.
+  - See the [ZEO 6.0.0 changelog](https://github.com/zopefoundation/ZEO/blob/6.0.0/CHANGES.rst)
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.26.0](https://www.npmjs.com/package/@plone/volto/v/16.26.0).  See the [changelog](https://github.com/plone/volto/blob/16.26.0/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.30.0](https://www.npmjs.com/package/@plone/volto/v/16.30.0).  See the [changelog](https://github.com/plone/volto/blob/16.30.0/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -89,7 +52,11 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 This release supports Python 3.8, 3.9, 3.10, and 3.11.
 
-There is preliminary support for Python 3.12, but this is not officially recommended yet.  Especially some changes in `RestrictedPython` may need to happen still.
+Plone 6.0.9 is the first release that also runs on Python 3.12, but we cannot officially recommend it yet for production use.
+See the remark in the Highlights above about tests failing on 3.12.1.
+That Plone runs on 3.12 is largely made possible by recent changes in `Zope` and `RestrictedPython`, so thanks a lot to the developers working on that!
+
+Note that Plone 6.0 is tested on Python 3.8 and 3.11 on every change to core packages.  For the other Python versions we run the tests once a week.
 
 
 ## pip, buildout, setuptools
@@ -98,8 +65,8 @@ In Plone core we use these versions to install Plone:
 
 ```
 pip==23.3.1
-setuptools==68.2.2
-wheel==0.41.2
+setuptools==69.0.2
+wheel==0.42.0
 zc.buildout==3.0.1
 ```
 
