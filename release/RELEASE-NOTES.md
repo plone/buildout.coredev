@@ -15,8 +15,11 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.8:
 
-* Plone 6.0.9 is the first release to officially support Python 3.12!
-* `Zope`: Officially support Python 3.12.
+* Plone 6.0.9 is the first release that can run on Python 3.12!
+  Unfortunately, there are [reports](https://github.com/zopefoundation/Zope/issues/1188) that on Python 3.12.1 the tests fail.
+  This should be only a problem in the tests, but it is hard to be completely sure.
+  So we cannot officially recommend Python 3.12 yet.
+* `Zope`: Support Python 3.12.
 * `plone.restapi`:
   - Added preview_image and preview_image_link to the list of smart fields for resolveuid and link integrity.
 * ZEO:
@@ -47,9 +50,12 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 ## Python compatibility
 
-This release supports Python 3.8, 3.9, 3.10, 3.11, and 3.12.
+This release supports Python 3.8, 3.9, 3.10, and 3.11.
 
-Plone 6.0.9 is the first release that officially supports Python 3.12.  This is made possible by recent changes in `Zope` and `RestrictedPython`.
+Plone 6.0.9 is the first release that also runs on Python 3.12, but we cannot officially recommend it yet for production use.
+See the remark in the Highlights above about tests failing on 3.12.1.
+That Plone runs on 3.12 is largely made possible by recent changes in `Zope` and `RestrictedPython`, so thanks a lot to the developers working on that!
+
 Note that Plone 6.0 is tested on Python 3.8 and 3.11 on every change to core packages.  For the other Python versions we run the tests once a week.
 
 
