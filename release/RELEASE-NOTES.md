@@ -1,39 +1,25 @@
-# Release notes for Plone 6.1.0a1
+# Release notes for Plone 6.1-dev
 
-* Released: Friday January 26, 2024
+* Last updated: Thursday February 1, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
   Yes, we need to start on a 6.1 upgrade guide.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.0a1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0a1/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0a1/constraints.txt](https://dist.plone.org/release/6.1.0a1/constraints.txt), plus optionally [`constraints-extra.txt`](https://dist.plone.org/release/6.1.0a1/constraints-extra.txt) and [`constraints-ecosystem.txt`](https://dist.plone.org/release/6.1.0a1/constraints-ecosystem.txt).  Note: in 6.0 we did not have these last two files.  This may still change.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0a1/versions.cfg](https://dist.plone.org/release/6.1.0a1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0a1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0a1/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt), plus optionally [`constraints-extra.txt`](https://dist.plone.org/release/6.1-dev/constraints-extra.txt) and [`constraints-ecosystem.txt`](https://dist.plone.org/release/6.1-dev/constraints-ecosystem.txt).  Note: in 6.0 we did not have these last two files.  This may still change.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.9:
+Major changes since 6.1.0a1:
 
-* Some packages have become "core add-ons".  They are no longer a dependency of `Products.CMFPlone`, but of `Plone`:
-  * `plone.app.multilingual`
-  * For `plone.app.discussion` this is being prepared, but is not there yet.
-* No longer let `Products.CMFPlone` depend on the deprecated `plone.app.widgets`.
-  The package still exists, and can be used, but it only has backwards compatibility imports that get the real code from their new canonical places, mostly `plone.app.z3cform`.
-  If your add-on uses this, you should explicitly depend on it.
-  You are encouraged to update your import statements to the canonical places instead.  These should work on both Plone 6.0 and 6.1.
-* `Products.CMFPlone`:
-  * Add `plone-61` as zcml feature, and define `PLONE61MARKER` as True.
-  * Explicitly disable ``Products.CMFCore.explicitacquisition`` in Plone 6.
-  * Do not use `UniqueObject` class for `PlonePortal`
-* `plone.staticresources` and `plonetheme.barceloneta`: Update TinyMCE to version 6.
-* `plone.app.z3cform`:
-  * Add `row` container to enable column layouts for fields with `wrapper_css_class`.
-  * Implement new ``z3c.form`` extensible attributes feature and cleanup widget templates using Chameleon interpolation.
-* `plone.restapi`:
-  * Translate validation error messages in the deserializer.
-  * Give Site Administrator permission to manage users. To make this possible, we now check the "plone.app.controlpanel.UsersAndGroups" permission instead of "cmf.ManagePortal" in a lot of operations in the users and groups endpoints.
+* `plone.app.multilingual`: Implement a more reasonable default for "connect translations" dialog.
+* `plone.scale`: support `Pillow` version 10.  We now pin `Pillow` 10.2.0.
+* `repoze.xmliter`: support `lxml` version 5.  This is not yet used, because of a test failure in Diazo.
+* `Products.CMFDiffTool`: Rereleased version 2.0.7.dev0 as 4.0.2.  There was a confusion due to a duplicate version number in this package.
 
 
 ## Volto frontend
