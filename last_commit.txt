@@ -1,33 +1,96 @@
-Repository: plone.restapi
+Repository: plone.api
 
 
-Branch: refs/heads/main
-Date: 2024-02-01T17:05:21-08:00
-Author: Víctor Fernández de Alba (sneridagh) <sneridagh@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/bfe05088ee924988c4099744c5eabbd416fe2d20
+Branch: refs/heads/master
+Date: 2024-01-29T23:26:21+05:30
+Author: Samriddhi Singh (samriddhi99) <samriddhisingh6079@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/4b3ef606eef691497160a7df7966f99749baf058
 
-Improve the block transforms to include also anchors when resolving uid back and forth (#1746)
-
-* Improve the block transforms to include also anchors when resolving uid back and forth
-
-* Changelog
-
-* Add use case where both suffixes can be present, add tests
-
-* fix suffix handling
-
-* Update news/1746.bugfix
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Edited api.content.get_view for increased efficiency to get views
 
 Files changed:
-A news/1746.bugfix
-M src/plone/restapi/deserializer/utils.py
-M src/plone/restapi/serializer/utils.py
-M src/plone/restapi/tests/test_blocks_deserializer.py
-M src/plone/restapi/tests/test_blocks_serializer.py
+A news/479.internal
+M src/plone/api/content.py
 
-b'diff --git a/news/1746.bugfix b/news/1746.bugfix\nnew file mode 100644\nindex 0000000000..d234eaaedb\n--- /dev/null\n+++ b/news/1746.bugfix\n@@ -0,0 +1 @@\n+Fixed the logic for converting public URLs to and from internal UID-based URLs. Now if the URL includes a fragment, it is preserved. @sneridagh\ndiff --git a/src/plone/restapi/deserializer/utils.py b/src/plone/restapi/deserializer/utils.py\nindex 04438be768..9a266d0e9b 100644\n--- a/src/plone/restapi/deserializer/utils.py\n+++ b/src/plone/restapi/deserializer/utils.py\n@@ -2,6 +2,9 @@\n from plone.uuid.interfaces import IUUID\n from plone.uuid.interfaces import IUUIDAware\n from zope.component import getMultiAdapter\n+import re\n+\n+PATH_RE = re.compile(r"^(.*?)((?=/@@|#).*)?$")\n \n \n def path2uid(context, link):\n@@ -24,12 +27,13 @@ def path2uid(context, link):\n             portal_path=portal_path, path=path.lstrip("/")\n         )\n \n-    # handle edge-case when we have non traversable path like /@@download/file\n-    if "/@@" in path:\n-        path, suffix = path.split("/@@", 1)\n-        suffix = "/@@" + suffix\n-    else:\n-        suffix = ""\n+    # handle edge cases with suffixes like /@@download/file or a fragment\n+    suffix = ""\n+    match = PATH_RE.match(path)\n+    if match is not None:\n+        path = match.group(1)\n+        suffix = match.group(2) or ""\n+\n     obj = portal.unrestrictedTraverse(path, None)\n     if obj is None or obj == portal:\n         return link\ndiff --git a/src/plone/restapi/serializer/utils.py b/src/plone/restapi/serializer/utils.py\nindex 4ac4e4ee7b..c94c5ee0a1 100644\n--- a/src/plone/restapi/serializer/utils.py\n+++ b/src/plone/restapi/serializer/utils.py\n@@ -8,7 +8,7 @@\n import re\n \n \n-RESOLVEUID_RE = re.compile("^(?:|.*/)resolve[Uu]id/([^/]*)/?(.*)$")\n+RESOLVEUID_RE = re.compile("^(?:|.*/)resolve[Uu]id/([^/#]*)/?(.*)?$")\n \n \n def resolve_uid(path):\ndiff --git a/src/plone/restapi/tests/test_blocks_deserializer.py b/src/plone/restapi/tests/test_blocks_deserializer.py\nindex 37a4e6ecd5..5fa3996ada 100644\n--- a/src/plone/restapi/tests/test_blocks_deserializer.py\n+++ b/src/plone/restapi/tests/test_blocks_deserializer.py\n@@ -18,7 +18,6 @@\n \n \n class TestBlocksDeserializer(unittest.TestCase):\n-\n     layer = PLONE_RESTAPI_DX_INTEGRATION_TESTING\n \n     def setUp(self):\n@@ -444,6 +443,98 @@ def test_slate_simple_link_deserializer(self):\n         link = value[0]["children"][1]["data"]["url"]\n         self.assertTrue(link.startswith("../resolveuid/"))\n \n+    def test_slate_simple_link_deserializer_with_anchor(self):\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": "%s/image-1#anchor-id"\n+                                    % self.portal.absolute_url()\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+\n+        res = self.deserialize(blocks=blocks)\n+        value = res.blocks["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(link, f"../resolveuid/{self.image.UID()}#anchor-id")\n+\n+    def test_slate_simple_link_deserializer_with_suffix(self):\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": "%s/image-1/@@download/file"\n+                                    % self.portal.absolute_url()\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+\n+        res = self.deserialize(blocks=blocks)\n+        value = res.blocks["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(link, f"../resolveuid/{self.image.UID()}/@@download/file")\n+\n+    def test_slate_simple_link_deserializer_with_suffix_and_anchor(self):\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": "%s/image-1/@@download/file#anchor-id"\n+                                    % self.portal.absolute_url()\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+\n+        res = self.deserialize(blocks=blocks)\n+        value = res.blocks["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(\n+            link, f"../resolveuid/{self.image.UID()}/@@download/file#anchor-id"\n+        )\n+\n     def test_aquisition_messing_with_link_deserializer(self):\n         self.portal.invokeFactory(\n             "Folder",\ndiff --git a/src/plone/restapi/tests/test_blocks_serializer.py b/src/plone/restapi/tests/test_blocks_serializer.py\nindex a72abb09d4..dd9b1bd9e0 100644\n--- a/src/plone/restapi/tests/test_blocks_serializer.py\n+++ b/src/plone/restapi/tests/test_blocks_serializer.py\n@@ -29,7 +29,6 @@\n \n \n class TestBlocksSerializer(unittest.TestCase):\n-\n     layer = PLONE_RESTAPI_DX_INTEGRATION_TESTING\n \n     def setUp(self):\n@@ -285,7 +284,111 @@ def test_simple_link_serializer(self):\n         )\n         value = res["abc"]["value"]\n         link = value[0]["children"][1]["data"]["url"]\n-        self.assertTrue(link, self.portal.absolute_url() + "/doc1")\n+        self.assertEqual(link, self.portal.absolute_url() + "/doc1")\n+\n+    def test_simple_link_serializer_with_anchor(self):\n+        doc_uid = IUUID(self.portal["doc1"])\n+        resolve_uid_link = f"../resolveuid/{doc_uid}#anchor-id"\n+\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": resolve_uid_link,\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+        res = self.serialize(\n+            context=self.portal["doc1"],\n+            blocks=blocks,\n+        )\n+        value = res["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(link, f"{self.portal[\'doc1\'].absolute_url()}/#anchor-id")\n+\n+    def test_simple_link_serializer_with_suffix(self):\n+        doc_uid = IUUID(self.portal["doc1"])\n+        resolve_uid_link = f"../resolveuid/{doc_uid}/@@download/file"\n+\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": resolve_uid_link,\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+        res = self.serialize(\n+            context=self.portal["doc1"],\n+            blocks=blocks,\n+        )\n+        value = res["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(link, f"{self.portal[\'doc1\'].absolute_url()}/@@download/file")\n+\n+    def test_simple_link_serializer_with_suffix_and_anchor(self):\n+        doc_uid = IUUID(self.portal["doc1"])\n+        resolve_uid_link = f"../resolveuid/{doc_uid}/@@download/file#anchor-id"\n+\n+        blocks = {\n+            "abc": {\n+                "@type": "slate",\n+                "plaintext": "Frontpage content here",\n+                "value": [\n+                    {\n+                        "children": [\n+                            {"text": "Frontpage "},\n+                            {\n+                                "children": [{"text": "content "}],\n+                                "data": {\n+                                    "url": resolve_uid_link,\n+                                },\n+                                "type": "link",\n+                            },\n+                            {"text": "here"},\n+                        ],\n+                        "type": "h2",\n+                    }\n+                ],\n+            }\n+        }\n+        res = self.serialize(\n+            context=self.portal["doc1"],\n+            blocks=blocks,\n+        )\n+        value = res["abc"]["value"]\n+        link = value[0]["children"][1]["data"]["url"]\n+        self.assertEqual(\n+            link, f"{self.portal[\'doc1\'].absolute_url()}/@@download/file#anchor-id"\n+        )\n \n     def test_slate_table_block_link_serializer(self):\n         doc_uid = IUUID(self.portal["doc1"])\n@@ -388,7 +491,7 @@ def test_slate_table_block_link_serializer(self):\n         rows = res["abc"]["table"]["rows"]\n         cell = rows[1]["cells"][0]\n         link = cell["value"][0]["children"][1]["data"]["url"]\n-        self.assertTrue(link, self.portal.absolute_url() + "/doc1")\n+        self.assertEqual(link, self.portal.absolute_url() + "/doc1")\n \n     @unittest.skipUnless(\n         HAS_PLONE_6,\n'
+b'diff --git a/news/479.internal b/news/479.internal\nnew file mode 100644\nindex 00000000..e5dc5d52\n--- /dev/null\n+++ b/news/479.internal\n@@ -0,0 +1 @@\n+Improved efficiency of view retrieval by deferring availability checks to error handling. @samriddhi99\n\\ No newline at end of file\ndiff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex f85790ee..b0b7784d 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -532,16 +532,21 @@ def get_view(name=None, context=None, request=None):\n     # and get their names.\n     available_view_names = [view[0] for view in available_views]\n \n-    # Raise an error if the requested view is not available.\n-    if name not in available_view_names:\n-        raise InvalidParameterError(\n-            "Cannot find a view with name \'{name}\'.\\n"\n-            "Available views are:\\n"\n-            "{views}".format(\n-                name=name,\n-                views="\\n".join(sorted(available_view_names)),\n-            ),\n-        )\n+\n+    try:\n+        return getMultiAdapter((context, request), name=name)\n+    except Exception:  \n+    # Check if the requested view is available.\n+        if name not in available_view_names:\n+            # Raise an error if the requested view is not available.\n+            raise InvalidParameterError(\n+                "Cannot find a view with name \'{name}\'.\\n"\n+                "Available views are:\\n"\n+                "{views}".format(\n+                    name=name,\n+                    views="\\n".join(sorted(available_view_names)),\n+                ),\n+            )\n     return getMultiAdapter((context, request), name=name)\n \n \n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2024-02-01T18:41:52+05:30
+Author: Samriddhi Singh (samriddhi99) <samriddhisingh6079@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/f89a207f53fab2981a91182394bcae188865e19d
+
+Changes as per https://github.com/plone/plone.api/pull/528#discussion_r1473611142 have been made
+
+Files changed:
+M src/plone/api/content.py
+
+b'diff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex b0b7784d..48117f48 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -523,20 +523,19 @@ def get_view(name=None, context=None, request=None):\n     # available, because the __init__ of said view will contain\n     # errors in client code.\n \n-    # Get all available views...\n-    sm = getSiteManager()\n-    available_views = sm.adapters.lookupAll(\n-        required=(providedBy(context), providedBy(request)),\n-        provided=Interface,\n-    )\n-    # and get their names.\n-    available_view_names = [view[0] for view in available_views]\n-\n-\n     try:\n-        return getMultiAdapter((context, request), name=name)\n-    except Exception:  \n-    # Check if the requested view is available.\n+        adapter = getMultiAdapter((context, request), name=name)\n+    except Exception: \n+\n+        #Getting all available views\n+        sm = getSiteManager()\n+        available_views = sm.adapters.lookupAll(\n+            required=(providedBy(context), providedBy(request)),\n+            provided=Interface,\n+        )\n+        \n+        # Check if the requested view is available by getting the names of all available views\n+        available_view_names = [view[0] for view in available_views]\n         if name not in available_view_names:\n             # Raise an error if the requested view is not available.\n             raise InvalidParameterError(\n@@ -547,8 +546,7 @@ def get_view(name=None, context=None, request=None):\n                     views="\\n".join(sorted(available_view_names)),\n                 ),\n             )\n-    return getMultiAdapter((context, request), name=name)\n-\n+    return adapter\n \n @required_parameters("obj")\n def get_uuid(obj=None):\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2024-02-05T16:56:47+05:30
+Author: Samriddhi Singh (samriddhi99) <samriddhisingh6079@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/d2715ada9710e76431f35a0ffd99383772797b1d
+
+Error handling if component not found in function get_view
+
+Files changed:
+M src/plone/api/content.py
+
+b'diff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex 48117f48..98c33ab9 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -13,11 +13,13 @@\n from Products.CMFCore.WorkflowCore import WorkflowException\n from zope.component import getMultiAdapter\n from zope.component import getSiteManager\n+from zope.component import ComponentLookupError\n from zope.container.interfaces import INameChooser\n from zope.globalrequest import getRequest\n from zope.interface import Interface\n from zope.interface import providedBy\n \n+\n import random\n import transaction\n \n@@ -525,8 +527,7 @@ def get_view(name=None, context=None, request=None):\n \n     try:\n         adapter = getMultiAdapter((context, request), name=name)\n-    except Exception: \n-\n+    except ComponentLookupError: \n         #Getting all available views\n         sm = getSiteManager()\n         available_views = sm.adapters.lookupAll(\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2024-02-05T17:10:06+05:30
+Author: Samriddhi Singh (samriddhi99) <samriddhisingh6079@gmail.com>
+Commit: https://github.com/plone/plone.api/commit/913b2cd07b1ce095772198d2b1864d203ed713bf
+
+Minor changes to get_view
+
+Files changed:
+M src/plone/api/content.py
+
+b'diff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex 98c33ab9..f6ed2cdd 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -526,7 +526,7 @@ def get_view(name=None, context=None, request=None):\n     # errors in client code.\n \n     try:\n-        adapter = getMultiAdapter((context, request), name=name)\n+        return getMultiAdapter((context, request), name=name)\n     except ComponentLookupError: \n         #Getting all available views\n         sm = getSiteManager()\n@@ -547,7 +547,6 @@ def get_view(name=None, context=None, request=None):\n                     views="\\n".join(sorted(available_view_names)),\n                 ),\n             )\n-    return adapter\n \n @required_parameters("obj")\n def get_uuid(obj=None):\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2024-02-07T21:17:07-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.api/commit/2e8015520b908e3a54d566edb20b55bec40610e1
+
+Update src/plone/api/content.py
+
+Co-authored-by: Alessandro Pisa &lt;alessandro.pisa@gmail.com&gt;
+
+Files changed:
+M src/plone/api/content.py
+
+b'diff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex f6ed2cdd..bd5d03d1 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -535,7 +535,8 @@ def get_view(name=None, context=None, request=None):\n             provided=Interface,\n         )\n         \n-        # Check if the requested view is available by getting the names of all available views\n+        # Check if the requested view is available\n+        # by getting the names of all available views\n         available_view_names = [view[0] for view in available_views]\n         if name not in available_view_names:\n             # Raise an error if the requested view is not available.\n'
+
+Repository: plone.api
+
+
+Branch: refs/heads/master
+Date: 2024-02-07T21:21:08-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.api/commit/3565a0b3fe1d327949e56ccaa7a64390531b9162
+
+Merge pull request #528 from samriddhi99/Issue-479-optimizing-api.content.get_view
+
+Issue 479: Edited api.content.get_view for increased efficiency to get views
+
+Files changed:
+A news/479.internal
+M src/plone/api/content.py
+
+b'diff --git a/news/479.internal b/news/479.internal\nnew file mode 100644\nindex 00000000..e5dc5d52\n--- /dev/null\n+++ b/news/479.internal\n@@ -0,0 +1 @@\n+Improved efficiency of view retrieval by deferring availability checks to error handling. @samriddhi99\n\\ No newline at end of file\ndiff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex f85790ee..bd5d03d1 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -13,11 +13,13 @@\n from Products.CMFCore.WorkflowCore import WorkflowException\n from zope.component import getMultiAdapter\n from zope.component import getSiteManager\n+from zope.component import ComponentLookupError\n from zope.container.interfaces import INameChooser\n from zope.globalrequest import getRequest\n from zope.interface import Interface\n from zope.interface import providedBy\n \n+\n import random\n import transaction\n \n@@ -523,27 +525,29 @@ def get_view(name=None, context=None, request=None):\n     # available, because the __init__ of said view will contain\n     # errors in client code.\n \n-    # Get all available views...\n-    sm = getSiteManager()\n-    available_views = sm.adapters.lookupAll(\n-        required=(providedBy(context), providedBy(request)),\n-        provided=Interface,\n-    )\n-    # and get their names.\n-    available_view_names = [view[0] for view in available_views]\n-\n-    # Raise an error if the requested view is not available.\n-    if name not in available_view_names:\n-        raise InvalidParameterError(\n-            "Cannot find a view with name \'{name}\'.\\n"\n-            "Available views are:\\n"\n-            "{views}".format(\n-                name=name,\n-                views="\\n".join(sorted(available_view_names)),\n-            ),\n+    try:\n+        return getMultiAdapter((context, request), name=name)\n+    except ComponentLookupError: \n+        #Getting all available views\n+        sm = getSiteManager()\n+        available_views = sm.adapters.lookupAll(\n+            required=(providedBy(context), providedBy(request)),\n+            provided=Interface,\n         )\n-    return getMultiAdapter((context, request), name=name)\n-\n+        \n+        # Check if the requested view is available\n+        # by getting the names of all available views\n+        available_view_names = [view[0] for view in available_views]\n+        if name not in available_view_names:\n+            # Raise an error if the requested view is not available.\n+            raise InvalidParameterError(\n+                "Cannot find a view with name \'{name}\'.\\n"\n+                "Available views are:\\n"\n+                "{views}".format(\n+                    name=name,\n+                    views="\\n".join(sorted(available_view_names)),\n+                ),\n+            )\n \n @required_parameters("obj")\n def get_uuid(obj=None):\n'
 
