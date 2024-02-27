@@ -1,14 +1,14 @@
-# Release notes for Plone 6.0.10rc1
+# Release notes for Plone 6.0.10
 
-* Released: Thursday February 22, 2023
+* Released: Tuesday February 27, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.10/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.10/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.10/constraints.txt](https://dist.plone.org/release/6.0.10/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.10/versions.cfg](https://dist.plone.org/release/6.0.10/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.10/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.10/versions-ecosystem.cfg).
 
 
 ## Highlights
@@ -24,7 +24,7 @@ Major changes since 6.0.9:
 * `plone.app.caching`: Fix purging of image scale paths for Dexterity content.
 * `plone.app.content`: Fix escaping HTML in ``tags`` popover and in vocabulary items.
 * `plone.app.theming`: Traverse to theme resources from the portal. This fixes a broken theme when rendering accessible content contained in an inaccessible navigation root.
-* `plone.staticresources`: Update dependencies: mockup 5.1.9, bootstrap 5.3.3, bootstrap-icons 1.11.3.
+* `plone.staticresources`: Update dependencies: mockup 5.1.11, bootstrap 5.3.3, bootstrap-icons 1.11.3.
 * `Products.CMFPlone`:
   * Remove volatile cached resource viewlet content to fix context aware expressions.
   * Add `data-bundle="diazo"` back, for backward compatibility with backend.xml (Classic UI).
@@ -33,7 +33,7 @@ Major changes since 6.0.9:
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.30.3](https://www.npmjs.com/package/@plone/volto/v/16.30.3).  See the [changelog](https://github.com/plone/volto/blob/16.30.3/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.0](https://www.npmjs.com/package/@plone/volto/v/16.31.0).  See the [changelog](https://github.com/plone/volto/blob/16.31.0/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
