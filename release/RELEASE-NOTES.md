@@ -1,14 +1,16 @@
-# Release notes for Plone 6.0.10
+# Release notes for Plone 6.0.10.1
 
-* Released: Tuesday February 27, 2024
+This is a "sub" release of 6.0.10 with a fix for a broken folder contents view in Classic UI.
+
+* Released: Wednesday February 28, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.10/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.10/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.10.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.10.1/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.10/constraints.txt](https://dist.plone.org/release/6.0.10/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.10/versions.cfg](https://dist.plone.org/release/6.0.10/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.10/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.10/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.10.1/constraints.txt](https://dist.plone.org/release/6.0.10.1/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.10.1/versions.cfg](https://dist.plone.org/release/6.0.10.1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.10.1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.10.1/versions-ecosystem.cfg).
 
 
 ## Highlights
@@ -29,6 +31,10 @@ Major changes since 6.0.9:
   * Remove volatile cached resource viewlet content to fix context aware expressions.
   * Add `data-bundle="diazo"` back, for backward compatibility with backend.xml (Classic UI).
   * Add a `data-bundle="plonecustomcss"` also for `@@custom.css` stylesheet
+
+Changed in 6.0.10.1:
+
+* `plone.staticresources`: Use version 2.1.13 to fix datatables.net version resolution.
 
 
 ## Volto frontend
