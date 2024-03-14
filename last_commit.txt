@@ -1,27 +1,50 @@
-Repository: plone.restapi
+Repository: plone.app.z3cform
 
 
-Branch: refs/heads/main
-Date: 2024-03-08T23:28:24+01:00
-Author: Wesley Barroso Lopes (wesleybl) <wesleybl@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/4287932cefc9b4a6d901321b88c0b044330b2704
+Branch: refs/heads/master
+Date: 2024-02-06T10:40:34+01:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.app.z3cform/commit/8edc52acf1b1551f82169ff7859f89f189dccf44
 
-Use the mode parameter instead of direction when calling the scale method (#1758)
-
-The direction parameter is deprecated. This avoids the warning:
-
-DeprecationWarning: The 'direction' option is deprecated, use 'mode'
-instead.
-
-Also change value to scale.
-
-Even though we get the warning in Plone 5.2, the tests fail when we use
-mode. So we keep direction in Plone 5.2.
+Fix `SelectFieldWidget` factory call from `plone.autoform`
 
 Files changed:
-A news/1758.bugfix
-M src/plone/restapi/__init__.py
-M src/plone/restapi/imaging.py
+M plone/app/z3cform/tests/test_widgets.py
+M plone/app/z3cform/widgets/select.py
 
-b'diff --git a/news/1758.bugfix b/news/1758.bugfix\nnew file mode 100644\nindex 0000000000..21c323b2df\n--- /dev/null\n+++ b/news/1758.bugfix\n@@ -0,0 +1 @@\n+Use the ``mode`` parameter instead of ``direction`` when calling the ``scale`` method. Also change value to ``scale`. @wesleybl\ndiff --git a/src/plone/restapi/__init__.py b/src/plone/restapi/__init__.py\nindex 5d449ae90c..c2cd6a1bb3 100644\n--- a/src/plone/restapi/__init__.py\n+++ b/src/plone/restapi/__init__.py\n@@ -1,12 +1,14 @@\n from . import patches  # noqa: ignore=F401\n from AccessControl import allow_module\n from AccessControl.Permissions import add_user_folders\n+from importlib import import_module\n from plone.restapi.pas import plugin\n from Products.PluggableAuthService.PluggableAuthService import registerMultiPlugin\n from zope.i18nmessageid import MessageFactory\n \n import pkg_resources\n \n+\n try:\n     pkg_resources.get_distribution("plone.app.multilingual")\n     HAS_MULTILINGUAL = True\n@@ -19,6 +21,11 @@\n \n allow_module("json")\n \n+# BBB: Plone 5.2\n+HAS_PLONE_6 = getattr(\n+    import_module("Products.CMFPlone.factory"), "PLONE60MARKER", False\n+)\n+\n \n def initialize(context):\n     registerMultiPlugin(plugin.JWTAuthenticationPlugin.meta_type)\ndiff --git a/src/plone/restapi/imaging.py b/src/plone/restapi/imaging.py\nindex 087ee9f32a..984fc88fa8 100644\n--- a/src/plone/restapi/imaging.py\n+++ b/src/plone/restapi/imaging.py\n@@ -1,8 +1,17 @@\n+from plone.restapi import HAS_PLONE_6\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n from zope.globalrequest import getRequest\n \n \n+if HAS_PLONE_6:\n+    # In Plone 6.0+, we must use the mode parameter\n+    scale_parameter = {"mode": "scale"}\n+else:\n+    # BBB: In Plone 5.2, it is necessary to use the direction parameter.\n+    scale_parameter = {"direction": "thumbnail"}\n+\n+\n def get_scales(context, field, width, height):\n     """Get a dictionary of available scales for a particular image field,\n     with the actual dimensions (aspect ratio of the original image).\n@@ -51,9 +60,8 @@ def get_original_image_url(context, fieldname, width, height):\n     scale_flags = {}\n     if hasattr(images_view, "picture"):\n         scale_flags["pre"] = True\n-    scale = images_view.scale(\n-        fieldname, width=width, height=height, direction="thumbnail", **scale_flags\n-    )\n+    parameters = {**scale_flags, **scale_parameter}\n+    scale = images_view.scale(fieldname, width=width, height=height, **parameters)\n     if scale:\n         return scale.url\n     # Corrupt images may not have a scale.\n'
+b'diff --git a/plone/app/z3cform/tests/test_widgets.py b/plone/app/z3cform/tests/test_widgets.py\nindex c063a3d..4cb6ebf 100644\n--- a/plone/app/z3cform/tests/test_widgets.py\n+++ b/plone/app/z3cform/tests/test_widgets.py\n@@ -571,17 +571,19 @@ def setUp(self):\n         self.request = self.layer["request"]\n \n     def test_select_widget(self):\n+        from plone.app.z3cform.widgets.select import SelectFieldWidget\n         from plone.app.z3cform.widgets.select import SelectWidget\n \n-        widget = SelectWidget(self.request)\n-        widget.id = "test-widget"\n-        widget.name = "selectfield-widget"\n-        widget.field = Choice(\n+        field = Choice(\n             __name__="selectfield",\n             values=["one", "two", "three"],\n+            required=True,\n         )\n-        widget.terms = widget.field.vocabulary\n-        widget.field.required = True\n+        widget = SelectFieldWidget(field, self.request)\n+        widget.id = "test-widget"\n+        widget.name = "selectfield-widget"\n+        widget.terms = field.vocabulary\n+        self.assertTrue(isinstance(widget, SelectWidget))\n         self.assertEqual(\n             {\n                 "pattern_options": {},\ndiff --git a/plone/app/z3cform/widgets/select.py b/plone/app/z3cform/widgets/select.py\nindex 4fbd055..5f4604f 100644\n--- a/plone/app/z3cform/widgets/select.py\n+++ b/plone/app/z3cform/widgets/select.py\n@@ -34,14 +34,16 @@ class SelectWidget(HTMLSelectWidget, SelectWidgetBase):\n \n \n @implementer(IFieldWidget)\n-def SelectFieldWidget(field, source, request):\n+def SelectFieldWidget(field, request, extra=None):\n+    if extra is not None:\n+        request = extra\n     return FieldWidget(field, SelectWidget(request))\n \n \n @implementer(IFieldWidget)\n def CollectionChoiceSelectFieldWidget(field, value_type, request):\n     """IFieldWidget factory for SelectWidget."""\n-    return SelectFieldWidget(field, None, request)\n+    return SelectFieldWidget(field, request)\n \n \n @implementer_only(ISelect2Widget)\n'
+
+Repository: plone.app.z3cform
+
+
+Branch: refs/heads/master
+Date: 2024-02-06T10:42:56+01:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.app.z3cform/commit/e6f1e92dc7e917fb6ca0d5aaf8e8de9ae9479622
+
+changenote
+
+Files changed:
+A news/192.bugfix
+
+b'diff --git a/news/192.bugfix b/news/192.bugfix\nnew file mode 100644\nindex 0000000..bbfe8c6\n--- /dev/null\n+++ b/news/192.bugfix\n@@ -0,0 +1,2 @@\n+Fix `SelectFieldWidget` factory call.\n+[petschki]\n'
+
+Repository: plone.app.z3cform
+
+
+Branch: refs/heads/master
+Date: 2024-03-14T07:35:04+01:00
+Author: Peter Mathis (petschki) <petschki@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.z3cform/commit/7a80bc4c827db326ee298755ad879e991a8b19d3
+
+Merge pull request #192 from plone/autoform-widget-factory
+
+Fix `SelectFieldWidget` factory call from `plone.autoform`
+
+Files changed:
+A news/192.bugfix
+M plone/app/z3cform/tests/test_widgets.py
+M plone/app/z3cform/widgets/select.py
+
+b'diff --git a/news/192.bugfix b/news/192.bugfix\nnew file mode 100644\nindex 00000000..bbfe8c67\n--- /dev/null\n+++ b/news/192.bugfix\n@@ -0,0 +1,2 @@\n+Fix `SelectFieldWidget` factory call.\n+[petschki]\ndiff --git a/plone/app/z3cform/tests/test_widgets.py b/plone/app/z3cform/tests/test_widgets.py\nindex c063a3d2..4cb6ebf1 100644\n--- a/plone/app/z3cform/tests/test_widgets.py\n+++ b/plone/app/z3cform/tests/test_widgets.py\n@@ -571,17 +571,19 @@ def setUp(self):\n         self.request = self.layer["request"]\n \n     def test_select_widget(self):\n+        from plone.app.z3cform.widgets.select import SelectFieldWidget\n         from plone.app.z3cform.widgets.select import SelectWidget\n \n-        widget = SelectWidget(self.request)\n-        widget.id = "test-widget"\n-        widget.name = "selectfield-widget"\n-        widget.field = Choice(\n+        field = Choice(\n             __name__="selectfield",\n             values=["one", "two", "three"],\n+            required=True,\n         )\n-        widget.terms = widget.field.vocabulary\n-        widget.field.required = True\n+        widget = SelectFieldWidget(field, self.request)\n+        widget.id = "test-widget"\n+        widget.name = "selectfield-widget"\n+        widget.terms = field.vocabulary\n+        self.assertTrue(isinstance(widget, SelectWidget))\n         self.assertEqual(\n             {\n                 "pattern_options": {},\ndiff --git a/plone/app/z3cform/widgets/select.py b/plone/app/z3cform/widgets/select.py\nindex 4fbd0559..5f4604fc 100644\n--- a/plone/app/z3cform/widgets/select.py\n+++ b/plone/app/z3cform/widgets/select.py\n@@ -34,14 +34,16 @@ class SelectWidget(HTMLSelectWidget, SelectWidgetBase):\n \n \n @implementer(IFieldWidget)\n-def SelectFieldWidget(field, source, request):\n+def SelectFieldWidget(field, request, extra=None):\n+    if extra is not None:\n+        request = extra\n     return FieldWidget(field, SelectWidget(request))\n \n \n @implementer(IFieldWidget)\n def CollectionChoiceSelectFieldWidget(field, value_type, request):\n     """IFieldWidget factory for SelectWidget."""\n-    return SelectFieldWidget(field, None, request)\n+    return SelectFieldWidget(field, request)\n \n \n @implementer_only(ISelect2Widget)\n'
 
