@@ -3,7 +3,7 @@
 This is a "sub" release of 6.0.10 with a fix for a broken folder contents view in Classic UI.
 And after that sub release we pinned a newer version of mxdev that properly works in Python 3.12 virtual envs.
 
-* Last updated: Wednesday March 13, 2024
+* Last updated: Friday March 15, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -16,30 +16,11 @@ If you want to jump straight in, here are two important links:
 
 ## Highlights
 
-Major changes since 6.0.9:
-
-* Plone 6.0.10 is the first release that officially supports Python 3.12.
-* `plone.api`: Implemented unrestricted find of content: `api.content.find(unrestricted=True)`
-* `plone.restapi`:
-  * Translate validation error messages in the deserializer.
-  * Give Site Administrator permission to manage users. To make this possible, we now check the "plone.app.controlpanel.UsersAndGroups" permission instead of "cmf.ManagePortal" in a lot of operations in the users and groups endpoints.
-* `plone.volto`: Add `VOLTO_FRONTEND_DOMAIN` as env var for `volto.frontend_domain` registry setting.
-* `plone.app.caching`: Fix purging of image scale paths for Dexterity content.
-* `plone.app.content`: Fix escaping HTML in ``tags`` popover and in vocabulary items.
-* `plone.app.theming`: Traverse to theme resources from the portal. This fixes a broken theme when rendering accessible content contained in an inaccessible navigation root.
-* `plone.staticresources`: Update dependencies: mockup 5.1.11, bootstrap 5.3.3, bootstrap-icons 1.11.3.
-* `Products.CMFPlone`:
-  * Remove volatile cached resource viewlet content to fix context aware expressions.
-  * Add `data-bundle="diazo"` back, for backward compatibility with backend.xml (Classic UI).
-  * Add a `data-bundle="plonecustomcss"` also for `@@custom.css` stylesheet
-
-Changed in 6.0.10.1:
-
-* `plone.staticresources`: Use version 2.1.13 to fix datatables.net version resolution.
-
-Changed after 6.0.10.1:
+Major changes since 6.0.10.1:
 
 * `mxdev`: Fix for Python 3.12 virtual envs.
+* `plone.namedfile` and `plone.formwidget.namedfile`: Support for allowed media types.
+  Support to constrain files to specific media types with an "accept" attribute on file and image fields, just like the "accept" attribute of the HTML file input.
 
 
 ## Volto frontend
