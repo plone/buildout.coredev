@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1-dev
 
-* Last updated: Wednesday March 13, 2024
+* Last updated: Friday March 15, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
   Yes, we need to start on a 6.1 upgrade guide.
@@ -18,6 +18,9 @@ Major changes since 6.1.0a2:
 
 * This release drops support for Python 3.8 and 3.9.  We only support Python 3.10, 3.11, and 3.12.
 * `mxdev`: Fix for Python 3.12 virtual envs.
+* `plone.namedfile`:
+  * Improve contenttype detection logic for unregistered but common types.  Change `get_contenttype` to support common types which are or were not registered with IANA, like image/webp or audio/midi.
+  * Support for allowed media types.  Support to constrain files to specific media types with an "accept" attribute on file and image fields, just like the "accept" attribute of the HTML file input.
 
 
 ## Volto frontend
