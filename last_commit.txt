@@ -2,22 +2,50 @@ Repository: plone.app.discussion
 
 
 Branch: refs/heads/master
-Date: 2024-03-18T11:57:30+01:00
-Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
-Commit: https://github.com/plone/plone.app.discussion/commit/267fc3baa267a9c58f7967cc5c022e3a939a0efd
+Date: 2024-03-20T16:43:12+01:00
+Author: Katja Süss (ksuess) <k.suess@rohberg.ch>
+Commit: https://github.com/plone/plone.app.discussion/commit/5e89f7c1c6bd281e6cdd1904aac687544c8a4014
 
-Support for HCaptcha via plone.formwidget.hcaptcha (#232)
+Apply validation for all captchas
 
 Files changed:
-A news/230.feature
-M .meta.toml
-M README.rst
-M plone/app/discussion/browser/captcha.py
+A news/234.bugfix
 M plone/app/discussion/browser/validator.py
-M plone/app/discussion/configure.zcml
-M plone/app/discussion/interfaces.py
-M plone/app/discussion/vocabularies.py
-M pyproject.toml
 
-b'diff --git a/.meta.toml b/.meta.toml\nindex aae3f94b..65043ef1 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -6,4 +6,4 @@ template = "default"\n commit-id = "cfffba8c"\n \n [pyproject]\n-dependencies_ignores = "[\'Products.LinguaPlone.interfaces.ITranslatable\', \'collective.akismet\', \'collective.z3cform.norobots\', \'plone.formwidget.captcha\', \'plone.formwidget.recaptcha\', \'plone.contentrules\', \'plone.app.contentrules\', \'plone.stringinterp\', \'plone.app.collection\']"\n+dependencies_ignores = "[\'Products.LinguaPlone.interfaces.ITranslatable\', \'collective.akismet\', \'collective.z3cform.norobots\', \'plone.formwidget.captcha\', \'plone.formwidget.recaptcha\', \'plone.formwidget.hcaptcha\', \'plone.contentrules\', \'plone.app.contentrules\', \'plone.stringinterp\', \'plone.app.collection\']"\ndiff --git a/README.rst b/README.rst\nindex e55d440b..3753d940 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -30,6 +30,10 @@ Add-on Products\n   <https://pypi.org/project/collective.z3cform.norobots/1.1/>`_\n   (provides a "human" captcha widget based on a list of questions/answers)\n \n+- `plone.formwidget.hcaptcha\n+  <https://pypi.org/project/plone.formwidget.hcaptcha/>`_\n+  (for spam protection by `HCaptcha <https://www.hcaptcha.com/>`_ )\n+\n Note: not all of these may be compatible with the current version of ``plone.app.discussion`` and ``Plone`` itself.\n \n \ndiff --git a/news/230.feature b/news/230.feature\nnew file mode 100644\nindex 00000000..72cc6f78\n--- /dev/null\n+++ b/news/230.feature\n@@ -0,0 +1 @@\n+Provide HCaptcha if plone.formwidget.hcaptcha is installed.  @ksuess\n\\ No newline at end of file\ndiff --git a/plone/app/discussion/browser/captcha.py b/plone/app/discussion/browser/captcha.py\nindex 7e10d124..e2e7fd28 100644\n--- a/plone/app/discussion/browser/captcha.py\n+++ b/plone/app/discussion/browser/captcha.py\n@@ -61,6 +61,10 @@ def update(self):\n                 from plone.formwidget.recaptcha import ReCaptchaFieldWidget\n \n                 self.form.fields["captcha"].widgetFactory = ReCaptchaFieldWidget\n+            elif self.captcha == "hcaptcha":\n+                from plone.formwidget.hcaptcha import HCaptchaFieldWidget\n+\n+                self.form.fields["captcha"].widgetFactory = HCaptchaFieldWidget\n             elif self.captcha == "norobots":\n                 from collective.z3cform.norobots import NorobotsFieldWidget\n \ndiff --git a/plone/app/discussion/browser/validator.py b/plone/app/discussion/browser/validator.py\nindex 755d6e5b..734b6c2d 100644\n--- a/plone/app/discussion/browser/validator.py\n+++ b/plone/app/discussion/browser/validator.py\n@@ -31,6 +31,11 @@\n except ImportError:\n     pass\n \n+try:\n+    from plone.formwidget.hcaptcha.validator import WrongCaptchaCode  # noqa\n+except ImportError:\n+    pass\n+\n \n @implementer(IValidator)\n @adapter(Interface, IDiscussionLayer, Interface, IField, Interface)\ndiff --git a/plone/app/discussion/configure.zcml b/plone/app/discussion/configure.zcml\nindex 4d5a1501..e2b82f2d 100644\n--- a/plone/app/discussion/configure.zcml\n+++ b/plone/app/discussion/configure.zcml\n@@ -21,16 +21,20 @@\n   <include file="subscribers.zcml" />\n   <include file="upgrades.zcml" />\n \n-  <!-- load captch before browser -->\n+  <!-- load captcha before browser -->\n   <configure zcml:condition="installed plone.formwidget.captcha">\n     <include package="plone.formwidget.captcha" />\n   </configure>\n   <configure zcml:condition="installed plone.formwidget.recaptcha">\n     <include package="plone.formwidget.recaptcha" />\n   </configure>\n+  <configure zcml:condition="installed plone.formwidget.hcaptcha">\n+    <include package="plone.formwidget.hcaptcha" />\n+  </configure>\n   <configure zcml:condition="installed collective.z3cform.norobots">\n     <include package="collective.z3cform.norobots" />\n   </configure>\n+\n   <include package=".browser" />\n \n   <!-- Register the installation GenericSetup extension profile -->\ndiff --git a/plone/app/discussion/interfaces.py b/plone/app/discussion/interfaces.py\nindex 458c5e31..5fca1385 100644\n--- a/plone/app/discussion/interfaces.py\n+++ b/plone/app/discussion/interfaces.py\n@@ -313,7 +313,9 @@ class IDiscussionSettings(Interface):\n             default="Use this setting to enable or disable Captcha "\n             "validation for comments. Install "\n             "plone.formwidget.captcha, "\n-            "plone.formwidget.recaptcha, collective.akismet, or "\n+            "plone.formwidget.recaptcha, "\n+            "plone.formwidget.hcaptcha, "\n+            "collective.akismet, or "\n             "collective.z3cform.norobots if there are no options "\n             "available.",\n         ),\ndiff --git a/plone/app/discussion/vocabularies.py b/plone/app/discussion/vocabularies.py\nindex 290448d3..3d28ee49 100644\n--- a/plone/app/discussion/vocabularies.py\n+++ b/plone/app/discussion/vocabularies.py\n@@ -19,6 +19,14 @@\n except ImportError:\n     pass\n \n+HAS_HCAPTCHA = False\n+try:\n+    import plone.formwidget.hcaptcha  # noqa\n+\n+    HAS_HCAPTCHA = True  # pragma: no cover\n+except ImportError:\n+    pass\n+\n HAS_AKISMET = False\n try:\n     import collective.akismet  # noqa\n@@ -49,11 +57,15 @@ def captcha_vocabulary(context):\n             SimpleTerm(value="recaptcha", token="recaptcha", title="ReCaptcha")\n         )\n \n+    if HAS_HCAPTCHA:  # pragma: no cover\n+        terms.append(SimpleTerm(value="hcaptcha", token="hcaptcha", title="HCaptcha"))\n+\n     if HAS_AKISMET:  # pragma: no cover\n         terms.append(SimpleTerm(value="akismet", token="akismet", title="Akismet"))\n \n     if HAS_NOROBOTS:  # pragma: no cover\n         terms.append(SimpleTerm(value="norobots", token="norobots", title="Norobots"))\n+\n     return SimpleVocabulary(terms)\n \n \ndiff --git a/pyproject.toml b/pyproject.toml\nindex cc0a3f98..ab35c2f2 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -116,7 +116,7 @@ Zope = [\n   \'Products.CMFCore\', \'Products.CMFDynamicViewFTI\',\n ]\n python-dateutil = [\'dateutil\']\n-ignore-packages = [\'Products.LinguaPlone.interfaces.ITranslatable\', \'collective.akismet\', \'collective.z3cform.norobots\', \'plone.formwidget.captcha\', \'plone.formwidget.recaptcha\', \'plone.contentrules\', \'plone.app.contentrules\', \'plone.stringinterp\', \'plone.app.collection\']\n+ignore-packages = [\'Products.LinguaPlone.interfaces.ITranslatable\', \'collective.akismet\', \'collective.z3cform.norobots\', \'plone.formwidget.captcha\', \'plone.formwidget.recaptcha\', \'plone.formwidget.hcaptcha\', \'plone.contentrules\', \'plone.app.contentrules\', \'plone.stringinterp\', \'plone.app.collection\']\n \n ##\n # Add extra configuration options in .meta.toml:\n'
+b'diff --git a/news/234.bugfix b/news/234.bugfix\nnew file mode 100644\nindex 00000000..8bfc3559\n--- /dev/null\n+++ b/news/234.bugfix\n@@ -0,0 +1 @@\n+Apply validation for all captchas. @ksuess\n\\ No newline at end of file\ndiff --git a/plone/app/discussion/browser/validator.py b/plone/app/discussion/browser/validator.py\nindex 734b6c2d..0605764b 100644\n--- a/plone/app/discussion/browser/validator.py\n+++ b/plone/app/discussion/browser/validator.py\n@@ -49,7 +49,7 @@ def validate(self, value):\n         registry = queryUtility(IRegistry)\n         settings = registry.forInterface(IDiscussionSettings, check=False)\n \n-        if settings.captcha in ("captcha", "recaptcha", "norobots"):\n+        if settings.captcha != \'disabled\':\n             captcha = getMultiAdapter(\n                 (aq_inner(self.context), self.request), name=settings.captcha\n             )\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2024-03-20T15:47:15Z
+Author: pre-commit-ci[bot] (pre-commit-ci[bot]) <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.discussion/commit/750128fe2c4034dca23b5abc26ee7b5d765a5ee3
+
+[pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+Files changed:
+M plone/app/discussion/browser/validator.py
+
+b'diff --git a/plone/app/discussion/browser/validator.py b/plone/app/discussion/browser/validator.py\nindex 0605764b..18db7d02 100644\n--- a/plone/app/discussion/browser/validator.py\n+++ b/plone/app/discussion/browser/validator.py\n@@ -49,7 +49,7 @@ def validate(self, value):\n         registry = queryUtility(IRegistry)\n         settings = registry.forInterface(IDiscussionSettings, check=False)\n \n-        if settings.captcha != \'disabled\':\n+        if settings.captcha != "disabled":\n             captcha = getMultiAdapter(\n                 (aq_inner(self.context), self.request), name=settings.captcha\n             )\n'
+
+Repository: plone.app.discussion
+
+
+Branch: refs/heads/master
+Date: 2024-03-20T23:48:06+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.discussion/commit/3d60532720c96bf807cf892492e1e914f6c7d674
+
+Merge pull request #234 from plone/hcaptcha-fix-master-branch
+
+Apply validation for all captchas
+
+Files changed:
+A news/234.bugfix
+M plone/app/discussion/browser/validator.py
+
+b'diff --git a/news/234.bugfix b/news/234.bugfix\nnew file mode 100644\nindex 00000000..8bfc3559\n--- /dev/null\n+++ b/news/234.bugfix\n@@ -0,0 +1 @@\n+Apply validation for all captchas. @ksuess\n\\ No newline at end of file\ndiff --git a/plone/app/discussion/browser/validator.py b/plone/app/discussion/browser/validator.py\nindex 734b6c2d..18db7d02 100644\n--- a/plone/app/discussion/browser/validator.py\n+++ b/plone/app/discussion/browser/validator.py\n@@ -49,7 +49,7 @@ def validate(self, value):\n         registry = queryUtility(IRegistry)\n         settings = registry.forInterface(IDiscussionSettings, check=False)\n \n-        if settings.captcha in ("captcha", "recaptcha", "norobots"):\n+        if settings.captcha != "disabled":\n             captcha = getMultiAdapter(\n                 (aq_inner(self.context), self.request), name=settings.captcha\n             )\n'
 
