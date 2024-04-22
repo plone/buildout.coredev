@@ -1,88 +1,48 @@
-Repository: plone.app.users
+Repository: plone.app.contentmenu
 
 
 Branch: refs/heads/master
-Date: 2024-02-23T21:37:01+01:00
-Author: rber474 (rber474) <rber474@gmail.com>
-Commit: https://github.com/plone/plone.app.users/commit/d406599d4c8b1ce5e5f4297d740329453aa1f073
+Date: 2024-03-13T11:12:51+01:00
+Author: szakitibi (szakitibi) <szakitibi@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.contentmenu/commit/57611a0d1abc834e520e46028bca3775f83f2013
 
-Fix #122 validating if image is supported by PIL showing a validation error if not
+Check menu item has dropdown submenu items
 
 Files changed:
-A news/122.bugfix
-A plone/app/users/tests/test_portrait.py
-A plone/app/users/tests/transparent_square.svg
-M .meta.toml
-M plone/app/users/browser/account.py
+M plone/app/contentmenu/contentmenu.pt
 
-b'diff --git a/.meta.toml b/.meta.toml\nindex 0a061e9b..4f62c932 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -7,4 +7,4 @@ commit-id = "cfffba8c"\n \n [pyproject]\n codespell_ignores = "complet,exemple"\n-dependencies_ignores = "[\'Products.CMFPlone\']"\n+dependencies_ignores = "[\'Products.CMFPlone\', \'PIL\']"\ndiff --git a/news/122.bugfix b/news/122.bugfix\nnew file mode 100644\nindex 00000000..367fd1c3\n--- /dev/null\n+++ b/news/122.bugfix\n@@ -0,0 +1,4 @@\n+Fix #122 validating if image is supported by PIL showing a validation error if not.\n+Include Pillow dependency in setup.py.\n+Fix ValueError: User could not be found in BaseTest setUp adding a transaction.commit().\n+[rber474]\n\\ No newline at end of file\ndiff --git a/plone/app/users/browser/account.py b/plone/app/users/browser/account.py\nindex bf02d69b..720e53f9 100644\n--- a/plone/app/users/browser/account.py\n+++ b/plone/app/users/browser/account.py\n@@ -1,5 +1,7 @@\n from AccessControl import Unauthorized\n from Acquisition import aq_inner\n+from PIL import Image\n+from PIL import UnidentifiedImageError\n from plone.app.layout.navigation.interfaces import INavigationRoot\n from plone.app.users.browser.interfaces import IAccountPanelForm\n from plone.app.users.browser.schemaeditor import getFromBaseSchema\n@@ -44,6 +46,11 @@\n     ),\n )\n \n+MESSAGE_IMAGE_NOT_SUPPORTED = _(\n+    "message_image_not_supported",\n+    "The file you selected is not supported by Pillow. " "Please choose another.",\n+)\n+\n \n def getSchema(schema_interface, schema_adapter, form_name=None):\n     request = getRequest()\n@@ -259,6 +266,23 @@ def validate_email(self, action, data):\n                 if err_str:\n                     notifyWidgetActionExecutionError(action, "email", err_str)\n \n+    def validate_portrait(self, action, data):\n+        """Portrait validation.\n+        Checks if image is supported by Pillow.\n+        SVG files are not yet supported.\n+        """\n+        error_keys = [error.field.getName() for error in action.form.widgets.errors]\n+        if "portrait" not in error_keys and data["portrait"] is not None:\n+            portrait = data["portrait"].open()\n+            try:\n+                Image.open(portrait)\n+            except UnidentifiedImageError:\n+                notifyWidgetActionExecutionError(\n+                    action, "portrait", MESSAGE_IMAGE_NOT_SUPPORTED\n+                )\n+            except Exception as exc:\n+                raise exc\n+\n     @button.buttonAndHandler(_("Save"))\n     def handleSave(self, action):\n         CheckAuthenticator(self.request)\n@@ -269,6 +293,11 @@ def handleSave(self, action):\n         if "email" in data:\n             self.validate_email(action, data)\n \n+        # Validate portrait, upload image could be not supported\n+        # by PIL what raises an exception when scaling image.\n+        if "portrait" in data:\n+            self.validate_portrait(action, data)\n+\n         if action.form.widgets.errors:\n             self.status = self.formErrorsMessage\n             return\ndiff --git a/plone/app/users/tests/test_portrait.py b/plone/app/users/tests/test_portrait.py\nnew file mode 100644\nindex 00000000..fb158fa7\n--- /dev/null\n+++ b/plone/app/users/tests/test_portrait.py\n@@ -0,0 +1,45 @@\n+from pkg_resources import resource_stream\n+from plone.app.testing import SITE_OWNER_NAME\n+from plone.app.testing import SITE_OWNER_PASSWORD\n+from plone.app.users.tests.base import BaseTestCase\n+\n+\n+class TestPortrait(BaseTestCase):\n+    def test_regression_supported_image_type_122(self):\n+        # https://github.com/plone/plone.app.users/issues/122\n+\n+        self.browser.open("http://nohost/plone/")\n+        self.browser.getLink("Log in").click()\n+        self.browser.getControl("Login Name").value = SITE_OWNER_NAME\n+        self.browser.getControl("Password").value = SITE_OWNER_PASSWORD\n+        self.browser.getControl("Log in").click()\n+        self.browser.open("http://nohost/plone/@@personal-information")\n+        self.browser.getControl(name="form.widgets.email").value = "test@test.com"\n+        portrait_file = resource_stream("plone.app.users.tests", "onepixel.jpg")\n+        self.browser.getControl(name="form.widgets.portrait").add_file(\n+            portrait_file, "image/jpg", "onepixel.# jpg"\n+        )\n+        self.browser.getControl("Save").click()\n+        self.assertIn("Changes saved.", self.browser.contents)\n+\n+    def test_not_supported_image_type_122(self):\n+        # https://github.com/plone/plone.app.users/issues/122\n+\n+        self.browser.open("http://nohost/plone/")\n+        self.browser.getLink("Log in").click()\n+        self.browser.getControl("Login Name").value = SITE_OWNER_NAME\n+        self.browser.getControl("Password").value = SITE_OWNER_PASSWORD\n+        self.browser.getControl("Log in").click()\n+        self.browser.open("http://nohost/plone/@@personal-information")\n+        self.browser.getControl(name="form.widgets.email").value = "test@test.com"\n+        portrait_file = resource_stream(\n+            "plone.app.users.tests", "transparent_square.svg"\n+        )\n+        self.browser.getControl(name="form.widgets.portrait").add_file(\n+            portrait_file, "image/svg+xml", "onepixel.# jpg"\n+        )\n+        self.browser.getControl("Save").click()\n+        self.assertIn(\n+            "The file you selected is not supported by Pillow. Please choose another.",\n+            self.browser.contents,\n+        )\ndiff --git a/plone/app/users/tests/transparent_square.svg b/plone/app/users/tests/transparent_square.svg\nnew file mode 100644\nindex 00000000..0b11a65e\n--- /dev/null\n+++ b/plone/app/users/tests/transparent_square.svg\n@@ -0,0 +1,3 @@\n+<?xml version="1.0" encoding="UTF-8" ?>\n+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="12" height="12">\n+</svg>\n\\ No newline at end of file\n'
+b'diff --git a/plone/app/contentmenu/contentmenu.pt b/plone/app/contentmenu/contentmenu.pt\nindex 32168d0..657ca53 100644\n--- a/plone/app/contentmenu/contentmenu.pt\n+++ b/plone/app/contentmenu/contentmenu.pt\n@@ -19,7 +19,7 @@\n            aria-expanded="${python:\'false\' if submenu else \'\'}"\n            href="#"\n            data-bs-offset="0,0"\n-           data-bs-toggle="dropdown"\n+           data-bs-toggle="${python: \'dropdown\' if submenu else \'\'}"\n            tal:define="\n              state_class menuItem/extra/class | nothing;\n              state_class python:\'label-%s\' % state_class if state_class else \'\';\n'
 
-Repository: plone.app.users
+Repository: plone.app.contentmenu
 
 
 Branch: refs/heads/master
-Date: 2024-02-23T21:37:18+01:00
-Author: rber474 (rber474) <rber474@gmail.com>
-Commit: https://github.com/plone/plone.app.users/commit/48418981e354340cca5b166a8601be4433f6c837
+Date: 2024-03-13T11:31:51+01:00
+Author: szakitibi (szakitibi) <szakitibi@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.contentmenu/commit/0bba87765bc09c013795dccd5464d1c5d7e7ad46
 
-Include Pillow dependency in setup.py
+Create 61.bugfix
 
 Files changed:
-M setup.py
+A news/61.bugfix
 
-b'diff --git a/setup.py b/setup.py\nindex ddd88c0..9950599 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -59,6 +59,7 @@\n     extras_require=extras_require,\n     install_requires=[\n         "Acquisition",\n+        "Pillow",\n         "Products.GenericSetup",\n         "Products.PlonePAS >= 5.0.1",\n         "Products.statusmessages",\n'
+b'diff --git a/news/61.bugfix b/news/61.bugfix\nnew file mode 100644\nindex 0000000..7208586\n--- /dev/null\n+++ b/news/61.bugfix\n@@ -0,0 +1,2 @@\n+- Check if "dropdown" needed for menu items\n+  [szakitibi]\n'
 
-Repository: plone.app.users
+Repository: plone.app.contentmenu
 
 
 Branch: refs/heads/master
-Date: 2024-02-23T21:37:32+01:00
-Author: rber474 (rber474) <rber474@gmail.com>
-Commit: https://github.com/plone/plone.app.users/commit/35e130784da5f1c05a50de570354dbbf24688976
+Date: 2024-04-22T17:58:37+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.app.contentmenu/commit/9ff56fe52c25d16b59fdc6093c6a5769a9fc1bb3
 
-Fix ValueError: User could not be found in BaseTest setUp adding a transaction.commit()
+Merge pull request #63 from szakitibi/patch-1
 
-Files changed:
-M plone/app/users/tests/base.py
-
-b'diff --git a/plone/app/users/tests/base.py b/plone/app/users/tests/base.py\nindex b059d13..b572beb 100644\n--- a/plone/app/users/tests/base.py\n+++ b/plone/app/users/tests/base.py\n@@ -24,6 +24,7 @@\n from zope.component import getSiteManager\n from zope.component import getUtility\n \n+import transaction\n import unittest\n \n \n@@ -42,6 +43,7 @@ def setUp(self):\n \n         self.browser = Browser(self.layer["app"])\n         self.request = self.layer["request"]\n+        transaction.commit()\n \n     def tearDown(self):\n         login(self.portal, "admin")\n'
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2024-02-23T21:57:19+01:00
-Author: rber474 (rber474) <rber474@gmail.com>
-Commit: https://github.com/plone/plone.app.users/commit/0863c451ba724613acb1f957e47fdf16a4e374bd
-
-Fix dependencychecker for Pillow
+Check menu item has dropdown submenu items
 
 Files changed:
-M .meta.toml
-M pyproject.toml
+A news/61.bugfix
+M plone/app/contentmenu/contentmenu.pt
 
-b'diff --git a/.meta.toml b/.meta.toml\nindex 4f62c93..0a061e9 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -7,4 +7,4 @@ commit-id = "cfffba8c"\n \n [pyproject]\n codespell_ignores = "complet,exemple"\n-dependencies_ignores = "[\'Products.CMFPlone\', \'PIL\']"\n+dependencies_ignores = "[\'Products.CMFPlone\']"\ndiff --git a/pyproject.toml b/pyproject.toml\nindex 62234f6..9d361c9 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -117,6 +117,7 @@ Zope = [\n ]\n python-dateutil = [\'dateutil\']\n ignore-packages = [\'Products.CMFPlone\']\n+Pillow = [\'PIL\']\n \n ##\n # Add extra configuration options in .meta.toml:\n'
-
-Repository: plone.app.users
-
-
-Branch: refs/heads/master
-Date: 2024-04-22T14:19:19+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.users/commit/ee9ebe906a6cad395353636db34a4f606245b303
-
-Merge pull request #123 from plone/122-portrait-image-file-not-supported-by-pil
-
-122 portrait image file not supported by pil
-
-Files changed:
-A news/122.bugfix
-A plone/app/users/tests/test_portrait.py
-A plone/app/users/tests/transparent_square.svg
-M plone/app/users/browser/account.py
-M plone/app/users/tests/base.py
-M pyproject.toml
-M setup.py
-
-b'diff --git a/news/122.bugfix b/news/122.bugfix\nnew file mode 100644\nindex 00000000..367fd1c3\n--- /dev/null\n+++ b/news/122.bugfix\n@@ -0,0 +1,4 @@\n+Fix #122 validating if image is supported by PIL showing a validation error if not.\n+Include Pillow dependency in setup.py.\n+Fix ValueError: User could not be found in BaseTest setUp adding a transaction.commit().\n+[rber474]\n\\ No newline at end of file\ndiff --git a/plone/app/users/browser/account.py b/plone/app/users/browser/account.py\nindex bf02d69b..720e53f9 100644\n--- a/plone/app/users/browser/account.py\n+++ b/plone/app/users/browser/account.py\n@@ -1,5 +1,7 @@\n from AccessControl import Unauthorized\n from Acquisition import aq_inner\n+from PIL import Image\n+from PIL import UnidentifiedImageError\n from plone.app.layout.navigation.interfaces import INavigationRoot\n from plone.app.users.browser.interfaces import IAccountPanelForm\n from plone.app.users.browser.schemaeditor import getFromBaseSchema\n@@ -44,6 +46,11 @@\n     ),\n )\n \n+MESSAGE_IMAGE_NOT_SUPPORTED = _(\n+    "message_image_not_supported",\n+    "The file you selected is not supported by Pillow. " "Please choose another.",\n+)\n+\n \n def getSchema(schema_interface, schema_adapter, form_name=None):\n     request = getRequest()\n@@ -259,6 +266,23 @@ def validate_email(self, action, data):\n                 if err_str:\n                     notifyWidgetActionExecutionError(action, "email", err_str)\n \n+    def validate_portrait(self, action, data):\n+        """Portrait validation.\n+        Checks if image is supported by Pillow.\n+        SVG files are not yet supported.\n+        """\n+        error_keys = [error.field.getName() for error in action.form.widgets.errors]\n+        if "portrait" not in error_keys and data["portrait"] is not None:\n+            portrait = data["portrait"].open()\n+            try:\n+                Image.open(portrait)\n+            except UnidentifiedImageError:\n+                notifyWidgetActionExecutionError(\n+                    action, "portrait", MESSAGE_IMAGE_NOT_SUPPORTED\n+                )\n+            except Exception as exc:\n+                raise exc\n+\n     @button.buttonAndHandler(_("Save"))\n     def handleSave(self, action):\n         CheckAuthenticator(self.request)\n@@ -269,6 +293,11 @@ def handleSave(self, action):\n         if "email" in data:\n             self.validate_email(action, data)\n \n+        # Validate portrait, upload image could be not supported\n+        # by PIL what raises an exception when scaling image.\n+        if "portrait" in data:\n+            self.validate_portrait(action, data)\n+\n         if action.form.widgets.errors:\n             self.status = self.formErrorsMessage\n             return\ndiff --git a/plone/app/users/tests/base.py b/plone/app/users/tests/base.py\nindex 52e4b160..60924f4d 100644\n--- a/plone/app/users/tests/base.py\n+++ b/plone/app/users/tests/base.py\n@@ -25,6 +25,7 @@\n from zope.component import getSiteManager\n from zope.component import getUtility\n \n+import transaction\n import unittest\n \n \n@@ -43,6 +44,7 @@ def setUp(self):\n \n         self.browser = Browser(self.layer["app"])\n         self.request = self.layer["request"]\n+        transaction.commit()\n \n     def tearDown(self):\n         login(self.portal, "admin")\ndiff --git a/plone/app/users/tests/test_portrait.py b/plone/app/users/tests/test_portrait.py\nnew file mode 100644\nindex 00000000..fb158fa7\n--- /dev/null\n+++ b/plone/app/users/tests/test_portrait.py\n@@ -0,0 +1,45 @@\n+from pkg_resources import resource_stream\n+from plone.app.testing import SITE_OWNER_NAME\n+from plone.app.testing import SITE_OWNER_PASSWORD\n+from plone.app.users.tests.base import BaseTestCase\n+\n+\n+class TestPortrait(BaseTestCase):\n+    def test_regression_supported_image_type_122(self):\n+        # https://github.com/plone/plone.app.users/issues/122\n+\n+        self.browser.open("http://nohost/plone/")\n+        self.browser.getLink("Log in").click()\n+        self.browser.getControl("Login Name").value = SITE_OWNER_NAME\n+        self.browser.getControl("Password").value = SITE_OWNER_PASSWORD\n+        self.browser.getControl("Log in").click()\n+        self.browser.open("http://nohost/plone/@@personal-information")\n+        self.browser.getControl(name="form.widgets.email").value = "test@test.com"\n+        portrait_file = resource_stream("plone.app.users.tests", "onepixel.jpg")\n+        self.browser.getControl(name="form.widgets.portrait").add_file(\n+            portrait_file, "image/jpg", "onepixel.# jpg"\n+        )\n+        self.browser.getControl("Save").click()\n+        self.assertIn("Changes saved.", self.browser.contents)\n+\n+    def test_not_supported_image_type_122(self):\n+        # https://github.com/plone/plone.app.users/issues/122\n+\n+        self.browser.open("http://nohost/plone/")\n+        self.browser.getLink("Log in").click()\n+        self.browser.getControl("Login Name").value = SITE_OWNER_NAME\n+        self.browser.getControl("Password").value = SITE_OWNER_PASSWORD\n+        self.browser.getControl("Log in").click()\n+        self.browser.open("http://nohost/plone/@@personal-information")\n+        self.browser.getControl(name="form.widgets.email").value = "test@test.com"\n+        portrait_file = resource_stream(\n+            "plone.app.users.tests", "transparent_square.svg"\n+        )\n+        self.browser.getControl(name="form.widgets.portrait").add_file(\n+            portrait_file, "image/svg+xml", "onepixel.# jpg"\n+        )\n+        self.browser.getControl("Save").click()\n+        self.assertIn(\n+            "The file you selected is not supported by Pillow. Please choose another.",\n+            self.browser.contents,\n+        )\ndiff --git a/plone/app/users/tests/transparent_square.svg b/plone/app/users/tests/transparent_square.svg\nnew file mode 100644\nindex 00000000..0b11a65e\n--- /dev/null\n+++ b/plone/app/users/tests/transparent_square.svg\n@@ -0,0 +1,3 @@\n+<?xml version="1.0" encoding="UTF-8" ?>\n+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="12" height="12">\n+</svg>\n\\ No newline at end of file\ndiff --git a/pyproject.toml b/pyproject.toml\nindex 125c535a..ff638bef 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -120,6 +120,7 @@ Zope = [\n ]\n python-dateutil = [\'dateutil\']\n ignore-packages = [\'Products.CMFPlone\']\n+Pillow = [\'PIL\']\n \n ##\n # Add extra configuration options in .meta.toml:\ndiff --git a/setup.py b/setup.py\nindex c774b37e..81bc08e7 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -59,6 +59,7 @@\n     extras_require=extras_require,\n     install_requires=[\n         "Acquisition",\n+        "Pillow",\n         "Products.GenericSetup",\n         "Products.PlonePAS >= 5.0.1",\n         "Products.statusmessages",\n'
+b'diff --git a/news/61.bugfix b/news/61.bugfix\nnew file mode 100644\nindex 0000000..7208586\n--- /dev/null\n+++ b/news/61.bugfix\n@@ -0,0 +1,2 @@\n+- Check if "dropdown" needed for menu items\n+  [szakitibi]\ndiff --git a/plone/app/contentmenu/contentmenu.pt b/plone/app/contentmenu/contentmenu.pt\nindex 32168d0..657ca53 100644\n--- a/plone/app/contentmenu/contentmenu.pt\n+++ b/plone/app/contentmenu/contentmenu.pt\n@@ -19,7 +19,7 @@\n            aria-expanded="${python:\'false\' if submenu else \'\'}"\n            href="#"\n            data-bs-offset="0,0"\n-           data-bs-toggle="dropdown"\n+           data-bs-toggle="${python: \'dropdown\' if submenu else \'\'}"\n            tal:define="\n              state_class menuItem/extra/class | nothing;\n              state_class python:\'label-%s\' % state_class if state_class else \'\';\n'
 
