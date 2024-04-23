@@ -1,9 +1,6 @@
 # Release notes for Plone 6.0-dev
 
-This is a "sub" release of 6.0.10 with a fix for a broken folder contents view in Classic UI.
-And after that sub release we pinned a newer version of mxdev that properly works in Python 3.12 virtual envs.
-
-* Last updated: Friday March 15, 2024
+* Last updated: Tuesday April 23, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -19,13 +16,19 @@ If you want to jump straight in, here are two important links:
 Major changes since 6.0.10.1:
 
 * `mxdev`: Fix for Python 3.12 virtual envs.
-* `plone.namedfile` and `plone.formwidget.namedfile`: Support for allowed media types.
-  Support to constrain files to specific media types with an "accept" attribute on file and image fields, just like the "accept" attribute of the HTML file input.
+* `plone.namedfile`, `plone.formwidget.namedfile` and `plone.app.z3cform`: Support for allowed media types.
+  Support to constrain files to specific media types with an "accept" attribute on file and image fields, just like the "accept" attribute of the HTML file input.  With this, allowed file types are checked already before uploading, while still also being checked on the server side.
+* `plone.app.z3cform`: Use `label_css_class` attribute from widget if available in checkbox_input and radio_input.
+* `plone.namedfile`: Improve contenttype detection logic for unregistered but common types.  Change `get_contenttype` to support common types which are or were not registered with IANA, like `image/webp` or `audio/midi`.
+* `plone.app.discussion`: Provide HCaptcha if `plone.formwidget.hcaptcha` is installed.
+* `plone.base`: Make the TinyMCE `help` and `accordion` plugins available as options.
+* `plone.base` and `plone.app.layout`: Add a field ``webstats_head_js`` to the Site controlpanel and render its contents in the head section using `IHtmlHeadLinks` viewlet manager.  Reason: some javascript needs to be loaded at the bottom of the page, and some in the head section.
+* `plone.recipe.zope2instance`: Add support for setting `max_value_length` in Sentry init.  When you use this option, you should use `sentry-sdk` 1.29.0 or higher.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.0](https://www.npmjs.com/package/@plone/volto/v/16.31.0).  See the [changelog](https://github.com/plone/volto/blob/16.31.0/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.4](https://www.npmjs.com/package/@plone/volto/v/16.31.4).  See the [changelog](https://github.com/plone/volto/blob/16.31.4/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -42,8 +45,6 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 This release supports Python 3.8, 3.9, 3.10, 3.11, and 3.12.
 
-Plone 6.0.10 is the first release that officially supports Python 3.12.
-
 Note that Plone 6.0 is tested on Python 3.8 and 3.11 on every change to core packages.  For the other Python versions we run the tests once a week.
 
 
@@ -53,8 +54,8 @@ In Plone core we use these versions to install Plone:
 
 ```
 pip==24.0
-setuptools==69.0.3
-wheel==0.42.0
+setuptools==69.5.1
+wheel==0.43.0
 zc.buildout==3.0.1
 ```
 
