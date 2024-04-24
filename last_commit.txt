@@ -1,40 +1,48 @@
-Repository: plone.app.contenttypes
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2024-03-05T11:19:01+01:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/c26b396ce0dee31c11abab244a7762d2b02865fa
+Date: 2024-04-23T17:29:07+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/91ffc650742f89a695ae6e3032c45673e1d5c49a
 
-Fix ILeadImageBehavior and IRichTextBehavior interfaces were the name change was forgotten.
+feat: extends sendmail wrapper
 
 Files changed:
-A news/681.bugfix
-M CHANGES.rst
-M docs/README.rst
-M plone/app/contenttypes/behaviors/viewlets.py
-M plone/app/contenttypes/indexers.py
+M Products/CMFPlone/patches/sendmail.py
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 5156f68e..2d016261 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -456,7 +456,7 @@ Bug fixes:\n New features:\n \n \n-- Support ILeadImage behavior when display collection album view.\n+- Support ILeadImageBehavior when display collection album view.\n   [rodfersou] (#524)\n - Add more log-messages during migration from AT to DX.\n   [pbauer] (#526)\n@@ -535,7 +535,7 @@ Bug fixes:\n \n Breaking changes:\n \n-- ILeadImage and IRichText behaviors now have proper "Marker"-Interfaces.\n+- ILeadImageBehavior and IRichTextBehavior behaviors now have proper "Marker"-Interfaces.\n   As this was only possible by renaming the schema adapter to *Behavior* to\n   not break with implementations inside the collective, the FTI-behavior-definition\n   has changed:\ndiff --git a/docs/README.rst b/docs/README.rst\nindex b3af8b62..84ad8b02 100644\n--- a/docs/README.rst\n+++ b/docs/README.rst\n@@ -79,7 +79,7 @@ You have several options:\n     <?xml version="1.0"?>\n     <object name="Folder" meta_type="Dexterity FTI">\n      <property name="behaviors" purge="False">\n-      <element value="plone.app.contenttypes.behaviors.leadimage.ILeadImage"/>\n+      <element value="plone.leadimage"/>\n      </property>\n     </object>\n \n@@ -91,7 +91,7 @@ You have several options:\n     <object name="Folder" meta_type="Dexterity FTI">\n      <property name="model_file">your.package.content:folder.xml</property>\n      <property name="behaviors" purge="False">\n-      <element value="plone.app.contenttypes.behaviors.leadimage.ILeadImage"/>\n+      <element value="plone.leadimage"/>\n      </property>\n     </object>\n \ndiff --git a/news/681.bugfix b/news/681.bugfix\nnew file mode 100644\nindex 00000000..31d52626\n--- /dev/null\n+++ b/news/681.bugfix\n@@ -0,0 +1,2 @@\n+Fix ILeadImageBehavior and IRichTextBehavior interfaces were the name change was forgotten.\n+[thet]\ndiff --git a/plone/app/contenttypes/behaviors/viewlets.py b/plone/app/contenttypes/behaviors/viewlets.py\nindex eb38dbb2..8fe6a8de 100644\n--- a/plone/app/contenttypes/behaviors/viewlets.py\n+++ b/plone/app/contenttypes/behaviors/viewlets.py\n@@ -1,4 +1,4 @@\n-from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImageBehavior\n from plone.app.layout.viewlets import ViewletBase\n \n \n@@ -6,5 +6,5 @@ class LeadImageViewlet(ViewletBase):\n     """A simple viewlet which renders leadimage"""\n \n     def update(self):\n-        self.context = ILeadImage(self.context)\n-        self.available = True if self.context.image else False\n+        behavior = ILeadImageBehavior(self.context)\n+        self.available = True if behavior.image else False\ndiff --git a/plone/app/contenttypes/indexers.py b/plone/app/contenttypes/indexers.py\nindex a4e49517..973dfe83 100644\n--- a/plone/app/contenttypes/indexers.py\n+++ b/plone/app/contenttypes/indexers.py\n@@ -1,6 +1,6 @@\n from Acquisition import aq_base\n from logging import getLogger\n-from plone.app.contenttypes.behaviors.richtext import IRichText\n+from plone.app.contenttypes.behaviors.richtext import IRichTextBehavior\n from plone.app.contenttypes.interfaces import ICollection\n from plone.app.contenttypes.interfaces import IDocument\n from plone.app.contenttypes.interfaces import IFile\n@@ -40,7 +40,7 @@ def _unicode_save_string_concat(*args):\n \n def SearchableText(obj):\n     text = ""\n-    richtext = IRichText(obj, None)\n+    richtext = IRichTextBehavior(obj, None)\n     if richtext:\n         textvalue = richtext.text\n         if IRichTextValue.providedBy(textvalue):\n'
+b'diff --git a/Products/CMFPlone/patches/sendmail.py b/Products/CMFPlone/patches/sendmail.py\nindex 126d45aaf0..01aa4d0377 100644\n--- a/Products/CMFPlone/patches/sendmail.py\n+++ b/Products/CMFPlone/patches/sendmail.py\n@@ -38,24 +38,16 @@ def applyPatches():\n         SMTPMailer.send = catchAllExceptions(SMTPMailer.send)\n \n \n-def new_init(\n-    self,\n-    hostname="localhost",\n-    port=25,\n-    username=None,\n-    password=None,\n-    no_tls=False,\n-    force_tls=False,\n-):\n-    registry = getUtility(IRegistry)\n-    mail_settings = registry.forInterface(IMailSchema, prefix="plone")\n-    self.hostname = mail_settings.smtp_host\n-    self.port = mail_settings.smtp_port\n-    self.username = mail_settings.smtp_userid\n-    self.password = mail_settings.smtp_pass\n-    self.force_tls = force_tls\n-    self.no_tls = no_tls\n-    self._smtp = _SMTPState()\n-\n-\n-SMTPMailer.__init__ = new_init\n+def mail_settings_wrapper(func):\n+    def wrapper(self, **kwargs):\n+        registry = getUtility(IRegistry)\n+        mail_settings = registry.forInterface(IMailSchema, prefix="plone")\n+        kwargs["hostname"] = mail_settings.smtp_host\n+        kwargs["port"] = mail_settings.smtp_port\n+        kwargs["username"] = mail_settings.smtp_userid\n+        kwargs["password"] = mail_settings.smtp_pass\n+        return func(self, **kwargs)\n+\n+    return wrapper\n+\n+SMTPMailer.__init__ = mail_settings_wrapper(SMTPMailer.__init__)\n'
 
-Repository: plone.app.contenttypes
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2024-04-24T01:01:43+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.contenttypes/commit/4d0a239ff4aa28bf104ac2234ee8d0b9ac5b934e
+Date: 2024-04-23T17:42:13+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/Products.CMFPlone/commit/8040c1d36a0b2fa87f6ab1e9872cec7d2efc3041
 
-Merge pull request #681 from plone/fix-behavior-interfaces
-
-Fix ILeadImageBehavior and IRichTextBehavior interfaces were the name change was forgotten.
+changelog
 
 Files changed:
-A news/681.bugfix
-M CHANGES.rst
-M docs/README.rst
-M plone/app/contenttypes/behaviors/viewlets.py
-M plone/app/contenttypes/indexers.py
+A news/3941.feature
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex bf7fc568c..b637b7362 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -473,7 +473,7 @@ Bug fixes:\n New features:\n \n \n-- Support ILeadImage behavior when display collection album view.\n+- Support ILeadImageBehavior when display collection album view.\n   [rodfersou] (#524)\n - Add more log-messages during migration from AT to DX.\n   [pbauer] (#526)\n@@ -552,7 +552,7 @@ Bug fixes:\n \n Breaking changes:\n \n-- ILeadImage and IRichText behaviors now have proper "Marker"-Interfaces.\n+- ILeadImageBehavior and IRichTextBehavior behaviors now have proper "Marker"-Interfaces.\n   As this was only possible by renaming the schema adapter to *Behavior* to\n   not break with implementations inside the collective, the FTI-behavior-definition\n   has changed:\ndiff --git a/docs/README.rst b/docs/README.rst\nindex b3af8b623..84ad8b02a 100644\n--- a/docs/README.rst\n+++ b/docs/README.rst\n@@ -79,7 +79,7 @@ You have several options:\n     <?xml version="1.0"?>\n     <object name="Folder" meta_type="Dexterity FTI">\n      <property name="behaviors" purge="False">\n-      <element value="plone.app.contenttypes.behaviors.leadimage.ILeadImage"/>\n+      <element value="plone.leadimage"/>\n      </property>\n     </object>\n \n@@ -91,7 +91,7 @@ You have several options:\n     <object name="Folder" meta_type="Dexterity FTI">\n      <property name="model_file">your.package.content:folder.xml</property>\n      <property name="behaviors" purge="False">\n-      <element value="plone.app.contenttypes.behaviors.leadimage.ILeadImage"/>\n+      <element value="plone.leadimage"/>\n      </property>\n     </object>\n \ndiff --git a/news/681.bugfix b/news/681.bugfix\nnew file mode 100644\nindex 000000000..31d526267\n--- /dev/null\n+++ b/news/681.bugfix\n@@ -0,0 +1,2 @@\n+Fix ILeadImageBehavior and IRichTextBehavior interfaces were the name change was forgotten.\n+[thet]\ndiff --git a/plone/app/contenttypes/behaviors/viewlets.py b/plone/app/contenttypes/behaviors/viewlets.py\nindex eb38dbb25..8fe6a8def 100644\n--- a/plone/app/contenttypes/behaviors/viewlets.py\n+++ b/plone/app/contenttypes/behaviors/viewlets.py\n@@ -1,4 +1,4 @@\n-from plone.app.contenttypes.behaviors.leadimage import ILeadImage\n+from plone.app.contenttypes.behaviors.leadimage import ILeadImageBehavior\n from plone.app.layout.viewlets import ViewletBase\n \n \n@@ -6,5 +6,5 @@ class LeadImageViewlet(ViewletBase):\n     """A simple viewlet which renders leadimage"""\n \n     def update(self):\n-        self.context = ILeadImage(self.context)\n-        self.available = True if self.context.image else False\n+        behavior = ILeadImageBehavior(self.context)\n+        self.available = True if behavior.image else False\ndiff --git a/plone/app/contenttypes/indexers.py b/plone/app/contenttypes/indexers.py\nindex a4e495178..973dfe83b 100644\n--- a/plone/app/contenttypes/indexers.py\n+++ b/plone/app/contenttypes/indexers.py\n@@ -1,6 +1,6 @@\n from Acquisition import aq_base\n from logging import getLogger\n-from plone.app.contenttypes.behaviors.richtext import IRichText\n+from plone.app.contenttypes.behaviors.richtext import IRichTextBehavior\n from plone.app.contenttypes.interfaces import ICollection\n from plone.app.contenttypes.interfaces import IDocument\n from plone.app.contenttypes.interfaces import IFile\n@@ -40,7 +40,7 @@ def _unicode_save_string_concat(*args):\n \n def SearchableText(obj):\n     text = ""\n-    richtext = IRichText(obj, None)\n+    richtext = IRichTextBehavior(obj, None)\n     if richtext:\n         textvalue = richtext.text\n         if IRichTextValue.providedBy(textvalue):\n'
+b'diff --git a/news/3941.feature b/news/3941.feature\nnew file mode 100644\nindex 0000000000..15a20d1cb9\n--- /dev/null\n+++ b/news/3941.feature\n@@ -0,0 +1,2 @@\n+Extends `SMTPMailer.__init__` patch to allow to use other arguments.\n+[mamico]\n'
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2024-04-24T07:27:47+02:00
+Author: Maurits van Rees (mauritsvanrees) <m.van.rees@zestsoftware.nl>
+Commit: https://github.com/plone/Products.CMFPlone/commit/a23d5db81e4b5a4b46c67993f0ebf32b371b6498
+
+Merge pull request #3941 from plone/extends_sendmail_wrapper
+
+feat: extends sendmail wrapper
+
+Files changed:
+A news/3941.feature
+M Products/CMFPlone/patches/sendmail.py
+
+b'diff --git a/Products/CMFPlone/patches/sendmail.py b/Products/CMFPlone/patches/sendmail.py\nindex 126d45aaf0..01aa4d0377 100644\n--- a/Products/CMFPlone/patches/sendmail.py\n+++ b/Products/CMFPlone/patches/sendmail.py\n@@ -38,24 +38,16 @@ def applyPatches():\n         SMTPMailer.send = catchAllExceptions(SMTPMailer.send)\n \n \n-def new_init(\n-    self,\n-    hostname="localhost",\n-    port=25,\n-    username=None,\n-    password=None,\n-    no_tls=False,\n-    force_tls=False,\n-):\n-    registry = getUtility(IRegistry)\n-    mail_settings = registry.forInterface(IMailSchema, prefix="plone")\n-    self.hostname = mail_settings.smtp_host\n-    self.port = mail_settings.smtp_port\n-    self.username = mail_settings.smtp_userid\n-    self.password = mail_settings.smtp_pass\n-    self.force_tls = force_tls\n-    self.no_tls = no_tls\n-    self._smtp = _SMTPState()\n-\n-\n-SMTPMailer.__init__ = new_init\n+def mail_settings_wrapper(func):\n+    def wrapper(self, **kwargs):\n+        registry = getUtility(IRegistry)\n+        mail_settings = registry.forInterface(IMailSchema, prefix="plone")\n+        kwargs["hostname"] = mail_settings.smtp_host\n+        kwargs["port"] = mail_settings.smtp_port\n+        kwargs["username"] = mail_settings.smtp_userid\n+        kwargs["password"] = mail_settings.smtp_pass\n+        return func(self, **kwargs)\n+\n+    return wrapper\n+\n+SMTPMailer.__init__ = mail_settings_wrapper(SMTPMailer.__init__)\ndiff --git a/news/3941.feature b/news/3941.feature\nnew file mode 100644\nindex 0000000000..15a20d1cb9\n--- /dev/null\n+++ b/news/3941.feature\n@@ -0,0 +1,2 @@\n+Extends `SMTPMailer.__init__` patch to allow to use other arguments.\n+[mamico]\n'
 
