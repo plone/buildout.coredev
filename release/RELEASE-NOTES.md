@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0-dev
 
-* Last updated: Tuesday April 23, 2024
+* Last updated: Thursday April 25, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -22,8 +22,13 @@ Major changes since 6.0.10.1:
 * `plone.namedfile`: Improve contenttype detection logic for unregistered but common types.  Change `get_contenttype` to support common types which are or were not registered with IANA, like `image/webp` or `audio/midi`.
 * `plone.app.discussion`: Provide HCaptcha if `plone.formwidget.hcaptcha` is installed.
 * `plone.base`: Make the TinyMCE `help` and `accordion` plugins available as options.
+  To really use this, you need an add-on, like [`collective.outputfilters.tinymceaccordion`](https://github.com/collective/collective.outputfilters.tinymceaccordion).  But at least the options are available now.
 * `plone.base` and `plone.app.layout`: Add a field ``webstats_head_js`` to the Site controlpanel and render its contents in the head section using `IHtmlHeadLinks` viewlet manager.  Reason: some javascript needs to be loaded at the bottom of the page, and some in the head section.
 * `plone.recipe.zope2instance`: Add support for setting `max_value_length` in Sentry init.  When you use this option, you should use `sentry-sdk` 1.29.0 or higher.
+* `plone.restapi`: Add available languages information and the site timezone to the `@site` endpoint.
+* `lxml`: Upgraded from version 4.9.4 to 5.2.1.  This could mean small differences in html.  See the [changelog](https://github.com/lxml/lxml/blob/lxml-5.2.1/CHANGES.txt).  If you get wrong results, maybe because Diazo theming rules are parsed differently, it should be fine to downgrade, but version 4 is not maintained anymore.
+* `Products.PortalTransforms`: Use `Cleaner` from new package `lxml_html_clean`.
+  This was factored out from `lxml` in version 5.2.0.  See https://lxml-html-clean.readthedocs.io/
 
 
 ## Volto frontend
