@@ -54,6 +54,11 @@ You can also try Volto 18.0.0-alpha.28.  Most likely, the first final release of
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.0 and 6.1.  Our documentation now refers to this frontend as 'Classic UI'.
 
 
+## Docker
+
+As we are still in the alpha stage, we are not yet creating `plone-backend` Docker images.
+
+
 ## Python compatibility
 
 This release supports Python 3.10, 3.11, and 3.12.
