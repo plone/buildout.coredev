@@ -1,15 +1,15 @@
-# Release notes for Plone 6.1-dev
+# Release notes for Plone 6.1.0a3
 
-* Last updated: Friday April 26, 2024
+* Released: Friday April 26, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
   Yes, we need to start on a 6.1 upgrade guide.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.0a3/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0a3/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt), plus optionally [`constraints-extra.txt`](https://dist.plone.org/release/6.1-dev/constraints-extra.txt) and [`constraints-ecosystem.txt`](https://dist.plone.org/release/6.1-dev/constraints-ecosystem.txt).  Note: in 6.0 we did not have these last two files.  This may still change.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0a3/constraints.txt](https://dist.plone.org/release/6.1.0a3/constraints.txt), plus optionally [`constraints-extra.txt`](https://dist.plone.org/release/6.1.0a3/constraints-extra.txt) and [`constraints-ecosystem.txt`](https://dist.plone.org/release/6.1.0a3/constraints-ecosystem.txt).  Note: in 6.0 we did not have these last two files.  This may still change.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0a3/versions.cfg](https://dist.plone.org/release/6.1.0a3/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0a3/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0a3/versions-ecosystem.cfg).
 
 
 ## Highlights
