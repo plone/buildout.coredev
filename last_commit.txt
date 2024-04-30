@@ -1,21 +1,19 @@
-Repository: plone.restapi
+Repository: plone.app.theming
 
 
-Branch: refs/heads/main
-Date: 2024-04-29T21:27:10-07:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.restapi/commit/f2e365394f19d2841cf0417bc69b89b18cdcacb9
+Branch: refs/heads/master
+Date: 2024-04-30T16:27:50+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.app.theming/commit/fc246c022ba23fa8cc77840d6e26f531e05ed998
 
-Fix event dates in docs (#1776)
+When calling the html serializer pass an encoding
 
-* Fix event dates in docs
-
-* changelog
+Fixes #238
 
 Files changed:
-A news/1776.documentation
-M src/plone/restapi/tests/http-examples/event.resp
-M src/plone/restapi/tests/test_documentation.py
+A news/238.bugfix
+M src/plone/app/theming/tests/test_transform.py
+M src/plone/app/theming/transform.py
 
-b'diff --git a/news/1776.documentation b/news/1776.documentation\nnew file mode 100644\nindex 000000000..a1e34cf4a\n--- /dev/null\n+++ b/news/1776.documentation\n@@ -0,0 +1 @@\n+Fix event start & end timezone in documentation examples. @davisagli\ndiff --git a/src/plone/restapi/tests/http-examples/event.resp b/src/plone/restapi/tests/http-examples/event.resp\nindex a8538c9fc..2591e6180 100644\n--- a/src/plone/restapi/tests/http-examples/event.resp\n+++ b/src/plone/restapi/tests/http-examples/event.resp\n@@ -44,7 +44,7 @@ Content-Type: application/json\n     ],\n     "description": "This is an event",\n     "effective": null,\n-    "end": "2013-01-01T12:00:00",\n+    "end": "2013-01-01T12:00:00+00:00",\n     "event_url": null,\n     "exclude_from_nav": false,\n     "expires": null,\n@@ -78,7 +78,7 @@ Content-Type: application/json\n     "relatedItems": [],\n     "review_state": "private",\n     "rights": "",\n-    "start": "2013-01-01T10:00:00",\n+    "start": "2013-01-01T10:00:00+00:00",\n     "subjects": [],\n     "sync_uid": null,\n     "text": null,\ndiff --git a/src/plone/restapi/tests/test_documentation.py b/src/plone/restapi/tests/test_documentation.py\nindex e10c2e97c..9c0fc9d34 100644\n--- a/src/plone/restapi/tests/test_documentation.py\n+++ b/src/plone/restapi/tests/test_documentation.py\n@@ -1,5 +1,6 @@\n from base64 import b64encode\n from datetime import datetime\n+from datetime import timezone\n from pkg_resources import resource_filename\n from plone import api\n from plone.app.discussion.interfaces import ICommentAddedEvent\n@@ -319,8 +320,8 @@ def test_documentation_event(self):\n         self.portal.invokeFactory("Event", id="event")\n         self.portal.event.title = "Event"\n         self.portal.event.description = "This is an event"\n-        self.portal.event.start = datetime(2013, 1, 1, 10, 0)\n-        self.portal.event.end = datetime(2013, 1, 1, 12, 0)\n+        self.portal.event.start = datetime(2013, 1, 1, 10, 0, tzinfo=timezone.utc)\n+        self.portal.event.end = datetime(2013, 1, 1, 12, 0, tzinfo=timezone.utc)\n         transaction.commit()\n         response = self.api_session.get(self.portal.event.absolute_url())\n         save_request_and_response_for_docs("event", response)\n'
+b'diff --git a/news/238.bugfix b/news/238.bugfix\nnew file mode 100644\nindex 00000000..c90b2a4b\n--- /dev/null\n+++ b/news/238.bugfix\n@@ -0,0 +1 @@\n+Fix an issue with unicode characters happening with lxml 5 [ale-rt]\ndiff --git a/src/plone/app/theming/tests/test_transform.py b/src/plone/app/theming/tests/test_transform.py\nindex ddb57c9d..faafa34c 100644\n--- a/src/plone/app/theming/tests/test_transform.py\n+++ b/src/plone/app/theming/tests/test_transform.py\n@@ -1,11 +1,13 @@\n from App.config import getConfiguration\n from diazo.compiler import compile_theme\n+from html import unescape\n from lxml import etree\n from os import environ\n from plone.app.testing import setRoles\n from plone.app.testing import TEST_USER_ID\n from plone.app.theming.interfaces import IThemeSettings\n from plone.app.theming.testing import THEMING_FUNCTIONAL_TESTING\n+from plone.app.theming.testing import THEMING_INTEGRATION_TESTING\n from plone.app.theming.transform import ThemeTransform\n from plone.app.theming.utils import applyTheme\n from plone.app.theming.utils import getTheme\n@@ -25,7 +27,30 @@\n import unittest\n \n \n-class TestCase(unittest.TestCase):\n+class IntegrationTestCase(unittest.TestCase):\n+\n+    layer = THEMING_INTEGRATION_TESTING\n+\n+    def test_transform_parseTree_with_unicode(self):\n+        request = self.layer["request"]\n+        request.response.setHeader("Content-Type", "text/html; charset=utf-8")\n+        transform = ThemeTransform(None, request)\n+        snippet = "\\n".join(\n+            (\n+                "<!DOCTYPE html>",\n+                "<html>",\n+                "<body>",\n+                "<div>\xc3\xa0</div>",\n+                "</body>",\n+                "</html>",\n+            )\n+        )\n+        parsed = transform.parseTree([snippet.encode()])\n+        serialized = unescape(parsed.serialize().decode())\n+        self.assertEqual(snippet, serialized)\n+\n+\n+class FunctionalTestCase(unittest.TestCase):\n     layer = THEMING_FUNCTIONAL_TESTING\n \n     def setUp(self):\ndiff --git a/src/plone/app/theming/transform.py b/src/plone/app/theming/transform.py\nindex eb388d5c..3f74c015 100644\n--- a/src/plone/app/theming/transform.py\n+++ b/src/plone/app/theming/transform.py\n@@ -13,6 +13,7 @@\n from zope.component import adapter\n from zope.interface import implementer\n from zope.interface import Interface\n+from ZPublisher.HTTPRequest import default_encoding\n \n import logging\n \n@@ -120,7 +121,9 @@ def parseTree(self, result):\n             return None\n \n         try:\n-            return getHTMLSerializer(result, pretty_print=False)\n+            return getHTMLSerializer(\n+                result, pretty_print=False, encoding=default_encoding\n+            )\n         except (AttributeError, TypeError, etree.ParseError):\n             return None\n \n'
 
