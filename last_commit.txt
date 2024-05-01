@@ -1,35 +1,37 @@
-Repository: plone.restapi
+Repository: plone.app.robotframework
 
 
-Branch: refs/heads/main
-Date: 2024-04-30T13:02:49-03:00
-Author: Wesley Barroso Lopes (wesleybl) <wesleybl@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/5e989dd839c5e6f4db5ebb0a619f8d539a40dde5
+Branch: refs/heads/master
+Date: 2024-04-30T18:41:21-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.robotframework/commit/2802561e88fc4adfde3f3949b34d183b9d256722
 
-Returns an error message when an Invalid occurs when validating a controlpanel field (#1771)
+Makes ``Wait For Then Click Element`` keyword more robust
 
-* Returns an error message when an Invalid occurs when validating a
-controlpanel field
-
-* Translates controlpanel validation error message
-
-* Does not return the "error" key as an object in controlpanel
-
-When deserializing the controlpanel, do not return the "error" key as an
-object, but rather as a string "ValidationError". On the front end, we
-are unable to convert an object to json. So we need to return a string.
-This is the same way content deserialization does.
-
-* Improves error handling
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Wait for the element to become visible and enabled before trying to
+focus on it
 
 Files changed:
-A news/1771.bugfix
-M src/plone/restapi/deserializer/controlpanels/__init__.py
-M src/plone/restapi/tests/test_services_controlpanels.py
+A news/157.bugfix
+M src/plone/app/robotframework/selenium.robot
 
-b'diff --git a/news/1771.bugfix b/news/1771.bugfix\nnew file mode 100644\nindex 0000000000..55046bdae0\n--- /dev/null\n+++ b/news/1771.bugfix\n@@ -0,0 +1 @@\n+Returns an error message when an Invalid error occurs when validating a controlpanel field. Also translates the message. @wesleybl\ndiff --git a/src/plone/restapi/deserializer/controlpanels/__init__.py b/src/plone/restapi/deserializer/controlpanels/__init__.py\nindex 53b9a2a07c..f27b8fd4b8 100644\n--- a/src/plone/restapi/deserializer/controlpanels/__init__.py\n+++ b/src/plone/restapi/deserializer/controlpanels/__init__.py\n@@ -9,7 +9,9 @@\n from zope.component import adapter\n from zope.component import getUtility\n from zope.component import queryMultiAdapter\n+from zope.i18n import translate\n from zope.interface import implementer\n+from zope.interface.exceptions import Invalid\n from zope.schema import getFields\n from zope.schema.interfaces import ValidationError\n \n@@ -32,7 +34,7 @@ def __init__(self, controlpanel):\n         self.context = self.controlpanel.context\n         self.request = self.controlpanel.request\n \n-    def __call__(self):\n+    def __call__(self, mask_validation_errors=True):\n         data = json_body(self.controlpanel.request)\n \n         proxy = self.registry.forInterface(self.schema, prefix=self.schema_prefix)\n@@ -61,10 +63,10 @@ def __call__(self):\n                     field.validate(value)\n                     # Set the value.\n                     setattr(proxy, name, value)\n-                except ValueError as e:\n-                    errors.append({"message": str(e), "field": name, "error": e})\n                 except ValidationError as e:\n                     errors.append({"message": e.doc(), "field": name, "error": e})\n+                except (ValueError, Invalid) as e:\n+                    errors.append({"message": str(e), "field": name, "error": e})\n                 else:\n                     field_data[name] = value\n \n@@ -77,4 +79,10 @@ def __call__(self):\n                 errors.append({"error": error, "message": str(error)})\n \n         if errors:\n+            for error in errors:\n+                if mask_validation_errors:\n+                    # Drop Python specific error classes in order to be able to better handle\n+                    # errors on front-end\n+                    error["error"] = "ValidationError"\n+                error["message"] = translate(error["message"], context=self.request)\n             raise BadRequest(errors)\ndiff --git a/src/plone/restapi/tests/test_services_controlpanels.py b/src/plone/restapi/tests/test_services_controlpanels.py\nindex f23affcca5..54a63b13a1 100644\n--- a/src/plone/restapi/tests/test_services_controlpanels.py\n+++ b/src/plone/restapi/tests/test_services_controlpanels.py\n@@ -115,6 +115,22 @@ def test_update_required(self):\n         self.assertIn("message", response)\n         self.assertIn("Required input is missing.", response["message"])\n \n+    def test_update_validation(self):\n+        response = self.api_session.patch(\n+            "/@controlpanels/socialmedia", json={"twitter_username": "@test"}\n+        )\n+        response = response.json()\n+        self.assertIn(\n+            \'Twitter username should not include the "@" prefix character.\',\n+            response["message"],\n+        )\n+\n+    def test_update_validation_status(self):\n+        response = self.api_session.patch(\n+            "/@controlpanels/socialmedia", json={"twitter_username": "@test"}\n+        )\n+        self.assertEqual(response.status_code, 400)\n+\n     def test_get_usergroup_control_panel(self):\n         # This control panel does not exist in Plone 5\n         response = self.api_session.get("/@controlpanels/usergroup")\n'
+b'diff --git a/news/157.bugfix b/news/157.bugfix\nnew file mode 100644\nindex 0000000..02e2de7\n--- /dev/null\n+++ b/news/157.bugfix\n@@ -0,0 +1 @@\n+Makes ``Wait For Then Click Element`` keyword more robust. @wesleybl\ndiff --git a/src/plone/app/robotframework/selenium.robot b/src/plone/app/robotframework/selenium.robot\nindex 6c3d2b1..154b224 100644\n--- a/src/plone/app/robotframework/selenium.robot\n+++ b/src/plone/app/robotframework/selenium.robot\n@@ -101,8 +101,9 @@ Wait For Element\n     ...              Element must match exactly one time.\n     [Arguments]  ${element}\n     Wait Until Page Contains Element  ${element}\n-    Set Focus To Element  ${element}\n     Wait Until Element Is Visible  ${element}\n+    Wait Until Element Is Enabled  ${element}\n+    Set Focus To Element  ${element}\n     Sleep  0.1\n     ${count} =  Get Element Count  ${element}\n     Should Be Equal as Numbers  ${count}  1\n@@ -112,8 +113,9 @@ Wait For Elements\n     ...              Element may match more than once.\n     [Arguments]  ${element}\n     Wait Until Page Contains Element  ${element}\n-    Set Focus To Element  ${element}\n     Wait Until Element Is Visible  ${element}\n+    Wait Until Element Is Enabled  ${element}\n+    Set Focus To Element  ${element}\n \n Wait For Then Click Element\n     [Documentation]  Can contain css=, jquery=, or any other element selector.\n'
+
+Repository: plone.app.robotframework
+
+
+Branch: refs/heads/master
+Date: 2024-05-01T11:08:45-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.robotframework/commit/15ac811ac4b94616806e196f03c0dcbeec14dba9
+
+Merge pull request #157 from plone/wait_for_element
+
+Makes ``Wait For Then Click Element`` keyword more robust
+
+Files changed:
+A news/157.bugfix
+M src/plone/app/robotframework/selenium.robot
+
+b'diff --git a/news/157.bugfix b/news/157.bugfix\nnew file mode 100644\nindex 0000000..02e2de7\n--- /dev/null\n+++ b/news/157.bugfix\n@@ -0,0 +1 @@\n+Makes ``Wait For Then Click Element`` keyword more robust. @wesleybl\ndiff --git a/src/plone/app/robotframework/selenium.robot b/src/plone/app/robotframework/selenium.robot\nindex 6c3d2b1..154b224 100644\n--- a/src/plone/app/robotframework/selenium.robot\n+++ b/src/plone/app/robotframework/selenium.robot\n@@ -101,8 +101,9 @@ Wait For Element\n     ...              Element must match exactly one time.\n     [Arguments]  ${element}\n     Wait Until Page Contains Element  ${element}\n-    Set Focus To Element  ${element}\n     Wait Until Element Is Visible  ${element}\n+    Wait Until Element Is Enabled  ${element}\n+    Set Focus To Element  ${element}\n     Sleep  0.1\n     ${count} =  Get Element Count  ${element}\n     Should Be Equal as Numbers  ${count}  1\n@@ -112,8 +113,9 @@ Wait For Elements\n     ...              Element may match more than once.\n     [Arguments]  ${element}\n     Wait Until Page Contains Element  ${element}\n-    Set Focus To Element  ${element}\n     Wait Until Element Is Visible  ${element}\n+    Wait Until Element Is Enabled  ${element}\n+    Set Focus To Element  ${element}\n \n Wait For Then Click Element\n     [Documentation]  Can contain css=, jquery=, or any other element selector.\n'
 
