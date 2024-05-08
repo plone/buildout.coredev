@@ -1,17 +1,24 @@
-# Release notes for Plone 6.0.11
+# Release notes for Plone 6.0.11.1
 
-* Last updated: Thursday April 25, 2024
+This is a "sub" release of 6.0.11 with a fix for wrong character encoding in some parts.
+For example in the folder contents view instead of "Add new..." you might see "Add newâ¦".
+
+* Released: Wednesday May 8, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.11/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.11/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.11.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.11.1/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.11/constraints.txt](https://dist.plone.org/release/6.0.11/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.11/versions.cfg](https://dist.plone.org/release/6.0.11/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.11/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.11/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.11.1/constraints.txt](https://dist.plone.org/release/6.0.11.1/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.11.1/versions.cfg](https://dist.plone.org/release/6.0.11.1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.11.1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.11.1/versions-ecosystem.cfg).
 
 
 ## Highlights
+
+Major changes since 6.0.11:
+
+* `plone.app.theming`: When calling the html serializer pass an encoding.  This is needed because we updated from `lxml` 4 to 5.
 
 Major changes since 6.0.10.1:
 
