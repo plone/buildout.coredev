@@ -40,3 +40,18 @@ test: ## Run tests
 test-acceptance: ## Run acceptance tests
 	@echo "$(GREEN)==> Run Acceptance Tests$(RESET)"
 	export ROBOTSUITE_PREFIX=ONLYROBOT && bin/alltests -t ONLYROBOT --all --xml
+
+.PHONY: pip-bootstrap
+pip-bootstrap:  ## Pip: Bootstrap a venv for tests (future: several venvs with less installed)
+	mkdir -p venvs
+	python3 -m venv venvs/test
+	./venvs/test/bin/pip install --upgrade -r requirements-bootstrap.txt
+
+.PHONY: pip-update
+pip-update:  ## Pip: Update a venv for tests (future: several venvs with less installed)
+    # uv seems to act on the current directory.
+	cd venvs/test && bin/uv pip install -r ../../requirements-test.txt
+
+.PHONY: pip-test
+pip-test:  ## Pip: Run only a few unit tests, as proof of concept.
+	./venvs/test/bin/zope-testrunner --path venvs/test/lib/*/site-packages/ -u -s Products.CMFPlone
