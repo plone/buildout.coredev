@@ -62,4 +62,4 @@ pip-update:  ## Pip: Update a venv for tests (future: several venvs with less in
 
 .PHONY: pip-test
 pip-test:  ## Pip: Run only a few unit tests, as proof of concept.
-	./venvs/test/bin/zope-testrunner --path venvs/test/lib/*/site-packages/ -u -s Products.CMFPlone
+	./venvs/test/bin/zope-testrunner --path venvs/test/lib/*/site-packages/ --path src/Products.CMFPlone -u -s Products.CMFPlone
