@@ -58,7 +58,7 @@ mxdev-update:  ## mxdev: update requirements and constraints files and pull the 
 .PHONY: pip-update
 pip-update:  ## Pip: Update a venv for tests (future: several venvs with less installed)
     # uv seems to act on the current directory.
-	cd venvs/test && bin/uv pip install -r ../../requirements-test.txt
+	cd venvs/test && bin/uv pip install --prerelease allow -r ../../requirements-mxdev.txt
 
 .PHONY: pip-test
 pip-test:  ## Pip: Run only a few unit tests, as proof of concept.
