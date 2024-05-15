@@ -47,6 +47,14 @@ pip-bootstrap:  ## Pip: Bootstrap a venv for tests (future: several venvs with l
 	python3 -m venv venvs/test
 	./venvs/test/bin/pip install --upgrade -r requirements-bootstrap.txt
 
+.PHONY: mxdev-generate
+mxdev-generate:  ## mxdev: generate requirements and constraints files without pulling sources
+	./venvs/test/bin/mxdev -c mxdev.ini -n
+
+.PHONY: mxdev-update
+mxdev-update:  ## mxdev: update requirements and constraints files and pull the sources
+	./venvs/test/bin/mxdev -c mxdev.ini
+
 .PHONY: pip-update
 pip-update:  ## Pip: Update a venv for tests (future: several venvs with less installed)
     # uv seems to act on the current directory.
