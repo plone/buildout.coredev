@@ -20,9 +20,11 @@ FORMAT_TARGETS+=plonereleaser-format
 DIRTY_TARGETS+=plonereleaser-dirty
 CLEAN_TARGETS+=plonereleaser-clean
 
+# buildout_files
+BUILDOUT_FILES:=checkouts.cfg versions.cfg sources.cfg
 # versions2constraints
 VERSIONS2CONSTRAINTS_TARGET:=constraints.txt
-$(VERSIONS2CONSTRAINTS_TARGET): $(PLONERELEASER_TARGET)
+$(VERSIONS2CONSTRAINTS_TARGET): $(PLONERELEASER_TARGET) $(BUILDOUT_FILES)
 	@echo "Generate constraints.txt from buildout"
 	@manage versions2constraints
 
@@ -30,7 +32,7 @@ $(VERSIONS2CONSTRAINTS_TARGET): $(PLONERELEASER_TARGET)
 
 # buildout2pip
 BUILDOUT2PIP_TARGET:=mxsources.txt mxcheckouts.txt
-$(BUILDOUT2PIP_TARGET): $(PLONERELEASER_TARGET)
+$(BUILDOUT2PIP_TARGET): $(PLONERELEASER_TARGET) $(BUILDOUT_FILES)
 	@echo "Generate mx sources and checkouts from buildout"
 	@manage buildout2pip
 
