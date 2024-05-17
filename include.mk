@@ -20,24 +20,24 @@ FORMAT_TARGETS+=plonereleaser-format
 DIRTY_TARGETS+=plonereleaser-dirty
 CLEAN_TARGETS+=plonereleaser-clean
 
-# buildout_files
-BUILDOUT_FILES:=checkouts.cfg versions.cfg sources.cfg
 # versions2constraints
 VERSIONS2CONSTRAINTS_TARGET:=constraints.txt
-$(VERSIONS2CONSTRAINTS_TARGET): $(PLONERELEASER_TARGET) $(BUILDOUT_FILES)
+$(VERSIONS2CONSTRAINTS_TARGET): $(PLONERELEASER_TARGET) versions.cfg
 	@echo "Generate constraints.txt from buildout"
 	@manage versions2constraints
 
 
-
 # buildout2pip
 BUILDOUT2PIP_TARGET:=mxsources.txt mxcheckouts.txt
-$(BUILDOUT2PIP_TARGET): $(PLONERELEASER_TARGET) $(BUILDOUT_FILES)
+$(BUILDOUT2PIP_TARGET): $(PLONERELEASER_TARGET) checkouts.cfg sources.cfg
 	@echo "Generate mx sources and checkouts from buildout"
 	@manage buildout2pip
 
 
 # configure to run pre sources
-PRE_SOURCES_TARGETS+= $(BUILDOUT2PIP_TARGET)
+PRE_SOURCES_TARGETS+=$(BUILDOUT2PIP_TARGET) $(VERSIONS2CONSTRAINTS_TARGET)
 
+.PHONY: run-presources
+run-presources: $(PRE_SOURCES_TARGETS)
+	@echo "Manual run pre sources targets"
 

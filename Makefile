@@ -84,7 +84,7 @@ VENV_FOLDER?=.venv
 
 # mxdev to install in virtual environment.
 # Default: mxdev
-MXDEV?=-e ../mxdev
+MXDEV?=mxdev
 
 # mxmake to install in virtual environment.
 # Default: mxmake
@@ -133,6 +133,7 @@ INSTALL_TARGETS?=
 DIRTY_TARGETS?=
 CLEAN_TARGETS?=
 PURGE_TARGETS?=
+PRE_SOURCES_TARGETS?=
 
 export PATH:=$(if $(EXTRA_PATH),$(EXTRA_PATH):,)$(PATH)
 
