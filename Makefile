@@ -242,7 +242,7 @@ CLEAN_TARGETS+=mxenv-clean
 SOURCES_TARGET:=$(SENTINEL_FOLDER)/sources.sentinel
 
 # pre sources targets to be used in includes
-PRE_SOURCES_TARGETS?=
+#PRE_SOURCES_TARGETS?=
 $(SOURCES_TARGET): $(PROJECT_CONFIG) $(MXENV_TARGET) $(PRE_SOURCES_TARGETS)
 	@echo "Checkout project sources"
 	@mxdev -o -c $(PROJECT_CONFIG)
