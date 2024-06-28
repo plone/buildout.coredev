@@ -1,9 +1,8 @@
 # Release notes for Plone 6.1-dev
 
-* Last updated: Wednesday May 8, 2024
+* Last updated: Wednesday June 29, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
-* Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-  Yes, we need to start on a 6.1 upgrade guide.
+* Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
 
 If you want to jump straight in, here are two important links:
@@ -17,6 +16,16 @@ If you want to jump straight in, here are two important links:
 Major changes since 6.1.0a3:
 
 * `plone.app.theming`: When calling the html serializer pass an encoding.  This is needed because we updated from `lxml` 4 to 5.
+* `plone.app.iterate`: Remove old GenericSetup profile with id `plone.app.iterate`.  See [](https://github.com/plone/plone.app.iterate/issues/99#issuecomment-1484686642).
+* Various package: remove `portal_properties` code.  This tool is scheduled for full removal in Plone 6.1.  If you use this tool in an add-on, you should move to storing settings in the `portal_registry` instead.
+* `plone.base`:
+  * Mockup TinyMCE settings: Remove deprecated AtD (After the Deadline spell checker) plugin settings and related views and interfaces.
+  * Remove `ISearchSchemas` `types_not_searched` "Discussion Item" value to make `plone.app.discussion` a core addon.
+    It is actually not needed anyway, also not part of the underlying vocabulary and would be lost on first save in control-panel.
+* `plone.api`: Report if a permission does not exist when calling `api.user.has_permission`.
+* `plone.restapi`:
+  * Add cache rules for `@site` and `@navroot`.
+  * Added `TeaserBlockSerializer` which updates the contents of a teaser block from its target if the block has `"overwrite": false`.
 
 
 ## Volto frontend
@@ -24,8 +33,8 @@ Major changes since 6.1.0a3:
 The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
-Latest release is [17.15.5](https://www.npmjs.com/package/@plone/volto/v/17.15.5).  See the [changelog](https://github.com/plone/volto/blob/17.15.5/CHANGELOG.md).
-You can also try Volto 18.0.0-alpha.28.  Most likely, the first final release of Plone 6.1 will use Volto 18.
+Latest release is [17.18.0](https://www.npmjs.com/package/@plone/volto/v/17.18.0).  See the [changelog](https://github.com/plone/volto/blob/17.18.0/CHANGELOG.md).
+You can also try Volto 18.0.0-alpha.39.  Most likely, the first final release of Plone 6.1 will use Volto 18.
 
 
 ## Classic UI
