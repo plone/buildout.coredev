@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1-dev
 
-* Last updated: Wednesday June 29, 2024
+* Last updated: Monday July 8, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -15,6 +15,13 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.1.0a3:
 
+* `Products.CMFPlone`:
+  * Made internal 6.1.0a4.dev0 release, only available on [https://dist.plone.org/release/6.1-dev](https://dist.plone.org/release/6.1-dev), so you will need this in your Buildout or pip find-links.  This is needed to unblock test setup in core packages.
+  * Mockup TinyMCE settings: Remove deprecated AtD plugin settings.
+  * Use details element for collapsibles in the resource registry.  Makes it possible to toggle elements even with broken or missing javascript.
+  * Remove queryCatalog and getFolderContents skins script.
+  * Plone upgrade page: show error when upgrade is needed but no upgrades are available.  Especially show a note when the `plone.app.upgrade` package is not available.
+ * Plone upgrade page: show list of previously installed packages that are currently missing.  For example: `plone.app.discussion` may be missing in Plone 6.1, unless you explicitly add it, or depend on the `Plone` package.
 * `plone.app.theming`: When calling the html serializer pass an encoding.  This is needed because we updated from `lxml` 4 to 5.
 * `plone.app.iterate`: Remove old GenericSetup profile with id `plone.app.iterate`.  See [](https://github.com/plone/plone.app.iterate/issues/99#issuecomment-1484686642).
 * Various package: remove `portal_properties` code.  This tool is scheduled for full removal in Plone 6.1.  If you use this tool in an add-on, you should move to storing settings in the `portal_registry` instead.
