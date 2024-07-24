@@ -1,142 +1,95 @@
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-17T16:39:44+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/1da1ca939a2f23b299b74fff91e0477aaeb5f961
+Date: 2024-07-18T12:09:43+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.event/commit/8e5ab78a30da39d81048d6b59b737125837b7d22
 
-Implemented pyICU for sorting of ReallyUserFriendlyTypes
+add tests
 
 Files changed:
-A news/3985.chore
-M plone/app/vocabularies/types.py
+M plone/app/event/tests/test_portlet_calendar.py
 
-b'diff --git a/news/3985.chore b/news/3985.chore\nnew file mode 100644\nindex 0000000..fda49c1\n--- /dev/null\n+++ b/news/3985.chore\n@@ -0,0 +1,2 @@\n+Implemented pyICU for sorting of ReallyUserFriendlyTypes\n+[rohnsha0]\n\\ No newline at end of file\ndiff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py\nindex 73f2d8e..cac9cea 100644\n--- a/plone/app/vocabularies/types.py\n+++ b/plone/app/vocabularies/types.py\n@@ -8,6 +8,8 @@\n from zope.schema.interfaces import IVocabularyFactory\n from zope.schema.vocabulary import SimpleTerm\n from zope.schema.vocabulary import SimpleVocabulary\n+from icu import Collator, Locale\n+\n \n \n def getAllowedContentTypes(context):\n@@ -290,15 +292,25 @@ def __call__(self, context):\n         site = getSite()\n         ttool = getToolByName(site, "portal_types", None)\n         if ttool is None:\n-            return SimpleVocabulary([])\n+            return PermissiveVocabulary([])\n \n         request = aq_get(ttool, "REQUEST", None)\n+        \n+        # Get the current language from the request\n+        language = request.get(\'LANGUAGE\', \'en\')\n+        \n+        # Create an ICU Collator for the current language\n+        collator = Collator.createInstance(Locale(language))\n+\n         items = [\n             (translate(ttool[t].Title(), context=request), t)\n             for t in ttool.listContentTypes()\n             if t not in BAD_TYPES\n         ]\n-        items.sort()\n+        \n+        # Sort items using the ICU Collator\n+        items.sort(key=lambda x: collator.getSortKey(x[0]))\n+        \n         items = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n         return PermissiveVocabulary(items)\n \n'
+b'diff --git a/plone/app/event/tests/test_portlet_calendar.py b/plone/app/event/tests/test_portlet_calendar.py\nindex 8b96a1d3..20a916e1 100644\n--- a/plone/app/event/tests/test_portlet_calendar.py\n+++ b/plone/app/event/tests/test_portlet_calendar.py\n@@ -269,3 +269,91 @@ def test_invalid_request(self):\n         r.update()\n         today = localized_today(self.portal)\n         self.assertEqual(r.year_month_display(), (today.year, today.month))\n+\n+    def test_with_collection_as_source(self):\n+        """When selecting a Collection as source, the events in that collection\n+        are used to build the calendar\n+        """\n+        tz = pytz.timezone(TZNAME)\n+        start = tz.localize(datetime.now())\n+        end = start + timedelta(hours=1)\n+\n+        e1 = createContentInContainer(\n+            self.portal, PTYPE, title="e1", start=start, end=end\n+        )\n+        self.portal.invokeFactory("Folder", "eventfolder")\n+        createContentInContainer(\n+            self.portal.eventfolder, PTYPE, title="e2", start=start, end=end\n+        )\n+        self.portal.portal_workflow.doActionFor(e1, "publish")\n+\n+        self.portal.invokeFactory(\n+            "Collection",\n+            "eventcollection",\n+            query=[\n+                {\n+                    "i": "portal_type",\n+                    "o": "plone.app.querystring.operation.selection.any",\n+                    "v": ["Event"],\n+                },\n+                {\n+                    "i": "end",\n+                    "o": "plone.app.querystring.operation.date.afterToday",\n+                    "v": "",\n+                },\n+            ],\n+        )\n+        self.portal\n+\n+        r = self.renderer(\n+            assignment=portlet_calendar.Assignment(\n+                state=("draft",), search_base_uid=self.portal.eventcollection.UID()\n+            )\n+        )\n+        r.update()\n+        rd = r.render()\n+        self.assertTrue("e1" not in rd and "e2" not in rd)\n+\n+        r = self.renderer(\n+            assignment=portlet_calendar.Assignment(\n+                state=("published",), search_base_uid=self.portal.eventcollection.UID()\n+            )\n+        )\n+        r.update()\n+        rd = r.render()\n+        self.assertTrue("e1" in rd and "e2" not in rd)\n+\n+        r = self.renderer(\n+            assignment=portlet_calendar.Assignment(\n+                state=(\n+                    "published",\n+                    "private",\n+                )\n+            )\n+        )\n+        r.update()\n+        rd = r.render()\n+        self.assertTrue("e1" in rd and "e2" in rd)\n+\n+        r = self.renderer(assignment=portlet_calendar.Assignment())\n+        r.update()\n+        rd = r.render()\n+        self.assertTrue("e1" in rd and "e2" in rd)\n+\n+        # No search base gives calendar urls with event_listing part\n+        self.assertTrue("event_listing?mode=day" in rd)\n+\n+        r = self.renderer(\n+            assignment=portlet_calendar.Assignment(\n+                search_base_uid=self.portal.eventfolder.UID()\n+            )\n+        )\n+        r.update()\n+        rd = r.render()\n+        self.assertTrue("e1" not in rd and "e2" in rd)\n+\n+        # A given search base gives calendar urls without event_listing part\n+        self.assertTrue("event_listing?mode=day" not in rd)\n+\n+        # link to calendar view in rendering\n+        self.assertTrue("?mode=day&amp;date=" in rd)\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-23T20:33:38+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/d3f4fce04e4e9c01c8b371f0d6cb160a87ec536f
+Date: 2024-07-22T11:46:20+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.event/commit/33a4edc7ddedb0934d4f32e73dbf654c7fea78af
 
-Sort ReallyUserFriendlyTypesVocabulary by translated title using unidecode
+test calendar portlet when configured item is a collection
 
 Files changed:
-M plone/app/vocabularies/types.py
+M plone/app/event/portlets/portlet_calendar.py
+M plone/app/event/tests/test_portlet_calendar.py
 
-b'diff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py\nindex cac9cea..81bf1f8 100644\n--- a/plone/app/vocabularies/types.py\n+++ b/plone/app/vocabularies/types.py\n@@ -8,8 +8,7 @@\n from zope.schema.interfaces import IVocabularyFactory\n from zope.schema.vocabulary import SimpleTerm\n from zope.schema.vocabulary import SimpleVocabulary\n-from icu import Collator, Locale\n-\n+from unidecode import unidecode\n \n \n def getAllowedContentTypes(context):\n@@ -292,27 +291,21 @@ def __call__(self, context):\n         site = getSite()\n         ttool = getToolByName(site, "portal_types", None)\n         if ttool is None:\n-            return PermissiveVocabulary([])\n+            return SimpleVocabulary([])\n \n         request = aq_get(ttool, "REQUEST", None)\n-        \n-        # Get the current language from the request\n-        language = request.get(\'LANGUAGE\', \'en\')\n-        \n-        # Create an ICU Collator for the current language\n-        collator = Collator.createInstance(Locale(language))\n-\n         items = [\n             (translate(ttool[t].Title(), context=request), t)\n             for t in ttool.listContentTypes()\n             if t not in BAD_TYPES\n         ]\n         \n-        # Sort items using the ICU Collator\n-        items.sort(key=lambda x: collator.getSortKey(x[0]))\n+        print(items)\n+        # Sort items based on the translated title using unidecode\n+        items.sort(key=lambda x: unidecode(x[0]).lower())\n         \n-        items = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n-        return PermissiveVocabulary(items)\n+        terms = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n+        return PermissiveVocabulary(terms)\n \n \n-ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()\n+ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()\n\\ No newline at end of file\n'
+b'diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py\nindex cfd4d21d..e9edf647 100644\n--- a/plone/app/event/portlets/portlet_calendar.py\n+++ b/plone/app/event/portlets/portlet_calendar.py\n@@ -26,8 +26,10 @@\n from zope.component.hooks import getSite\n from zope.i18nmessageid import MessageFactory\n from zope.interface import implementer\n+from DateTime import DateTime\n \n import calendar\n+import datetime\n import json\n \n \n@@ -211,14 +213,13 @@ def cal_data(self):\n                 sort_order=None,\n             )\n \n-            # restrict start/end with those from query, if given.\n-            if "start" in query and query["start"] > start:\n-                start = query["start"]\n-            if "end" in query and query["end"] < end:\n-                end = query["end"]\n-\n+            # When having a collection as context, we should use the configured query\n+            # except the start and the end, which should be\n+            # taken from the current calendar start and end\n             start, end = _prepare_range(self.search_base, start, end)\n-            query.update(start_end_query(start, end))\n+            query.update(\n+                start_end_query(DateTime(start.isoformat()), DateTime(end.isoformat()))\n+            )\n             events = self.search_base.results(\n                 batch=False, brains=True, custom_query=query\n             )\ndiff --git a/plone/app/event/tests/test_portlet_calendar.py b/plone/app/event/tests/test_portlet_calendar.py\nindex 20a916e1..176a92c2 100644\n--- a/plone/app/event/tests/test_portlet_calendar.py\n+++ b/plone/app/event/tests/test_portlet_calendar.py\n@@ -278,14 +278,64 @@ def test_with_collection_as_source(self):\n         start = tz.localize(datetime.now())\n         end = start + timedelta(hours=1)\n \n-        e1 = createContentInContainer(\n-            self.portal, PTYPE, title="e1", start=start, end=end\n+        createContentInContainer(self.portal, PTYPE, title="e1", start=start, end=end)\n+\n+        createContentInContainer(self.portal, PTYPE, title="e2", start=start, end=end)\n+\n+        # starts yesterday, ends yesterday\n+        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n+        end_yesterday = start + timedelta(hours=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e3",\n+            start=start_yesterday,\n+            end=end_yesterday,\n         )\n-        self.portal.invokeFactory("Folder", "eventfolder")\n+\n+        # starts today, ends tomorrow\n+        start_today = tz.localize(datetime.now())\n+        end_tomorrow = start + timedelta(days=1)\n+\n         createContentInContainer(\n-            self.portal.eventfolder, PTYPE, title="e2", start=start, end=end\n+            self.portal,\n+            PTYPE,\n+            title="e4",\n+            start=start_today,\n+            end=end_tomorrow,\n         )\n-        self.portal.portal_workflow.doActionFor(e1, "publish")\n+\n+        # starts yesterday, ends tomorrow\n+        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n+        end_tomorrow = tz.localize(datetime.now()) + timedelta(days=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e5",\n+            start=start_yesterday,\n+            end=end_tomorrow,\n+        )\n+\n+        # starts tomorrow, ends tomorrow + 1\n+        start_tomorrow = tz.localize(datetime.now() + timedelta(days=1))\n+        end_tomorrow_1 = start_tomorrow + timedelta(days=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e6",\n+            start=start_tomorrow,\n+            end=end_tomorrow_1,\n+        )\n+\n+        # self.wft.doActionFor(self.portal.e1, "publish")\n+        self.wft.doActionFor(self.portal.e2, "publish")\n+        self.wft.doActionFor(self.portal.e3, "publish")\n+        self.wft.doActionFor(self.portal.e4, "publish")\n+        self.wft.doActionFor(self.portal.e5, "publish")\n+        self.wft.doActionFor(self.portal.e6, "publish")\n \n         self.portal.invokeFactory(\n             "Collection",\n@@ -294,66 +344,34 @@ def test_with_collection_as_source(self):\n                 {\n                     "i": "portal_type",\n                     "o": "plone.app.querystring.operation.selection.any",\n-                    "v": ["Event"],\n+                    "v": [PTYPE],\n                 },\n                 {\n                     "i": "end",\n                     "o": "plone.app.querystring.operation.date.afterToday",\n                     "v": "",\n                 },\n+                {\n+                    "i": "review_state",\n+                    "o": "plone.app.querystring.operation.selection.any",\n+                    "v": ["published"],\n+                },\n             ],\n         )\n-        self.portal\n-\n-        r = self.renderer(\n-            assignment=portlet_calendar.Assignment(\n-                state=("draft",), search_base_uid=self.portal.eventcollection.UID()\n-            )\n-        )\n-        r.update()\n-        rd = r.render()\n-        self.assertTrue("e1" not in rd and "e2" not in rd)\n-\n-        r = self.renderer(\n-            assignment=portlet_calendar.Assignment(\n-                state=("published",), search_base_uid=self.portal.eventcollection.UID()\n-            )\n-        )\n-        r.update()\n-        rd = r.render()\n-        self.assertTrue("e1" in rd and "e2" not in rd)\n-\n-        r = self.renderer(\n-            assignment=portlet_calendar.Assignment(\n-                state=(\n-                    "published",\n-                    "private",\n-                )\n-            )\n-        )\n-        r.update()\n-        rd = r.render()\n-        self.assertTrue("e1" in rd and "e2" in rd)\n-\n-        r = self.renderer(assignment=portlet_calendar.Assignment())\n-        r.update()\n-        rd = r.render()\n-        self.assertTrue("e1" in rd and "e2" in rd)\n-\n-        # No search base gives calendar urls with event_listing part\n-        self.assertTrue("event_listing?mode=day" in rd)\n \n         r = self.renderer(\n+            # context=self.portal.eventcollection,\n             assignment=portlet_calendar.Assignment(\n-                search_base_uid=self.portal.eventfolder.UID()\n-            )\n+                state=("published",),\n+                search_base_uid=self.portal.eventcollection.UID(),\n+            ),\n         )\n         r.update()\n         rd = r.render()\n-        self.assertTrue("e1" not in rd and "e2" in rd)\n-\n-        # A given search base gives calendar urls without event_listing part\n-        self.assertTrue("event_listing?mode=day" not in rd)\n \n-        # link to calendar view in rendering\n-        self.assertTrue("?mode=day&amp;date=" in rd)\n+        self.assertTrue("e1" not in rd)\n+        self.assertTrue("e2" in rd)\n+        self.assertTrue("e3" in rd)\n+        self.assertTrue("e4" in rd)\n+        self.assertTrue("e5" in rd)\n+        self.assertTrue("e6" in rd)\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-23T20:51:39+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/d65f0f2b10bda3475e1c3aca82be970f1a793798
+Date: 2024-07-22T11:47:51+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.event/commit/fd8d96ad30729f8a22c85e1a1d1e294ec6f262ad
 
-removed print statement
+isort
 
 Files changed:
-M plone/app/vocabularies/types.py
+M plone/app/event/portlets/portlet_calendar.py
 
-b'diff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py\nindex 81bf1f8..e294ddf 100644\n--- a/plone/app/vocabularies/types.py\n+++ b/plone/app/vocabularies/types.py\n@@ -299,8 +299,7 @@ def __call__(self, context):\n             for t in ttool.listContentTypes()\n             if t not in BAD_TYPES\n         ]\n-        \n-        print(items)\n+    \n         # Sort items based on the translated title using unidecode\n         items.sort(key=lambda x: unidecode(x[0]).lower())\n         \n'
+b'diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py\nindex e9edf647..e47d7d62 100644\n--- a/plone/app/event/portlets/portlet_calendar.py\n+++ b/plone/app/event/portlets/portlet_calendar.py\n@@ -1,5 +1,6 @@\n from Acquisition import aq_inner\n from ComputedAttribute import ComputedAttribute\n+from DateTime import DateTime\n from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.event import _\n@@ -26,7 +27,6 @@\n from zope.component.hooks import getSite\n from zope.i18nmessageid import MessageFactory\n from zope.interface import implementer\n-from DateTime import DateTime\n \n import calendar\n import datetime\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-23T21:00:52+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/430dae4506e43f11eaf1e6d9f73a1f7f71e61e6d
+Date: 2024-07-22T11:49:14+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.event/commit/49edfa6d8554159a91e1e095a6df83b7ecfa3fb4
 
-add "unidecode" dependency to setup.py
+changelog
 
 Files changed:
-M setup.py
+A news/399.bugfix
 
-b'diff --git a/setup.py b/setup.py\nindex 613c086..105c88a 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -47,6 +47,7 @@\n         # by many many other packages in plone.app.* namespace\n         # it is very easy to add transitive circular dependencies\n         "BTrees",\n+        "unidecode",\n         "Products.ZCatalog",\n         "plone.base",\n         "plone.memoize",\n'
+b'diff --git a/news/399.bugfix b/news/399.bugfix\nnew file mode 100644\nindex 000000000..adba3539f\n--- /dev/null\n+++ b/news/399.bugfix\n@@ -0,0 +1 @@\n+Fix calendar portlet to work when selected item is a Collection [erral]\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-23T21:06:06+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/771b2937da3880d6c4dbc5479128c4f246fa6b49
+Date: 2024-07-22T11:51:50+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.app.event/commit/bfee507928b1916c5616e581770aec4dcea21646
 
-Update setup.py with "unidecode" dependency
+unneeded
 
 Files changed:
-M setup.py
+M plone/app/event/portlets/portlet_calendar.py
 
-b'diff --git a/setup.py b/setup.py\nindex 105c88a..b479aee 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -47,7 +47,6 @@\n         # by many many other packages in plone.app.* namespace\n         # it is very easy to add transitive circular dependencies\n         "BTrees",\n-        "unidecode",\n         "Products.ZCatalog",\n         "plone.base",\n         "plone.memoize",\n@@ -56,6 +55,7 @@\n         "plone.uuid",\n         "pytz",\n         "setuptools",\n+        "unidecode",\n         "z3c.formwidget.query",\n         "zope.browser",\n         "zope.globalrequest",\n'
+b'diff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py\nindex e47d7d62..b5ff6e01 100644\n--- a/plone/app/event/portlets/portlet_calendar.py\n+++ b/plone/app/event/portlets/portlet_calendar.py\n@@ -1,6 +1,5 @@\n from Acquisition import aq_inner\n from ComputedAttribute import ComputedAttribute\n-from DateTime import DateTime\n from plone.app.contenttypes.behaviors.collection import ISyndicatableCollection\n from plone.app.contenttypes.interfaces import IFolder\n from plone.app.event import _\n@@ -29,7 +28,6 @@\n from zope.interface import implementer\n \n import calendar\n-import datetime\n import json\n \n \n@@ -217,9 +215,7 @@ def cal_data(self):\n             # except the start and the end, which should be\n             # taken from the current calendar start and end\n             start, end = _prepare_range(self.search_base, start, end)\n-            query.update(\n-                start_end_query(DateTime(start.isoformat()), DateTime(end.isoformat()))\n-            )\n+            query.update(start_end_query(start, end))\n             events = self.search_base.results(\n                 batch=False, brains=True, custom_query=query\n             )\n'
 
-Repository: plone.app.vocabularies
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-07-23T15:42:20Z
-Author: pre-commit-ci[bot] (pre-commit-ci[bot]) <66853113+pre-commit-ci[bot]@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/4087ba8564d2147615264e4427016c7f9221ddb9
+Date: 2024-07-23T21:21:52-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.event/commit/3608882f01847f8d9596caae4bb567cc3421cfc9
 
-[pre-commit.ci] auto fixes from pre-commit.com hooks
+Merge pull request #400 from plone/erral-issue-399
 
-for more information, see https://pre-commit.ci
-
-Files changed:
-M plone/app/vocabularies/types.py
-
-b'diff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py\nindex e294ddf..a921e9c 100644\n--- a/plone/app/vocabularies/types.py\n+++ b/plone/app/vocabularies/types.py\n@@ -1,6 +1,7 @@\n from Acquisition import aq_get\n from plone.app.vocabularies import PermissiveVocabulary\n from Products.CMFCore.utils import getToolByName\n+from unidecode import unidecode\n from zope.component.hooks import getSite\n from zope.deprecation import deprecate\n from zope.i18n import translate\n@@ -8,7 +9,6 @@\n from zope.schema.interfaces import IVocabularyFactory\n from zope.schema.vocabulary import SimpleTerm\n from zope.schema.vocabulary import SimpleVocabulary\n-from unidecode import unidecode\n \n \n def getAllowedContentTypes(context):\n@@ -299,12 +299,12 @@ def __call__(self, context):\n             for t in ttool.listContentTypes()\n             if t not in BAD_TYPES\n         ]\n-    \n+\n         # Sort items based on the translated title using unidecode\n         items.sort(key=lambda x: unidecode(x[0]).lower())\n-        \n+\n         terms = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n         return PermissiveVocabulary(terms)\n \n \n-ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()\n\\ No newline at end of file\n+ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2024-07-23T21:27:25+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/a82224d18a91a0c3c5ec4a01a5ffac0b2efca505
-
-updates news comment
+Fix calendar portlet to work when selected item is a Collection
 
 Files changed:
-M news/3985.chore
+A news/399.bugfix
+M plone/app/event/portlets/portlet_calendar.py
+M plone/app/event/tests/test_portlet_calendar.py
 
-b'diff --git a/news/3985.chore b/news/3985.chore\nindex fda49c1..f846ca0 100644\n--- a/news/3985.chore\n+++ b/news/3985.chore\n@@ -1,2 +1,2 @@\n-Implemented pyICU for sorting of ReallyUserFriendlyTypes\n+Implemented sorting of ReallyUserFriendlyTypes using `unidecode`\n [rohnsha0]\n\\ No newline at end of file\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2024-07-23T21:42:54+05:30
-Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/82bb290e95935de5b1b4434acf539a79bf9f21b4
-
-added period in news
-
-Files changed:
-M news/3985.chore
-
-b'diff --git a/news/3985.chore b/news/3985.chore\nindex f846ca0..84968a3 100644\n--- a/news/3985.chore\n+++ b/news/3985.chore\n@@ -1,2 +1,2 @@\n-Implemented sorting of ReallyUserFriendlyTypes using `unidecode`\n+Implemented sorting of ReallyUserFriendlyTypes using `unidecode`.\n [rohnsha0]\n\\ No newline at end of file\n'
-
-Repository: plone.app.vocabularies
-
-
-Branch: refs/heads/master
-Date: 2024-07-24T07:17:03+05:30
-Author: Rohan Shaw (rohnsha0) <86848116+rohnsha0@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.vocabularies/commit/1da12d2633c261f946c46e1d0a1d380b4bedcc60
-
-Merge pull request #93 from plone/sorting-ReallyUserFriendlyTypes-using-pyicu
-
-Implemented sorting of ReallyUserFriendlyTypes using `unidecode`
-
-Files changed:
-A news/3985.chore
-M plone/app/vocabularies/types.py
-M setup.py
-
-b'diff --git a/news/3985.chore b/news/3985.chore\nnew file mode 100644\nindex 0000000..84968a3\n--- /dev/null\n+++ b/news/3985.chore\n@@ -0,0 +1,2 @@\n+Implemented sorting of ReallyUserFriendlyTypes using `unidecode`.\n+[rohnsha0]\n\\ No newline at end of file\ndiff --git a/plone/app/vocabularies/types.py b/plone/app/vocabularies/types.py\nindex 73f2d8e..a921e9c 100644\n--- a/plone/app/vocabularies/types.py\n+++ b/plone/app/vocabularies/types.py\n@@ -1,6 +1,7 @@\n from Acquisition import aq_get\n from plone.app.vocabularies import PermissiveVocabulary\n from Products.CMFCore.utils import getToolByName\n+from unidecode import unidecode\n from zope.component.hooks import getSite\n from zope.deprecation import deprecate\n from zope.i18n import translate\n@@ -298,9 +299,12 @@ def __call__(self, context):\n             for t in ttool.listContentTypes()\n             if t not in BAD_TYPES\n         ]\n-        items.sort()\n-        items = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n-        return PermissiveVocabulary(items)\n+\n+        # Sort items based on the translated title using unidecode\n+        items.sort(key=lambda x: unidecode(x[0]).lower())\n+\n+        terms = [SimpleTerm(i[1], i[1], i[0]) for i in items]\n+        return PermissiveVocabulary(terms)\n \n \n ReallyUserFriendlyTypesVocabularyFactory = ReallyUserFriendlyTypesVocabulary()\ndiff --git a/setup.py b/setup.py\nindex 613c086..b479aee 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -55,6 +55,7 @@\n         "plone.uuid",\n         "pytz",\n         "setuptools",\n+        "unidecode",\n         "z3c.formwidget.query",\n         "zope.browser",\n         "zope.globalrequest",\n'
+b'diff --git a/news/399.bugfix b/news/399.bugfix\nnew file mode 100644\nindex 000000000..adba3539f\n--- /dev/null\n+++ b/news/399.bugfix\n@@ -0,0 +1 @@\n+Fix calendar portlet to work when selected item is a Collection [erral]\ndiff --git a/plone/app/event/portlets/portlet_calendar.py b/plone/app/event/portlets/portlet_calendar.py\nindex cfd4d21d8..b5ff6e011 100644\n--- a/plone/app/event/portlets/portlet_calendar.py\n+++ b/plone/app/event/portlets/portlet_calendar.py\n@@ -211,12 +211,9 @@ def cal_data(self):\n                 sort_order=None,\n             )\n \n-            # restrict start/end with those from query, if given.\n-            if "start" in query and query["start"] > start:\n-                start = query["start"]\n-            if "end" in query and query["end"] < end:\n-                end = query["end"]\n-\n+            # When having a collection as context, we should use the configured query\n+            # except the start and the end, which should be\n+            # taken from the current calendar start and end\n             start, end = _prepare_range(self.search_base, start, end)\n             query.update(start_end_query(start, end))\n             events = self.search_base.results(\ndiff --git a/plone/app/event/tests/test_portlet_calendar.py b/plone/app/event/tests/test_portlet_calendar.py\nindex 8b96a1d3a..176a92c23 100644\n--- a/plone/app/event/tests/test_portlet_calendar.py\n+++ b/plone/app/event/tests/test_portlet_calendar.py\n@@ -269,3 +269,109 @@ def test_invalid_request(self):\n         r.update()\n         today = localized_today(self.portal)\n         self.assertEqual(r.year_month_display(), (today.year, today.month))\n+\n+    def test_with_collection_as_source(self):\n+        """When selecting a Collection as source, the events in that collection\n+        are used to build the calendar\n+        """\n+        tz = pytz.timezone(TZNAME)\n+        start = tz.localize(datetime.now())\n+        end = start + timedelta(hours=1)\n+\n+        createContentInContainer(self.portal, PTYPE, title="e1", start=start, end=end)\n+\n+        createContentInContainer(self.portal, PTYPE, title="e2", start=start, end=end)\n+\n+        # starts yesterday, ends yesterday\n+        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n+        end_yesterday = start + timedelta(hours=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e3",\n+            start=start_yesterday,\n+            end=end_yesterday,\n+        )\n+\n+        # starts today, ends tomorrow\n+        start_today = tz.localize(datetime.now())\n+        end_tomorrow = start + timedelta(days=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e4",\n+            start=start_today,\n+            end=end_tomorrow,\n+        )\n+\n+        # starts yesterday, ends tomorrow\n+        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n+        end_tomorrow = tz.localize(datetime.now()) + timedelta(days=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e5",\n+            start=start_yesterday,\n+            end=end_tomorrow,\n+        )\n+\n+        # starts tomorrow, ends tomorrow + 1\n+        start_tomorrow = tz.localize(datetime.now() + timedelta(days=1))\n+        end_tomorrow_1 = start_tomorrow + timedelta(days=1)\n+\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e6",\n+            start=start_tomorrow,\n+            end=end_tomorrow_1,\n+        )\n+\n+        # self.wft.doActionFor(self.portal.e1, "publish")\n+        self.wft.doActionFor(self.portal.e2, "publish")\n+        self.wft.doActionFor(self.portal.e3, "publish")\n+        self.wft.doActionFor(self.portal.e4, "publish")\n+        self.wft.doActionFor(self.portal.e5, "publish")\n+        self.wft.doActionFor(self.portal.e6, "publish")\n+\n+        self.portal.invokeFactory(\n+            "Collection",\n+            "eventcollection",\n+            query=[\n+                {\n+                    "i": "portal_type",\n+                    "o": "plone.app.querystring.operation.selection.any",\n+                    "v": [PTYPE],\n+                },\n+                {\n+                    "i": "end",\n+                    "o": "plone.app.querystring.operation.date.afterToday",\n+                    "v": "",\n+                },\n+                {\n+                    "i": "review_state",\n+                    "o": "plone.app.querystring.operation.selection.any",\n+                    "v": ["published"],\n+                },\n+            ],\n+        )\n+\n+        r = self.renderer(\n+            # context=self.portal.eventcollection,\n+            assignment=portlet_calendar.Assignment(\n+                state=("published",),\n+                search_base_uid=self.portal.eventcollection.UID(),\n+            ),\n+        )\n+        r.update()\n+        rd = r.render()\n+\n+        self.assertTrue("e1" not in rd)\n+        self.assertTrue("e2" in rd)\n+        self.assertTrue("e3" in rd)\n+        self.assertTrue("e4" in rd)\n+        self.assertTrue("e5" in rd)\n+        self.assertTrue("e6" in rd)\n'
 
