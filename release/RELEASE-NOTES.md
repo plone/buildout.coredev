@@ -1,39 +1,30 @@
-# Release notes for Plone 6.0.11
+# Release notes for Plone 6.0.12
 
-* Last updated: Thursday April 25, 2024
+* Released: Thursday August 1st, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.11/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.11/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.12/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.11/constraints.txt](https://dist.plone.org/release/6.0.11/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.11/versions.cfg](https://dist.plone.org/release/6.0.11/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.11/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.11/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.12/constraints.txt](https://dist.plone.org/release/6.0.12/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.12/versions.cfg](https://dist.plone.org/release/6.0.12/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.12/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.12/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.10.1:
+Major changes since 6.0.11.1:
 
-* `mxdev`: Fix for Python 3.12 virtual envs.
-* `plone.namedfile`, `plone.formwidget.namedfile` and `plone.app.z3cform`: Support for allowed media types.
-  Support to constrain files to specific media types with an "accept" attribute on file and image fields, just like the "accept" attribute of the HTML file input.  With this, allowed file types are checked already before uploading, while still also being checked on the server side.
-* `plone.app.z3cform`: Use `label_css_class` attribute from widget if available in checkbox_input and radio_input.
-* `plone.namedfile`: Improve contenttype detection logic for unregistered but common types.  Change `get_contenttype` to support common types which are or were not registered with IANA, like `image/webp` or `audio/midi`.
-* `plone.app.discussion`: Provide HCaptcha if `plone.formwidget.hcaptcha` is installed.
-* `plone.base`: Make the TinyMCE `help` and `accordion` plugins available as options.
-  To really use this, you need an add-on, like [`collective.outputfilters.tinymceaccordion`](https://github.com/collective/collective.outputfilters.tinymceaccordion).  But at least the options are available now.
-* `plone.base` and `plone.app.layout`: Add a field ``webstats_head_js`` to the Site controlpanel and render its contents in the head section using `IHtmlHeadLinks` viewlet manager.  Reason: some javascript needs to be loaded at the bottom of the page, and some in the head section.
-* `plone.recipe.zope2instance`: Add support for setting `max_value_length` in Sentry init.  When you use this option, you should use `sentry-sdk` 1.29.0 or higher.
-* `plone.restapi`: Add available languages information and the site timezone to the `@site` endpoint.
-* `lxml`: Upgraded from version 4.9.4 to 5.2.1.  This could mean small differences in html.  See the [changelog](https://github.com/lxml/lxml/blob/lxml-5.2.1/CHANGES.txt).  If you get wrong results, maybe because Diazo theming rules are parsed differently, it should be fine to downgrade, but version 4 is not maintained anymore.
-* `Products.PortalTransforms`: Use `Cleaner` from new package `lxml_html_clean`.
-  This was factored out from `lxml` in version 5.2.0.  See https://lxml-html-clean.readthedocs.io/
+* `plone.api`: Report if a permission does not exist when calling `api.user.has_permission`.
+* `plone.restapi`:
+  * Add cache rules for `@site` and `@navroot`.
+  * Added `TeaserBlockSerializer` which updates the contents of a teaser block from its target if the block has `"overwrite": false`.
+* `plone.app.content`: Speed improvement in `getVocabulary` for large vocabularies.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.4](https://www.npmjs.com/package/@plone/volto/v/16.31.4).  See the [changelog](https://github.com/plone/volto/blob/16.31.4/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.11](https://www.npmjs.com/package/@plone/volto/v/16.31.11).  See the [changelog](https://github.com/plone/volto/blob/16.31.11/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -65,6 +56,7 @@ zc.buildout==3.0.1
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
+`setuptools` 70 will cause problems with current `zc.buildout` 3.0.1, so keep your eyes out for a new `zc.buildout` release.
 
 
 ## Installation
