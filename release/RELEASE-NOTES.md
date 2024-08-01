@@ -1,49 +1,36 @@
-# Release notes for Plone 5.2.14
+# Release notes for Plone 5.2.15
 
-* Released: Thursday September 21, 2023
-* This is expected to be the last maintenance release.
+* Released: Thursday August 1, 2024
+* This is expected to be the last maintenance release.  Already one more than was promised.
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://5.docs.plone.org/manage/upgrading/version_specific_migration/upgrade_to_52.html), explaining the biggest changes compared to 5.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/5.2.14/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.14/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/5.2.15/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/5.2.15/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/5.2.14/constraints.txt](https://dist.plone.org/release/5.2.14/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2.14/versions.cfg](https://dist.plone.org/release/5.2.14/versions.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/5.2.15/constraints.txt](https://dist.plone.org/release/5.2.15/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/5.2.15/versions.cfg](https://dist.plone.org/release/5.2.15/versions.cfg).
 
 
 ## Highlights
 
-Major changes since 5.2.13:
+Major changes since 5.2.14:
 
-* This includes security fixes from today's announcement:
-  * https://community.plone.org/t/plone-security-advisory-2023-09-21/17941
-  * https://plone.org/security/hotfix/20230921
-* `Zope`:
-  * Security fixes in `AccessControl` and `RestrictedPython`.  See [community announcement](https://community.plone.org/t/zope-4-8-9-and-5-8-4-released-with-a-security-fix/17849).
-  * Allow only some image types to be displayed inline. Force download for others, especially SVG images.
-  * Tighten down the ZMI frame source logic to only allow site-local sources.
-* `plone.namedfile`: Fix stored XSS (Cross Site Scripting) for SVG images.
-* `plone.rest`: When ``++api++`` is in the url multiple times, redirect to the proper url.
-* `plone.restapi`:
-  * Fix stored XSS (Cross Site Scripting) for SVG image in user portrait.
-* `Products.CMFCore`: Make `decodeFolderFilter` and `encodeFolderFilter` non-public.
-  This is the workaround from [CVE-2023-36814](https://github.com/zopefoundation/Products.CMFCore/security/advisories/GHSA-4hpj-8rhv-9x87).
-* `plone.app.multilingual`:
-  * Fix various problems when using the Indonesian language in a multilingual setup.
-    This language has ``id`` as code.  This is not allowed as an id in Plone, so it has always been created as ``id-id`` instead.
-    This needs some special handling.
-  * Fix ``set_recursive_language`` to actually find child objects.  This is used to make sure that a language folder only contains content in this language.
+* `plone.recipe.zope2instance`:
+  * Add support for setting max_value_length in Sentry init.  When you use this option, you should use `sentry-sdk` 1.29.0 or higher.
+  * Add ``dos_protection`` config.  With Zope 5.8.4+ you may get ``zExceptions.BadRequest: data exceeds memory limit`` when uploading an image or file of more than 1 MB.  To increase this limit, you can add this in your instance recipe, and choose your own limit: `zope-conf-additional = <dos_protection>form-memory-limit 4MB</dos_protection>`
+* `plone.app.discussion`: Provide HCaptcha if `plone.formwidget.hcaptcha` is installed.  Apply validation for all captchas.
+* `plone.restapi`: Added `@site` and `@navroot` endpoints.
+* For the rest see the full packages changelog linked above.
 
 
 ## Last maintenance release
 
-Plone 5.2.14 is planned to be the last regular release of Plone 5.2.
-This release was originally planned for October, but we moved it forward to have the security fixes in a full release.  If there are good reasons, we can still make a new release.
+Plone 5.2.15 is planned to be the last regular release of Plone 5.2.
 
-After October 2023, Plone 5.2 is out of maintenance support.
+Plone 5.2 is actually already out of maintenance support since October 2023, but I decided it was fine to gather some last changes and release them.
 
-There is still one year of security support, until October 31, 2024.
+There is still security support, but only until October 31, 2024.
 At that moment, even Python 3.8 is out of security support by the Python community.
 
 
@@ -51,7 +38,7 @@ At that moment, even Python 3.8 is out of security support by the Python communi
 
 This release supports Python 2.7 and 3.8.
 
-Python 3.6 and 3.7 should still work, but these are end of life and no longer supported.
+Python 3.6 and 3.7 should still work, but these are end-of-life, untested, and no longer supported.
 
 Plone 5.2 still supports Python 2.7, but this is end-of-life since 2020.  It should only be used as a temporary stepping stone before you migrate your Plone site to Python 3.
 
@@ -77,13 +64,23 @@ wheel==0.38.4
 In general you are free to use whatever versions work for you, especially newer ones, but these worked for us.
 
 Note that `setuptools` 66 is more strict with what versions it can recognize.  If you run `pip` or `buildout` and it suddenly cannot find a package with a non-standard version, then this may be the cause.  This is why we stayed at version 65 for Plone 5.2.
+`setuptools` 70 will cause problems with current `zc.buildout` 3.0.1, so keep your eyes out for a new `zc.buildout` release.
 
 
 ## Installation
 
 For installation instructions, see the [documentation](https://5.docs.plone.org/manage/installing/index.html).
 
-There is still a [Unified Installer](https://launchpad.net/plone/5.2/5.2.14).  One warning there: we could no longer test this on Python 2.7.  It *should* work though.
+There is still a [Unified Installer](https://launchpad.net/plone/5.2/5.2.15).  One warning there: we could no longer test this on Python 2.7.  It *should* work though.
+
+For previous Plone 5.2 patch releases we always added all used package distributions on the dist.plone.org server, so you could use this as a "find-link" in Buildout or pip.
+This was a historical practice, mostly to have a fallback when a distribution of a third party package was removed from the Python Package Index.
+This problem hardly ever happens anymore, so the added value of uploading these distributions is questionable.
+It turned out to be harder to gather all packages, so I abandoned it.
+If you somehow need this, it should work fine to add the directory of the previous release to the find-links:
+https://dist.plone.org/release/5.2.14/
+Only a few packages have different versions in 5.2.15.
+
 
 ## Issues
 
