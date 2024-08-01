@@ -1,30 +1,30 @@
-# Release notes for Plone 6.0-dev
+# Release notes for Plone 6.0.12
 
-* Last updated: Wednesday June 29, 2024
+* Released: Thursday August 1st, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.12/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.12/constraints.txt](https://dist.plone.org/release/6.0.12/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.12/versions.cfg](https://dist.plone.org/release/6.0.12/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.12/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.12/versions-ecosystem.cfg).
 
 
 ## Highlights
 
 Major changes since 6.0.11.1:
 
-* `plone.app.theming`: When calling the html serializer pass an encoding.  This is needed because we updated from `lxml` 4 to 5.
 * `plone.api`: Report if a permission does not exist when calling `api.user.has_permission`.
 * `plone.restapi`:
   * Add cache rules for `@site` and `@navroot`.
   * Added `TeaserBlockSerializer` which updates the contents of a teaser block from its target if the block has `"overwrite": false`.
+* `plone.app.content`: Speed improvement in `getVocabulary` for large vocabularies.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.10](https://www.npmjs.com/package/@plone/volto/v/16.31.10).  See the [changelog](https://github.com/plone/volto/blob/16.31.10/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.11](https://www.npmjs.com/package/@plone/volto/v/16.31.11).  See the [changelog](https://github.com/plone/volto/blob/16.31.11/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -56,6 +56,7 @@ zc.buildout==3.0.1
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
+`setuptools` 70 will cause problems with current `zc.buildout` 3.0.1, so keep your eyes out for a new `zc.buildout` release.
 
 
 ## Installation
