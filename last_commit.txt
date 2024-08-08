@@ -1,54 +1,90 @@
-Repository: Products.PortalTransforms
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2024-08-05T16:58:51+02:00
+Date: 2024-08-02T16:20:19+02:00
 Author: Manuel Reinhardt (reinhardt) <reinhardt@syslab.com>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/d5c91cfbd96dd5ca83c7c9e1d6ad502ef95e107f
+Commit: https://github.com/plone/plone.app.content/commit/2524e288c382252ea1ce357a5ed96079e88e8d78
 
-feat: Shortcut in safe_html
+getVocabulary: Call scrub_html on individual items, but check for script/html first
 
-Check for signs of html or script, skip further processing if none are found.
-Saves processing time for lxml parsing and manipulation.
+Fixes JSONDecodeError when terms contain incomplete HTML
 
 Files changed:
-A news/66.feature
-M Products/PortalTransforms/transforms/safe_html.py
+A news/288.bugfix
+M plone/app/content/browser/vocabulary.py
+M plone/app/content/tests/test_widgets.py
 
-b'diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py\nindex 787e7e1..fc25179 100644\n--- a/Products/PortalTransforms/transforms/safe_html.py\n+++ b/Products/PortalTransforms/transforms/safe_html.py\n@@ -4,6 +4,7 @@\n from lxml_html_clean import Cleaner\n from plone.base.interfaces import IFilterSchema\n from plone.base.utils import safe_bytes\n+from plone.base.utils import safe_text\n from plone.registry.interfaces import IRegistry\n from Products.PortalTransforms.interfaces import ITransform\n from Products.PortalTransforms.libtransforms.utils import bodyfinder\n@@ -183,6 +184,14 @@ def cleaner_options(self):\n         return options\n \n     def scrub_html(self, orig):\n+        orig_text = safe_text(orig)\n+        # short cut if no html or script is detected\n+        if not orig or not (\n+            hasScript(orig_text)\n+            or "<" in orig_text\n+            or any((entity in orig_text for entity in html5entities.values()))\n+        ):\n+            return orig_text\n         # append html tag to create a dummy parent for the tree\n         html_parser = html.HTMLParser(encoding="utf-8")\n         orig = safe_bytes(orig)\ndiff --git a/news/66.feature b/news/66.feature\nnew file mode 100644\nindex 0000000..c07a4bb\n--- /dev/null\n+++ b/news/66.feature\n@@ -0,0 +1 @@\n+Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.\n'
+b'diff --git a/news/288.bugfix b/news/288.bugfix\nnew file mode 100644\nindex 00000000..2a88b713\n--- /dev/null\n+++ b/news/288.bugfix\n@@ -0,0 +1 @@\n+getVocabulary: Fix for terms with incomplete HTML\ndiff --git a/plone/app/content/browser/vocabulary.py b/plone/app/content/browser/vocabulary.py\nindex 7419e80c..8611163b 100644\n--- a/plone/app/content/browser/vocabulary.py\n+++ b/plone/app/content/browser/vocabulary.py\n@@ -17,6 +17,7 @@\n from Products.Five import BrowserView\n from Products.MimetypesRegistry.MimeTypeItem import guess_icon_path\n from Products.MimetypesRegistry.MimeTypeItem import PREFIX\n+from Products.PortalTransforms.transforms.safe_html import hasScript\n from Products.PortalTransforms.transforms.safe_html import SafeHTML\n from types import FunctionType\n from z3c.form.interfaces import IAddForm\n@@ -128,6 +129,12 @@ def get_translated_ignored(self):\n     def get_base_path(self, context):\n         return get_navigation_root(context)\n \n+    def maybe_scrub(self, value):\n+        if value and (hasScript(value) or "<" in value):\n+            transform = SafeHTML()\n+            return transform.scrub_html(value)\n+        return value\n+\n     def __call__(self):\n         """\n         Accepts GET parameters of:\n@@ -210,7 +217,6 @@ def __call__(self):\n             attributes = attributes.split(",")\n \n         translate_ignored = self.get_translated_ignored()\n-        transform = SafeHTML()\n         if attributes:\n             base_path = self.get_base_path(context)\n             sm = getSecurityManager()\n@@ -261,8 +267,10 @@ def __call__(self):\n         else:\n             items = [\n                 {\n-                    "id": item.value,\n-                    "text": (item.title if item.title else ""),\n+                    "id": unescape(self.maybe_scrub(item.value)),\n+                    "text": (\n+                        unescape(self.maybe_scrub(item.title)) if item.title else ""\n+                    ),\n                 }\n                 for item in results\n             ]\n@@ -270,9 +278,7 @@ def __call__(self):\n         if total == 0:\n             total = len(items)\n \n-        return unescape(\n-            transform.scrub_html(json_dumps({"results": items, "total": total}))\n-        )\n+        return json_dumps({"results": items, "total": total})\n \n     def parsed_query(\n         self,\ndiff --git a/plone/app/content/tests/test_widgets.py b/plone/app/content/tests/test_widgets.py\nindex 95e662dd..88469c13 100644\n--- a/plone/app/content/tests/test_widgets.py\n+++ b/plone/app/content/tests/test_widgets.py\n@@ -680,6 +680,24 @@ def testGetMimeIcon(self):\n             [{"getMimeIcon": "/plone/++resource++mimetype.icons/unknown.png"}],\n         )\n \n+    def testScrubHtml(self):\n+        from zope.schema.vocabulary import SimpleTerm\n+        from zope.schema.vocabulary import SimpleVocabulary\n+\n+        view = VocabularyView(self.portal, self.request)\n+        vocab = SimpleVocabulary(\n+            [\n+                SimpleTerm(\n+                    token=f"term {idx} <b>",\n+                    value=f"term {idx} <b>",\n+                    title=f"term {idx} <b>",\n+                )\n+                for idx in range(3)\n+            ]\n+        )\n+        with mock.patch.object(view, "get_vocabulary", return_value=vocab):\n+            json.loads(view())\n+\n \n class FunctionalBrowserTest(unittest.TestCase):\n     layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n'
 
-Repository: Products.PortalTransforms
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2024-08-05T23:33:38Z
-Author: pre-commit-ci[bot] (pre-commit-ci[bot]) <66853113+pre-commit-ci[bot]@users.noreply.github.com>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/0bb777712e109418f36174158d9815140aae2e73
+Date: 2024-08-06T08:23:33+02:00
+Author: Manuel Reinhardt (reinhardt) <reinhardt@syslab.com>
+Commit: https://github.com/plone/plone.app.content/commit/6fb696a41914d399a5d69c93937ef55fb2fb3440
 
-[pre-commit.ci] auto fixes from pre-commit.com hooks
+getVocabulary: Remove check for scrub_html
 
-for more information, see https://pre-commit.ci
+There is now a similar check inside scrub_html, see
+https://github.com/plone/Products.PortalTransforms/pull/66
 
 Files changed:
-M Products/PortalTransforms/transforms/safe_html.py
+M plone/app/content/browser/vocabulary.py
 
-b'diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py\nindex fc25179..934c529 100644\n--- a/Products/PortalTransforms/transforms/safe_html.py\n+++ b/Products/PortalTransforms/transforms/safe_html.py\n@@ -189,7 +189,7 @@ def scrub_html(self, orig):\n         if not orig or not (\n             hasScript(orig_text)\n             or "<" in orig_text\n-            or any((entity in orig_text for entity in html5entities.values()))\n+            or any(entity in orig_text for entity in html5entities.values())\n         ):\n             return orig_text\n         # append html tag to create a dummy parent for the tree\n'
+b'diff --git a/plone/app/content/browser/vocabulary.py b/plone/app/content/browser/vocabulary.py\nindex 8611163..4b707cf 100644\n--- a/plone/app/content/browser/vocabulary.py\n+++ b/plone/app/content/browser/vocabulary.py\n@@ -17,7 +17,6 @@\n from Products.Five import BrowserView\n from Products.MimetypesRegistry.MimeTypeItem import guess_icon_path\n from Products.MimetypesRegistry.MimeTypeItem import PREFIX\n-from Products.PortalTransforms.transforms.safe_html import hasScript\n from Products.PortalTransforms.transforms.safe_html import SafeHTML\n from types import FunctionType\n from z3c.form.interfaces import IAddForm\n@@ -129,12 +128,6 @@ def get_translated_ignored(self):\n     def get_base_path(self, context):\n         return get_navigation_root(context)\n \n-    def maybe_scrub(self, value):\n-        if value and (hasScript(value) or "<" in value):\n-            transform = SafeHTML()\n-            return transform.scrub_html(value)\n-        return value\n-\n     def __call__(self):\n         """\n         Accepts GET parameters of:\n@@ -217,6 +210,7 @@ def __call__(self):\n             attributes = attributes.split(",")\n \n         translate_ignored = self.get_translated_ignored()\n+        transform = SafeHTML()\n         if attributes:\n             base_path = self.get_base_path(context)\n             sm = getSecurityManager()\n@@ -267,9 +261,9 @@ def __call__(self):\n         else:\n             items = [\n                 {\n-                    "id": unescape(self.maybe_scrub(item.value)),\n+                    "id": unescape(transform.scrub_html(item.value)),\n                     "text": (\n-                        unescape(self.maybe_scrub(item.title)) if item.title else ""\n+                        unescape(transform.scrub_html(item.title)) if item.title else ""\n                     ),\n                 }\n                 for item in results\n'
 
-Repository: Products.PortalTransforms
+Repository: plone.app.content
 
 
 Branch: refs/heads/master
-Date: 2024-08-05T18:35:24-07:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/Products.PortalTransforms/commit/85d7947fb25e942817663f6fbe9833cee35dd77c
+Date: 2024-08-07T13:11:41+02:00
+Author: Manuel Reinhardt (reinhardt) <reinhardt@syslab.com>
+Commit: https://github.com/plone/plone.app.content/commit/b44635de635ab968ea8f202bcdceb88366f5a973
 
-Merge pull request #66 from plone/scrub-shortcut
+Rename test method
 
-Shortcut in safe_html
+Co-authored-by: Maurits van Rees &lt;maurits@vanrees.org&gt;
 
 Files changed:
-A news/66.feature
-M Products/PortalTransforms/transforms/safe_html.py
+M plone/app/content/tests/test_widgets.py
 
-b'diff --git a/Products/PortalTransforms/transforms/safe_html.py b/Products/PortalTransforms/transforms/safe_html.py\nindex 787e7e1..934c529 100644\n--- a/Products/PortalTransforms/transforms/safe_html.py\n+++ b/Products/PortalTransforms/transforms/safe_html.py\n@@ -4,6 +4,7 @@\n from lxml_html_clean import Cleaner\n from plone.base.interfaces import IFilterSchema\n from plone.base.utils import safe_bytes\n+from plone.base.utils import safe_text\n from plone.registry.interfaces import IRegistry\n from Products.PortalTransforms.interfaces import ITransform\n from Products.PortalTransforms.libtransforms.utils import bodyfinder\n@@ -183,6 +184,14 @@ def cleaner_options(self):\n         return options\n \n     def scrub_html(self, orig):\n+        orig_text = safe_text(orig)\n+        # short cut if no html or script is detected\n+        if not orig or not (\n+            hasScript(orig_text)\n+            or "<" in orig_text\n+            or any(entity in orig_text for entity in html5entities.values())\n+        ):\n+            return orig_text\n         # append html tag to create a dummy parent for the tree\n         html_parser = html.HTMLParser(encoding="utf-8")\n         orig = safe_bytes(orig)\ndiff --git a/news/66.feature b/news/66.feature\nnew file mode 100644\nindex 0000000..c07a4bb\n--- /dev/null\n+++ b/news/66.feature\n@@ -0,0 +1 @@\n+Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.\n'
+b'diff --git a/plone/app/content/tests/test_widgets.py b/plone/app/content/tests/test_widgets.py\nindex 88469c1..d56b3b4 100644\n--- a/plone/app/content/tests/test_widgets.py\n+++ b/plone/app/content/tests/test_widgets.py\n@@ -680,7 +680,7 @@ def testGetMimeIcon(self):\n             [{"getMimeIcon": "/plone/++resource++mimetype.icons/unknown.png"}],\n         )\n \n-    def testScrubHtml(self):\n+    def testGeneratesValidJson(self):\n         from zope.schema.vocabulary import SimpleTerm\n         from zope.schema.vocabulary import SimpleVocabulary\n \n'
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2024-08-08T08:47:57+02:00
+Author: Manuel Reinhardt (reinhardt) <reinhardt@syslab.com>
+Commit: https://github.com/plone/plone.app.content/commit/6c1e1f2d4598eb8d51b18be78c76ab0f4dd876e2
+
+Extend and explain test
+
+Co-authored-by: Maurits van Rees &lt;maurits@vanrees.org&gt;
+
+Files changed:
+M plone/app/content/tests/test_widgets.py
+
+b'diff --git a/plone/app/content/tests/test_widgets.py b/plone/app/content/tests/test_widgets.py\nindex d56b3b4..1a37c7a 100644\n--- a/plone/app/content/tests/test_widgets.py\n+++ b/plone/app/content/tests/test_widgets.py\n@@ -696,7 +696,12 @@ def testGeneratesValidJson(self):\n             ]\n         )\n         with mock.patch.object(view, "get_vocabulary", return_value=vocab):\n-            json.loads(view())\n+            result = view()\n+        # The above values could result in invalid json if there is an error in\n+        # the code: the following call would give a json.decoder.JSONDecodeError.\n+        # See https://github.com/plone/plone.app.content/pull/288\n+        parsed = json.loads(result)\n+        self.assertEqual(parsed["results"][0]["text"], "term 0 <b></b>")\n \n \n class FunctionalBrowserTest(unittest.TestCase):\n'
+
+Repository: plone.app.content
+
+
+Branch: refs/heads/master
+Date: 2024-08-08T12:17:01+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
+Commit: https://github.com/plone/plone.app.content/commit/0cebad3373552cadceb7b15d50ee88f8e055519a
+
+Merge pull request #288 from plone/getVocabulary-incomplete-html
+
+getVocabulary: Call scrub_html on individual items
+
+Files changed:
+A news/288.bugfix
+M plone/app/content/browser/vocabulary.py
+M plone/app/content/tests/test_widgets.py
+
+b'diff --git a/news/288.bugfix b/news/288.bugfix\nnew file mode 100644\nindex 00000000..2a88b713\n--- /dev/null\n+++ b/news/288.bugfix\n@@ -0,0 +1 @@\n+getVocabulary: Fix for terms with incomplete HTML\ndiff --git a/plone/app/content/browser/vocabulary.py b/plone/app/content/browser/vocabulary.py\nindex 7419e80c..4b707cfb 100644\n--- a/plone/app/content/browser/vocabulary.py\n+++ b/plone/app/content/browser/vocabulary.py\n@@ -261,8 +261,10 @@ def __call__(self):\n         else:\n             items = [\n                 {\n-                    "id": item.value,\n-                    "text": (item.title if item.title else ""),\n+                    "id": unescape(transform.scrub_html(item.value)),\n+                    "text": (\n+                        unescape(transform.scrub_html(item.title)) if item.title else ""\n+                    ),\n                 }\n                 for item in results\n             ]\n@@ -270,9 +272,7 @@ def __call__(self):\n         if total == 0:\n             total = len(items)\n \n-        return unescape(\n-            transform.scrub_html(json_dumps({"results": items, "total": total}))\n-        )\n+        return json_dumps({"results": items, "total": total})\n \n     def parsed_query(\n         self,\ndiff --git a/plone/app/content/tests/test_widgets.py b/plone/app/content/tests/test_widgets.py\nindex 95e662dd..1a37c7aa 100644\n--- a/plone/app/content/tests/test_widgets.py\n+++ b/plone/app/content/tests/test_widgets.py\n@@ -680,6 +680,29 @@ def testGetMimeIcon(self):\n             [{"getMimeIcon": "/plone/++resource++mimetype.icons/unknown.png"}],\n         )\n \n+    def testGeneratesValidJson(self):\n+        from zope.schema.vocabulary import SimpleTerm\n+        from zope.schema.vocabulary import SimpleVocabulary\n+\n+        view = VocabularyView(self.portal, self.request)\n+        vocab = SimpleVocabulary(\n+            [\n+                SimpleTerm(\n+                    token=f"term {idx} <b>",\n+                    value=f"term {idx} <b>",\n+                    title=f"term {idx} <b>",\n+                )\n+                for idx in range(3)\n+            ]\n+        )\n+        with mock.patch.object(view, "get_vocabulary", return_value=vocab):\n+            result = view()\n+        # The above values could result in invalid json if there is an error in\n+        # the code: the following call would give a json.decoder.JSONDecodeError.\n+        # See https://github.com/plone/plone.app.content/pull/288\n+        parsed = json.loads(result)\n+        self.assertEqual(parsed["results"][0]["text"], "term 0 <b></b>")\n+\n \n class FunctionalBrowserTest(unittest.TestCase):\n     layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n'
 
