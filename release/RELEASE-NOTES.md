@@ -1,6 +1,6 @@
-# Release notes for Plone 6.0.12
+# Release notes for Plone 6.0.13 (unreleased)
 
-* Released: Thursday August 1st, 2024
+* Last updated: August 9, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.12/changelog.txt).
@@ -13,13 +13,11 @@ If you want to jump straight in, here are two important links:
 
 ## Highlights
 
-Major changes since 6.0.11.1:
+Major changes since 6.0.12:
 
-* `plone.api`: Report if a permission does not exist when calling `api.user.has_permission`.
-* `plone.restapi`:
-  * Add cache rules for `@site` and `@navroot`.
-  * Added `TeaserBlockSerializer` which updates the contents of a teaser block from its target if the block has `"overwrite": false`.
-* `plone.app.content`: Speed improvement in `getVocabulary` for large vocabularies.
+* `plone.app.content`: getVocabulary: Fix for terms with incomplete HTML.
+* `Products.PortalTransforms`: Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.
+* Newer `docutils` that works with Sphinx 8.
 
 
 ## Volto frontend
