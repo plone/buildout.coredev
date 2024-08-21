@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0.13 (unreleased)
 
-* Last updated: August 9, 2024
+* Last updated: August 21, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.12/changelog.txt).
@@ -15,9 +15,14 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.0.12:
 
-* `plone.app.content`: getVocabulary: Fix for terms with incomplete HTML.
+* `plone.app.content`:
+  * `getVocabulary`: Fix for terms with incomplete HTML.
+  * Fix `select_default_page` in VHM hosted sites.
 * `Products.PortalTransforms`: Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.
 * Newer `docutils` that works with Sphinx 8.
+* `Products.validation`:
+  * Drop support for Plone 5.2 and for Python 3.7 and lower.  Only Plone 6.0 and 6.1 are supported now.  Note that this is not used by core Plone, but for example by `collective.easyform`.
+  * Move translations from plone.app.locales to here.
 
 
 ## Volto frontend
