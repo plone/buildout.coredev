@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1.0a5 (unreleased)
 
-* Last updated: August 9, 2024
+* Last updated: August 22, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -15,9 +15,16 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.1.0a4:
 
-* `plone.app.content`: getVocabulary: Fix for terms with incomplete HTML.
+* `plone.app.content`:
+  * `getVocabulary`: Fix for terms with incomplete HTML.
+  * Fix `select_default_page` in VHM hosted sites.
 * `Products.PortalTransforms`: Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.
 * Newer `docutils` that works with Sphinx 8.
+* `Products.validation`:
+  * Moved to `versions-ecosystem.cfg`, and no longer test it in core, as core Plone is not using it.  It is used by the populare addon `collective.easyform`.
+  * Drop support for Plone 5.2 and for Python 3.7 and lower.  Only Plone 6.0 and 6.1 are supported now.
+  * Move translations from `plone.app.locales` to here.
+* `Products.isurlinportal`: No longer patch `Products.CMFPlone`.  Instead, `Products.CMFPlone` will use us directly (it already does, but with a new `Products.CMFPlone` release it will do so more cleanly).  This solves cyclic dependencies.
 
 
 ## Volto frontend
