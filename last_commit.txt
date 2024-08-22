@@ -1,50 +1,65 @@
-Repository: plone.app.content
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-08-21T11:08:03+02:00
+Date: 2024-08-19T16:30:05+02:00
 Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.content/commit/39b72eba010a6d852b760974273aac4318634246
+Commit: https://github.com/plone/plone.app.event/commit/0fb4a8b2155c4e3377e055993156716e7d4d27e6
 
-Fix `select_default_page` in VHM environments and add test
+Fix date conversion when collection context has start/end date queries
 
 Files changed:
-M plone/app/content/browser/selection.py
-M plone/app/content/tests/test_selectdefaultpage.py
+M plone/app/event/browser/event_listing.py
+M plone/app/event/tests/test_event_listing.py
 
-b'diff --git a/plone/app/content/browser/selection.py b/plone/app/content/browser/selection.py\nindex 480010d..ea79477 100644\n--- a/plone/app/content/browser/selection.py\n+++ b/plone/app/content/browser/selection.py\n@@ -104,7 +104,7 @@ def get_selectable_items(self):\n \n         results = []\n         for brain in portal_catalog(\n-            path={"query": context.absolute_url_path(), "depth": 1},\n+            path={"query": "/".join(context.getPhysicalPath()), "depth": 1},\n             sort_on="getObjPositionInParent",\n         ):\n             portal_type = brain.portal_type\ndiff --git a/plone/app/content/tests/test_selectdefaultpage.py b/plone/app/content/tests/test_selectdefaultpage.py\nindex ff3a285..0ac0f67 100644\n--- a/plone/app/content/tests/test_selectdefaultpage.py\n+++ b/plone/app/content/tests/test_selectdefaultpage.py\n@@ -31,6 +31,7 @@ class SelectDefaultPageDXTestCase(unittest.TestCase):\n     layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n \n     def setUp(self):\n+        self.app = self.layer["app"]\n         self.portal = self.layer["portal"]\n         self.portal.acl_users.userFolderAddUser(\n             "editor", TEST_USER_PASSWORD, ["Editor"], []\n@@ -93,6 +94,32 @@ def test_select_default_page_view(self):\n         self.assertTrue("Select default page" in self.browser.contents)\n         self.assertTrue(\'id="testdoc"\' in self.browser.contents)\n \n+    def test_select_default_page_vhm_hosted(self):\n+        # Install a Virtual Host Monster\n+        if "virtual_hosting" not in self.app.objectIds():\n+            # If ZopeLite was imported, we have no default virtual\n+            # host monster\n+            from Products.SiteAccess.VirtualHostMonster import (\n+                manage_addVirtualHostMonster,\n+            )\n+\n+            manage_addVirtualHostMonster(self.app, "virtual_hosting")\n+        transaction.commit()\n+\n+        folder = self.portal.testfolder\n+        folder_vhm_url = (\n+            "{}/VirtualHostBase/http/plone.org/{}/VirtualHostRoot/{}".format(\n+                self.app.absolute_url(),\n+                self.portal.id,\n+                folder.id,\n+            )\n+        )\n+\n+        self.browser.open(f"{folder_vhm_url}/@@select_default_page")\n+\n+        self.assertTrue("Select default page" in self.browser.contents)\n+        self.assertTrue(\'id="testdoc"\' in self.browser.contents)\n+\n     def test_select_default_page_view_with_folderish_type(self):\n         """Check if folderish types are available."""\n         folder = self.portal.testfolder\n'
+b'diff --git a/plone/app/event/browser/event_listing.py b/plone/app/event/browser/event_listing.py\nindex 55c0f2e1..e01de705 100644\n--- a/plone/app/event/browser/event_listing.py\n+++ b/plone/app/event/browser/event_listing.py\n@@ -222,6 +222,13 @@ def _expand_events_start_end(self, start, end):\n         # XXX: This actually fits most needs, but not all. Maybe someone\n         # wants to come up with some edgecases!\n         se = dict(start=None, end=None)\n+\n+        def safe_dt(val):\n+            # convert value from DateTime to datetime\n+            if hasattr(val, "asdatetime"):\n+                return val.asdatetime()\n+            return val\n+\n         if start:\n             q = start.get("query")\n             r = start.get("range")\n@@ -238,7 +245,7 @@ def _expand_events_start_end(self, start, end):\n             r = end.get("range")\n             if r == "min":\n                 se["start"] = q\n-        return se["start"], se["end"]\n+        return safe_dt(se["start"]), safe_dt(se["end"])\n \n     def formatted_date(self, occ):\n         provider = getMultiAdapter(\ndiff --git a/plone/app/event/tests/test_event_listing.py b/plone/app/event/tests/test_event_listing.py\nindex 5eb94662..abab4e12 100644\n--- a/plone/app/event/tests/test_event_listing.py\n+++ b/plone/app/event/tests/test_event_listing.py\n@@ -1,3 +1,4 @@\n+from DateTime import DateTime\n from plone.app.event.base import localized_today\n from plone.app.event.testing import make_fake_response\n from plone.app.event.testing import PAEventDX_INTEGRATION_TESTING\n@@ -151,3 +152,26 @@ def test_no_date_filtering(self):\n             "mode_day",\n         ]:\n             self.assertTrue(_class not in out)\n+\n+    @mock.patch("plone.app.event.browser.event_listing.localized_now", new=PN)\n+    @mock.patch("plone.app.event.base.localized_now", new=PN)\n+    def test_end_date_filtering(self):\n+        """Test date conversion between collection query and \'expand_events\'\n+        filtering.\n+        """\n+        # plone.app.contenttypes ICollection type\n+        self.portal.invokeFactory("Collection", "col_with_date_criterion", title="Col")\n+        collection = self.portal.col_with_date_criterion\n+        collection.query = [\n+            {\n+                "i": "portal_type",\n+                "o": "plone.app.querystring.operation.selection.any",\n+                "v": ["Event", "plone.app.event.dx.event"],\n+            },\n+            {\n+                "i": "end",\n+                "o": "plone.app.querystring.operation.date.largerThan",\n+                "v": DateTime(PN()),\n+            },\n+        ]\n+        self.assertIs(len(self.portal.col_with_date_criterion.results()), 3)\n'
 
-Repository: plone.app.content
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-08-21T11:08:03+02:00
+Date: 2024-08-19T16:36:19+02:00
 Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.content/commit/a931ec9f32a1c8a3ac99f9899ed29187258717db
+Commit: https://github.com/plone/plone.app.event/commit/f6a3aa8244bbcac89630a336cb8f148061ca2907
 
 changenote
 
 Files changed:
-A news/292.bugfix
+A news/404.bugfix
 
-b'diff --git a/news/292.bugfix b/news/292.bugfix\nnew file mode 100644\nindex 00000000..fa4b4ec7\n--- /dev/null\n+++ b/news/292.bugfix\n@@ -0,0 +1,2 @@\n+Fix `select_default_page` in VHM hosted sites\n+[petschki]\n'
+b'diff --git a/news/404.bugfix b/news/404.bugfix\nnew file mode 100644\nindex 000000000..26707eee0\n--- /dev/null\n+++ b/news/404.bugfix\n@@ -0,0 +1,2 @@\n+Fix date conversion between collection query and ``expand_events`` filtering.\n+[petschki]\n'
 
-Repository: plone.app.content
+Repository: plone.app.event
 
 
 Branch: refs/heads/master
-Date: 2024-08-21T16:04:05+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
-Commit: https://github.com/plone/plone.app.content/commit/e5191a45ff006899b1d58c9f2de782bcbef6b48e
+Date: 2024-08-19T16:40:16+02:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.app.event/commit/22ce428cd56187d5327b34b1611359d9064dd56b
 
-Merge pull request #292 from plone/vhm_select_default_page
-
-Fix `select_default_page` in VHM environments
+call event_listing view in test to test conversion
 
 Files changed:
-A news/292.bugfix
-M plone/app/content/browser/selection.py
-M plone/app/content/tests/test_selectdefaultpage.py
+M plone/app/event/tests/test_event_listing.py
 
-b'diff --git a/news/292.bugfix b/news/292.bugfix\nnew file mode 100644\nindex 00000000..fa4b4ec7\n--- /dev/null\n+++ b/news/292.bugfix\n@@ -0,0 +1,2 @@\n+Fix `select_default_page` in VHM hosted sites\n+[petschki]\ndiff --git a/plone/app/content/browser/selection.py b/plone/app/content/browser/selection.py\nindex 480010d2..ea794770 100644\n--- a/plone/app/content/browser/selection.py\n+++ b/plone/app/content/browser/selection.py\n@@ -104,7 +104,7 @@ def get_selectable_items(self):\n \n         results = []\n         for brain in portal_catalog(\n-            path={"query": context.absolute_url_path(), "depth": 1},\n+            path={"query": "/".join(context.getPhysicalPath()), "depth": 1},\n             sort_on="getObjPositionInParent",\n         ):\n             portal_type = brain.portal_type\ndiff --git a/plone/app/content/tests/test_selectdefaultpage.py b/plone/app/content/tests/test_selectdefaultpage.py\nindex ff3a2857..0ac0f678 100644\n--- a/plone/app/content/tests/test_selectdefaultpage.py\n+++ b/plone/app/content/tests/test_selectdefaultpage.py\n@@ -31,6 +31,7 @@ class SelectDefaultPageDXTestCase(unittest.TestCase):\n     layer = PLONE_APP_CONTENT_DX_FUNCTIONAL_TESTING\n \n     def setUp(self):\n+        self.app = self.layer["app"]\n         self.portal = self.layer["portal"]\n         self.portal.acl_users.userFolderAddUser(\n             "editor", TEST_USER_PASSWORD, ["Editor"], []\n@@ -93,6 +94,32 @@ def test_select_default_page_view(self):\n         self.assertTrue("Select default page" in self.browser.contents)\n         self.assertTrue(\'id="testdoc"\' in self.browser.contents)\n \n+    def test_select_default_page_vhm_hosted(self):\n+        # Install a Virtual Host Monster\n+        if "virtual_hosting" not in self.app.objectIds():\n+            # If ZopeLite was imported, we have no default virtual\n+            # host monster\n+            from Products.SiteAccess.VirtualHostMonster import (\n+                manage_addVirtualHostMonster,\n+            )\n+\n+            manage_addVirtualHostMonster(self.app, "virtual_hosting")\n+        transaction.commit()\n+\n+        folder = self.portal.testfolder\n+        folder_vhm_url = (\n+            "{}/VirtualHostBase/http/plone.org/{}/VirtualHostRoot/{}".format(\n+                self.app.absolute_url(),\n+                self.portal.id,\n+                folder.id,\n+            )\n+        )\n+\n+        self.browser.open(f"{folder_vhm_url}/@@select_default_page")\n+\n+        self.assertTrue("Select default page" in self.browser.contents)\n+        self.assertTrue(\'id="testdoc"\' in self.browser.contents)\n+\n     def test_select_default_page_view_with_folderish_type(self):\n         """Check if folderish types are available."""\n         folder = self.portal.testfolder\n'
+b'diff --git a/plone/app/event/tests/test_event_listing.py b/plone/app/event/tests/test_event_listing.py\nindex abab4e12..db67bbd8 100644\n--- a/plone/app/event/tests/test_event_listing.py\n+++ b/plone/app/event/tests/test_event_listing.py\n@@ -174,4 +174,8 @@ def test_end_date_filtering(self):\n                 "v": DateTime(PN()),\n             },\n         ]\n+\n+        view = self.portal.col_with_date_criterion.restrictedTraverse("@@event_listing")\n+        view()\n+\n         self.assertIs(len(self.portal.col_with_date_criterion.results()), 3)\n'
+
+Repository: plone.app.event
+
+
+Branch: refs/heads/master
+Date: 2024-08-22T09:09:35+02:00
+Author: Peter Mathis (petschki) <petschki@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.event/commit/8a991b10d2e9ebeee76edf36c6dedbb68b253679
+
+Merge pull request #404 from plone/eventlisting_date_filter
+
+Fix date conversion when collection context has start/end date queries
+
+Files changed:
+A news/404.bugfix
+M plone/app/event/browser/event_listing.py
+M plone/app/event/tests/test_event_listing.py
+
+b'diff --git a/news/404.bugfix b/news/404.bugfix\nnew file mode 100644\nindex 00000000..26707eee\n--- /dev/null\n+++ b/news/404.bugfix\n@@ -0,0 +1,2 @@\n+Fix date conversion between collection query and ``expand_events`` filtering.\n+[petschki]\ndiff --git a/plone/app/event/browser/event_listing.py b/plone/app/event/browser/event_listing.py\nindex 55c0f2e1..e01de705 100644\n--- a/plone/app/event/browser/event_listing.py\n+++ b/plone/app/event/browser/event_listing.py\n@@ -222,6 +222,13 @@ def _expand_events_start_end(self, start, end):\n         # XXX: This actually fits most needs, but not all. Maybe someone\n         # wants to come up with some edgecases!\n         se = dict(start=None, end=None)\n+\n+        def safe_dt(val):\n+            # convert value from DateTime to datetime\n+            if hasattr(val, "asdatetime"):\n+                return val.asdatetime()\n+            return val\n+\n         if start:\n             q = start.get("query")\n             r = start.get("range")\n@@ -238,7 +245,7 @@ def _expand_events_start_end(self, start, end):\n             r = end.get("range")\n             if r == "min":\n                 se["start"] = q\n-        return se["start"], se["end"]\n+        return safe_dt(se["start"]), safe_dt(se["end"])\n \n     def formatted_date(self, occ):\n         provider = getMultiAdapter(\ndiff --git a/plone/app/event/tests/test_event_listing.py b/plone/app/event/tests/test_event_listing.py\nindex 5eb94662..db67bbd8 100644\n--- a/plone/app/event/tests/test_event_listing.py\n+++ b/plone/app/event/tests/test_event_listing.py\n@@ -1,3 +1,4 @@\n+from DateTime import DateTime\n from plone.app.event.base import localized_today\n from plone.app.event.testing import make_fake_response\n from plone.app.event.testing import PAEventDX_INTEGRATION_TESTING\n@@ -151,3 +152,30 @@ def test_no_date_filtering(self):\n             "mode_day",\n         ]:\n             self.assertTrue(_class not in out)\n+\n+    @mock.patch("plone.app.event.browser.event_listing.localized_now", new=PN)\n+    @mock.patch("plone.app.event.base.localized_now", new=PN)\n+    def test_end_date_filtering(self):\n+        """Test date conversion between collection query and \'expand_events\'\n+        filtering.\n+        """\n+        # plone.app.contenttypes ICollection type\n+        self.portal.invokeFactory("Collection", "col_with_date_criterion", title="Col")\n+        collection = self.portal.col_with_date_criterion\n+        collection.query = [\n+            {\n+                "i": "portal_type",\n+                "o": "plone.app.querystring.operation.selection.any",\n+                "v": ["Event", "plone.app.event.dx.event"],\n+            },\n+            {\n+                "i": "end",\n+                "o": "plone.app.querystring.operation.date.largerThan",\n+                "v": DateTime(PN()),\n+            },\n+        ]\n+\n+        view = self.portal.col_with_date_criterion.restrictedTraverse("@@event_listing")\n+        view()\n+\n+        self.assertIs(len(self.portal.col_with_date_criterion.results()), 3)\n'
 
