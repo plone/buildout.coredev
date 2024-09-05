@@ -1,30 +1,38 @@
-# Release notes for Plone 6.0.12
+# Release notes for Plone 6.0.13
 
-* Released: Thursday August 1st, 2024
+* Released: September 5, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.12/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.12/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.13/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.13/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.12/constraints.txt](https://dist.plone.org/release/6.0.12/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.12/versions.cfg](https://dist.plone.org/release/6.0.12/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.12/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.12/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.13/constraints.txt](https://dist.plone.org/release/6.0.13/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.13/versions.cfg](https://dist.plone.org/release/6.0.13/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.13/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.13/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.11.1:
+Major changes since 6.0.12:
 
-* `plone.api`: Report if a permission does not exist when calling `api.user.has_permission`.
-* `plone.restapi`:
-  * Add cache rules for `@site` and `@navroot`.
-  * Added `TeaserBlockSerializer` which updates the contents of a teaser block from its target if the block has `"overwrite": false`.
-* `plone.app.content`: Speed improvement in `getVocabulary` for large vocabularies.
+* `plone.app.content`:
+  * `getVocabulary`: Fix for terms with incomplete HTML.
+  * Fix `select_default_page` in VHM hosted sites.
+* `Products.PortalTransforms`: Shortcut in safe_html: Check for signs of html or script, skip further processing if none are found.
+* Newer `docutils` that works with Sphinx 8.
+* `Products.validation`:
+  * Drop support for Plone 5.2 and for Python 3.7 and lower.  Only Plone 6.0 and 6.1 are supported now.  Note that this is not used by core Plone, but for example by `collective.easyform`.
+  * Move translations from plone.app.locales to here.
+* `zc.buildout`: update to version that works with latest setuptools.
+* `plone.app.locales:
+  * Remove `Products.validation` translations. They are moved to that package.
+  * Update es, pt-br, eu, cn, and nl translations.
+* `Products.CMFPlone`: Use `five.registerPackage` so an editable install with `pip` works.
 
 
 ## Volto frontend
 
-The default frontend for new Plone 6 sites is Volto. Latest release is [16.31.11](https://www.npmjs.com/package/@plone/volto/v/16.31.11).  See the [changelog](https://github.com/plone/volto/blob/16.31.11/CHANGELOG.md).
+The default frontend for new Plone 6 sites is Volto. Latest release is [16.32.1](https://www.npmjs.com/package/@plone/volto/v/16.32.1).  See the [changelog](https://github.com/plone/volto/blob/16.32.1/CHANGELOG.md).
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Also, existing Plone sites need some or more extensive changes to be upgraded before they can use the Volto Frontend. Please read the guide on [migrating from Plone Classic UI to Volto](https://6.docs.plone.org/backend/upgrading/version-specific-migration/migrate-to-volto.html).
@@ -49,14 +57,13 @@ Note that Plone 6.0 is tested on Python 3.8 and 3.11 on every change to core pac
 In Plone core we use these versions to install Plone:
 
 ```
-pip==24.0
-setuptools==69.5.1
-wheel==0.43.0
-zc.buildout==3.0.1
+pip==24.2
+setuptools==74.0.0
+wheel==0.44.0
+zc.buildout==3.1.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
-`setuptools` 70 will cause problems with current `zc.buildout` 3.0.1, so keep your eyes out for a new `zc.buildout` release.
 
 
 ## Installation
