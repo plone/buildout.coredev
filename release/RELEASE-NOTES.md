@@ -89,9 +89,7 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 ## Docker
 
-In the alpha stage, we did not create any `plone-backend` Docker images.
-This is expected to change now that we have a first beta release.
-
+In the alpha stage, we did not create any [`plone-backend` Docker images](https://hub.docker.com/r/plone/plone-backend), but for the first beta we did.  You can now use the `plone/plone-backend:6.1.0b1` image.
 
 ## Python compatibility
 
