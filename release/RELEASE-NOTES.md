@@ -17,7 +17,7 @@ The main change in this release is the support and inclusion of Plone Distributi
 A Plone distribution is a Python package that defines specific features, themes, add-ons, and configurations that get activated when creating a Plone site.
 Now it is available in core Plone as the recommended way for creating a new Plone site.
 
-Work is underway to document what distributions are, how to use them, and how they may affect an upgrade to Plone 6.1.  See this [documentation PR](https://github.com/plone/documentation/pull/1733).
+The documentation explains the [concept of distributions](https://6.docs.plone.org/conceptual-guides/distributions.html), how to [create a distribution](https://6.docs.plone.org/developer-guide/create-a-distribution.html) and what you may need to [do when upgrading](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html#distributions).
 
 The following packages are involved in the changes.  Their links already give an idea of how to create and use distributions:
 
