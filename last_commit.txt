@@ -1,32 +1,16 @@
-Repository: plone.restapi
+Repository: plone.keyring
 
 
-Branch: refs/heads/main
-Date: 2024-11-26T11:29:08-03:00
-Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/447a87c3248ba31c0cbb9cd7cadb1c5b5f315d9e
+Branch: refs/heads/master
+Date: 2024-11-27T15:38:05-03:00
+Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
+Commit: https://github.com/plone/plone.keyring/commit/c10e755bd20d7bdb7d9308e74b8989bdb6f3760f
 
-Register IObjectPrimaryFieldTarget for Link objects (#1847)
-
-* Register IObjectPrimaryFieldTarget for Link objects to render target url for anonymous users
-
-* add changelog
-
-* Update news/1847.feat
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
-
-* rename changelog file
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+fix removed `unittest.makeSuite` in python 3.13
 
 Files changed:
-A news/1847.feature
-M src/plone/restapi/serializer/configure.zcml
-M src/plone/restapi/serializer/dxcontent.py
-M src/plone/restapi/tests/test_dxcontent_serializer.py
+M plone/keyring/tests/testKeymanager.py
+M plone/keyring/tests/testKeyring.py
 
-b'diff --git a/news/1847.feature b/news/1847.feature\nnew file mode 100644\nindex 0000000000..c2f91e123e\n--- /dev/null\n+++ b/news/1847.feature\n@@ -0,0 +1 @@\n+When a Link content item is linked by UID, resolve its URL as the linked target URL for anonymous users. @cekk\ndiff --git a/src/plone/restapi/serializer/configure.zcml b/src/plone/restapi/serializer/configure.zcml\nindex 0e84f64f42..32c63b2d78 100644\n--- a/src/plone/restapi/serializer/configure.zcml\n+++ b/src/plone/restapi/serializer/configure.zcml\n@@ -8,6 +8,8 @@\n   <adapter factory=".dxcontent.SerializeToJson" />\n   <adapter factory=".dxcontent.SerializeFolderToJson" />\n   <adapter factory=".dxcontent.DexterityObjectPrimaryFieldTarget" />\n+  <adapter factory=".dxcontent.LinkObjectPrimaryFieldTarget" />\n+\n \n   <configure zcml:condition="installed plone.app.contenttypes">\n     <adapter factory=".collection.SerializeCollectionToJson" />\ndiff --git a/src/plone/restapi/serializer/dxcontent.py b/src/plone/restapi/serializer/dxcontent.py\nindex 1c546d091d..e497bb6b68 100644\n--- a/src/plone/restapi/serializer/dxcontent.py\n+++ b/src/plone/restapi/serializer/dxcontent.py\n@@ -1,6 +1,7 @@\n from AccessControl import getSecurityManager\n from Acquisition import aq_inner\n from Acquisition import aq_parent\n+from plone.app.contenttypes.interfaces import ILink\n from plone.autoform.interfaces import READ_PERMISSIONS_KEY\n from plone.dexterity.interfaces import IDexterityContainer\n from plone.dexterity.interfaces import IDexterityContent\n@@ -266,3 +267,27 @@ def check_permission(self, permission_name, obj):\n                     sm.checkPermission(permission.title, obj)\n                 )\n         return self.permission_cache[permission_name]\n+\n+\n+@adapter(ILink, Interface)\n+@implementer(IObjectPrimaryFieldTarget)\n+class LinkObjectPrimaryFieldTarget:\n+    def __init__(self, context, request):\n+        self.context = context\n+        self.request = request\n+\n+        self.permission_cache = {}\n+\n+    def __call__(self):\n+        """\n+        If user can edit Link object, do not return remoteUrl\n+        """\n+        pm = getToolByName(self.context, "portal_membership")\n+        if bool(pm.isAnonymousUser()):\n+            for schema in iterSchemata(self.context):\n+                for name, field in getFields(schema).items():\n+                    if name == "remoteUrl":\n+                        serializer = queryMultiAdapter(\n+                            (field, self.context, self.request), IFieldSerializer\n+                        )\n+                        return serializer()\ndiff --git a/src/plone/restapi/tests/test_dxcontent_serializer.py b/src/plone/restapi/tests/test_dxcontent_serializer.py\nindex 567aa01e62..1989181472 100644\n--- a/src/plone/restapi/tests/test_dxcontent_serializer.py\n+++ b/src/plone/restapi/tests/test_dxcontent_serializer.py\n@@ -16,11 +16,13 @@\n from plone.namedfile.file import NamedFile\n from plone.registry.interfaces import IRegistry\n from plone.restapi.interfaces import IExpandableElement\n+from plone.restapi.interfaces import IObjectPrimaryFieldTarget\n from plone.restapi.interfaces import ISerializeToJson\n from plone.restapi.testing import PLONE_RESTAPI_DX_INTEGRATION_TESTING\n from plone.restapi.tests.test_expansion import ExpandableElementFoo\n from plone.restapi.serializer.utils import get_portal_type_title\n from plone.uuid.interfaces import IMutableUUID\n+from plone.uuid.interfaces import IUUID\n from Products.CMFCore.utils import getToolByName\n from zope.component import getGlobalSiteManager\n from zope.component import getMultiAdapter\n@@ -756,3 +758,38 @@ def test_primary_field_target_with_edit_permissions(self):\n         serializer = getMultiAdapter((self.portal.doc1, self.request), ISerializeToJson)\n         data = serializer()\n         self.assertNotIn("targetUrl", data)\n+\n+    def test_primary_field_target_for_link_objects_for_auth_return_none(self):\n+        self.portal.invokeFactory(\n+            "Document",\n+            id="linked",\n+        )\n+        self.portal.invokeFactory(\n+            "Link",\n+            id="link",\n+            remoteUrl=f"../resolveuid/{IUUID(self.portal.linked)}",\n+        )\n+        wftool = getToolByName(self.portal, "portal_workflow")\n+        wftool.doActionFor(self.portal.linked, "publish")\n+        adapter = getMultiAdapter(\n+            (self.portal.link, self.request), IObjectPrimaryFieldTarget\n+        )\n+        self.assertEqual(adapter(), None)\n+\n+    def test_primary_field_target_for_link_objects_for_anonymous(self):\n+        self.portal.invokeFactory(\n+            "Document",\n+            id="linked",\n+        )\n+        self.portal.invokeFactory(\n+            "Link",\n+            id="link",\n+            remoteUrl=f"../resolveuid/{IUUID(self.portal.linked)}",\n+        )\n+        wftool = getToolByName(self.portal, "portal_workflow")\n+        wftool.doActionFor(self.portal.linked, "publish")\n+        logout()\n+        adapter = getMultiAdapter(\n+            (self.portal.link, self.request), IObjectPrimaryFieldTarget\n+        )\n+        self.assertEqual(adapter(), self.portal.linked.absolute_url())\n'
+b'diff --git a/plone/keyring/tests/testKeymanager.py b/plone/keyring/tests/testKeymanager.py\nindex 86e9fbe..4ae58f1 100644\n--- a/plone/keyring/tests/testKeymanager.py\n+++ b/plone/keyring/tests/testKeymanager.py\n@@ -2,7 +2,7 @@\n from plone.keyring.interfaces import IKeyManager\n from plone.keyring.keymanager import KeyManager\n from plone.keyring.keyring import Keyring\n-from unittest import makeSuite\n+from unittest import defaultTestLoader\n from unittest import TestCase\n from unittest import TestSuite\n from zope.interface.verify import verifyClass\n@@ -110,5 +110,5 @@ def testSecretUnknownRing(self):\n \n def test_suite():\n     suite = TestSuite()\n-    suite.addTest(makeSuite(KeyManagerTests))\n+    suite.addTest(defaultTestLoader.loadTestsFromTestCase(KeyManagerTests))\n     return suite\ndiff --git a/plone/keyring/tests/testKeyring.py b/plone/keyring/tests/testKeyring.py\nindex 34f0876..b4f61ad 100644\n--- a/plone/keyring/tests/testKeyring.py\n+++ b/plone/keyring/tests/testKeyring.py\n@@ -1,6 +1,6 @@\n from plone.keyring.interfaces import IKeyring\n from plone.keyring.keyring import Keyring\n-from unittest import makeSuite\n+from unittest import defaultTestLoader\n from unittest import TestCase\n from unittest import TestSuite\n from zope.interface.verify import verifyClass\n@@ -60,5 +60,5 @@ def testCurrent(self):\n \n def test_suite():\n     suite = TestSuite()\n-    suite.addTest(makeSuite(KeyringTests))\n+    suite.addTest(defaultTestLoader.loadTestsFromTestCase(KeyringTests))\n     return suite\n'
 
