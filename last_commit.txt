@@ -2,38 +2,28 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2024-12-16T20:56:01-08:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.restapi/commit/93ceb885d78b804d4cc0fe8ef636c5bee1b3c20d
+Date: 2024-12-16T21:12:14-08:00
+Author: Andrea Cecchi (cekk) <andrea.cecchi85@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/a571899353937b7e3609eaab728116107caf567a
 
-Make primary field target adapter return early. (#1851)
+Handle aliases in path2uid (#1848)
 
-* Make primary field target adapter return early.
+* Handle aliases in path2uid
 
-When there is no primary field, do not go through all fields.
-First compare the field name, then the permission: comparing two strings is cheaper.
-If the field name matches, stop iterating over other fields: you have already found the field.
+* add changelog
 
-* Update news/1851.bugfix
+* make sure it found the correct page
 
-* Primary field target: get primary_field_name directly instead of iterating over all fields.
-
-* Run tests on ubuntu-22.04.
-
-This was ubuntu-latest until last week.
-With ubuntu-24.04 on Python 3.12 Pillow is not installed correctly.
-See https://github.com/plone/plone.restapi/pull/1851#issuecomment-2547097591
-
-* Update src/plone/restapi/serializer/dxcontent.py
+* adjust changelog
 
 ---------
 
 Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-A news/1851.bugfix
-M .github/workflows/tests.yml
-M src/plone/restapi/serializer/dxcontent.py
+A news/1848.bugfix
+M src/plone/restapi/deserializer/utils.py
+M src/plone/restapi/tests/test_blocks_deserializer.py
 
-b"diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml\nindex 73447527bc..72d7ada3ff 100644\n--- a/.github/workflows/tests.yml\n+++ b/.github/workflows/tests.yml\n@@ -3,7 +3,7 @@ on: [push, pull_request]\n jobs:\n   build:\n     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name\n-    runs-on: ubuntu-latest\n+    runs-on: ubuntu-22.04\n     strategy:\n       fail-fast: false\n       matrix:\ndiff --git a/news/1851.bugfix b/news/1851.bugfix\nnew file mode 100644\nindex 0000000000..dc29516054\n--- /dev/null\n+++ b/news/1851.bugfix\n@@ -0,0 +1 @@\n+Optimized performance of DexterityObjectPrimaryFieldTarget adapter. @maurits\ndiff --git a/src/plone/restapi/serializer/dxcontent.py b/src/plone/restapi/serializer/dxcontent.py\nindex e497bb6b68..eb0fc44c6e 100644\n--- a/src/plone/restapi/serializer/dxcontent.py\n+++ b/src/plone/restapi/serializer/dxcontent.py\n@@ -220,23 +220,26 @@ def __init__(self, context, request):\n \n     def __call__(self):\n         primary_field_name = self.get_primary_field_name()\n+        if not primary_field_name:\n+            return\n         for schema in iterSchemata(self.context):\n             read_permissions = mergedTaggedValueDict(schema, READ_PERMISSIONS_KEY)\n \n-            for name, field in getFields(schema).items():\n-                if not self.check_permission(read_permissions.get(name), self.context):\n-                    continue\n-\n-                if name != primary_field_name:\n-                    continue\n-\n-                target_adapter = queryMultiAdapter(\n-                    (field, self.context, self.request), IPrimaryFieldTarget\n-                )\n-                if target_adapter:\n-                    target = target_adapter()\n-                    if target:\n-                        return target\n+            field = getFields(schema).get(primary_field_name)\n+            if field is None:\n+                continue\n+            if not self.check_permission(\n+                read_permissions.get(primary_field_name),\n+                self.context,\n+            ):\n+                return\n+\n+            target_adapter = queryMultiAdapter(\n+                (field, self.context, self.request), IPrimaryFieldTarget\n+            )\n+            if not target_adapter:\n+                return\n+            return target_adapter()\n \n     def get_primary_field_name(self):\n         fieldname = None\n"
+b'diff --git a/news/1848.bugfix b/news/1848.bugfix\nnew file mode 100644\nindex 0000000000..c9816615af\n--- /dev/null\n+++ b/news/1848.bugfix\n@@ -0,0 +1 @@\n+Fix resolving paths in deserializer if the target was moved in the same request. @cekk\ndiff --git a/src/plone/restapi/deserializer/utils.py b/src/plone/restapi/deserializer/utils.py\nindex 67d67d5556..c6b687fa2f 100644\n--- a/src/plone/restapi/deserializer/utils.py\n+++ b/src/plone/restapi/deserializer/utils.py\n@@ -2,6 +2,9 @@\n from plone.uuid.interfaces import IUUID\n from plone.uuid.interfaces import IUUIDAware\n from zope.component import getMultiAdapter\n+from plone.app.redirector.interfaces import IRedirectionStorage\n+from zope.component import getUtility\n+\n import re\n \n PATH_RE = re.compile(r"^(.*?)((?=/@@|#).*)?$")\n@@ -35,6 +38,14 @@ def path2uid(context, link):\n         suffix = match.group(2) or ""\n \n     obj = portal.unrestrictedTraverse(path, None)\n+    if obj is None:\n+        # last try: maybe the object or some parent has been renamed.\n+        # if yes, there should be a reference into redirection storage\n+        storage = getUtility(IRedirectionStorage)\n+        alias_path = storage.get(path)\n+        if alias_path:\n+            path = alias_path\n+            obj = portal.unrestrictedTraverse(path, None)\n     if obj is None or obj == portal:\n         return link\n     segments = path.split("/")\ndiff --git a/src/plone/restapi/tests/test_blocks_deserializer.py b/src/plone/restapi/tests/test_blocks_deserializer.py\nindex 874e5446e8..dcaf3bf2c8 100644\n--- a/src/plone/restapi/tests/test_blocks_deserializer.py\n+++ b/src/plone/restapi/tests/test_blocks_deserializer.py\n@@ -1,3 +1,4 @@\n+from plone import api\n from plone.dexterity.interfaces import IDexterityFTI\n from plone.dexterity.interfaces import IDexterityItem\n from plone.restapi.behaviors import IBlocks\n@@ -724,3 +725,16 @@ def test_deserialize_url_with_image_scales(self):\n         res = self.deserialize(blocks=blocks)\n         self.assertTrue(res.blocks["123"]["url"].startswith("../resolveuid/"))\n         self.assertNotIn("image_scales", res.blocks["123"])\n+\n+    def test_deserializer_resolve_path_also_if_it_is_an_alias(self):\n+\n+        self.portal.invokeFactory(\n+            "Document",\n+            id="doc",\n+        )\n+        api.content.move(source=self.portal.doc, id="renamed-doc")\n+        blocks = {"abc": {"href": "%s/doc" % self.portal.absolute_url()}}\n+\n+        res = self.deserialize(blocks=blocks)\n+        link = res.blocks["abc"]["href"]\n+        self.assertEqual(link, f"../resolveuid/{self.portal[\'renamed-doc\'].UID()}")\n'
 
