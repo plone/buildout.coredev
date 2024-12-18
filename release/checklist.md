@@ -30,6 +30,7 @@ See the [release schedule](https://plone.org/download/release-schedule).
   - [ ] Create a file `release/RELEASE-NOTES.md`. It may be enough to look through the changelog and copy interesting changes.
   - [ ] Get the `versions.cfg` file and any other versions files from coredev.
   - [ ] Create a `release/constraints.txt` file from this. The above tox command generates this.  Note: at some point I expect the constraints file to become leading, and we may need to generate a `versions.cfg` file instead.
+  - [ ] NEW.  Run `make install`.  This uses `mxdev` to install packages and generate some files.  Most importantly this generates `constraints-mxdev.txt`.  This contains *all* constraints, *and* makes sure no constraints are in there twice (provided that `mx.ini` is correct).  This is really the only constraints file that is needed and that is correct.  So I think I will only ship this one and call it `constraints.txt` on dist.plone.org.  This may need some more thought and updates in next releases.
   - [ ] Copy (`rsync`) these files to the pending release directory.  (We used to copy packages as well, but we do not do this for Plone 6 anymore.)
 - [ ] Write a post on community.plone.org announcing a pending/soft release. See [example](https://community.plone.org/t/plone-6-0-0b3-released/15728).  In the 6.1 alpha/beta/rc stage, we can skip pending releases and just make a real release.
 - [ ] Wait for feedback, preferably at most a few days.  As said, in the alpha/beta/rc stage, we can skip this.

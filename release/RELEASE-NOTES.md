@@ -7,7 +7,7 @@
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0b1/constraints.txt](https://dist.plone.org/release/6.1.0b1/constraints.txt), plus optionally [`constraints-extra.txt`](https://dist.plone.org/release/6.1.0b1/constraints-extra.txt) and [`constraints-ecosystem.txt`](https://dist.plone.org/release/6.1.0b1/constraints-ecosystem.txt).  Note: in 6.0 we did not have these last two files.  This may still change.
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0b1/constraints.txt](https://dist.plone.org/release/6.1.0b1/constraints.txt).
 * With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0b1/versions.cfg](https://dist.plone.org/release/6.1.0b1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0b1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0b1/versions-ecosystem.cfg).
 
 
