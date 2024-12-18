@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1.0b2 (unreleased)
 
-* Last updated: December 11, 2024
+* Last updated: December 18, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1.0b1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0b1/changelog.txt).
@@ -15,7 +15,18 @@ If you want to jump straight in, here are two important links:
 
 Major changes since 6.1.0b1:
 
+* Supports Python 3.13.  Python 3.13.0 has a problem though, so you need at least 3.13.1.
 * `Products.CMFEditions`: Fix ancient bug: "Can't pickle objects in acquisition wrappers" error in `OMOutsideChildrensModifier` and `OMInsideChildrensModifier`.
+* `plone.app.event`: Provide an IContentListingObject adapter.
+* `plone.app.multilingual`: use pat-contentbrowser as default widget for add translation form.
+* `plone.distribution`: Fix bug where launch screen was blank in Chrome.
+* `plone.namedfile`: Set `Link` header with `rel="canonical"` for file downloads. @mamico (#163)
+* `plone.restapi`: Fix log in after changing email when "email as login" is enabled.
+* `plone.volto`:
+  * Rename `default` distribution to `volto`.
+  * Enable the `plone.versioning` behavior for the Page content type.
+  * The `volto.head_title` behavior has been renamed to `volto.kicker`.  The old name still works, but is deprecated.  Content types should be updated to use the new name.
+* `plonetheme.barceloneta`: Upgrade TinyMCE 7.6.0.
 
 
 ## Volto frontend
@@ -24,9 +35,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.0.0](https://www.npmjs.com/package/@plone/volto/v/18.0.0).  See the [changelog](https://github.com/plone/volto/blob/18.0.0/packages/volto/CHANGELOG.md).  You saw that right: this is no longer an alpha release, but a final release!
-
-Or use the latest Volto 17.
+Latest release is [18.4.0](https://www.npmjs.com/package/@plone/volto/v/18.4.0).  See the [changelog](https://github.com/plone/volto/blob/18.4.0/packages/volto/CHANGELOG.md).
 
 
 ## Classic UI
@@ -34,30 +43,27 @@ Or use the latest Volto 17.
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.0 and 6.1.  Our documentation now refers to this frontend as 'Classic UI'.
 
 
-## Docker
-
-In the alpha stage, we did not create any [`plone-backend` Docker images](https://hub.docker.com/r/plone/plone-backend), but for the first beta we did.  You can now use the `plone/plone-backend:6.1.0b1` image.
-
 ## Python compatibility
 
-This release supports Python 3.10, 3.11, and 3.12.
+This is the first Plone release to support Python 3.13.
+This release supports Python 3.10, 3.11, 3.12, and 3.13.
 
-The underlying Zope 5.11 supports Python 3.13, but this Plone release not yet.  We should be close though.
 
 ## pip, buildout, setuptools
 
 In Plone core we use these versions to install Plone:
 
 ```
-pip==24.2
-setuptools==75.2.0
-wheel==0.44.0
+pip==24.3.1
+setuptools==75.6.0
+wheel==0.45.1
 zc.buildout==3.3
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
 
 Note that there is also a [`zc.buildout` 4.0.0a1](https://pypi.org/project/zc.buildout/4.0.0a1/) release that you could try.
+
 
 ## Installation
 
