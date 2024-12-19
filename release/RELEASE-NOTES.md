@@ -1,6 +1,6 @@
-# Release notes for Plone 6.1.0b2 (unreleased)
+# Release notes for Plone 6.1.0b2
 
-* Last updated: December 18, 2024
+* Released: December 19, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1.0b1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0b1/changelog.txt).
@@ -16,12 +16,15 @@ If you want to jump straight in, here are two important links:
 Major changes since 6.1.0b1:
 
 * Supports Python 3.13.  Python 3.13.0 has a problem though, so you need at least 3.13.1.
+* `Products.CMFPlone`: Allow bundles to be rendered after all others.  To render resources after all others, give them the "depends" value of "all".
 * `Products.CMFEditions`: Fix ancient bug: "Can't pickle objects in acquisition wrappers" error in `OMOutsideChildrensModifier` and `OMInsideChildrensModifier`.
 * `plone.app.event`: Provide an IContentListingObject adapter.
 * `plone.app.multilingual`: use pat-contentbrowser as default widget for add translation form.
 * `plone.distribution`: Fix bug where launch screen was blank in Chrome.
 * `plone.namedfile`: Set `Link` header with `rel="canonical"` for file downloads. @mamico (#163)
-* `plone.restapi`: Fix log in after changing email when "email as login" is enabled.
+* `plone.restapi`:
+  * Fix log in after changing email when "email as login" is enabled.
+  * When a Link content item is linked by UID, resolve its URL as the linked target URL for anonymous users.
 * `plone.volto`:
   * Rename `default` distribution to `volto`.
   * Enable the `plone.versioning` behavior for the Page content type.
