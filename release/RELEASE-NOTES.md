@@ -3,12 +3,12 @@
 * Released: December 19, 2024
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.0b1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0b1/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.0b2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0b2/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0b1/constraints.txt](https://dist.plone.org/release/6.1.0b1/constraints.txt).
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0b1/versions.cfg](https://dist.plone.org/release/6.1.0b1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0b1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0b1/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0b2/constraints.txt](https://dist.plone.org/release/6.1.0b2/constraints.txt).
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0b2/versions.cfg](https://dist.plone.org/release/6.1.0b2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0b2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0b2/versions-ecosystem.cfg).
 
 
 ## Highlights
