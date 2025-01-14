@@ -1,19 +1,41 @@
-Repository: plone.app.discussion
+Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2025-01-14T08:28:42+01:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.app.discussion/commit/d6a314178c8c38ffd2bef56504ece95add91a47d
+Date: 2025-01-14T14:53:17-08:00
+Author: Dylan Jay (djay) <github@dylanjay.com>
+Commit: https://github.com/plone/plone.restapi/commit/aeb3ad0ccb550860ed32398a0632b14c0c61561b
 
-Revert "Do not depend on plone.api"
+Handle bad input as BadRequest instead of ValueError (#1855)
 
-This reverts commit 977d3ce3b1b6ee6cd488efa4b74b659dc40d5e5e.
+* Handle bad input as BadRequest instead of ValueError
+
+useful so it can be more easily ignored
+
+* added basic test
+
+* Update src/plone/restapi/services/navigation/get.py
+
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+
+* batching int valueerror to badrequests
+
+* fix flake8
+
+* add changelog
+
+* Update news/1855.bugfix
+
+---------
+
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-M plone/app/discussion/upgrades.py
-M setup.py
-D news/188.bugfix.rst
+A news/1855.bugfix
+M src/plone/restapi/batching.py
+M src/plone/restapi/services/navigation/get.py
+M src/plone/restapi/tests/test_batching.py
+M src/plone/restapi/tests/test_services_navigation.py
 
-b'diff --git a/news/188.bugfix.rst b/news/188.bugfix.rst\ndeleted file mode 100644\nindex 30f44736..00000000\n--- a/news/188.bugfix.rst\n+++ /dev/null\n@@ -1 +0,0 @@\n-Do not depend on ``plone.api``. [ale-rt]\ndiff --git a/plone/app/discussion/upgrades.py b/plone/app/discussion/upgrades.py\nindex cab45926..b63a666b 100644\n--- a/plone/app/discussion/upgrades.py\n+++ b/plone/app/discussion/upgrades.py\n@@ -1,6 +1,7 @@\n from .interfaces import IDiscussionSettings\n from .setuphandlers import add_discussion_behavior_to_default_types\n from datetime import timezone\n+from plone import api\n from plone.registry.interfaces import IRegistry\n from Products.CMFCore.utils import getToolByName\n from Products.ZCatalog.ProgressHandler import ZLogHandler\n@@ -91,7 +92,7 @@ def extend_review_workflow(context):\n \n def set_timezone_on_dates(context):\n     """Ensure timezone data is stored against all creation/modified dates"""\n-    pc = getToolByName(context, "portal_catalog")\n+    pc = api.portal.get_tool("portal_catalog")\n     creations = 0\n     modifieds = 0\n     logger.info("Setting timezone information on comment dates")\ndiff --git a/setup.py b/setup.py\nindex 558c1c69..f4c4869d 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -44,6 +44,7 @@\n         "Products.GenericSetup",\n         "Products.ZCatalog",\n         "Products.statusmessages",\n+        "plone.api",\n         "plone.app.event",\n         "plone.registry",\n         "plone.resource",\n'
+b'diff --git a/news/1855.bugfix b/news/1855.bugfix\nnew file mode 100644\nindex 0000000000..b164e9f037\n--- /dev/null\n+++ b/news/1855.bugfix\n@@ -0,0 +1 @@\n+Changed bad int inputs into 500 Exceptions to 400 BadRequest so they can be filtered out of logs more easily. @djay\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/batching.py b/src/plone/restapi/batching.py\nindex 7b0b814eea..30653c43c3 100644\n--- a/src/plone/restapi/batching.py\n+++ b/src/plone/restapi/batching.py\n@@ -1,7 +1,9 @@\n from plone.batching.batch import Batch\n from plone.restapi.deserializer import json_body\n+from plone.restapi.exceptions import DeserializationError\n from urllib.parse import parse_qsl\n from urllib.parse import urlencode\n+from zExceptions import BadRequest\n \n \n DEFAULT_BATCH_SIZE = 25\n@@ -11,13 +13,15 @@ class HypermediaBatch:\n     def __init__(self, request, results):\n         self.request = request\n \n-        self.b_start = int(json_body(self.request).get("b_start", False)) or int(\n-            self.request.form.get("b_start", 0)\n-        )\n-        self.b_size = int(json_body(self.request).get("b_size", False)) or int(\n-            self.request.form.get("b_size", DEFAULT_BATCH_SIZE)\n-        )\n-\n+        try:\n+            self.b_start = int(json_body(self.request).get("b_start", False)) or int(\n+                self.request.form.get("b_start", 0)\n+            )\n+            self.b_size = int(json_body(self.request).get("b_size", False)) or int(\n+                self.request.form.get("b_size", DEFAULT_BATCH_SIZE)\n+            )\n+        except (ValueError, DeserializationError) as e:\n+            raise BadRequest(e)\n         self.batch = Batch(results, self.b_size, self.b_start)\n \n     def __iter__(self):\ndiff --git a/src/plone/restapi/services/navigation/get.py b/src/plone/restapi/services/navigation/get.py\nindex a21a52abe4..de9f91ed6b 100644\n--- a/src/plone/restapi/services/navigation/get.py\n+++ b/src/plone/restapi/services/navigation/get.py\n@@ -17,6 +17,7 @@\n from zope.i18n import translate\n from zope.interface import implementer\n from zope.interface import Interface\n+from zExceptions import BadRequest\n \n \n @implementer(IExpandableElement)\n@@ -29,7 +30,10 @@ def __init__(self, context, request):\n \n     def __call__(self, expand=False):\n         if self.request.form.get("expand.navigation.depth", False):\n-            self.depth = int(self.request.form["expand.navigation.depth"])\n+            try:\n+                self.depth = int(self.request.form["expand.navigation.depth"])\n+            except (ValueError, TypeError) as e:\n+                raise BadRequest(e)\n         else:\n             self.depth = 1\n \ndiff --git a/src/plone/restapi/tests/test_batching.py b/src/plone/restapi/tests/test_batching.py\nindex 3e809ebabc..4470b2c8f6 100644\n--- a/src/plone/restapi/tests/test_batching.py\n+++ b/src/plone/restapi/tests/test_batching.py\n@@ -185,6 +185,11 @@ def test_batching_links_omitted_if_resulset_fits_in_single_batch(self):\n         response = self.api_session.get("/collection?b_size=100")\n         self.assertNotIn("batching", list(response.json()))\n \n+    def test_batching_badrequests(self):\n+        response = self.api_session.get("/collection?b_size=php")\n+        self.assertEqual(response.status_code, 400)\n+        self.assertIn("invalid literal for int()", response.json()["message"])\n+\n \n class TestBatchingDXFolders(TestBatchingDXBase):\n \ndiff --git a/src/plone/restapi/tests/test_services_navigation.py b/src/plone/restapi/tests/test_services_navigation.py\nindex 890c5c1220..a61009005c 100644\n--- a/src/plone/restapi/tests/test_services_navigation.py\n+++ b/src/plone/restapi/tests/test_services_navigation.py\n@@ -239,3 +239,11 @@ def test_use_nav_title_when_available_and_set(self):\n         )\n \n         self.assertEqual(response.json()["items"][1]["items"][-1]["title"], nav_title)\n+\n+    def test_navigation_badrequests(self):\n+        response = self.api_session.get(\n+            "/folder/@navigation", params={"expand.navigation.depth": "php"}\n+        )\n+\n+        self.assertEqual(response.status_code, 400)\n+        self.assertIn("invalid literal for int()", response.json()["message"])\n'
 
