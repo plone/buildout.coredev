@@ -2,40 +2,25 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2025-01-14T14:53:17-08:00
+Date: 2025-01-14T17:48:13-08:00
 Author: Dylan Jay (djay) <github@dylanjay.com>
-Commit: https://github.com/plone/plone.restapi/commit/aeb3ad0ccb550860ed32398a0632b14c0c61561b
+Commit: https://github.com/plone/plone.restapi/commit/7af964916aa59cb38b33700198829b8372c1b4ea
 
-Handle bad input as BadRequest instead of ValueError (#1855)
+Handle more BadRequests (#1857)
 
-* Handle bad input as BadRequest instead of ValueError
-
-useful so it can be more easily ignored
-
-* added basic test
-
-* Update src/plone/restapi/services/navigation/get.py
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
-
-* batching int valueerror to badrequests
-
-* fix flake8
+* Another should be BadRequest found in the wild
 
 * add changelog
 
-* Update news/1855.bugfix
+* Update news/1857.bugfix
 
 ---------
 
 Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-A news/1855.bugfix
-M src/plone/restapi/batching.py
-M src/plone/restapi/services/navigation/get.py
-M src/plone/restapi/tests/test_batching.py
-M src/plone/restapi/tests/test_services_navigation.py
+A news/1857.bugfix
+M src/plone/restapi/services/querystringsearch/get.py
 
-b'diff --git a/news/1855.bugfix b/news/1855.bugfix\nnew file mode 100644\nindex 0000000000..b164e9f037\n--- /dev/null\n+++ b/news/1855.bugfix\n@@ -0,0 +1 @@\n+Changed bad int inputs into 500 Exceptions to 400 BadRequest so they can be filtered out of logs more easily. @djay\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/batching.py b/src/plone/restapi/batching.py\nindex 7b0b814eea..30653c43c3 100644\n--- a/src/plone/restapi/batching.py\n+++ b/src/plone/restapi/batching.py\n@@ -1,7 +1,9 @@\n from plone.batching.batch import Batch\n from plone.restapi.deserializer import json_body\n+from plone.restapi.exceptions import DeserializationError\n from urllib.parse import parse_qsl\n from urllib.parse import urlencode\n+from zExceptions import BadRequest\n \n \n DEFAULT_BATCH_SIZE = 25\n@@ -11,13 +13,15 @@ class HypermediaBatch:\n     def __init__(self, request, results):\n         self.request = request\n \n-        self.b_start = int(json_body(self.request).get("b_start", False)) or int(\n-            self.request.form.get("b_start", 0)\n-        )\n-        self.b_size = int(json_body(self.request).get("b_size", False)) or int(\n-            self.request.form.get("b_size", DEFAULT_BATCH_SIZE)\n-        )\n-\n+        try:\n+            self.b_start = int(json_body(self.request).get("b_start", False)) or int(\n+                self.request.form.get("b_start", 0)\n+            )\n+            self.b_size = int(json_body(self.request).get("b_size", False)) or int(\n+                self.request.form.get("b_size", DEFAULT_BATCH_SIZE)\n+            )\n+        except (ValueError, DeserializationError) as e:\n+            raise BadRequest(e)\n         self.batch = Batch(results, self.b_size, self.b_start)\n \n     def __iter__(self):\ndiff --git a/src/plone/restapi/services/navigation/get.py b/src/plone/restapi/services/navigation/get.py\nindex a21a52abe4..de9f91ed6b 100644\n--- a/src/plone/restapi/services/navigation/get.py\n+++ b/src/plone/restapi/services/navigation/get.py\n@@ -17,6 +17,7 @@\n from zope.i18n import translate\n from zope.interface import implementer\n from zope.interface import Interface\n+from zExceptions import BadRequest\n \n \n @implementer(IExpandableElement)\n@@ -29,7 +30,10 @@ def __init__(self, context, request):\n \n     def __call__(self, expand=False):\n         if self.request.form.get("expand.navigation.depth", False):\n-            self.depth = int(self.request.form["expand.navigation.depth"])\n+            try:\n+                self.depth = int(self.request.form["expand.navigation.depth"])\n+            except (ValueError, TypeError) as e:\n+                raise BadRequest(e)\n         else:\n             self.depth = 1\n \ndiff --git a/src/plone/restapi/tests/test_batching.py b/src/plone/restapi/tests/test_batching.py\nindex 3e809ebabc..4470b2c8f6 100644\n--- a/src/plone/restapi/tests/test_batching.py\n+++ b/src/plone/restapi/tests/test_batching.py\n@@ -185,6 +185,11 @@ def test_batching_links_omitted_if_resulset_fits_in_single_batch(self):\n         response = self.api_session.get("/collection?b_size=100")\n         self.assertNotIn("batching", list(response.json()))\n \n+    def test_batching_badrequests(self):\n+        response = self.api_session.get("/collection?b_size=php")\n+        self.assertEqual(response.status_code, 400)\n+        self.assertIn("invalid literal for int()", response.json()["message"])\n+\n \n class TestBatchingDXFolders(TestBatchingDXBase):\n \ndiff --git a/src/plone/restapi/tests/test_services_navigation.py b/src/plone/restapi/tests/test_services_navigation.py\nindex 890c5c1220..a61009005c 100644\n--- a/src/plone/restapi/tests/test_services_navigation.py\n+++ b/src/plone/restapi/tests/test_services_navigation.py\n@@ -239,3 +239,11 @@ def test_use_nav_title_when_available_and_set(self):\n         )\n \n         self.assertEqual(response.json()["items"][1]["items"][-1]["title"], nav_title)\n+\n+    def test_navigation_badrequests(self):\n+        response = self.api_session.get(\n+            "/folder/@navigation", params={"expand.navigation.depth": "php"}\n+        )\n+\n+        self.assertEqual(response.status_code, 400)\n+        self.assertIn("invalid literal for int()", response.json()["message"])\n'
+b'diff --git a/news/1857.bugfix b/news/1857.bugfix\nnew file mode 100644\nindex 0000000000..ea4ba7b398\n--- /dev/null\n+++ b/news/1857.bugfix\n@@ -0,0 +1 @@\n+Handle TypeError on querystringsearch as BadRequest. @djay\n\\ No newline at end of file\ndiff --git a/src/plone/restapi/services/querystringsearch/get.py b/src/plone/restapi/services/querystringsearch/get.py\nindex acd9f3647b..9b3c0e60c7 100644\n--- a/src/plone/restapi/services/querystringsearch/get.py\n+++ b/src/plone/restapi/services/querystringsearch/get.py\n@@ -33,17 +33,17 @@ def __call__(self):\n         query = data.get("query", None)\n         try:\n             b_start = int(data.get("b_start", 0))\n-        except ValueError:\n+        except (ValueError, TypeError):\n             raise BadRequest("Invalid b_start")\n         try:\n             b_size = int(data.get("b_size", 25))\n-        except ValueError:\n+        except (ValueError, TypeError):\n             raise BadRequest("Invalid b_size")\n         sort_on = data.get("sort_on", None)\n         sort_order = data.get("sort_order", None)\n         try:\n             limit = int(data.get("limit", 1000))\n-        except ValueError:\n+        except (ValueError, TypeError):\n             raise BadRequest("Invalid limit")\n         fullobjects = bool(data.get("fullobjects", False))\n \n'
 
