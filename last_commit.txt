@@ -1,27 +1,38 @@
-Repository: plone.restapi
+Repository: plone.app.event
 
 
-Branch: refs/heads/main
-Date: 2025-01-21T19:14:39-08:00
-Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/5a120c416db8bbd6168fc8c10fdf1ef75e5eac62
+Branch: refs/heads/master
+Date: 2025-01-23T00:00:20+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.event/commit/e3f3e397135cb40f2409b84df4fd8d3a5335a766
 
-fix: contextnavigation when a file has an unknown type (#1864)
+Support `icalendar` 6 by forcing it to use its `pytz` timezone implementation.
 
-* fix: contextnavigation when a file has an unknown type
-
-* changelog
-
-* Update news/1864.bugfix
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+The new `zoneinfo` support in `icalendar` 6 does not work for us yet, giving indexing problems.
+So we call `icalendar.use_pytz` at startup.
+If this fails, we must be using an older version where `pytz` is the only option anyway, so we ignore this.
 
 Files changed:
-A news/1864.bugfix
-M src/plone/restapi/services/contextnavigation/get.py
-M src/plone/restapi/tests/test_services_contextnavigation.py
+A news/6.bugfix
+M plone/app/event/__init__.py
 
-b'diff --git a/news/1864.bugfix b/news/1864.bugfix\nnew file mode 100644\nindex 0000000000..9e63a64abd\n--- /dev/null\n+++ b/news/1864.bugfix\n@@ -0,0 +1 @@\n+In the `@contextnavigation` endpoint, return `"icon": null` for Files with a mimetype not found in the `content_type_registry`, instead of raising `TypeError`. @mamico\ndiff --git a/src/plone/restapi/services/contextnavigation/get.py b/src/plone/restapi/services/contextnavigation/get.py\nindex 0fe0d7a054..3f22602222 100644\n--- a/src/plone/restapi/services/contextnavigation/get.py\n+++ b/src/plone/restapi/services/contextnavigation/get.py\n@@ -357,7 +357,8 @@ def getMimeTypeIcon(self, node):\n             mtt = getToolByName(self.context, "mimetypes_registry")\n             if fileo.contentType:\n                 ctype = mtt.lookup(fileo.contentType)\n-                return os.path.join(portal_url, guess_icon_path(ctype[0]))\n+                if ctype:\n+                    return os.path.join(portal_url, guess_icon_path(ctype[0]))\n         except AttributeError:\n             pass\n \ndiff --git a/src/plone/restapi/tests/test_services_contextnavigation.py b/src/plone/restapi/tests/test_services_contextnavigation.py\nindex 9f8405e95a..05fe3c037e 100644\n--- a/src/plone/restapi/tests/test_services_contextnavigation.py\n+++ b/src/plone/restapi/tests/test_services_contextnavigation.py\n@@ -3,6 +3,7 @@\n from plone.app.testing import SITE_OWNER_NAME\n from plone.app.testing import SITE_OWNER_PASSWORD\n from plone.app.testing import TEST_USER_ID\n+from plone.namedfile.file import NamedBlobFile\n from plone.registry.interfaces import IRegistry\n from plone.restapi.services.contextnavigation.get import ContextNavigation\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n@@ -99,6 +100,9 @@ def populateSite(self):\n         folder2.invokeFactory("Document", "doc22")\n         folder2.invokeFactory("Document", "doc23")\n         folder2.invokeFactory("File", "file21")\n+        folder2.file21.file = NamedBlobFile(\n+            data="Hello World", contentType="text/plain", filename="file.txt"\n+        )\n         folder2.invokeFactory("Folder", "folder21")\n         folder21 = getattr(folder2, "folder21")\n         folder21.invokeFactory("Document", "doc211")\n@@ -996,3 +1000,28 @@ def testContextNavigation(self):\n                 "/plone/folder1/doc11",\n             )\n         )\n+\n+    def testIcon(self):\n+        view = self.renderer(\n+            self.portal.folder2.file21,\n+            opts(root_path="/folder2", topLevel=0),\n+        )\n+        tree = view.getNavTree()\n+        self.assertTrue(tree)\n+        self.assertEqual(\n+            tree["items"][0]["icon"],\n+            "/plone/++resource++mimetype.icons/txt.png",\n+        )\n+\n+    def testIconNotRegisteredMimetype(self):\n+        self.portal.folder2.file21.file.contentType = "plain/x-text"\n+        view = self.renderer(\n+            self.portal.folder2.file21,\n+            opts(root_path="/folder2", topLevel=0),\n+        )\n+        tree = view.getNavTree()\n+        self.assertTrue(tree)\n+        self.assertEqual(\n+            tree["items"][0]["icon"],\n+            None,\n+        )\n'
+b'diff --git a/news/6.bugfix b/news/6.bugfix\nnew file mode 100644\nindex 00000000..b000847d\n--- /dev/null\n+++ b/news/6.bugfix\n@@ -0,0 +1,5 @@\n+Support ``icalendar`` 6 by forcing it to use its ``pytz`` timezone implementation.\n+The new ``zoneinfo`` support in ``icalendar`` 6 does not work for us yet, giving indexing problems.\n+So we call ``icalendar.use_pytz`` at startup.\n+If this fails, we must be using an older version where ``pytz`` is the only option anyway, so we ignore this.\n+[maurits]\ndiff --git a/plone/app/event/__init__.py b/plone/app/event/__init__.py\nindex bac87e2c..62ed906e 100644\n--- a/plone/app/event/__init__.py\n+++ b/plone/app/event/__init__.py\n@@ -1,10 +1,27 @@\n from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+import icalendar\n+import logging\n \n+\n+logger = logging.getLogger(__name__)\n packageName = __name__\n _ = MessageFactory("plone")\n \n+# We are not yet ready to use the standard zoneinfo implementation\n+# introduced in icalendar 6.  For starters, the tests fail when\n+# Products.DateRecurringIndex.index.index_object is called:\n+# SystemError: <class \'BTrees.IIBTree.IISet\'> returned a result with an exception set\n+try:\n+    icalendar.use_pytz()\n+    logger.info("icalendar has been set up to use pytz instead of zoneinfo.")\n+except AttributeError:\n+    # If use_pytz does not exist, we either have an older icalender version\n+    # that only supports pytz anyway, or we have a newer version that no\n+    # longer supports it at all.\n+    pass\n+\n # BBB Permissions\n PORTAL_ADD_PERMISSION = "Add portal events"  # CMFCalendar/ATCT permissions\n \n'
+
+Repository: plone.app.event
+
+
+Branch: refs/heads/master
+Date: 2025-01-23T11:01:02+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.event/commit/7985b0fd7a9f8a395fc4a9658548ce11b246520f
+
+Merge pull request #419 from plone/icalendar-6-pytz
+
+Support icalendar 6 by forcing it to use pytz
+
+Files changed:
+A news/6.bugfix
+M plone/app/event/__init__.py
+
+b'diff --git a/news/6.bugfix b/news/6.bugfix\nnew file mode 100644\nindex 00000000..b000847d\n--- /dev/null\n+++ b/news/6.bugfix\n@@ -0,0 +1,5 @@\n+Support ``icalendar`` 6 by forcing it to use its ``pytz`` timezone implementation.\n+The new ``zoneinfo`` support in ``icalendar`` 6 does not work for us yet, giving indexing problems.\n+So we call ``icalendar.use_pytz`` at startup.\n+If this fails, we must be using an older version where ``pytz`` is the only option anyway, so we ignore this.\n+[maurits]\ndiff --git a/plone/app/event/__init__.py b/plone/app/event/__init__.py\nindex bac87e2c..62ed906e 100644\n--- a/plone/app/event/__init__.py\n+++ b/plone/app/event/__init__.py\n@@ -1,10 +1,27 @@\n from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+import icalendar\n+import logging\n \n+\n+logger = logging.getLogger(__name__)\n packageName = __name__\n _ = MessageFactory("plone")\n \n+# We are not yet ready to use the standard zoneinfo implementation\n+# introduced in icalendar 6.  For starters, the tests fail when\n+# Products.DateRecurringIndex.index.index_object is called:\n+# SystemError: <class \'BTrees.IIBTree.IISet\'> returned a result with an exception set\n+try:\n+    icalendar.use_pytz()\n+    logger.info("icalendar has been set up to use pytz instead of zoneinfo.")\n+except AttributeError:\n+    # If use_pytz does not exist, we either have an older icalender version\n+    # that only supports pytz anyway, or we have a newer version that no\n+    # longer supports it at all.\n+    pass\n+\n # BBB Permissions\n PORTAL_ADD_PERMISSION = "Add portal events"  # CMFCalendar/ATCT permissions\n \n'
 
