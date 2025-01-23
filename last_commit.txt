@@ -1,38 +1,72 @@
-Repository: plone.app.event
+Repository: plone.exportimport
 
 
-Branch: refs/heads/master
-Date: 2025-01-23T00:00:20+01:00
+Branch: refs/heads/main
+Date: 2025-01-21T22:27:36+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.event/commit/e3f3e397135cb40f2409b84df4fd8d3a5335a766
+Commit: https://github.com/plone/plone.exportimport/commit/7d96bf2a9fa8f112a0f9a8eb12135891213fa256
 
-Support `icalendar` 6 by forcing it to use its `pytz` timezone implementation.
-
-The new `zoneinfo` support in `icalendar` 6 does not work for us yet, giving indexing problems.
-So we call `icalendar.use_pytz` at startup.
-If this fails, we must be using an older version where `pytz` is the only option anyway, so we ignore this.
+Export principals: sort groups, roles and members.
 
 Files changed:
-A news/6.bugfix
-M plone/app/event/__init__.py
+A news/39.bugfix.1
+M src/plone/exportimport/utils/principals/groups.py
+M src/plone/exportimport/utils/principals/helpers.py
+M src/plone/exportimport/utils/principals/members.py
+M tests/exporters/test_exporters_principals.py
 
-b'diff --git a/news/6.bugfix b/news/6.bugfix\nnew file mode 100644\nindex 00000000..b000847d\n--- /dev/null\n+++ b/news/6.bugfix\n@@ -0,0 +1,5 @@\n+Support ``icalendar`` 6 by forcing it to use its ``pytz`` timezone implementation.\n+The new ``zoneinfo`` support in ``icalendar`` 6 does not work for us yet, giving indexing problems.\n+So we call ``icalendar.use_pytz`` at startup.\n+If this fails, we must be using an older version where ``pytz`` is the only option anyway, so we ignore this.\n+[maurits]\ndiff --git a/plone/app/event/__init__.py b/plone/app/event/__init__.py\nindex bac87e2c..62ed906e 100644\n--- a/plone/app/event/__init__.py\n+++ b/plone/app/event/__init__.py\n@@ -1,10 +1,27 @@\n from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+import icalendar\n+import logging\n \n+\n+logger = logging.getLogger(__name__)\n packageName = __name__\n _ = MessageFactory("plone")\n \n+# We are not yet ready to use the standard zoneinfo implementation\n+# introduced in icalendar 6.  For starters, the tests fail when\n+# Products.DateRecurringIndex.index.index_object is called:\n+# SystemError: <class \'BTrees.IIBTree.IISet\'> returned a result with an exception set\n+try:\n+    icalendar.use_pytz()\n+    logger.info("icalendar has been set up to use pytz instead of zoneinfo.")\n+except AttributeError:\n+    # If use_pytz does not exist, we either have an older icalender version\n+    # that only supports pytz anyway, or we have a newer version that no\n+    # longer supports it at all.\n+    pass\n+\n # BBB Permissions\n PORTAL_ADD_PERMISSION = "Add portal events"  # CMFCalendar/ATCT permissions\n \n'
+b'diff --git a/news/39.bugfix.1 b/news/39.bugfix.1\nnew file mode 100644\nindex 0000000..087531c\n--- /dev/null\n+++ b/news/39.bugfix.1\n@@ -0,0 +1 @@\n+Export principals: sort groups, roles, and members.  @mauritsvanrees\ndiff --git a/src/plone/exportimport/utils/principals/groups.py b/src/plone/exportimport/utils/principals/groups.py\nindex 66bb180..69bb875 100644\n--- a/src/plone/exportimport/utils/principals/groups.py\n+++ b/src/plone/exportimport/utils/principals/groups.py\n@@ -12,13 +12,13 @@ def export_groups() -> List[dict]:\n     all_groups = get_all_groups()\n     for group in all_groups:\n         roles = get_roles_for_group(group)\n-        groups = [g.id for g in get_all_groups(group=group)]\n+        groups = sorted([g.id for g in get_all_groups(group=group)])\n         item = {"groupid": group.id, "groups": groups, "roles": roles}\n         for prop in group.getProperties():\n             item[prop] = json_compatible(group.getProperty(prop))\n         # export all principals (incl. groups and ldap-users)\n         plone_group = group.getGroup()\n-        item["principals"] = plone_group.getMemberIds()\n+        item["principals"] = sorted(plone_group.getMemberIds())\n         data.append(item)\n     return data\n \ndiff --git a/src/plone/exportimport/utils/principals/helpers.py b/src/plone/exportimport/utils/principals/helpers.py\nindex e9f338b..cb105cf 100644\n--- a/src/plone/exportimport/utils/principals/helpers.py\n+++ b/src/plone/exportimport/utils/principals/helpers.py\n@@ -11,7 +11,7 @@ def get_roles_for_group(group: GroupData, filter: bool = True) -> list:\n     roles = [r for r in api.group.get_roles(group=group)]\n     if filter:\n         roles = [r for r in roles if r not in AUTO_ROLES]\n-    return roles\n+    return sorted(roles)\n \n \n def get_roles_for_member(member, filter: bool = True) -> List[str]:\n@@ -19,7 +19,7 @@ def get_roles_for_member(member, filter: bool = True) -> List[str]:\n     roles = [r for r in member.getRoles()]\n     if filter:\n         roles = [r for r in roles if r not in AUTO_ROLES]\n-    return roles\n+    return sorted(roles)\n \n \n def get_all_groups(\ndiff --git a/src/plone/exportimport/utils/principals/members.py b/src/plone/exportimport/utils/principals/members.py\nindex ed54cc7..779aa70 100644\n--- a/src/plone/exportimport/utils/principals/members.py\n+++ b/src/plone/exportimport/utils/principals/members.py\n@@ -78,8 +78,8 @@ def _get_base_user_data(member: MemberData):\n     # username, groups, roles\n     props = {\n         "username": user_id,\n-        "roles": json_compatible(roles),\n-        "groups": json_compatible(groups),\n+        "roles": json_compatible(sorted(roles)),\n+        "groups": json_compatible(sorted(groups)),\n     }\n     return props\n \ndiff --git a/tests/exporters/test_exporters_principals.py b/tests/exporters/test_exporters_principals.py\nindex edfc2f2..ea8633d 100644\n--- a/tests/exporters/test_exporters_principals.py\n+++ b/tests/exporters/test_exporters_principals.py\n@@ -2,6 +2,7 @@\n from plone.exportimport.exporters import principals\n from zope.component import getAdapter\n \n+import json\n import pytest\n \n \n@@ -35,5 +36,20 @@ def test_principals_is_exported(self, export_path, paths_as_relative, path):\n         )\n         assert isinstance(result, list)\n         assert path in result\n-        assert (export_path / path).exists() is True\n-        assert (export_path / path).is_file() is True\n+        full_path = export_path / path\n+        assert full_path.exists() is True\n+        assert full_path.is_file() is True\n+        contents = json.loads(full_path.read_bytes())\n+        assert isinstance(contents, dict)\n+        assert sorted(contents.keys()) == ["groups", "members"]\n+        group_ids = [group["groupid"] for group in contents["groups"]]\n+        assert "Site Administrators" in group_ids\n+        usernames = [member["username"] for member in contents["members"]]\n+        assert "joao.silva" in usernames\n+        for group in contents["groups"]:\n+            assert group["groups"] == sorted(group["groups"])\n+            assert group["principals"] == sorted(group["principals"])\n+            assert group["roles"] == sorted(group["roles"])\n+        for member in contents["members"]:\n+            assert member["groups"] == sorted(member["groups"])\n+            assert member["roles"] == sorted(member["roles"])\n'
 
-Repository: plone.app.event
+Repository: plone.exportimport
 
 
-Branch: refs/heads/master
-Date: 2025-01-23T11:01:02+01:00
+Branch: refs/heads/main
+Date: 2025-01-22T11:20:44+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.event/commit/7985b0fd7a9f8a395fc4a9658548ce11b246520f
+Commit: https://github.com/plone/plone.exportimport/commit/6c93b1f25ea18082020145b9c499a61143e082e2
 
-Merge pull request #419 from plone/icalendar-6-pytz
+Apply suggestions from code review
 
-Support icalendar 6 by forcing it to use pytz
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-A news/6.bugfix
-M plone/app/event/__init__.py
+M src/plone/exportimport/utils/principals/groups.py
 
-b'diff --git a/news/6.bugfix b/news/6.bugfix\nnew file mode 100644\nindex 00000000..b000847d\n--- /dev/null\n+++ b/news/6.bugfix\n@@ -0,0 +1,5 @@\n+Support ``icalendar`` 6 by forcing it to use its ``pytz`` timezone implementation.\n+The new ``zoneinfo`` support in ``icalendar`` 6 does not work for us yet, giving indexing problems.\n+So we call ``icalendar.use_pytz`` at startup.\n+If this fails, we must be using an older version where ``pytz`` is the only option anyway, so we ignore this.\n+[maurits]\ndiff --git a/plone/app/event/__init__.py b/plone/app/event/__init__.py\nindex bac87e2c..62ed906e 100644\n--- a/plone/app/event/__init__.py\n+++ b/plone/app/event/__init__.py\n@@ -1,10 +1,27 @@\n from AccessControl.Permission import addPermission\n from zope.i18nmessageid import MessageFactory\n \n+import icalendar\n+import logging\n \n+\n+logger = logging.getLogger(__name__)\n packageName = __name__\n _ = MessageFactory("plone")\n \n+# We are not yet ready to use the standard zoneinfo implementation\n+# introduced in icalendar 6.  For starters, the tests fail when\n+# Products.DateRecurringIndex.index.index_object is called:\n+# SystemError: <class \'BTrees.IIBTree.IISet\'> returned a result with an exception set\n+try:\n+    icalendar.use_pytz()\n+    logger.info("icalendar has been set up to use pytz instead of zoneinfo.")\n+except AttributeError:\n+    # If use_pytz does not exist, we either have an older icalender version\n+    # that only supports pytz anyway, or we have a newer version that no\n+    # longer supports it at all.\n+    pass\n+\n # BBB Permissions\n PORTAL_ADD_PERMISSION = "Add portal events"  # CMFCalendar/ATCT permissions\n \n'
+b'diff --git a/src/plone/exportimport/utils/principals/groups.py b/src/plone/exportimport/utils/principals/groups.py\nindex 69bb875..e75359e 100644\n--- a/src/plone/exportimport/utils/principals/groups.py\n+++ b/src/plone/exportimport/utils/principals/groups.py\n@@ -12,7 +12,7 @@ def export_groups() -> List[dict]:\n     all_groups = get_all_groups()\n     for group in all_groups:\n         roles = get_roles_for_group(group)\n-        groups = sorted([g.id for g in get_all_groups(group=group)])\n+        groups = sorted(g.id for g in get_all_groups(group=group))\n         item = {"groupid": group.id, "groups": groups, "roles": roles}\n         for prop in group.getProperties():\n             item[prop] = json_compatible(group.getProperty(prop))\n'
+
+Repository: plone.exportimport
+
+
+Branch: refs/heads/main
+Date: 2025-01-22T11:32:23+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.exportimport/commit/c28c5ae2153d13047332689fd7e07f2a2362e165
+
+Export principals: sort only once.
+
+Files changed:
+M src/plone/exportimport/utils/principals/helpers.py
+M src/plone/exportimport/utils/principals/members.py
+
+b'diff --git a/src/plone/exportimport/utils/principals/helpers.py b/src/plone/exportimport/utils/principals/helpers.py\nindex cb105cf..ccf2c91 100644\n--- a/src/plone/exportimport/utils/principals/helpers.py\n+++ b/src/plone/exportimport/utils/principals/helpers.py\n@@ -1,3 +1,4 @@\n+from operator import attrgetter\n from plone import api\n from plone.exportimport.settings import AUTO_GROUPS\n from plone.exportimport.settings import AUTO_ROLES\n@@ -6,6 +7,9 @@\n from typing import Optional\n \n \n+_sort_key_id = attrgetter("id")\n+\n+\n def get_roles_for_group(group: GroupData, filter: bool = True) -> list:\n     """Return a list of roles for a given group."""\n     roles = [r for r in api.group.get_roles(group=group)]\n@@ -34,4 +38,4 @@ def get_all_groups(\n     groups = [g for g in api.group.get_groups(**payload)]\n     if filter:\n         groups = [g for g in groups if g.id not in AUTO_GROUPS]\n-    return groups\n+    return sorted(groups, key=_sort_key_id)\ndiff --git a/src/plone/exportimport/utils/principals/members.py b/src/plone/exportimport/utils/principals/members.py\nindex 779aa70..ed54cc7 100644\n--- a/src/plone/exportimport/utils/principals/members.py\n+++ b/src/plone/exportimport/utils/principals/members.py\n@@ -78,8 +78,8 @@ def _get_base_user_data(member: MemberData):\n     # username, groups, roles\n     props = {\n         "username": user_id,\n-        "roles": json_compatible(sorted(roles)),\n-        "groups": json_compatible(sorted(groups)),\n+        "roles": json_compatible(roles),\n+        "groups": json_compatible(groups),\n     }\n     return props\n \n'
+
+Repository: plone.exportimport
+
+
+Branch: refs/heads/main
+Date: 2025-01-23T16:23:39+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.exportimport/commit/c3892c12730d97a0c9af2b60dd78f5796c3cf1ff
+
+Merge pull request #41 from plone/maurits-sustainable-exports-principals-sort
+
+Export principals: sort groups, roles and members.
+
+Files changed:
+A news/39.bugfix.1
+M src/plone/exportimport/utils/principals/groups.py
+M src/plone/exportimport/utils/principals/helpers.py
+M tests/exporters/test_exporters_principals.py
+
+b'diff --git a/news/39.bugfix.1 b/news/39.bugfix.1\nnew file mode 100644\nindex 0000000..087531c\n--- /dev/null\n+++ b/news/39.bugfix.1\n@@ -0,0 +1 @@\n+Export principals: sort groups, roles, and members.  @mauritsvanrees\ndiff --git a/src/plone/exportimport/utils/principals/groups.py b/src/plone/exportimport/utils/principals/groups.py\nindex 66bb180..e75359e 100644\n--- a/src/plone/exportimport/utils/principals/groups.py\n+++ b/src/plone/exportimport/utils/principals/groups.py\n@@ -12,13 +12,13 @@ def export_groups() -> List[dict]:\n     all_groups = get_all_groups()\n     for group in all_groups:\n         roles = get_roles_for_group(group)\n-        groups = [g.id for g in get_all_groups(group=group)]\n+        groups = sorted(g.id for g in get_all_groups(group=group))\n         item = {"groupid": group.id, "groups": groups, "roles": roles}\n         for prop in group.getProperties():\n             item[prop] = json_compatible(group.getProperty(prop))\n         # export all principals (incl. groups and ldap-users)\n         plone_group = group.getGroup()\n-        item["principals"] = plone_group.getMemberIds()\n+        item["principals"] = sorted(plone_group.getMemberIds())\n         data.append(item)\n     return data\n \ndiff --git a/src/plone/exportimport/utils/principals/helpers.py b/src/plone/exportimport/utils/principals/helpers.py\nindex e9f338b..ccf2c91 100644\n--- a/src/plone/exportimport/utils/principals/helpers.py\n+++ b/src/plone/exportimport/utils/principals/helpers.py\n@@ -1,3 +1,4 @@\n+from operator import attrgetter\n from plone import api\n from plone.exportimport.settings import AUTO_GROUPS\n from plone.exportimport.settings import AUTO_ROLES\n@@ -6,12 +7,15 @@\n from typing import Optional\n \n \n+_sort_key_id = attrgetter("id")\n+\n+\n def get_roles_for_group(group: GroupData, filter: bool = True) -> list:\n     """Return a list of roles for a given group."""\n     roles = [r for r in api.group.get_roles(group=group)]\n     if filter:\n         roles = [r for r in roles if r not in AUTO_ROLES]\n-    return roles\n+    return sorted(roles)\n \n \n def get_roles_for_member(member, filter: bool = True) -> List[str]:\n@@ -19,7 +23,7 @@ def get_roles_for_member(member, filter: bool = True) -> List[str]:\n     roles = [r for r in member.getRoles()]\n     if filter:\n         roles = [r for r in roles if r not in AUTO_ROLES]\n-    return roles\n+    return sorted(roles)\n \n \n def get_all_groups(\n@@ -34,4 +38,4 @@ def get_all_groups(\n     groups = [g for g in api.group.get_groups(**payload)]\n     if filter:\n         groups = [g for g in groups if g.id not in AUTO_GROUPS]\n-    return groups\n+    return sorted(groups, key=_sort_key_id)\ndiff --git a/tests/exporters/test_exporters_principals.py b/tests/exporters/test_exporters_principals.py\nindex edfc2f2..ea8633d 100644\n--- a/tests/exporters/test_exporters_principals.py\n+++ b/tests/exporters/test_exporters_principals.py\n@@ -2,6 +2,7 @@\n from plone.exportimport.exporters import principals\n from zope.component import getAdapter\n \n+import json\n import pytest\n \n \n@@ -35,5 +36,20 @@ def test_principals_is_exported(self, export_path, paths_as_relative, path):\n         )\n         assert isinstance(result, list)\n         assert path in result\n-        assert (export_path / path).exists() is True\n-        assert (export_path / path).is_file() is True\n+        full_path = export_path / path\n+        assert full_path.exists() is True\n+        assert full_path.is_file() is True\n+        contents = json.loads(full_path.read_bytes())\n+        assert isinstance(contents, dict)\n+        assert sorted(contents.keys()) == ["groups", "members"]\n+        group_ids = [group["groupid"] for group in contents["groups"]]\n+        assert "Site Administrators" in group_ids\n+        usernames = [member["username"] for member in contents["members"]]\n+        assert "joao.silva" in usernames\n+        for group in contents["groups"]:\n+            assert group["groups"] == sorted(group["groups"])\n+            assert group["principals"] == sorted(group["principals"])\n+            assert group["roles"] == sorted(group["roles"])\n+        for member in contents["members"]:\n+            assert member["groups"] == sorted(member["groups"])\n+            assert member["roles"] == sorted(member["roles"])\n'
 
