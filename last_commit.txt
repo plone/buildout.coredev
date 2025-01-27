@@ -2,14 +2,28 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2025-01-25T01:56:59-08:00
-Author: Steve Piercy (stevepiercy) <web@stevepiercy.com>
-Commit: https://github.com/plone/plone.restapi/commit/a1ca992283db85842e23248e6c71596eafffa917
+Date: 2025-01-27T08:48:48-08:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/3830080c59daf497880046022521ab8cdb10ee7a
 
-Linkcheck fixes (#1870)
+AttributeError occurs in creator_name when the user is missing (#1867)
+
+* AttributeError occurs in creator_name when the user is missing
+
+* changelog
+
+* userid
+
+* Update news/1867.bugfix
+
+---------
+
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-M .readthedocs.yaml
+A news/1867.bugfix
+M src/plone/restapi/services/locking/__init__.py
+M src/plone/restapi/tests/test_locking.py
 
-b'diff --git a/.readthedocs.yaml b/.readthedocs.yaml\nindex 043663c1c..31fe20fa4 100644\n--- a/.readthedocs.yaml\n+++ b/.readthedocs.yaml\n@@ -1,6 +1,6 @@\n # .readthedocs.yaml\n # Read the Docs configuration file\n-# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details\n+# See https://docs.readthedocs.com/platform/stable/config-file/v2.html for details\n \n # Required\n version: 2\n'
+b'diff --git a/news/1867.bugfix b/news/1867.bugfix\nnew file mode 100644\nindex 000000000..f4ddcaac8\n--- /dev/null\n+++ b/news/1867.bugfix\n@@ -0,0 +1 @@\n+In the `@locking` endpoint, fixed edge cases where the user who owns the lock was not found correctly. @mamico\ndiff --git a/src/plone/restapi/services/locking/__init__.py b/src/plone/restapi/services/locking/__init__.py\nindex 1b22e975a..c9347a7b4 100644\n--- a/src/plone/restapi/services/locking/__init__.py\n+++ b/src/plone/restapi/services/locking/__init__.py\n@@ -7,14 +7,17 @@\n from plone.locking.interfaces import ILockable\n \n \n-def creator_name(username):\n-    user = api.user.get(username=username)\n-    return user.getProperty("fullname") or username\n+def creator_name(userid):\n+    user = api.user.get(userid=userid)\n+    if user:\n+        return user.getProperty("fullname") or userid\n+    else:\n+        return userid\n \n \n-def creator_url(username):\n+def creator_url(userid):\n     url = api.portal.get().absolute_url()\n-    return f"{url}/author/{username}"\n+    return f"{url}/author/{userid}"\n \n \n def creation_date(timestamp):\ndiff --git a/src/plone/restapi/tests/test_locking.py b/src/plone/restapi/tests/test_locking.py\nindex 191b4d6bd..40e7fc5b8 100644\n--- a/src/plone/restapi/tests/test_locking.py\n+++ b/src/plone/restapi/tests/test_locking.py\n@@ -1,3 +1,4 @@\n+from plone import api\n from plone.app.testing import login\n from plone.app.testing import SITE_OWNER_NAME\n from plone.app.testing import SITE_OWNER_PASSWORD\n@@ -112,3 +113,45 @@ def test_update_locked_object_with_token_succeeds(self):\n         transaction.commit()\n         self.assertEqual(response.status_code, 204)\n         self.assertEqual(self.doc.Title(), "New Title")\n+\n+    def test_lock_user_removed(self):\n+        lockable = ILockable(self.doc)\n+        api.user.create(\n+            username="foo",\n+            email="foo@bar.com",\n+            roles=["Manager"],\n+        )\n+        with api.env.adopt_user(username="foo"):\n+            lockable.lock()\n+        api.user.delete(username="foo")\n+        transaction.commit()\n+        # the user that locked the object is no longer present\n+        response = self.api_session.get("/@lock")\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["creator"], "foo")\n+        self.assertEqual(response.json()["creator_name"], "foo")\n+        self.assertTrue(lockable.locked())\n+\n+    def test_lock_username_vs_userid(self):\n+        lockable = ILockable(self.doc)\n+        api.user.create(\n+            username="foo1234",\n+            email="foo@bar.com",\n+            roles=["Manager"],\n+            properties={"fullname": "Foo Bar"},\n+        )\n+        pas = api.portal.get_tool("acl_users")\n+        # generally the username and userid are the same...\n+        self.assertEqual(pas.getUserById("foo1234").getUserName(), "foo1234")\n+        # ...but we can change it\n+        pas.updateLoginName("foo1234", "foo")\n+        self.assertEqual(pas.getUserById("foo1234").getUserName(), "foo")\n+        with api.env.adopt_user(username="foo"):\n+            lockable.lock()\n+        transaction.commit()\n+        response = self.api_session.get("/@lock")\n+        self.assertEqual(response.status_code, 200)\n+        # here the userid\n+        self.assertEqual(response.json()["creator"], "foo1234")\n+        self.assertEqual(response.json()["creator_name"], "Foo Bar")\n+        self.assertTrue(lockable.locked())\n'
 
