@@ -1,32 +1,161 @@
-Repository: plone.staticresources
+Repository: plone.app.iterate
 
 
 Branch: refs/heads/master
-Date: 2025-01-28T16:57:36+01:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.staticresources/commit/b32936c149403b7aeae5ad0f678b2a84ac757e9e
+Date: 2024-10-09T10:30:09-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/3690126577cfd2d307e77d4c28af1a20b324d745
 
-Preparing release 2.2.0b5
+Allows working copy of Plone Site
+
+The container for the Plone Site working copy is Plone Site itself.
+
+To avoid permission errors, the Plone Site working copy is created as
+the Document type. But right after the Document is created, its
+portal_type is changed to "Plone Site", so that the schema of the
+working copy is the same as the Plone Site schema.
+
+- Prevents Plone Site permissions from being changed on checkin.
 
 Files changed:
+M plone/app/iterate/base.py
+M plone/app/iterate/dexterity/configure.zcml
+M plone/app/iterate/dexterity/copier.py
+
+b'diff --git a/plone/app/iterate/base.py b/plone/app/iterate/base.py\nindex 062574c..d38da35 100644\n--- a/plone/app/iterate/base.py\n+++ b/plone/app/iterate/base.py\n@@ -65,7 +65,12 @@ def checkout(self, container):\n \n         # use the object copier to checkout the content to the container\n         copier = queryAdapter(self.context, IObjectCopier)\n-        working_copy, relation = copier.copyTo(container)\n+        # The container for the Portal\'s working copy is the Portal itself.\n+        if self.context.portal_type == "Plone Site":\n+            working_copy_container = self.context\n+        else:\n+            working_copy_container = container\n+        working_copy, relation = copier.copyTo(working_copy_container)\n \n         # publish the event for any subscribers\n         notify(CheckoutEvent(self.context, working_copy, relation))\ndiff --git a/plone/app/iterate/dexterity/configure.zcml b/plone/app/iterate/dexterity/configure.zcml\nindex 0457c7b..2909fdf 100644\n--- a/plone/app/iterate/dexterity/configure.zcml\n+++ b/plone/app/iterate/dexterity/configure.zcml\n@@ -29,4 +29,8 @@\n     <implements interface="plone.app.iterate.dexterity.interfaces.IDexterityIterateAware" />\n   </class>\n \n+  <class class="Products.CMFPlone.Portal.PloneSite">\n+    <implements interface="plone.app.iterate.dexterity.interfaces.IDexterityIterateAware" />\n+  </class>\n+\n </configure>\ndiff --git a/plone/app/iterate/dexterity/copier.py b/plone/app/iterate/dexterity/copier.py\nindex bfa8ab4..3e4d47f 100644\n--- a/plone/app/iterate/dexterity/copier.py\n+++ b/plone/app/iterate/dexterity/copier.py\n@@ -98,6 +98,10 @@ def _replaceBaseline(self, baseline):\n         return baseline\n \n     def _reassembleWorkingCopy(self, new_baseline, baseline):\n+        # Does not change Plone Site permissions.\n+        if new_baseline.portal_type == "Plone Site":\n+            return new_baseline\n+\n         # reattach the source\'s workflow history, try avoid a dangling ref\n         try:\n             new_baseline.workflow_history = PersistentMapping(\n@@ -171,11 +175,20 @@ def checkin(self, checkin_message):\n \n class FolderishContentCopier(ContentCopier):\n     def _copyBaseline(self, container):\n+        if self.context.portal_type == "Plone Site":\n+            portal_type = "Document"\n+        else:\n+            portal_type = self.context.portal_type\n         obj = createContentInContainer(\n             container,\n-            self.context.portal_type,\n+            portal_type,\n             id=f"working_copy_of_{self.context.id}",\n         )\n+        # Since the working copy of the Portal is originally a Document,\n+        # we force its portal_type to "Plone Site", so that the "Plone Site"\n+        # schema is used.\n+        if self.context.portal_type == "Plone Site":\n+            obj.portal_type = "Plone Site"\n \n         # copy all field values from the baseline to the working copy\n         for schema in iterSchemata(self.context):\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2024-10-09T10:30:27-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/8748953445944e82dedef2787ef620276ee21582
+
+Check permission to add content in Plone Site
+
+The working copy of Plone Site is created in Plone Site itself. So at
+checkout, we should check if the user has permission to add content in
+Plone Site, instead of its parent.
+
+Files changed:
+M plone/app/iterate/containers.py
+
+b'diff --git a/plone/app/iterate/containers.py b/plone/app/iterate/containers.py\nindex c22142c..da1cc18 100644\n--- a/plone/app/iterate/containers.py\n+++ b/plone/app/iterate/containers.py\n@@ -64,11 +64,11 @@ def __init__(self, context):\n \n     @property\n     def available(self):\n-        return bool(\n-            getSecurityManager().checkPermission(\n-                AddPortalContent, aq_parent(aq_inner(self.context))\n-            )\n-        )\n+        obj = aq_inner(self.context)\n+        # In Plone Site checkout, the working copy container is the portal itself.\n+        if obj.portal_type != "Plone Site":\n+            obj = aq_parent(obj)\n+        return bool(getSecurityManager().checkPermission(AddPortalContent, obj))\n \n     def __call__(self):\n         if not self.available:\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2024-10-09T10:30:46-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/572f06d14f724835f486911be1686840fdf9c49d
+
+Fix tests to work with changes to Products.CMFEditions
+
+Plone Site is now versionable in Products.CMFEditions
+
+Files changed:
+M plone/app/iterate/tests/test_containers.py
+M plone/app/iterate/tests/test_iterate.py
+
+b'diff --git a/plone/app/iterate/tests/test_containers.py b/plone/app/iterate/tests/test_containers.py\nindex b79735d..d18df35 100644\n--- a/plone/app/iterate/tests/test_containers.py\n+++ b/plone/app/iterate/tests/test_containers.py\n@@ -219,11 +219,11 @@ def test_container_control_checkin_allowed_with_no_policy(self):\n         self.assertFalse(control.checkin_allowed())\n \n     def test_container_control_checkout_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.checkout_allowed())\n \n     def test_container_control_cancel_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.cancel_allowed())\n \n     def test_container_control_cancel_on_original_does_not_delete_original(self):\ndiff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py\nindex 93b9397..dc72b04 100644\n--- a/plone/app/iterate/tests/test_iterate.py\n+++ b/plone/app/iterate/tests/test_iterate.py\n@@ -126,11 +126,11 @@ def test_control_checkin_allowed_with_no_policy(self):\n         self.assertFalse(control.checkin_allowed())\n \n     def test_control_checkout_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.checkout_allowed())\n \n     def test_control_cancel_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.cancel_allowed())\n \n     def test_control_cancel_on_original_does_not_delete_original(self):\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2024-10-09T10:35:19-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/87f6f9622f21378fa29c77c93aaeb6c86cf1723c
+
+Add changes
+
+Files changed:
+A news/130.feature
+
+b'diff --git a/news/130.feature b/news/130.feature\nnew file mode 100644\nindex 0000000..9e8ad04\n--- /dev/null\n+++ b/news/130.feature\n@@ -0,0 +1 @@\n+Allows working copy of Plone Site. @wesleybl\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2024-11-04T15:32:57-03:00
+Author: wesleybl (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/7d8272d1bab8ab814644c06e7f52b4e50539e35d
+
+Merge remote-tracking branch 'origin/master' into working_copy_portal
+
+Files changed:
+M .gitignore
+M .meta.toml
+M .pre-commit-config.yaml
 M CHANGES.rst
+M MANIFEST.in
+M pyproject.toml
 M setup.py
-D news/368.bugfix
+M tox.ini
 
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 21a2e0d01..8ced6e3ba 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,16 @@ Changelog\n \n .. towncrier release notes start\n \n+2.2.0b5 (2025-01-28)\n+--------------------\n+\n+Bug fixes:\n+\n+\n+- Update `mockup=5.2.0-beta.5`. See https://github.com/plone/mockup/releases/tag/5.2.0-beta.5\n+  [petschki] (#368)\n+\n+\n 2.2.0b4 (2025-01-27)\n --------------------\n \ndiff --git a/news/368.bugfix b/news/368.bugfix\ndeleted file mode 100644\nindex b662738ca..000000000\n--- a/news/368.bugfix\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Update `mockup=5.2.0-beta.5`. See https://github.com/plone/mockup/releases/tag/5.2.0-beta.5\n-[petschki]\ndiff --git a/setup.py b/setup.py\nindex 5c9c6efa1..c9791acd0 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -11,7 +11,7 @@\n \n setup(\n     name="plone.staticresources",\n-    version="2.2.0b5.dev0",\n+    version="2.2.0b5",\n     description="Static resources for Plone",\n     long_description=long_description,\n     long_description_content_type="text/x-rst",\n'
+b'diff --git a/.gitignore b/.gitignore\nindex 486392f..8f05622 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -20,6 +20,8 @@ __pycache__/\n .tox\n .vscode/\n node_modules/\n+forest.dot\n+forest.json\n \n # venv / buildout related\n bin/\ndiff --git a/.meta.toml b/.meta.toml\nindex 596d386..fbf9cad 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -3,7 +3,10 @@\n # See the inline comments on how to expand/tweak this configuration file\n [meta]\n template = "default"\n-commit-id = "a89af8f2"\n+commit-id = "792c8799"\n \n [pyproject]\n codespell_ignores = "ore,checkin"\n+\n+[tox]\n+constraints_file = "https://dist.plone.org/release/6.1-dev/constraints.txt"\ndiff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml\nindex 1460326..f70417d 100644\n--- a/.pre-commit-config.yaml\n+++ b/.pre-commit-config.yaml\n@@ -16,7 +16,7 @@ repos:\n     hooks:\n     -   id: isort\n -   repo: https://github.com/psf/black\n-    rev: 24.8.0\n+    rev: 24.10.0\n     hooks:\n     -   id: black\n -   repo: https://github.com/collective/zpretty\ndiff --git a/CHANGES.rst b/CHANGES.rst\nindex 3a80b15..50214b5 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,17 @@ Changelog\n \n .. towncrier release notes start\n \n+6.0.1 (2024-10-23)\n+------------------\n+\n+Internal:\n+\n+\n+- Use Plone 6.1 constraints in tox to avoid circular dependency error in Plone 6.0. @wesleybl (#131)\n+- Update configuration files.\n+  [plone devs]\n+\n+\n 6.0.0 (2024-06-26)\n ------------------\n \ndiff --git a/MANIFEST.in b/MANIFEST.in\nindex 647d62f..89a5ce0 100644\n--- a/MANIFEST.in\n+++ b/MANIFEST.in\n@@ -7,4 +7,4 @@ recursive-include plone *\n global-exclude *pyc\n \n recursive-exclude news *\n-exclude news\n+exclude news *.yml\ndiff --git a/pyproject.toml b/pyproject.toml\nindex ec5dc96..1041bf4 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -119,6 +119,7 @@ Zope = [\n   \'Products.CMFCore\', \'Products.CMFDynamicViewFTI\',\n ]\n python-dateutil = [\'dateutil\']\n+pytest-plone = [\'pytest\', \'zope.pytestlayer\', \'plone.testing\', \'plone.app.testing\']\n \n ##\n # Add extra configuration options in .meta.toml:\ndiff --git a/setup.py b/setup.py\nindex 4959dc7..75dd2cf 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -3,7 +3,7 @@\n from setuptools import setup\n \n \n-version = "6.0.1.dev0"\n+version = "6.0.2.dev0"\n \n long_description = (\n     f"{Path(\'README.rst\').read_text()}\\n{Path(\'CHANGES.rst\').read_text()}"\ndiff --git a/tox.ini b/tox.ini\nindex 4e1cdf5..f632753 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -108,7 +108,7 @@ set_env =\n ##\n deps =\n     zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    -c https://dist.plone.org/release/6.1-dev/constraints.txt\n \n ##\n # Specify additional deps in .meta.toml:\n@@ -151,7 +151,7 @@ set_env =\n deps =\n     coverage\n     zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    -c https://dist.plone.org/release/6.1-dev/constraints.txt\n \n commands =\n     coverage run --branch --source plone.app.iterate {envbindir}/zope-testrunner --quiet --all --test-path={toxinidir} -s plone.app.iterate {posargs}\n@@ -169,7 +169,7 @@ deps =\n     twine\n     build\n     towncrier\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    -c https://dist.plone.org/release/6.1-dev/constraints.txt\n \n commands =\n     # fake version to not have to install the package\n@@ -200,7 +200,7 @@ allowlist_externals =\n deps =\n     pipdeptree\n     pipforester\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    -c https://dist.plone.org/release/6.1-dev/constraints.txt\n \n commands =\n     # Generate the full dependency tree\n'
 
-Repository: plone.staticresources
+Repository: plone.app.iterate
 
 
 Branch: refs/heads/master
-Date: 2025-01-28T16:58:49+01:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.staticresources/commit/46c2681a1e150118d2ef17c3d3b7bb4d1306a1f4
+Date: 2025-01-24T20:08:45-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/410c22409ed48d5dae501a103a2e7c05bd62a319
 
-Back to development: 2.2.0b6
+Support working copies for content types that have versioning disabled
 
 Files changed:
-M setup.py
+A news/130.feature.2
+M news/130.feature
+M plone/app/iterate/browser/control.py
+M plone/app/iterate/subscribers/versioning.py
+M plone/app/iterate/tests/test_containers.py
+M plone/app/iterate/tests/test_iterate.py
 
-b'diff --git a/setup.py b/setup.py\nindex c9791acd0..bb19ec898 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -11,7 +11,7 @@\n \n setup(\n     name="plone.staticresources",\n-    version="2.2.0b5",\n+    version="2.2.0b6.dev0",\n     description="Static resources for Plone",\n     long_description=long_description,\n     long_description_content_type="text/x-rst",\n'
+b'diff --git a/news/130.feature b/news/130.feature\nindex 9e8ad04..1b647f4 100644\n--- a/news/130.feature\n+++ b/news/130.feature\n@@ -1 +1 @@\n-Allows working copy of Plone Site. @wesleybl\n+Support working copies of the Plone Site. @wesleybl\ndiff --git a/news/130.feature.2 b/news/130.feature.2\nnew file mode 100644\nindex 0000000..f08533a\n--- /dev/null\n+++ b/news/130.feature.2\n@@ -0,0 +1 @@\n+Support working copies of content types that don\'t have versioning enabled. @davisagli\ndiff --git a/plone/app/iterate/browser/control.py b/plone/app/iterate/browser/control.py\nindex 6b8ae7d..89fcbc0 100644\n--- a/plone/app/iterate/browser/control.py\n+++ b/plone/app/iterate/browser/control.py\n@@ -47,10 +47,6 @@ def checkin_allowed(self):\n         if not interfaces.IIterateAware.providedBy(context):\n             return False\n \n-        archiver = interfaces.IObjectArchiver(context)\n-        if not archiver.isVersionable():\n-            return False\n-\n         if not IWorkingCopy.providedBy(context):\n             return False\n \n@@ -85,10 +81,6 @@ def checkout_allowed(self):\n         if not interfaces.IIterateAware.providedBy(context):\n             return False\n \n-        archiver = interfaces.IObjectArchiver(context)\n-        if not archiver.isVersionable():\n-            return False\n-\n         policy = ICheckinCheckoutPolicy(context, None)\n         if policy is None:\n             return False\ndiff --git a/plone/app/iterate/subscribers/versioning.py b/plone/app/iterate/subscribers/versioning.py\nindex 470824d..e7fa179 100644\n--- a/plone/app/iterate/subscribers/versioning.py\n+++ b/plone/app/iterate/subscribers/versioning.py\n@@ -24,10 +24,14 @@\n \n def handleBeforeCheckout(event):\n     archiver = interfaces.IObjectArchiver(event.object)\n+    if not archiver.isVersionable():\n+        return\n     if archiver.isModified() or not archiver.isVersioned():\n         archiver.save("Baseline created")\n \n \n def handleAfterCheckin(event):\n     archiver = interfaces.IObjectArchiver(event.object)\n+    if not archiver.isVersionable():\n+        return\n     archiver.save(event.message)\ndiff --git a/plone/app/iterate/tests/test_containers.py b/plone/app/iterate/tests/test_containers.py\nindex d18df35..99657da 100644\n--- a/plone/app/iterate/tests/test_containers.py\n+++ b/plone/app/iterate/tests/test_containers.py\n@@ -220,7 +220,7 @@ def test_container_control_checkin_allowed_with_no_policy(self):\n \n     def test_container_control_checkout_allowed_with_no_policy(self):\n         control = Control(self.portal.docs, self.layer["request"])\n-        self.assertFalse(control.checkout_allowed())\n+        self.assertTrue(control.checkout_allowed())\n \n     def test_container_control_cancel_allowed_with_no_policy(self):\n         control = Control(self.portal.docs, self.layer["request"])\ndiff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py\nindex dc72b04..b118833 100644\n--- a/plone/app/iterate/tests/test_iterate.py\n+++ b/plone/app/iterate/tests/test_iterate.py\n@@ -127,7 +127,7 @@ def test_control_checkin_allowed_with_no_policy(self):\n \n     def test_control_checkout_allowed_with_no_policy(self):\n         control = Control(self.portal.docs, self.layer["request"])\n-        self.assertFalse(control.checkout_allowed())\n+        self.assertTrue(control.checkout_allowed())\n \n     def test_control_cancel_allowed_with_no_policy(self):\n         control = Control(self.portal.docs, self.layer["request"])\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-01-28T12:37:09+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.iterate/commit/01c6ac4d9562fe77223c39784f5eca27395cecd6
+
+Working copy of Plone Site: make sure the layout is correct.
+
+Files changed:
+M plone/app/iterate/dexterity/copier.py
+
+b'diff --git a/plone/app/iterate/dexterity/copier.py b/plone/app/iterate/dexterity/copier.py\nindex 3e4d47f..e5c99c5 100644\n--- a/plone/app/iterate/dexterity/copier.py\n+++ b/plone/app/iterate/dexterity/copier.py\n@@ -6,6 +6,7 @@\n from plone.app.iterate.dexterity.relation import StagingRelationValue\n from plone.app.iterate.event import AfterCheckinEvent\n from plone.app.relationfield.event import update_behavior_relations\n+from plone.dexterity.interfaces import IDexterityFTI\n from plone.dexterity.utils import createContentInContainer\n from plone.dexterity.utils import iterSchemata\n from Products.CMFCore.utils import getToolByName\n@@ -19,6 +20,7 @@\n from ZODB.PersistentMapping import PersistentMapping\n from zope import component\n from zope.annotation.interfaces import IAnnotations\n+from zope.component import getUtility\n from zope.event import notify\n from zope.intid.interfaces import IIntIds\n from zope.schema import getFieldsInOrder\n@@ -189,6 +191,11 @@ def _copyBaseline(self, container):\n         # schema is used.\n         if self.context.portal_type == "Plone Site":\n             obj.portal_type = "Plone Site"\n+            # Especially in Classic UI we may get a 404 NotFound on the document\n+            # because it gets its layout/display from the Plone Site FTI.\n+            document_fti = getUtility(IDexterityFTI, name="Document")\n+            if obj.getLayout() not in document_fti.view_methods:\n+                obj._setProperty("layout", document_fti.default_view or "view")\n \n         # copy all field values from the baseline to the working copy\n         for schema in iterSchemata(self.context):\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-01-28T09:56:41-08:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/31c212b3ed576d8ef6737203d9ddcc2963496294
+
+Merge pull request #130 from plone/working_copy_portal
+
+Allows working copy of Plone Site
+
+Files changed:
+A news/130.feature
+A news/130.feature.2
+M plone/app/iterate/base.py
+M plone/app/iterate/browser/control.py
+M plone/app/iterate/containers.py
+M plone/app/iterate/dexterity/configure.zcml
+M plone/app/iterate/dexterity/copier.py
+M plone/app/iterate/subscribers/versioning.py
+M plone/app/iterate/tests/test_containers.py
+M plone/app/iterate/tests/test_iterate.py
+
+b'diff --git a/news/130.feature b/news/130.feature\nnew file mode 100644\nindex 0000000..1b647f4\n--- /dev/null\n+++ b/news/130.feature\n@@ -0,0 +1 @@\n+Support working copies of the Plone Site. @wesleybl\ndiff --git a/news/130.feature.2 b/news/130.feature.2\nnew file mode 100644\nindex 0000000..f08533a\n--- /dev/null\n+++ b/news/130.feature.2\n@@ -0,0 +1 @@\n+Support working copies of content types that don\'t have versioning enabled. @davisagli\ndiff --git a/plone/app/iterate/base.py b/plone/app/iterate/base.py\nindex 062574c..d38da35 100644\n--- a/plone/app/iterate/base.py\n+++ b/plone/app/iterate/base.py\n@@ -65,7 +65,12 @@ def checkout(self, container):\n \n         # use the object copier to checkout the content to the container\n         copier = queryAdapter(self.context, IObjectCopier)\n-        working_copy, relation = copier.copyTo(container)\n+        # The container for the Portal\'s working copy is the Portal itself.\n+        if self.context.portal_type == "Plone Site":\n+            working_copy_container = self.context\n+        else:\n+            working_copy_container = container\n+        working_copy, relation = copier.copyTo(working_copy_container)\n \n         # publish the event for any subscribers\n         notify(CheckoutEvent(self.context, working_copy, relation))\ndiff --git a/plone/app/iterate/browser/control.py b/plone/app/iterate/browser/control.py\nindex 6b8ae7d..89fcbc0 100644\n--- a/plone/app/iterate/browser/control.py\n+++ b/plone/app/iterate/browser/control.py\n@@ -47,10 +47,6 @@ def checkin_allowed(self):\n         if not interfaces.IIterateAware.providedBy(context):\n             return False\n \n-        archiver = interfaces.IObjectArchiver(context)\n-        if not archiver.isVersionable():\n-            return False\n-\n         if not IWorkingCopy.providedBy(context):\n             return False\n \n@@ -85,10 +81,6 @@ def checkout_allowed(self):\n         if not interfaces.IIterateAware.providedBy(context):\n             return False\n \n-        archiver = interfaces.IObjectArchiver(context)\n-        if not archiver.isVersionable():\n-            return False\n-\n         policy = ICheckinCheckoutPolicy(context, None)\n         if policy is None:\n             return False\ndiff --git a/plone/app/iterate/containers.py b/plone/app/iterate/containers.py\nindex c22142c..da1cc18 100644\n--- a/plone/app/iterate/containers.py\n+++ b/plone/app/iterate/containers.py\n@@ -64,11 +64,11 @@ def __init__(self, context):\n \n     @property\n     def available(self):\n-        return bool(\n-            getSecurityManager().checkPermission(\n-                AddPortalContent, aq_parent(aq_inner(self.context))\n-            )\n-        )\n+        obj = aq_inner(self.context)\n+        # In Plone Site checkout, the working copy container is the portal itself.\n+        if obj.portal_type != "Plone Site":\n+            obj = aq_parent(obj)\n+        return bool(getSecurityManager().checkPermission(AddPortalContent, obj))\n \n     def __call__(self):\n         if not self.available:\ndiff --git a/plone/app/iterate/dexterity/configure.zcml b/plone/app/iterate/dexterity/configure.zcml\nindex 0457c7b..2909fdf 100644\n--- a/plone/app/iterate/dexterity/configure.zcml\n+++ b/plone/app/iterate/dexterity/configure.zcml\n@@ -29,4 +29,8 @@\n     <implements interface="plone.app.iterate.dexterity.interfaces.IDexterityIterateAware" />\n   </class>\n \n+  <class class="Products.CMFPlone.Portal.PloneSite">\n+    <implements interface="plone.app.iterate.dexterity.interfaces.IDexterityIterateAware" />\n+  </class>\n+\n </configure>\ndiff --git a/plone/app/iterate/dexterity/copier.py b/plone/app/iterate/dexterity/copier.py\nindex bfa8ab4..e5c99c5 100644\n--- a/plone/app/iterate/dexterity/copier.py\n+++ b/plone/app/iterate/dexterity/copier.py\n@@ -6,6 +6,7 @@\n from plone.app.iterate.dexterity.relation import StagingRelationValue\n from plone.app.iterate.event import AfterCheckinEvent\n from plone.app.relationfield.event import update_behavior_relations\n+from plone.dexterity.interfaces import IDexterityFTI\n from plone.dexterity.utils import createContentInContainer\n from plone.dexterity.utils import iterSchemata\n from Products.CMFCore.utils import getToolByName\n@@ -19,6 +20,7 @@\n from ZODB.PersistentMapping import PersistentMapping\n from zope import component\n from zope.annotation.interfaces import IAnnotations\n+from zope.component import getUtility\n from zope.event import notify\n from zope.intid.interfaces import IIntIds\n from zope.schema import getFieldsInOrder\n@@ -98,6 +100,10 @@ def _replaceBaseline(self, baseline):\n         return baseline\n \n     def _reassembleWorkingCopy(self, new_baseline, baseline):\n+        # Does not change Plone Site permissions.\n+        if new_baseline.portal_type == "Plone Site":\n+            return new_baseline\n+\n         # reattach the source\'s workflow history, try avoid a dangling ref\n         try:\n             new_baseline.workflow_history = PersistentMapping(\n@@ -171,11 +177,25 @@ def checkin(self, checkin_message):\n \n class FolderishContentCopier(ContentCopier):\n     def _copyBaseline(self, container):\n+        if self.context.portal_type == "Plone Site":\n+            portal_type = "Document"\n+        else:\n+            portal_type = self.context.portal_type\n         obj = createContentInContainer(\n             container,\n-            self.context.portal_type,\n+            portal_type,\n             id=f"working_copy_of_{self.context.id}",\n         )\n+        # Since the working copy of the Portal is originally a Document,\n+        # we force its portal_type to "Plone Site", so that the "Plone Site"\n+        # schema is used.\n+        if self.context.portal_type == "Plone Site":\n+            obj.portal_type = "Plone Site"\n+            # Especially in Classic UI we may get a 404 NotFound on the document\n+            # because it gets its layout/display from the Plone Site FTI.\n+            document_fti = getUtility(IDexterityFTI, name="Document")\n+            if obj.getLayout() not in document_fti.view_methods:\n+                obj._setProperty("layout", document_fti.default_view or "view")\n \n         # copy all field values from the baseline to the working copy\n         for schema in iterSchemata(self.context):\ndiff --git a/plone/app/iterate/subscribers/versioning.py b/plone/app/iterate/subscribers/versioning.py\nindex 470824d..e7fa179 100644\n--- a/plone/app/iterate/subscribers/versioning.py\n+++ b/plone/app/iterate/subscribers/versioning.py\n@@ -24,10 +24,14 @@\n \n def handleBeforeCheckout(event):\n     archiver = interfaces.IObjectArchiver(event.object)\n+    if not archiver.isVersionable():\n+        return\n     if archiver.isModified() or not archiver.isVersioned():\n         archiver.save("Baseline created")\n \n \n def handleAfterCheckin(event):\n     archiver = interfaces.IObjectArchiver(event.object)\n+    if not archiver.isVersionable():\n+        return\n     archiver.save(event.message)\ndiff --git a/plone/app/iterate/tests/test_containers.py b/plone/app/iterate/tests/test_containers.py\nindex b79735d..99657da 100644\n--- a/plone/app/iterate/tests/test_containers.py\n+++ b/plone/app/iterate/tests/test_containers.py\n@@ -219,11 +219,11 @@ def test_container_control_checkin_allowed_with_no_policy(self):\n         self.assertFalse(control.checkin_allowed())\n \n     def test_container_control_checkout_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n-        self.assertFalse(control.checkout_allowed())\n+        control = Control(self.portal.docs, self.layer["request"])\n+        self.assertTrue(control.checkout_allowed())\n \n     def test_container_control_cancel_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.cancel_allowed())\n \n     def test_container_control_cancel_on_original_does_not_delete_original(self):\ndiff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py\nindex 93b9397..b118833 100644\n--- a/plone/app/iterate/tests/test_iterate.py\n+++ b/plone/app/iterate/tests/test_iterate.py\n@@ -126,11 +126,11 @@ def test_control_checkin_allowed_with_no_policy(self):\n         self.assertFalse(control.checkin_allowed())\n \n     def test_control_checkout_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n-        self.assertFalse(control.checkout_allowed())\n+        control = Control(self.portal.docs, self.layer["request"])\n+        self.assertTrue(control.checkout_allowed())\n \n     def test_control_cancel_allowed_with_no_policy(self):\n-        control = Control(self.portal, self.layer["request"])\n+        control = Control(self.portal.docs, self.layer["request"])\n         self.assertFalse(control.cancel_allowed())\n \n     def test_control_cancel_on_original_does_not_delete_original(self):\n'
 
