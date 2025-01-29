@@ -1,35 +1,38 @@
-# Release notes for Plone 6.1.0b2
+# Release notes for Plone 6.1.0rc1 (unreleased)
 
-* Released: December 19, 2024
+* Last updated: January 29, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.0b2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.0b2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.0b2/constraints.txt](https://dist.plone.org/release/6.1.0b2/constraints.txt).
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.0b2/versions.cfg](https://dist.plone.org/release/6.1.0b2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.0b2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.0b2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.1.0b1:
+Major changes since 6.1.0b2:
 
-* Supports Python 3.13.  Python 3.13.0 has a problem though, so you need at least 3.13.1.
-* `Products.CMFPlone`: Allow bundles to be rendered after all others.  To render resources after all others, give them the "depends" value of "all".
-* `Products.CMFEditions`: Fix ancient bug: "Can't pickle objects in acquisition wrappers" error in `OMOutsideChildrensModifier` and `OMInsideChildrensModifier`.
-* `plone.app.event`: Provide an IContentListingObject adapter.
-* `plone.app.multilingual`: use pat-contentbrowser as default widget for add translation form.
-* `plone.distribution`: Fix bug where launch screen was blank in Chrome.
-* `plone.namedfile`: Set `Link` header with `rel="canonical"` for file downloads. @mamico (#163)
+* Fixed lots of deprecation warnings in lots of packages.
+* `icalendar`: Upgraded to version 6.  This has support for the `zoneinfo` Python standard library.
+  Plone is not ready for that yet, so in `plone.app.event`, which uses it for the ical/vcal downloads, we configure it to keep using the `pytz` library as before.
+  You should not notice a difference, but if you have own code that uses `icalendar`, you should look at the [breaking changes in v6.0.0a0](https://github.com/collective/icalendar/blob/v6.0.0a0/CHANGES.rst).
+* `plone.exportimport` and `plone.distribution` have changes that make the exported files more "stable": when you create a site with a distribution and then make a fresh export, there should be no changes in the distribution.
+  * Include revisions only when passing `--include-revisions` in `bin/plone-exporter` and `bin/export-distribution`.
+  * Export principals: sort groups, roles, and members.
+  * Import: update modification dates again at the end. The original modification dates may have changed.
+  * Do not export parent info.
+    This information is no longer needed: during import, parents are now always found by path and not by UID.
+    From now on, the import ignores any parent info that is set.
 * `plone.restapi`:
-  * Fix log in after changing email when "email as login" is enabled.
-  * When a Link content item is linked by UID, resolve its URL as the linked target URL for anonymous users.
-* `plone.volto`:
-  * Rename `default` distribution to `volto`.
-  * Enable the `plone.versioning` behavior for the Page content type.
-  * The `volto.head_title` behavior has been renamed to `volto.kicker`.  The old name still works, but is deprecated.  Content types should be updated to use the new name.
-* `plonetheme.barceloneta`: Upgrade TinyMCE 7.6.0.
+  * Add a `@login` endpoint to get external login services' links.
+  * In the `@registry` endpoint, added support for filtering the list of registry records.
+* `plone.volto`: Implement a specific robots.txt for Volto sites.
+  The existing standard one would [block API calls made by Google](https://github.com/plone/plone.volto/issues/178).
+  There is an upgrade step which will update the existing `plone.robots_txt` registry setting unless it has been customized.
+* `Products.PlonePAS`: Return an error when trying to access the PAS views from the web.
 
 
 ## Volto frontend
@@ -38,7 +41,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.4.0](https://www.npmjs.com/package/@plone/volto/v/18.4.0).  See the [changelog](https://github.com/plone/volto/blob/18.4.0/packages/volto/CHANGELOG.md).
+Latest release is [18.7.0](https://www.npmjs.com/package/@plone/volto/v/18.7.0).  See the [changelog](https://github.com/plone/volto/blob/18.7.0/packages/volto/CHANGELOG.md).
 
 
 ## Classic UI
@@ -48,7 +51,6 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 ## Python compatibility
 
-This is the first Plone release to support Python 3.13.
 This release supports Python 3.10, 3.11, 3.12, and 3.13.
 
 
