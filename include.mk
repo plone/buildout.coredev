@@ -17,8 +17,6 @@ plonereleaser-clean: plonereleaser-dirty
 	@test -e $(MXENV_PYTHON) && $(MXENV_PYTHON) -m pip uninstall -y plone.releaser || :
 
 INSTALL_TARGETS+=$(PLONERELEASER_TARGET)
-CHECK_TARGETS+=plonereleaser-check
-FORMAT_TARGETS+=plonereleaser-format
 DIRTY_TARGETS+=plonereleaser-dirty
 CLEAN_TARGETS+=plonereleaser-clean
 
@@ -39,7 +37,12 @@ $(BUILDOUT2PIP_TARGET): $(PLONERELEASER_TARGET) checkouts.cfg sources.cfg
 # configure to run pre sources
 PRE_SOURCES_TARGETS+=$(BUILDOUT2PIP_TARGET) $(VERSIONS2CONSTRAINTS_TARGET)
 
-.PHONY: run-presources
-run-presources: $(PRE_SOURCES_TARGETS)
-	@echo "Manual run pre sources targets"
+PRE_SOURCES_TARGET:=$(SENTINEL_FOLDER)/pre_sources.sentinel
+$(PRE_SOURCES_TARGET): $(PRE_SOURCES_TARGETS)
+	@touch $(PRE_SOURCES_TARGET)
 
+.PHONY: run-presources
+run-presources: $(PRE_SOURCES_TARGET)
+	@touch $(PRE_SOURCES_TARGET)
+
+INSTALL_TARGETS+=run-presources
