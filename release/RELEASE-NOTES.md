@@ -1,34 +1,27 @@
-# Release notes for Plone 6.0.14
+# Release notes for Plone 6.0.15 (unreleased)
 
-* Released: December 19, 2024
+* Last updated: January 30, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.14/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.14/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
 
 If you want to jump straight in, here are two important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.14/constraints.txt](https://dist.plone.org/release/6.0.14/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.14/versions.cfg](https://dist.plone.org/release/6.0.14/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.14/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.14/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
 
 
 ## Highlights
 
-Major changes since 6.0.13:
+Major changes since 6.0.14:
 
-* Drop Python 3.8 support.
-* Provisionally support Python 3.13.  It should work fine, but it has not been fully tested yet.
-* `Products.CMFPlone`:
-  * Allow bundles to be rendered after all others.  To render resources after all others, give them the "depends" value of "all".
-  * Redirection control panel: Added support for start and end filters.
-  * URL Management control panel: Find substring matches when querying aliases.
-* `plone.app.event`: Provide an IContentListingObject adapter.
-* `plone.namedfile`: Set `Link` header with `rel="canonical"` for file downloads.
-* `plone.recipe.zope2instance`: Specify a standalone `logging.ini` configuration using the `wsgi-logging-ini-template` option in buildout.  The log configuration will be injected into `wsgi.ini` keeping all other default wsgi config.  The `wsgi-logging-ini-template` option cannot be used together with the `wsgi-ini-template`.
+* Fully support Python 3.13.  In the previous release it worked fine, but it had not been fully tested yet.
+  Note that 3.13.0 does not work: you need at least 3.13.1.
+* Fixed lots of deprecation warnings in lots of packages.
 * `plone.restapi`:
-  * Fix log in after changing email when "email as login" is enabled.
-  * When a Link content item is linked by UID, resolve its URL as the linked target URL for anonymous users.
-  * Added create and fetch aliases in CSV format.
-  * Site service: Indicate whether the site supports filtering URL aliases by date.
+  * Add a `@login` endpoint to get external login services' links.
+  * In the `@registry` endpoint, added support for filtering the list of registry records.
+* `Products.PlonePAS`: Return an error when trying to access the PAS views from the web.
 
 
 ## Volto frontend
@@ -48,9 +41,7 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 ## Python compatibility
 
-This release supports Python 3.9, 3.10, 3.11, and 3.12.
-It drops Python 3.8 support.
-It provisionally supports Python 3.13.  It should work fine, but it has not been fully tested yet.
+This release supports Python 3.9, 3.10, 3.11, 3.12, and 3.13.
 
 
 ## pip, buildout, setuptools
