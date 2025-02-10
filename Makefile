@@ -46,7 +46,7 @@ EXTRA_PATH?=
 PRIMARY_PYTHON?=python3
 
 # Minimum required Python version.
-# Default: 3.7
+# Default: 3.9
 PYTHON_MIN_VERSION?=3.7
 
 # Install packages using the given package installer method.
@@ -133,7 +133,6 @@ INSTALL_TARGETS?=
 DIRTY_TARGETS?=
 CLEAN_TARGETS?=
 PURGE_TARGETS?=
-PRE_SOURCES_TARGETS?=
 
 export PATH:=$(if $(EXTRA_PATH),$(EXTRA_PATH):,)$(PATH)
 
@@ -160,6 +159,8 @@ $(SENTINEL): $(firstword $(MAKEFILE_LIST))
 ##############################################################################
 # mxenv
 ##############################################################################
+
+export OS:=$(OS)
 
 # Determine the executable path
 ifeq ("$(VENV_ENABLED)", "true")
@@ -240,10 +241,7 @@ CLEAN_TARGETS+=mxenv-clean
 ##############################################################################
 
 SOURCES_TARGET:=$(SENTINEL_FOLDER)/sources.sentinel
-
-# pre sources targets to be used in includes
-#PRE_SOURCES_TARGETS?=
-$(SOURCES_TARGET): $(PROJECT_CONFIG) $(MXENV_TARGET) $(PRE_SOURCES_TARGETS)
+$(SOURCES_TARGET): $(PROJECT_CONFIG) $(MXENV_TARGET)
 	@echo "Checkout project sources"
 	@mxdev -o -c $(PROJECT_CONFIG)
 	@touch $(SOURCES_TARGET)
@@ -394,6 +392,7 @@ CLEAN_TARGETS+=cookiecutter-clean
 
 ZOPE_INSTANCE_FOLDER:=$(ZOPE_BASE_FOLDER)/instance
 ZOPE_INSTANCE_TARGET:=$(ZOPE_INSTANCE_FOLDER)/etc/zope.ini $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(ZOPE_INSTANCE_FOLDER)/etc/site.zcml
+ZOPE_RUN_TARGET:=$(ZOPE_INSTANCE_TARGET) $(PACKAGES_TARGET)
 
 ifeq (,$(ZOPE_TEMPLATE_CHECKOUT))
 	ZOPE_COOKIECUTTER_TEMPLATE_OPTIONS=
@@ -412,19 +411,19 @@ $(ZOPE_INSTANCE_TARGET): $(COOKIECUTTER_TARGET) $(ZOPE_CONFIGURATION_FILE)
 zope-instance: $(ZOPE_INSTANCE_TARGET) $(SOURCES)
 
 .PHONY: zope-start
-zope-start: $(ZOPE_INSTANCE_TARGET) $(PACKAGES_TARGET)
+zope-start: $(ZOPE_RUN_TARGET)
 	@echo "Start Zope/Plone with configuration in $(ZOPE_INSTANCE_FOLDER)"
 	@runwsgi -v "$(ZOPE_INSTANCE_FOLDER)/etc/zope.ini"
 
 .PHONY: zope-debug
-zope-debug: $(ZOPE_INSTANCE_TARGET) $(PACKAGES_TARGET)
+zope-debug: $(ZOPE_RUN_TARGET)
 	@echo "Start Zope/Plone with configuration in $(ZOPE_INSTANCE_FOLDER)"
-	@zconsole debug "$(ZOPE_INSTANCE_FOLDER)/etc/zope.ini"
+	@zconsole debug "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf"
 
 .PHONY: zope-runscript
-zope-runscript: $(ZOPE_INSTANCE_TARGET) $(PACKAGES_TARGET)
+zope-runscript: $(ZOPE_RUN_TARGET)
 	@echo "Run Zope/Plone Console Script $(ZOPE_SCRIPTNAME) in $(ZOPE_INSTANCE_FOLDER)"
-	@zconsole run "$(ZOPE_INSTANCE_FOLDER)/etc/zope.ini" $(ZOPE_SCRIPTNAME)
+	@zconsole run "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf" $(ZOPE_SCRIPTNAME)
 
 .PHONY: zope-dirty
 zope-dirty:
@@ -442,6 +441,10 @@ zope-purge: zope-dirty
 INSTALL_TARGETS+=zope-instance
 DIRTY_TARGETS+=zope-dirty
 CLEAN_TARGETS+=zope-clean
+
+##############################################################################
+# Custom includes
+##############################################################################
 
 -include $(INCLUDE_MAKEFILE)
 
@@ -480,3 +483,4 @@ runtime-clean:
 	@find . -name '*.py[c|o]' -delete
 	@find . -name '*~' -exec rm -f {} +
 	@find . -name '__pycache__' -exec rm -fr {} +
+
