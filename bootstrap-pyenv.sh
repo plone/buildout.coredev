@@ -1,7 +1,7 @@
 #!/bin/sh
 # This script uses pyenv to install specific virtualenv
 PY="3.11.2"
-VENVBASE="plone-coredev-6.1"
+VENVBASE="plone-coredev-6.2"
 
 if ! which pyenv &> /dev/null; then
   echo "Error: pyenv script is not installed." >&2
