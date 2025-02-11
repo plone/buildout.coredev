@@ -2,7 +2,7 @@
 
 Create an issue in CMFPlone and copy the below text in it.
 Edit where needed.
-https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Plone+6.2.x
+https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Plone+6.1.x
 
 ## Release packages, update versions
 
@@ -19,20 +19,20 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 
 ## Release notes, constraints, dist.plone.org
 
-- [ ] Adjust coredev branch [`release/6.2-dev`](https://github.com/plone/buildout.coredev/tree/release/6.2-dev).  Most importantly, the `auto-checkout` list in `checkouts.cfg` should be empty, and the `versions.cfg` and `requirements.txt` should be the same.  One way that works for me: `git switch release/6.2-dev; git reset --hard 6.2; git reset origin/release/6.2-dev; git checkout .package_ignores checkouts.cfg last_commit.txt mxcheckouts.ini`.  Then check which remaining changes you want to commit.
-- [ ] Update the `6.2-dev` directory on dist.plone.org, and gather files to put there:
-  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=6.2.0a1 > release/changelog.txt`.  Remove the uninteresting top lines.  You may want to link to the [Zope changelog](https://github.com/zopefoundation/Zope/blob/master/CHANGES.rst) with a specific tag.
+- [ ] Adjust coredev branch [`release/6.1-dev`](https://github.com/plone/buildout.coredev/tree/release/6.1-dev).  Most importantly, the `auto-checkout` list in `checkouts.cfg` should be empty, and the `versions.cfg` and `requirements.txt` should be the same.  One way that works for me: `git switch release/6.1-dev; git reset --hard 6.1; git reset origin/release/6.1-dev; git checkout .package_ignores checkouts.cfg last_commit.txt mxcheckouts.ini`.  Then check which remaining changes you want to commit.
+- [ ] Update the `6.1-dev` directory on dist.plone.org, and gather files to put there:
+  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=6.1.0a1 > release/changelog.txt`.  Remove the uninteresting top lines.  You may want to link to the [Zope changelog](https://github.com/zopefoundation/Zope/blob/master/CHANGES.rst) with a specific tag.
   - [ ] Create a file `release/RELEASE-NOTES.md`.  It may be enough to look through the changelog and copy interesting changes.
   - [ ] Get the `versions*.cfg` file and any other versions files from coredev.
   - [ ] NEW.  Run `make install`.  This uses `mxdev` to install packages and generate some files.  Most importantly this generates `constraints-mxdev.txt`.  This contains *all* constraints, *and* makes sure no constraints are in there twice (provided that `mx.ini` is correct).  This is really the only constraints file that is needed and that is correct.  So for now I will only ship this one and call it `constraints.txt` on dist.plone.org.  This may need some more thought and updates in next releases.
   - [ ] Use `tox -c release/tox.ini` to copy these files to `release/dist`.
-  - [ ] Copy (`rsync`) these files to the pending release directory: `scp release/dist/* dist.plone.org:release/6.2-dev/`
+  - [ ] Copy (`rsync`) these files to the pending release directory: `scp release/dist/* dist.plone.org:release/6.1-dev/`
 
 ## Final release, Docker
 
-- [ ] Create tag of the `release/6.2-dev` branch, e.g.  6.2.0a1, and push to GitHub.
+- [ ] Create tag of the `release/6.1-dev` branch, e.g.  6.1.0a1, and push to GitHub.
 - [ ] Make final release directory on dist.plone.org, with versions, requirements, constraints, changelog, release notes.
-- [ ] Update the "-latest" links on dist.plone.org, e.g.  `ln -sfT 6.2.0a1 6.2-latest`
+- [ ] Update the "-latest" links on dist.plone.org, e.g.  `ln -sfT 6.1.0a1 6.1-latest`
 - [ ] Create a pull request for the [`plone-backend`](https://github.com/plone/plone-backend) Docker image with the new version number.  Get this reviewed, merged, tagged, released.
 
 ## Announcements
