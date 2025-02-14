@@ -9,6 +9,8 @@
 #: core.mxfiles
 #: core.packages
 #: core.sources
+#: qa.coverage
+#: qa.test
 #
 # SETTINGS (ALL CHANGES MADE BELOW SETTINGS WILL BE LOST)
 ##############################################################################
@@ -103,6 +105,29 @@ PROJECT_CONFIG?=mx.ini
 # Default: false
 PACKAGES_ALLOW_PRERELEASES?=false
 
+## qa.test
+
+# The command which gets executed. Defaults to the location the
+# :ref:`run-tests` template gets rendered to if configured.
+# Default: .mxmake/files/run-tests.sh
+TEST_COMMAND?=.mxmake/files/run-tests.sh
+
+# Additional Python requirements for running tests to be
+# installed (via pip).
+# Default: pytest
+TEST_REQUIREMENTS?=zope-testrunner
+
+# Additional make targets the test target depends on.
+# No default value.
+TEST_DEPENDENCY_TARGETS?=
+
+## qa.coverage
+
+# The command which gets executed. Defaults to the location the
+# :ref:`run-coverage` template gets rendered to if configured.
+# Default: .mxmake/files/run-coverage.sh
+COVERAGE_COMMAND?=.mxmake/files/run-coverage.sh
+
 ## applications.zope
 
 # cookiecutter configuration file to use
@@ -125,6 +150,14 @@ ZOPE_BASE_FOLDER?=.
 # Default: No Default
 ZOPE_SCRIPTNAME?=No Default
 
+# user name to create
+# Default: No Default
+ZOPE_USER_NAME?=No Default
+
+# user name to create
+# Default: No Default
+ZOPE_USER_PASSWORD?=No Default
+
 ##############################################################################
 # END SETTINGS - DO NOT EDIT BELOW THIS LINE
 ##############################################################################
@@ -133,6 +166,9 @@ INSTALL_TARGETS?=
 DIRTY_TARGETS?=
 CLEAN_TARGETS?=
 PURGE_TARGETS?=
+CHECK_TARGETS?=
+TYPECHECK_TARGETS?=
+FORMAT_TARGETS?=
 
 export PATH:=$(if $(EXTRA_PATH),$(EXTRA_PATH):,)$(PATH)
 
@@ -362,6 +398,64 @@ DIRTY_TARGETS+=packages-dirty
 CLEAN_TARGETS+=packages-clean
 
 ##############################################################################
+# test
+##############################################################################
+
+TEST_TARGET:=$(SENTINEL_FOLDER)/test.sentinel
+$(TEST_TARGET): $(MXENV_TARGET)
+	@echo "Install $(TEST_REQUIREMENTS)"
+	@$(PYTHON_PACKAGE_COMMAND) install $(TEST_REQUIREMENTS)
+	@touch $(TEST_TARGET)
+
+.PHONY: test
+test: $(FILES_TARGET) $(SOURCES_TARGET) $(PACKAGES_TARGET) $(TEST_TARGET) $(TEST_DEPENDENCY_TARGETS)
+	@test -z "$(TEST_COMMAND)" && echo "No test command defined" && exit 1 || :
+	@echo "Run tests using $(TEST_COMMAND)"
+	@/usr/bin/env bash -c "$(TEST_COMMAND)"
+
+.PHONY: test-dirty
+test-dirty:
+	@rm -f $(TEST_TARGET)
+
+.PHONY: test-clean
+test-clean: test-dirty
+	@test -e $(MXENV_PYTHON) && $(MXENV_PYTHON) -m pip uninstall -y $(TEST_REQUIREMENTS) || :
+	@rm -rf .pytest_cache
+
+INSTALL_TARGETS+=$(TEST_TARGET)
+CLEAN_TARGETS+=test-clean
+DIRTY_TARGETS+=test-dirty
+
+##############################################################################
+# coverage
+##############################################################################
+
+COVERAGE_TARGET:=$(SENTINEL_FOLDER)/coverage.sentinel
+$(COVERAGE_TARGET): $(TEST_TARGET)
+	@echo "Install Coverage"
+	@$(PYTHON_PACKAGE_COMMAND) install -U coverage
+	@touch $(COVERAGE_TARGET)
+
+.PHONY: coverage
+coverage: $(FILES_TARGET) $(SOURCES_TARGET) $(PACKAGES_TARGET) $(COVERAGE_TARGET)
+	@test -z "$(COVERAGE_COMMAND)" && echo "No coverage command defined" && exit 1 || :
+	@echo "Run coverage using $(COVERAGE_COMMAND)"
+	@/usr/bin/env bash -c "$(COVERAGE_COMMAND)"
+
+.PHONY: coverage-dirty
+coverage-dirty:
+	@rm -f $(COVERAGE_TARGET)
+
+.PHONY: coverage-clean
+coverage-clean: coverage-dirty
+	@test -e $(MXENV_PYTHON) && $(MXENV_PYTHON) -m pip uninstall -y coverage || :
+	@rm -rf .coverage htmlcov
+
+INSTALL_TARGETS+=$(COVERAGE_TARGET)
+DIRTY_TARGETS+=coverage-dirty
+CLEAN_TARGETS+=coverage-clean
+
+##############################################################################
 # cookiecutter
 ##############################################################################
 
@@ -425,6 +519,11 @@ zope-runscript: $(ZOPE_RUN_TARGET)
 	@echo "Run Zope/Plone Console Script $(ZOPE_SCRIPTNAME) in $(ZOPE_INSTANCE_FOLDER)"
 	@zconsole run "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf" $(ZOPE_SCRIPTNAME)
 
+.PHONY: zope-adduser
+zope-adduser: $(ZOPE_RUN_TARGET)
+	@echo "Run Zope addzopeuser to create an emergency user '$(ZOPE_USER_NAME)' with role 'Manager'"
+	@addzopeuser -c "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf" $(ZOPE_USER_NAME) $(ZOPE_USER_PASSWORD)
+
 .PHONY: zope-dirty
 zope-dirty:
 	@touch ${ZOPE_CONFIGURATION_FILE}
@@ -484,3 +583,11 @@ runtime-clean:
 	@find . -name '*~' -exec rm -f {} +
 	@find . -name '__pycache__' -exec rm -fr {} +
 
+.PHONY: check
+check: $(CHECK_TARGETS)
+
+.PHONY: typecheck
+typecheck: $(TYPECHECK_TARGETS)
+
+.PHONY: format
+format: $(FORMAT_TARGETS)
