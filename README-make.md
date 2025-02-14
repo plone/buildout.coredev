@@ -63,8 +63,7 @@ See https://github.com/mxstack/mxdev/tree/main
 This means you should not edit the `Makefile` by hand.
 Please only touch `include.mk` if anything needs to be changed or extra targets are needed.
 
-Every now and then we can regenerate the `Makefile`.
-TODO: how do we do that?
+Every now and then we can regenerate the `Makefile` with `mxmake update`.
 
 See https://mxstack.github.io/mxmake
 
