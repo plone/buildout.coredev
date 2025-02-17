@@ -1,89 +1,99 @@
-Repository: plone.app.multilingual
+Repository: plone.app.caching
 
 
 Branch: refs/heads/master
-Date: 2025-01-28T22:32:59+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/d937b5d50a7d8a94954c3ad27ae0ad39a817e038
+Date: 2025-02-12T08:47:30+01:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/411d9c194983d54a40067fd01c92554ff4885cc3
 
-test querying the first page
+purge on workflow change
 
 Files changed:
-M src/plone/app/multilingual/tests/test_sitemap.py
+M plone/app/caching/configure.zcml
+M plone/app/caching/purge.py
+M plone/app/caching/tests/test_integration.py
 
-b'diff --git a/src/plone/app/multilingual/tests/test_sitemap.py b/src/plone/app/multilingual/tests/test_sitemap.py\nindex ed3c2239..5b4ce3ed 100644\n--- a/src/plone/app/multilingual/tests/test_sitemap.py\n+++ b/src/plone/app/multilingual/tests/test_sitemap.py\n@@ -52,6 +52,7 @@ def test_portalroot_sitemap(self):\n         Requests for the sitemap on portalroot return all languages\n         """\n \n+        self.portal.REQUEST[\'page\'] = 1\n         xml = self.uncompress(self.sitemap())\n         self.assertIn(b"<loc>http://nohost/plone/ca/test-document</loc>", xml)\n         self.assertIn(b"<loc>http://nohost/plone/en/test-document</loc>", xml)\n@@ -68,6 +69,8 @@ def test_navroot_sitemap(self):\n         sitemap = getMultiAdapter(\n             (self.portal.es, self.portal.REQUEST), name="sitemap.xml.gz"\n         )\n+        self.portal.REQUEST["page"] = 1\n+\n         xml = self.uncompress(sitemap())\n         self.assertNotIn(\n             b"<loc>http://nohost/plone/ca/test-document</loc>", xml\n'
+b'diff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml\nindex 48394f7..6a2c5a2 100644\n--- a/plone/app/caching/configure.zcml\n+++ b/plone/app/caching/configure.zcml\n@@ -45,6 +45,8 @@\n   <!-- Purging -->\n   <subscriber handler=".purge.purgeOnModified" />\n   <subscriber handler=".purge.purgeOnMovedOrRemoved" />\n+  <subscriber handler=".purge.purgeOnWorkflow" />\n+\n \n   <!-- ILastModified adapters -->\n   <adapter factory=".lastmodified.PageTemplateDelegateLastModified" />\ndiff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex d5a92ed..2632bbb 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -9,6 +9,7 @@\n from plone.namedfile.interfaces import INamedBlobFileField\n from plone.namedfile.interfaces import INamedImageField\n from plone.registry.interfaces import IRegistry\n+from Products.CMFCore.interfaces import IActionSucceededEvent\n from Products.CMFCore.interfaces import IContentish\n from Products.CMFCore.interfaces import IDiscussionResponse\n from Products.CMFCore.interfaces import IDynamicType\n@@ -252,3 +253,9 @@ def purgeOnMovedOrRemoved(object, event):\n     parent = object.getParentNode()\n     if parent:\n         notify(Purge(parent))\n+\n+\n+@adapter(IContentish, IActionSucceededEvent)\n+def purgeOnWorkflow(object, event):\n+    if isPurged(object):\n+        notify(Purge(object))\ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex a6fd622..5f41ad4 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -272,3 +272,49 @@ def test_auto_purge_content_types(self):\n             },\n             set(self.purger._async),\n         )\n+\n+    def test_purge_on_changeworkflow(self):\n+        setRoles(self.portal, TEST_USER_ID, ("Manager",))\n+\n+        # Non-folder content\n+        self.portal.invokeFactory("Document", "d1")\n+        self.portal["d1"].title = "Document one"\n+        self.portal["d1"].description = "Document one description"\n+        self.portal.portal_workflow.doActionFor(self.portal["d1"], "publish")\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual([], self.purger._async)\n+\n+        # Enable purge\n+        self.cachePurgingSettings.enabled = True\n+        self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n+        self.ploneCacheSettings.purgedContentTypes = ("Document",)\n+\n+        url = self.portal["d1"].absolute_url()\n+        token = getToken(TEST_USER_NAME)\n+        retractURL = f"{url}/content_status_modify?workflow_action=retract&_authenticator={token}"\n+\n+        import transaction\n+\n+        transaction.commit()\n+\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            "Authorization",\n+            f"Basic {TEST_USER_NAME}:{TEST_USER_PASSWORD}",\n+        )\n+\n+        # Retract the document\n+        browser.open(retractURL)\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual(\n+            {\n+                "http://localhost:1234/plone/d1",\n+                "http://localhost:1234/plone/d1/document_view",\n+                "http://localhost:1234/plone/d1/",\n+                "http://localhost:1234/plone/d1/view",\n+            },\n+            set(self.purger._async),\n+        )\n'
 
-Repository: plone.app.multilingual
+Repository: plone.app.caching
 
 
 Branch: refs/heads/master
-Date: 2025-01-28T22:34:49+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/858ad6fa4476ede36ecf9f9d5a26e517b9c14c60
+Date: 2025-02-12T08:51:57+01:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/2389937939810930ae8c79bfd8ada2d8e0ddf64f
 
 changelog
 
 Files changed:
-A news/481.bugfix
+A news/144.feature
 
-b'diff --git a/news/481.bugfix b/news/481.bugfix\nnew file mode 100644\nindex 000000000..f0b1e5edc\n--- /dev/null\n+++ b/news/481.bugfix\n@@ -0,0 +1,2 @@\n+Test sitemap with page number\n+[erral]\n'
+b'diff --git a/news/144.feature b/news/144.feature\nnew file mode 100644\nindex 0000000..8a9e474\n--- /dev/null\n+++ b/news/144.feature\n@@ -0,0 +1 @@\n+trigger purge on workflow change @mamico\n'
 
-Repository: plone.app.multilingual
-
-
-Branch: refs/heads/master
-Date: 2025-01-28T22:36:32+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/b8ac5a4f128579a690102c522583081728ac5d1c
-
-black
-
-Files changed:
-M src/plone/app/multilingual/tests/test_sitemap.py
-
-b'diff --git a/src/plone/app/multilingual/tests/test_sitemap.py b/src/plone/app/multilingual/tests/test_sitemap.py\nindex 5b4ce3ed..75f98380 100644\n--- a/src/plone/app/multilingual/tests/test_sitemap.py\n+++ b/src/plone/app/multilingual/tests/test_sitemap.py\n@@ -52,7 +52,7 @@ def test_portalroot_sitemap(self):\n         Requests for the sitemap on portalroot return all languages\n         """\n \n-        self.portal.REQUEST[\'page\'] = 1\n+        self.portal.REQUEST["page"] = 1\n         xml = self.uncompress(self.sitemap())\n         self.assertIn(b"<loc>http://nohost/plone/ca/test-document</loc>", xml)\n         self.assertIn(b"<loc>http://nohost/plone/en/test-document</loc>", xml)\n'
-
-Repository: plone.app.multilingual
+Repository: plone.app.caching
 
 
 Branch: refs/heads/master
-Date: 2025-02-15T11:19:31+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/c708fe1adf6ec36f1b7f429e8a416cefeaee31c8
+Date: 2025-02-12T23:48:53+01:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/ed381c3d1f0d97813f24d3ed1a723be1cf456570
 
-Merge branch 'master' into erral-new-sitemap
+purge parent
 
 Files changed:
-A news/483.testing
-M .editorconfig
-M .flake8
-M .github/workflows/meta.yml
-M .gitignore
-M .meta.toml
-M .pre-commit-config.yaml
-M dependabot.yml
-M pyproject.toml
-M setup.py
-M src/plone/app/multilingual/tests/robot/test_add_translation.robot
-M tox.ini
+M plone/app/caching/purge.py
+M plone/app/caching/tests/test_integration.py
 
-b'diff --git a/.editorconfig b/.editorconfig\nindex 5b3c112c..d054af15 100644\n--- a/.editorconfig\n+++ b/.editorconfig\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n #\n # EditorConfig Configuration file, for more details see:\ndiff --git a/.flake8 b/.flake8\nindex 38918f42..3e2d35f9 100644\n--- a/.flake8\n+++ b/.flake8\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n [flake8]\n doctests = 1\ndiff --git a/.github/workflows/meta.yml b/.github/workflows/meta.yml\nindex 6d378e21..478d580f 100644\n--- a/.github/workflows/meta.yml\n+++ b/.github/workflows/meta.yml\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n name: Meta\n on:\ndiff --git a/.gitignore b/.gitignore\nindex 4ffaa406..49541eec 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n # python related\n *.egg-info\ndiff --git a/.meta.toml b/.meta.toml\nindex dd10d959..7876ff44 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -1,9 +1,9 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n [meta]\n template = "default"\n-commit-id = "4cf2df11"\n+commit-id = "6c8043cd"\n \n [gitignore]\n extra_lines = """\ndiff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml\nindex 18b75326..cb3ab3f8 100644\n--- a/.pre-commit-config.yaml\n+++ b/.pre-commit-config.yaml\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n ci:\n     autofix_prs: false\n@@ -12,11 +12,11 @@ repos:\n     -   id: pyupgrade\n         args: [--py38-plus]\n -   repo: https://github.com/pycqa/isort\n-    rev: 5.13.2\n+    rev: 6.0.0\n     hooks:\n     -   id: isort\n -   repo: https://github.com/psf/black\n-    rev: 24.10.0\n+    rev: 25.1.0\n     hooks:\n     -   id: black\n -   repo: https://github.com/collective/zpretty\n@@ -44,7 +44,7 @@ repos:\n #  """\n ##\n -   repo: https://github.com/codespell-project/codespell\n-    rev: v2.3.0\n+    rev: v2.4.1\n     hooks:\n     -   id: codespell\n         additional_dependencies:\ndiff --git a/dependabot.yml b/dependabot.yml\nindex bbd3ab05..e5e4522d 100644\n--- a/dependabot.yml\n+++ b/dependabot.yml\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n version: 2\n updates:\ndiff --git a/news/483.testing b/news/483.testing\nnew file mode 100644\nindex 00000000..b3d26bbc\n--- /dev/null\n+++ b/news/483.testing\n@@ -0,0 +1,2 @@\n+fix robottest for new contentbrowser version\n+[@1letter]\ndiff --git a/pyproject.toml b/pyproject.toml\nindex e8239a22..3047ef2e 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n [build-system]\n requires = ["setuptools>=68.2"]\n@@ -71,7 +71,7 @@ target-version = ["py38"]\n ##\n \n [tool.codespell]\n-ignore-words-list = "discreet,assertin,pres"\n+ignore-words-list = "discreet,assertin,thet,pres"\n skip = "*.po,"\n ##\n # Add extra configuration options in .meta.toml:\n@@ -120,7 +120,7 @@ Zope = [\n ]\n python-dateutil = [\'dateutil\']\n pytest-plone = [\'pytest\', \'zope.pytestlayer\', \'plone.testing\', \'plone.app.testing\']\n-ignore-packages = [\'Products.LinguaPlone\', \'Products.CMFPlacefulWorkflow\']\n+ignore-packages = [\'Products.LinguaPlone\']\n \n ##\n # Add extra configuration options in .meta.toml:\ndiff --git a/setup.py b/setup.py\nindex 179e0022..fa6db140 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -62,7 +62,6 @@\n             "plone.rfc822",\n             "plone.testing",\n             "robotsuite",\n-            "Products.CMFPlacefulWorkflow",\n         ],\n     },\n     entry_points="""\ndiff --git a/src/plone/app/multilingual/tests/robot/test_add_translation.robot b/src/plone/app/multilingual/tests/robot/test_add_translation.robot\nindex 66d592b2..1767a0c3 100644\n--- a/src/plone/app/multilingual/tests/robot/test_add_translation.robot\n+++ b/src/plone/app/multilingual/tests/robot/test_add_translation.robot\n@@ -48,7 +48,7 @@ I link the document in English as a translation\n     Click    //table[@id="translations-overview"]/tbody/tr[1]/td[3]/a[contains(@class,"connectTranslationAction")]\n     Click    //div[@id="formfield-form-widgets-content"]//div[@class="content-browser-wrapper"]//a[contains(text(),"Select")]\n     Click item in column    2   2\n-    Click    //div[contains(@class, "content-browser-wrapper")]//div[contains(@class, "levelColumns")]/div[contains(@class, "preview")]/div[contains(@class, "levelToolbar")]/button\n+    Click    //div[contains(@class, "content-browser-wrapper")]//div[contains(@class, "levelColumns")]/div[contains(@class, "preview")]/div[contains(@class, "levelToolbar")]//button\n     Click    //*[contains(@class, \'modal-footer\')]//button[@name=\'form.buttons.connect_translation\']\n     Get Text    //table[@id="translations-overview"]/tbody/tr[1]/td[2]/h3[@class="translationTitle"]    should be    An English Document\n     Click    //table[@id="translations-overview"]//a[contains(text(),\'/plone/ca/a-catalan-document\')]\ndiff --git a/tox.ini b/tox.ini\nindex c7ff6348..c30333b3 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -1,5 +1,5 @@\n # Generated from:\n-# https://github.com/plone/meta/tree/main/config/default\n+# https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n [tox]\n # We need 4.4.0 for constrain_package_deps.\n'
+b'diff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex 2632bbb..8de398b 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -259,3 +259,6 @@ def purgeOnMovedOrRemoved(object, event):\n def purgeOnWorkflow(object, event):\n     if isPurged(object):\n         notify(Purge(object))\n+    parent = object.getParentNode()\n+    if parent and isPurged(parent):\n+        notify(Purge(parent))\ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex 5f41ad4..cec5b03 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -276,11 +276,12 @@ def test_auto_purge_content_types(self):\n     def test_purge_on_changeworkflow(self):\n         setRoles(self.portal, TEST_USER_ID, ("Manager",))\n \n-        # Non-folder content\n-        self.portal.invokeFactory("Document", "d1")\n-        self.portal["d1"].title = "Document one"\n-        self.portal["d1"].description = "Document one description"\n-        self.portal.portal_workflow.doActionFor(self.portal["d1"], "publish")\n+        # folder\n+        self.portal.invokeFactory("Folder", "f1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"], "publish")\n+        # document\n+        self.portal["f1"].invokeFactory("Document", "d1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"]["d1"], "publish")\n \n         self.assertEqual([], self.purger._sync)\n         self.assertEqual([], self.purger._async)\n@@ -288,9 +289,12 @@ def test_purge_on_changeworkflow(self):\n         # Enable purge\n         self.cachePurgingSettings.enabled = True\n         self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n-        self.ploneCacheSettings.purgedContentTypes = ("Document",)\n+        self.ploneCacheSettings.purgedContentTypes = (\n+            "Document",\n+            "Folder",\n+        )\n \n-        url = self.portal["d1"].absolute_url()\n+        url = self.portal["f1"]["d1"].absolute_url()\n         token = getToken(TEST_USER_NAME)\n         retractURL = f"{url}/content_status_modify?workflow_action=retract&_authenticator={token}"\n \n@@ -309,12 +313,17 @@ def test_purge_on_changeworkflow(self):\n         browser.open(retractURL)\n \n         self.assertEqual([], self.purger._sync)\n+        # purged the document d1, and the parent folder f1\n         self.assertEqual(\n-            {\n-                "http://localhost:1234/plone/d1",\n-                "http://localhost:1234/plone/d1/document_view",\n-                "http://localhost:1234/plone/d1/",\n-                "http://localhost:1234/plone/d1/view",\n-            },\n-            set(self.purger._async),\n+            [\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d1",\n+                "http://localhost:1234/plone/f1/d1/",\n+                "http://localhost:1234/plone/f1/d1/document_view",\n+                "http://localhost:1234/plone/f1/d1/view",\n+                "http://localhost:1234/plone/f1/listing_view",\n+                "http://localhost:1234/plone/f1/view",\n+            ],\n+            sorted(self.purger._async),\n         )\n'
 
-Repository: plone.app.multilingual
+Repository: plone.app.caching
 
 
 Branch: refs/heads/master
-Date: 2025-02-15T11:20:06+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/a955483495c181277c4c342ec34f0eb36d26bf7f
+Date: 2025-02-13T00:14:53+01:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/e762db37b02d4811f5bfbe94b4dbd057f498b973
 
-Merge pull request #481 from plone/erral-new-sitemap
-
-test querying the first page
+test
 
 Files changed:
-A news/481.bugfix
-M src/plone/app/multilingual/tests/test_sitemap.py
+M plone/app/caching/tests/test_purge.py
 
-b'diff --git a/news/481.bugfix b/news/481.bugfix\nnew file mode 100644\nindex 00000000..f0b1e5ed\n--- /dev/null\n+++ b/news/481.bugfix\n@@ -0,0 +1,2 @@\n+Test sitemap with page number\n+[erral]\ndiff --git a/src/plone/app/multilingual/tests/test_sitemap.py b/src/plone/app/multilingual/tests/test_sitemap.py\nindex ed3c2239..75f98380 100644\n--- a/src/plone/app/multilingual/tests/test_sitemap.py\n+++ b/src/plone/app/multilingual/tests/test_sitemap.py\n@@ -52,6 +52,7 @@ def test_portalroot_sitemap(self):\n         Requests for the sitemap on portalroot return all languages\n         """\n \n+        self.portal.REQUEST["page"] = 1\n         xml = self.uncompress(self.sitemap())\n         self.assertIn(b"<loc>http://nohost/plone/ca/test-document</loc>", xml)\n         self.assertIn(b"<loc>http://nohost/plone/en/test-document</loc>", xml)\n@@ -68,6 +69,8 @@ def test_navroot_sitemap(self):\n         sitemap = getMultiAdapter(\n             (self.portal.es, self.portal.REQUEST), name="sitemap.xml.gz"\n         )\n+        self.portal.REQUEST["page"] = 1\n+\n         xml = self.uncompress(sitemap())\n         self.assertNotIn(\n             b"<loc>http://nohost/plone/ca/test-document</loc>", xml\n'
+b'diff --git a/plone/app/caching/tests/test_purge.py b/plone/app/caching/tests/test_purge.py\nindex b101758..28d8aa7 100644\n--- a/plone/app/caching/tests/test_purge.py\n+++ b/plone/app/caching/tests/test_purge.py\n@@ -7,6 +7,7 @@\n from plone.app.caching.purge import DiscussionItemPurgePaths\n from plone.app.caching.purge import purgeOnModified\n from plone.app.caching.purge import purgeOnMovedOrRemoved\n+from plone.app.caching.purge import purgeOnWorkflow\n from plone.app.caching.purge import ScalesPurgePaths\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n from plone.app.contenttypes.behaviors.leadimage import ILeadImageBehavior\n@@ -24,6 +25,7 @@\n from plone.testing.zca import UNIT_TESTING\n from Products.CMFCore.interfaces import IContentish\n from Products.CMFCore.interfaces import IDiscussionResponse\n+from Products.CMFCore.WorkflowCore import ActionSucceededEvent\n from Products.CMFDynamicViewFTI.interfaces import IBrowserDefault\n from z3c.caching.interfaces import IPurgeEvent\n from z3c.caching.interfaces import IPurgePaths\n@@ -97,6 +99,9 @@ class FauxContent(FauxNonContent):\n     def defaultView(self):\n         return "default-view"\n \n+    def getParentNode(self):\n+        return getattr(self, "__parent__", None)\n+\n \n @implementer(IDiscussionResponse)\n class FauxDiscussable(Explicit):\n@@ -112,6 +117,7 @@ def setUp(self):\n         provideHandler(objectEventNotify)\n         provideHandler(purgeOnModified)\n         provideHandler(purgeOnMovedOrRemoved)\n+        provideHandler(purgeOnWorkflow)\n         provideAdapter(persistentFieldAdapter)\n         provideUtility(Registry(), IRegistry)\n         registry = getUtility(IRegistry)\n@@ -178,6 +184,14 @@ def test_removed(self):\n         self.assertEqual(2, len(self.handler.invocations))\n         self.assertEqual(context, self.handler.invocations[0].object)\n \n+    def test_workflow_transitions(self):\n+        context = FauxContent("new").__of__(FauxContent())\n+        context.getParentNode()\n+        notify(ActionSucceededEvent(context, "dummy_workflow", "publish", None))\n+        # XXX: actual 2, when also purging the parent!\n+        self.assertEqual(2, len(self.handler.invocations))\n+        self.assertEqual(context, self.handler.invocations[0].object)\n+\n \n class TestContentPurgePaths(unittest.TestCase):\n     layer = UNIT_TESTING\n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/master
+Date: 2025-02-16T17:37:37-08:00
+Author: David Glick (davisagli) <david.glick@plone.org>
+Commit: https://github.com/plone/plone.app.caching/commit/81452334f73bd37e8651ed339dda6007c3984ee1
+
+Update news/144.feature
+
+Files changed:
+M news/144.feature
+
+b'diff --git a/news/144.feature b/news/144.feature\nindex 8a9e474..9fc5ac9 100644\n--- a/news/144.feature\n+++ b/news/144.feature\n@@ -1 +1 @@\n-trigger purge on workflow change @mamico\n+Trigger purge on workflow change. @mamico\n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/master
+Date: 2025-02-16T17:38:03-08:00
+Author: David Glick (davisagli) <david.glick@plone.org>
+Commit: https://github.com/plone/plone.app.caching/commit/ab7562545ac2f1aed13f3d3638237240b963f714
+
+Merge pull request #144 from plone/purge_on_wf
+
+purge on workflow change
+
+Files changed:
+A news/144.feature
+M plone/app/caching/configure.zcml
+M plone/app/caching/purge.py
+M plone/app/caching/tests/test_integration.py
+M plone/app/caching/tests/test_purge.py
+
+b'diff --git a/news/144.feature b/news/144.feature\nnew file mode 100644\nindex 0000000..9fc5ac9\n--- /dev/null\n+++ b/news/144.feature\n@@ -0,0 +1 @@\n+Trigger purge on workflow change. @mamico\ndiff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml\nindex 48394f7..6a2c5a2 100644\n--- a/plone/app/caching/configure.zcml\n+++ b/plone/app/caching/configure.zcml\n@@ -45,6 +45,8 @@\n   <!-- Purging -->\n   <subscriber handler=".purge.purgeOnModified" />\n   <subscriber handler=".purge.purgeOnMovedOrRemoved" />\n+  <subscriber handler=".purge.purgeOnWorkflow" />\n+\n \n   <!-- ILastModified adapters -->\n   <adapter factory=".lastmodified.PageTemplateDelegateLastModified" />\ndiff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex d5a92ed..8de398b 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -9,6 +9,7 @@\n from plone.namedfile.interfaces import INamedBlobFileField\n from plone.namedfile.interfaces import INamedImageField\n from plone.registry.interfaces import IRegistry\n+from Products.CMFCore.interfaces import IActionSucceededEvent\n from Products.CMFCore.interfaces import IContentish\n from Products.CMFCore.interfaces import IDiscussionResponse\n from Products.CMFCore.interfaces import IDynamicType\n@@ -252,3 +253,12 @@ def purgeOnMovedOrRemoved(object, event):\n     parent = object.getParentNode()\n     if parent:\n         notify(Purge(parent))\n+\n+\n+@adapter(IContentish, IActionSucceededEvent)\n+def purgeOnWorkflow(object, event):\n+    if isPurged(object):\n+        notify(Purge(object))\n+    parent = object.getParentNode()\n+    if parent and isPurged(parent):\n+        notify(Purge(parent))\ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex a6fd622..cec5b03 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -272,3 +272,58 @@ def test_auto_purge_content_types(self):\n             },\n             set(self.purger._async),\n         )\n+\n+    def test_purge_on_changeworkflow(self):\n+        setRoles(self.portal, TEST_USER_ID, ("Manager",))\n+\n+        # folder\n+        self.portal.invokeFactory("Folder", "f1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"], "publish")\n+        # document\n+        self.portal["f1"].invokeFactory("Document", "d1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"]["d1"], "publish")\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual([], self.purger._async)\n+\n+        # Enable purge\n+        self.cachePurgingSettings.enabled = True\n+        self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n+        self.ploneCacheSettings.purgedContentTypes = (\n+            "Document",\n+            "Folder",\n+        )\n+\n+        url = self.portal["f1"]["d1"].absolute_url()\n+        token = getToken(TEST_USER_NAME)\n+        retractURL = f"{url}/content_status_modify?workflow_action=retract&_authenticator={token}"\n+\n+        import transaction\n+\n+        transaction.commit()\n+\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            "Authorization",\n+            f"Basic {TEST_USER_NAME}:{TEST_USER_PASSWORD}",\n+        )\n+\n+        # Retract the document\n+        browser.open(retractURL)\n+\n+        self.assertEqual([], self.purger._sync)\n+        # purged the document d1, and the parent folder f1\n+        self.assertEqual(\n+            [\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d1",\n+                "http://localhost:1234/plone/f1/d1/",\n+                "http://localhost:1234/plone/f1/d1/document_view",\n+                "http://localhost:1234/plone/f1/d1/view",\n+                "http://localhost:1234/plone/f1/listing_view",\n+                "http://localhost:1234/plone/f1/view",\n+            ],\n+            sorted(self.purger._async),\n+        )\ndiff --git a/plone/app/caching/tests/test_purge.py b/plone/app/caching/tests/test_purge.py\nindex b101758..28d8aa7 100644\n--- a/plone/app/caching/tests/test_purge.py\n+++ b/plone/app/caching/tests/test_purge.py\n@@ -7,6 +7,7 @@\n from plone.app.caching.purge import DiscussionItemPurgePaths\n from plone.app.caching.purge import purgeOnModified\n from plone.app.caching.purge import purgeOnMovedOrRemoved\n+from plone.app.caching.purge import purgeOnWorkflow\n from plone.app.caching.purge import ScalesPurgePaths\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n from plone.app.contenttypes.behaviors.leadimage import ILeadImageBehavior\n@@ -24,6 +25,7 @@\n from plone.testing.zca import UNIT_TESTING\n from Products.CMFCore.interfaces import IContentish\n from Products.CMFCore.interfaces import IDiscussionResponse\n+from Products.CMFCore.WorkflowCore import ActionSucceededEvent\n from Products.CMFDynamicViewFTI.interfaces import IBrowserDefault\n from z3c.caching.interfaces import IPurgeEvent\n from z3c.caching.interfaces import IPurgePaths\n@@ -97,6 +99,9 @@ class FauxContent(FauxNonContent):\n     def defaultView(self):\n         return "default-view"\n \n+    def getParentNode(self):\n+        return getattr(self, "__parent__", None)\n+\n \n @implementer(IDiscussionResponse)\n class FauxDiscussable(Explicit):\n@@ -112,6 +117,7 @@ def setUp(self):\n         provideHandler(objectEventNotify)\n         provideHandler(purgeOnModified)\n         provideHandler(purgeOnMovedOrRemoved)\n+        provideHandler(purgeOnWorkflow)\n         provideAdapter(persistentFieldAdapter)\n         provideUtility(Registry(), IRegistry)\n         registry = getUtility(IRegistry)\n@@ -178,6 +184,14 @@ def test_removed(self):\n         self.assertEqual(2, len(self.handler.invocations))\n         self.assertEqual(context, self.handler.invocations[0].object)\n \n+    def test_workflow_transitions(self):\n+        context = FauxContent("new").__of__(FauxContent())\n+        context.getParentNode()\n+        notify(ActionSucceededEvent(context, "dummy_workflow", "publish", None))\n+        # XXX: actual 2, when also purging the parent!\n+        self.assertEqual(2, len(self.handler.invocations))\n+        self.assertEqual(context, self.handler.invocations[0].object)\n+\n \n class TestContentPurgePaths(unittest.TestCase):\n     layer = UNIT_TESTING\n'
 
