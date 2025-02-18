@@ -1,5 +1,23 @@
 # Using the Makefile in buildout.coredev
 
+# TL;DR
+
+To install, configure and start Plone *without* any buildout involved.
+
+## Preprequisites
+
+- Python 3.10+
+- GNU make
+- bash
+
+## Start
+
+```bash
+make run
+```
+
+# History Motivation
+
 Traditionally, the way to run `buildout.coredev`, was to use Buildout, and you can still do that.
 Basically:
 
@@ -40,7 +58,7 @@ First, there are some tools you should know about.
 
 [`plone.releaser`](https://github.com/plone/plone.releaser) is our wrapper around [`zest.releaser`](https://github.com/zestsoftware/zest.releaser), used for releasing Pythong packages.
 But it also introduces a `manage` script that has recently gotten some extra commands.
-These are needed to translate between our current Buildout files and what we need for `pip`.
+These are needed to translate between our current pBuildout files and what we need for `pip`.
 
 * `manage versions2constraints` takes the `versions*.cfg` files and translates them to `constraints*.txt` files for use by `pip`.
 * `manage buildout2pip` does the same, but also translates `sources.cfg` and `checkouts.cfg` (used by `mr.developer`) to `mxsources.ini` and `mxcheckouts.ini` (for use by `mxdev`).
