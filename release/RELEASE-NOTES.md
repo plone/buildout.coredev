@@ -1,27 +1,50 @@
 # Release notes for Plone 6.0.15 (unreleased)
 
-* Last updated: January 30, 2025
+* Last updated: February 24, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
 
-If you want to jump straight in, here are two important links:
+If you want to jump straight in, here are some important links:
 
 * With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
 * With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
+* Use Docker image `plone-backend`.
 
 
 ## Highlights
 
 Major changes since 6.0.14:
 
-* Fully support Python 3.13.  In the previous release it worked fine, but it had not been fully tested yet.
-  Note that 3.13.0 does not work: you need at least 3.13.1.
-* Fixed lots of deprecation warnings in lots of packages.
+* `plone.api`:
+  * Added the content API helper function ``api.content.get_path``, which gets either the relative or absolute path of an object.
+  * Added two new portal API functions:
+    * ``api.portal.get_vocabulary``: Get a vocabulary by name.
+    * ``api.portal.get_vocabulary_names``: Get a list of all available vocabulary names.
+* `plone.app.users`: Email validation: use new registration tool method `principal_id_or_login_name_exists` if available.
+  This helps in some corner cases when email-as-login is used.  This needs a new `Products.CMFPlone` release though.
+* `plone.schema`: Fix email validation:
+  * allow apostrophes
+  * allow accented characters
+  * allow ampersand in the user part
+  * do not allow spaces.
+  * accept TLDs with more than 4 characters
 * `plone.restapi`:
   * Add a `@login` endpoint to get external login services' links.
   * In the `@registry` endpoint, added support for filtering the list of registry records.
-* `Products.PlonePAS`: Return an error when trying to access the PAS views from the web.
+  * Support working copies of the Plone Site.  But this feature can needs the new `plone.app.iterate` 6.1.0 release, which we won't add to Plone 6.0 for backwards compatibility reasons (removal of an old GenericSetup profile).  If you know what you are doing, you can add it.
+* `plone.app.upgrade`: Ensure that the mimetypes registry globs contain valid patterns.
+  If you have a site that started on Python 2.7 and is now running on Python 3.11, the mimetypes registry may give errors.  This upgrade step fixes it.
+* `Products.MailHost`: Add support to `implicit_tls` flag. With this flag set, MailHost use TLS from the beginning of the connection, known as SMTPS and commonly used on TCP port 465.  You need to switch this on in the ZMI (Zope Management Interface).
+* `zc.buildout`: Upgraded to the cleaned up version 4.  This has `packaging` as a dependency, and requires Python 3.9 or higher.
+* `collective.recipe.omelette` (only relevant if you use Buildout):
+  * No longer generate ``__init__.py`` files with namespace stanza in ``parts/omelette``.
+    I think this was originally done to be able to go to ``parts/omelette``, start a standard Python, and be able to import everything.
+    With current Python versions the ``__init__.py`` files are not needed for a directory to be importable.
+  * Remove ``products`` recipe option and special handling of ``Products`` namespace.
+    Zope 4 and higher no longer have the concept of a products directory.
+    You can still use ``packages = path/to/products_dir Products`` if you need something similar.
+  * Fix handling checkouts of native namespace packages.
 
 
 ## Volto frontend
@@ -49,15 +72,16 @@ This release supports Python 3.9, 3.10, 3.11, 3.12, and 3.13.
 In Plone core we use these versions to install Plone:
 
 ```
+packaging==24.2
 pip==24.3.1
 setuptools==75.6.0
 wheel==0.45.1
-zc.buildout==3.3
+zc.buildout==4.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
 
-Note that there is also a [`zc.buildout` 4.0.0a1](https://pypi.org/project/zc.buildout/4.0.0a1/) release that you could try.
+Note that `zc.buildout` 4 has `packaging` as a dependency, so we added a pin for it in the requirements.
 
 
 ## Installation
