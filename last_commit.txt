@@ -1,47 +1,85 @@
-Repository: plone.api
+Repository: plone.app.caching
 
 
-Branch: refs/heads/main
-Date: 2025-02-25T20:08:48-08:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.api/commit/689ded88a9001a6e8fa3ec6248cc7b6c2b24df62
+Branch: refs/heads/master
+Date: 2025-02-13T15:54:56+01:00
+Author: Paul Grunewald (pgrunewald) <paul.grunewald@tu-dresden.de>
+Commit: https://github.com/plone/plone.app.caching/commit/124a16d478aee7f552d29789be32bf91e036f9ce
 
-try to fix constraints for tox test env
-
-Files changed:
-M tox.ini
-
-b'diff --git a/tox.ini b/tox.ini\nindex 8c18222e..bef39ff8 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -123,8 +123,7 @@ set_env =\n #  constrain_package_deps = "false"\n ##\n deps =\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n ##\n # Specify additional deps in .meta.toml:\n'
-
-Repository: plone.api
-
-
-Branch: refs/heads/main
-Date: 2025-02-25T20:12:28-08:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.api/commit/721119b2b6766c84f1bb8d6e4e5c2716091d2ca5
-
-fix coverage too
+Fix purging for deleted content
 
 Files changed:
-M tox.ini
+A news/145.bugfix
+M plone/app/caching/configure.zcml
+M plone/app/caching/purge.py
+M plone/app/caching/tests/test_integration.py
+M plone/app/caching/tests/test_purge.py
 
-b'diff --git a/tox.ini b/tox.ini\nindex bef39ff8..d6cc86bf 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -165,8 +165,7 @@ set_env =\n ##\n deps =\n     coverage\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     coverage run --branch --source plone.api {envbindir}/zope-testrunner --quiet --all --test-path={toxinidir}/src -s plone.api {posargs}\n'
+b'diff --git a/news/145.bugfix b/news/145.bugfix\nnew file mode 100644\nindex 0000000..22d5c41\n--- /dev/null\n+++ b/news/145.bugfix\n@@ -0,0 +1,2 @@\n+Fix purging for deleted content.\n+[pgrunewald]\ndiff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml\nindex 6a2c5a2..649051a 100644\n--- a/plone/app/caching/configure.zcml\n+++ b/plone/app/caching/configure.zcml\n@@ -44,7 +44,8 @@\n \n   <!-- Purging -->\n   <subscriber handler=".purge.purgeOnModified" />\n-  <subscriber handler=".purge.purgeOnMovedOrRemoved" />\n+  <subscriber handler=".purge.purgeOnMoved" />\n+  <subscriber handler=".purge.purgeOnRemoved" />\n   <subscriber handler=".purge.purgeOnWorkflow" />\n \n \ndiff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex 8de398b..785c49f 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -233,22 +233,28 @@ def purgeOnModified(object, event):\n \n \n @adapter(IContentish, IObjectMovedEvent)\n-def purgeOnMovedOrRemoved(object, event):\n-    request = getRequest()\n-    confirmed_delete = (\n-        request is not None\n-        and getattr(request, "URL", None)\n-        and "delete_confirmation" in request.URL\n-        and request.REQUEST_METHOD == "POST"\n-        and "form.submitted" in request.form\n-    )\n-    if not confirmed_delete and IObjectRemovedEvent.providedBy(event):\n-        # ignore extra delete events\n+def purgeOnMoved(object, event):\n+    """Purge after object was moved."""\n+\n+    # Purge on removal is handled elsewhere\n+    if IObjectRemovedEvent.providedBy(event):\n         return\n     # Don\'t purge when added\n     if IObjectAddedEvent.providedBy(event):\n         return\n-    if isPurged(object) and "portal_factory" not in request.URL:\n+    # check to not include move-events during content creation\n+    if isPurged(object):\n+        notify(Purge(object))\n+\n+    parent = object.getParentNode()\n+    if parent:\n+        notify(Purge(parent))\n+\n+\n+@adapter(IContentish, IObjectRemovedEvent)\n+def purgeOnRemoved(object, event):\n+    """Purge after object was deleted."""\n+    if isPurged(object):\n         notify(Purge(object))\n     parent = object.getParentNode()\n     if parent:\ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex cec5b03..eaeda71 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -15,9 +15,13 @@\n from plone.namedfile.file import NamedImage\n from plone.registry.interfaces import IRegistry\n from plone.testing.zope import Browser\n+from unittest import mock\n from zope.component import getUtility\n+from zope.event import notify\n from zope.globalrequest import setRequest\n+from ZPublisher.pubevents import PubSuccess\n \n+import json\n import OFS.Image\n import pkg_resources\n import unittest\n@@ -327,3 +331,97 @@ def test_purge_on_changeworkflow(self):\n             ],\n             sorted(self.purger._async),\n         )\n+\n+    @mock.patch(\n+        "plone.app.content.browser.contents.ContentsBaseAction.protect", lambda x: True\n+    )  # noqa\n+    def test_delete_via_different_ways(self):\n+        """We test the different sorts of removal."""\n+        setRoles(self.portal, TEST_USER_ID, ("Manager",))\n+\n+        # folder\n+        self.portal.invokeFactory("Folder", "f1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"], "publish")\n+        # Non-folder contents\n+        self.portal["f1"].invokeFactory("Document", "d1")\n+        self.portal["f1"]["d1"].title = "Document one"\n+        self.portal["f1"]["d1"].description = "Document one description"\n+\n+        self.portal["f1"].invokeFactory("Document", "d2")\n+        self.portal["f1"]["d2"].title = "Document two"\n+        self.portal["f1"]["d2"].description = "Document two description"\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual([], self.purger._async)\n+\n+        # Enable purge\n+        self.cachePurgingSettings.enabled = True\n+        self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n+        self.ploneCacheSettings.purgedContentTypes = ("Document",)\n+\n+        # Execute delete request (via @@fc-delete)\n+        selection = [self.portal["f1"]["d1"].UID()]\n+        request = self.layer["request"]\n+        request.form["folder"] = "/f1"\n+        request.form["selection"] = json.dumps(selection)\n+        res = self.portal.restrictedTraverse("@@fc-delete")()\n+\n+        import transaction\n+\n+        transaction.commit()\n+\n+        notify(PubSuccess(request))\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual(\n+            {\n+                "http://localhost:1234/plone/f1/d1/document_view",\n+                "http://localhost:1234/plone/f1/d1/",\n+                "http://localhost:1234/plone/f1/view",\n+                "http://localhost:1234/plone/f1/d1",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d1/view",\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/listing_view",\n+            },\n+            set(self.purger._async),\n+        )\n+\n+        # Check for successful deletion\n+        res = json.loads(res)\n+        self.assertEqual(res["status"], "success")\n+        self.assertEqual(len(self.portal["f1"].contentIds()), 1)\n+\n+        # Clear purge URLs\n+        self.purger.reset()\n+\n+        # Execute delete request (via delete_confirmation)\n+\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            "Authorization",\n+            f"Basic {TEST_USER_NAME}:{TEST_USER_PASSWORD}",\n+        )\n+\n+        delete_url = self.portal["f1"]["d2"].absolute_url() + "/delete_confirmation"\n+        browser.open(delete_url)\n+        browser.open(delete_url)\n+\n+        # Try to delete in both browsers\n+        browser.getControl(name="form.buttons.Delete").click()\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual(\n+            {\n+                "http://localhost:1234/plone/f1/d2/document_view",\n+                "http://localhost:1234/plone/f1/d2/",\n+                "http://localhost:1234/plone/f1/view",\n+                "http://localhost:1234/plone/f1/d2",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d2/view",\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/listing_view",\n+            },\n+            set(self.purger._async),\n+        )\ndiff --git a/plone/app/caching/tests/test_purge.py b/plone/app/caching/tests/test_purge.py\nindex 28d8aa7..2c139fa 100644\n--- a/plone/app/caching/tests/test_purge.py\n+++ b/plone/app/caching/tests/test_purge.py\n@@ -6,7 +6,8 @@\n from plone.app.caching.purge import ContentPurgePaths\n from plone.app.caching.purge import DiscussionItemPurgePaths\n from plone.app.caching.purge import purgeOnModified\n-from plone.app.caching.purge import purgeOnMovedOrRemoved\n+from plone.app.caching.purge import purgeOnMoved\n+from plone.app.caching.purge import purgeOnRemoved\n from plone.app.caching.purge import purgeOnWorkflow\n from plone.app.caching.purge import ScalesPurgePaths\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n@@ -116,7 +117,8 @@ def setUp(self):\n         provideHandler(self.handler.handler)\n         provideHandler(objectEventNotify)\n         provideHandler(purgeOnModified)\n-        provideHandler(purgeOnMovedOrRemoved)\n+        provideHandler(purgeOnMoved)\n+        provideHandler(purgeOnRemoved)\n         provideHandler(purgeOnWorkflow)\n         provideAdapter(persistentFieldAdapter)\n         provideUtility(Registry(), IRegistry)\n@@ -130,7 +132,6 @@ def test_not_purged(self):\n \n         notify(ObjectModifiedEvent(context))\n         notify(ObjectAddedEvent(context))\n-        notify(ObjectRemovedEvent(context))\n \n         self.assertEqual(0, len(self.handler.invocations))\n \n@@ -175,9 +176,6 @@ def test_renamed(self):\n \n     def test_removed(self):\n         context = FauxContent("new").__of__(FauxContent())\n-        request = FauxRequest()\n-        request.URL = "http://nohost/delete_confirmation"\n-        setRequest(request)\n \n         notify(ObjectRemovedEvent(context, context.__parent__, "new"))\n \n'
 
-Repository: plone.api
+Repository: plone.app.caching
 
 
-Branch: refs/heads/main
-Date: 2025-02-25T20:16:16-08:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.api/commit/31f4c98b01eaafbbfb9c14d5da3a3ffab18478aa
+Branch: refs/heads/master
+Date: 2025-02-14T13:24:12+01:00
+Author: Paul Grunewald (pgrunewald) <paul.grunewald@tu-dresden.de>
+Commit: https://github.com/plone/plone.app.caching/commit/3e106c4b6f1e29ebd6880cd11c9292040604d546
 
-Merge pull request #564 from plone/561-constraints
-
-try to fix constraints for tox test env
+Add check before purging parent
 
 Files changed:
-M tox.ini
+M plone/app/caching/purge.py
 
-b'diff --git a/tox.ini b/tox.ini\nindex 8c18222e..d6cc86bf 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -123,8 +123,7 @@ set_env =\n #  constrain_package_deps = "false"\n ##\n deps =\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n ##\n # Specify additional deps in .meta.toml:\n@@ -166,8 +165,7 @@ set_env =\n ##\n deps =\n     coverage\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     coverage run --branch --source plone.api {envbindir}/zope-testrunner --quiet --all --test-path={toxinidir}/src -s plone.api {posargs}\n'
+b'diff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex 785c49f..f32c86d 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -247,7 +247,7 @@ def purgeOnMoved(object, event):\n         notify(Purge(object))\n \n     parent = object.getParentNode()\n-    if parent:\n+    if parent and isPurged(parent):\n         notify(Purge(parent))\n \n \n@@ -257,7 +257,7 @@ def purgeOnRemoved(object, event):\n     if isPurged(object):\n         notify(Purge(object))\n     parent = object.getParentNode()\n-    if parent:\n+    if parent and isPurged(parent):\n         notify(Purge(parent))\n \n \n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/master
+Date: 2025-02-14T16:16:05+01:00
+Author: Paul Grunewald (pgrunewald) <paul.grunewald@tu-dresden.de>
+Commit: https://github.com/plone/plone.app.caching/commit/7cca42133088a84b602d4a7950c5ee3d3c76f586
+
+Fix test
+
+Files changed:
+M plone/app/caching/tests/test_integration.py
+
+b'diff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex eaeda71..800bc3f 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -357,7 +357,10 @@ def test_delete_via_different_ways(self):\n         # Enable purge\n         self.cachePurgingSettings.enabled = True\n         self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n-        self.ploneCacheSettings.purgedContentTypes = ("Document",)\n+        self.ploneCacheSettings.purgedContentTypes = (\n+            "Document",\n+            "Folder",\n+        )\n \n         # Execute delete request (via @@fc-delete)\n         selection = [self.portal["f1"]["d1"].UID()]\n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/master
+Date: 2025-02-17T07:50:24+01:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.caching/commit/971948b8c24d0d94e2546c460b257255da06b084
+
+Merge branch 'master' into purge_on_delete
+
+Files changed:
+M news/144.feature
+
+b'diff --git a/news/144.feature b/news/144.feature\nindex 8a9e474..9fc5ac9 100644\n--- a/news/144.feature\n+++ b/news/144.feature\n@@ -1 +1 @@\n-trigger purge on workflow change @mamico\n+Trigger purge on workflow change. @mamico\n'
+
+Repository: plone.app.caching
+
+
+Branch: refs/heads/master
+Date: 2025-02-25T20:36:10-08:00
+Author: David Glick (davisagli) <david.glick@plone.org>
+Commit: https://github.com/plone/plone.app.caching/commit/2338b425c087865a474757dcd86b8cb6888b7a31
+
+Merge pull request #146 from plone/purge_on_delete
+
+Purge on delete
+
+Files changed:
+A news/145.bugfix
+M plone/app/caching/configure.zcml
+M plone/app/caching/purge.py
+M plone/app/caching/tests/test_integration.py
+M plone/app/caching/tests/test_purge.py
+
+b'diff --git a/news/145.bugfix b/news/145.bugfix\nnew file mode 100644\nindex 0000000..22d5c41\n--- /dev/null\n+++ b/news/145.bugfix\n@@ -0,0 +1,2 @@\n+Fix purging for deleted content.\n+[pgrunewald]\ndiff --git a/plone/app/caching/configure.zcml b/plone/app/caching/configure.zcml\nindex 6a2c5a2..649051a 100644\n--- a/plone/app/caching/configure.zcml\n+++ b/plone/app/caching/configure.zcml\n@@ -44,7 +44,8 @@\n \n   <!-- Purging -->\n   <subscriber handler=".purge.purgeOnModified" />\n-  <subscriber handler=".purge.purgeOnMovedOrRemoved" />\n+  <subscriber handler=".purge.purgeOnMoved" />\n+  <subscriber handler=".purge.purgeOnRemoved" />\n   <subscriber handler=".purge.purgeOnWorkflow" />\n \n \ndiff --git a/plone/app/caching/purge.py b/plone/app/caching/purge.py\nindex 8de398b..f32c86d 100644\n--- a/plone/app/caching/purge.py\n+++ b/plone/app/caching/purge.py\n@@ -233,25 +233,31 @@ def purgeOnModified(object, event):\n \n \n @adapter(IContentish, IObjectMovedEvent)\n-def purgeOnMovedOrRemoved(object, event):\n-    request = getRequest()\n-    confirmed_delete = (\n-        request is not None\n-        and getattr(request, "URL", None)\n-        and "delete_confirmation" in request.URL\n-        and request.REQUEST_METHOD == "POST"\n-        and "form.submitted" in request.form\n-    )\n-    if not confirmed_delete and IObjectRemovedEvent.providedBy(event):\n-        # ignore extra delete events\n+def purgeOnMoved(object, event):\n+    """Purge after object was moved."""\n+\n+    # Purge on removal is handled elsewhere\n+    if IObjectRemovedEvent.providedBy(event):\n         return\n     # Don\'t purge when added\n     if IObjectAddedEvent.providedBy(event):\n         return\n-    if isPurged(object) and "portal_factory" not in request.URL:\n+    # check to not include move-events during content creation\n+    if isPurged(object):\n         notify(Purge(object))\n+\n     parent = object.getParentNode()\n-    if parent:\n+    if parent and isPurged(parent):\n+        notify(Purge(parent))\n+\n+\n+@adapter(IContentish, IObjectRemovedEvent)\n+def purgeOnRemoved(object, event):\n+    """Purge after object was deleted."""\n+    if isPurged(object):\n+        notify(Purge(object))\n+    parent = object.getParentNode()\n+    if parent and isPurged(parent):\n         notify(Purge(parent))\n \n \ndiff --git a/plone/app/caching/tests/test_integration.py b/plone/app/caching/tests/test_integration.py\nindex cec5b03..800bc3f 100644\n--- a/plone/app/caching/tests/test_integration.py\n+++ b/plone/app/caching/tests/test_integration.py\n@@ -15,9 +15,13 @@\n from plone.namedfile.file import NamedImage\n from plone.registry.interfaces import IRegistry\n from plone.testing.zope import Browser\n+from unittest import mock\n from zope.component import getUtility\n+from zope.event import notify\n from zope.globalrequest import setRequest\n+from ZPublisher.pubevents import PubSuccess\n \n+import json\n import OFS.Image\n import pkg_resources\n import unittest\n@@ -327,3 +331,100 @@ def test_purge_on_changeworkflow(self):\n             ],\n             sorted(self.purger._async),\n         )\n+\n+    @mock.patch(\n+        "plone.app.content.browser.contents.ContentsBaseAction.protect", lambda x: True\n+    )  # noqa\n+    def test_delete_via_different_ways(self):\n+        """We test the different sorts of removal."""\n+        setRoles(self.portal, TEST_USER_ID, ("Manager",))\n+\n+        # folder\n+        self.portal.invokeFactory("Folder", "f1")\n+        self.portal.portal_workflow.doActionFor(self.portal["f1"], "publish")\n+        # Non-folder contents\n+        self.portal["f1"].invokeFactory("Document", "d1")\n+        self.portal["f1"]["d1"].title = "Document one"\n+        self.portal["f1"]["d1"].description = "Document one description"\n+\n+        self.portal["f1"].invokeFactory("Document", "d2")\n+        self.portal["f1"]["d2"].title = "Document two"\n+        self.portal["f1"]["d2"].description = "Document two description"\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual([], self.purger._async)\n+\n+        # Enable purge\n+        self.cachePurgingSettings.enabled = True\n+        self.cachePurgingSettings.cachingProxies = ("http://localhost:1234",)\n+        self.ploneCacheSettings.purgedContentTypes = (\n+            "Document",\n+            "Folder",\n+        )\n+\n+        # Execute delete request (via @@fc-delete)\n+        selection = [self.portal["f1"]["d1"].UID()]\n+        request = self.layer["request"]\n+        request.form["folder"] = "/f1"\n+        request.form["selection"] = json.dumps(selection)\n+        res = self.portal.restrictedTraverse("@@fc-delete")()\n+\n+        import transaction\n+\n+        transaction.commit()\n+\n+        notify(PubSuccess(request))\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual(\n+            {\n+                "http://localhost:1234/plone/f1/d1/document_view",\n+                "http://localhost:1234/plone/f1/d1/",\n+                "http://localhost:1234/plone/f1/view",\n+                "http://localhost:1234/plone/f1/d1",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d1/view",\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/listing_view",\n+            },\n+            set(self.purger._async),\n+        )\n+\n+        # Check for successful deletion\n+        res = json.loads(res)\n+        self.assertEqual(res["status"], "success")\n+        self.assertEqual(len(self.portal["f1"].contentIds()), 1)\n+\n+        # Clear purge URLs\n+        self.purger.reset()\n+\n+        # Execute delete request (via delete_confirmation)\n+\n+        browser = Browser(self.app)\n+        browser.handleErrors = False\n+        browser.addHeader(\n+            "Authorization",\n+            f"Basic {TEST_USER_NAME}:{TEST_USER_PASSWORD}",\n+        )\n+\n+        delete_url = self.portal["f1"]["d2"].absolute_url() + "/delete_confirmation"\n+        browser.open(delete_url)\n+        browser.open(delete_url)\n+\n+        # Try to delete in both browsers\n+        browser.getControl(name="form.buttons.Delete").click()\n+\n+        self.assertEqual([], self.purger._sync)\n+        self.assertEqual(\n+            {\n+                "http://localhost:1234/plone/f1/d2/document_view",\n+                "http://localhost:1234/plone/f1/d2/",\n+                "http://localhost:1234/plone/f1/view",\n+                "http://localhost:1234/plone/f1/d2",\n+                "http://localhost:1234/plone/f1/",\n+                "http://localhost:1234/plone/f1/d2/view",\n+                "http://localhost:1234/plone/f1",\n+                "http://localhost:1234/plone/f1/listing_view",\n+            },\n+            set(self.purger._async),\n+        )\ndiff --git a/plone/app/caching/tests/test_purge.py b/plone/app/caching/tests/test_purge.py\nindex 28d8aa7..2c139fa 100644\n--- a/plone/app/caching/tests/test_purge.py\n+++ b/plone/app/caching/tests/test_purge.py\n@@ -6,7 +6,8 @@\n from plone.app.caching.purge import ContentPurgePaths\n from plone.app.caching.purge import DiscussionItemPurgePaths\n from plone.app.caching.purge import purgeOnModified\n-from plone.app.caching.purge import purgeOnMovedOrRemoved\n+from plone.app.caching.purge import purgeOnMoved\n+from plone.app.caching.purge import purgeOnRemoved\n from plone.app.caching.purge import purgeOnWorkflow\n from plone.app.caching.purge import ScalesPurgePaths\n from plone.app.caching.testing import PLONE_APP_CACHING_FUNCTIONAL_TESTING\n@@ -116,7 +117,8 @@ def setUp(self):\n         provideHandler(self.handler.handler)\n         provideHandler(objectEventNotify)\n         provideHandler(purgeOnModified)\n-        provideHandler(purgeOnMovedOrRemoved)\n+        provideHandler(purgeOnMoved)\n+        provideHandler(purgeOnRemoved)\n         provideHandler(purgeOnWorkflow)\n         provideAdapter(persistentFieldAdapter)\n         provideUtility(Registry(), IRegistry)\n@@ -130,7 +132,6 @@ def test_not_purged(self):\n \n         notify(ObjectModifiedEvent(context))\n         notify(ObjectAddedEvent(context))\n-        notify(ObjectRemovedEvent(context))\n \n         self.assertEqual(0, len(self.handler.invocations))\n \n@@ -175,9 +176,6 @@ def test_renamed(self):\n \n     def test_removed(self):\n         context = FauxContent("new").__of__(FauxContent())\n-        request = FauxRequest()\n-        request.URL = "http://nohost/delete_confirmation"\n-        setRequest(request)\n \n         notify(ObjectRemovedEvent(context, context.__parent__, "new"))\n \n'
 
