@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: February 24, 2025
+* Last updated: February 27, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -40,6 +40,7 @@ These are the main changes since 6.1.0:
   * do not allow spaces.
   * accept TLDs with more than 4 characters
 * `plone.staticresources`: Update to latest `mockup`.  This improves the new content browser widget (used for uploading images or selecting content).
+* `plone.autoinclude`: Fix importing module when the module name differs from the project name.  This can easily happen with `setuptools` 75.8.1, though maybe 75.8.2 fixes it in some cases.
 
 
 ## Volto frontend
