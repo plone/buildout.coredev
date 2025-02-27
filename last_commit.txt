@@ -1,128 +1,94 @@
-Repository: plone.autoinclude
+Repository: plone.schemaeditor
 
 
-Branch: refs/heads/main
-Date: 2025-02-26T22:59:53+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.autoinclude/commit/523f8444ee800df2c2cdc0b7822a23587666fe22
+Branch: refs/heads/master
+Date: 2025-02-27T09:48:41+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/caee34fbcdeee5eb47b6d65f06dfbc4e614783d0
 
-Fix importing module with when module name differs from project name.
-
-This can easily happen with `setuptools` 75.8.1, though maybe 75.8.2 fixes it.
-Fixes https://github.com/plone/plone.autoinclude/issues/25
+make the robot test more stable
 
 Files changed:
-A news/25.bugfix
-M src/plone/autoinclude/loader.py
+M plone/schemaeditor/tests/robot/test_fields.robot
 
-b'diff --git a/news/25.bugfix b/news/25.bugfix\nnew file mode 100644\nindex 0000000..f584126\n--- /dev/null\n+++ b/news/25.bugfix\n@@ -0,0 +1,3 @@\n+Fix importing module when the module name differs from the project name.\n+This can easily happen with ``setuptools`` 75.8.1, though maybe 75.8.2 fixes it in some cases.\n+[maurits]\n\\ No newline at end of file\ndiff --git a/src/plone/autoinclude/loader.py b/src/plone/autoinclude/loader.py\nindex 3ff523d..75997e6 100644\n--- a/src/plone/autoinclude/loader.py\n+++ b/src/plone/autoinclude/loader.py\n@@ -1,3 +1,4 @@\n+from importlib.metadata import distribution\n from pkg_resources import iter_entry_points\n from pkg_resources import resource_filename\n from pkg_resources import working_set\n@@ -30,6 +31,27 @@\n         ALLOW_MODULE_NOT_FOUND_SET = set(_allowed)\n \n \n+def _get_module_name_from_project_name(project_name):\n+    """Get module name from project_name.\n+\n+    We got the project_name from an entry point, so there should be a\n+    distribution that we can find with this name.\n+\n+    From there, we want to get a module or package name.\n+    If we are lucky, this is the same as the project name, but it can differ.\n+\n+    This must be something we can import.  So we at least replace any dashes\n+    with underscores.\n+    """\n+    dist = distribution(project_name)\n+    # In Python 3.9, dist.name does not exist, or maybe not always.\n+    if hasattr(dist, "name"):\n+        dist_name = dist.name\n+    else:\n+        dist_name = dist.metadata["Name"]\n+    return dist_name.replace("-", "_")\n+\n+\n def load_z3c_packages(target=""):\n     """Load packages from the z3c.autoinclude.plugin entry points.\n \n@@ -44,15 +66,19 @@ def load_z3c_packages(target=""):\n         # we can include it.\n         if target and ep.module_name != target:\n             continue\n-        module_name = ep.dist.project_name.replace("-", "_")\n+        # We should always be able to get the distribution.\n+        # Otherwise: how could we have an entry point?\n+        module_name = _get_module_name_from_project_name(ep.dist.project_name)\n         if module_name not in _known_module_names:\n             try:\n-                dist = importlib.import_module(module_name)\n+                module = importlib.import_module(module_name)\n             except ModuleNotFoundError:\n                 # Note: this may happen a lot, at least for z3c.autoinclude,\n                 # because the project name may not be the same as the package/module.\n                 # If we accept it, we may hide real errors though:\n                 # the module may be there but have an ImportError.\n+                # Second note: I am not sure how much this part is still needed\n+                # now that we call \'distribution(ep.dist.project_name)\'.\n                 if (\n                     not ALLOW_MODULE_NOT_FOUND_ALL\n                     and module_name not in ALLOW_MODULE_NOT_FOUND_SET\n@@ -72,10 +98,10 @@ def load_z3c_packages(target=""):\n                 )\n                 _known_module_names[module_name] = None\n                 continue\n-            _known_module_names[module_name] = dist\n-        dist = _known_module_names[module_name]\n-        if dist is not None:\n-            dists[module_name] = dist\n+            _known_module_names[module_name] = module\n+        module = _known_module_names[module_name]\n+        if module is not None:\n+            dists[module_name] = module\n     return dists\n \n \n@@ -110,7 +136,9 @@ def load_own_packages(target=""):\n             if target and eps["target"].module_name != target:\n                 # entry point defines target X but we only want target Y.\n                 continue\n-            module_name = wsdist.project_name.replace("-", "_")\n+            # We should always be able to get the distribution.\n+            # Otherwise: how could we have an entry point?\n+            module_name = _get_module_name_from_project_name(wsdist.project_name)\n         if "module" in eps:\n             # We could load the dist with ep.load(), but we do it differently.\n             module_name = eps["module"].module_name\n@@ -121,11 +149,11 @@ def load_own_packages(target=""):\n             )\n         if module_name not in _known_module_names:\n             # We could try/except ModuleNotFoundError, but this is an unexpected error.\n-            dist = importlib.import_module(module_name)\n-            _known_module_names[module_name] = dist\n+            module = importlib.import_module(module_name)\n+            _known_module_names[module_name] = module\n         else:\n-            dist = _known_module_names[module_name]\n-        dists[module_name] = dist\n+            module = _known_module_names[module_name]\n+        dists[module_name] = module\n     return dists\n \n \n'
+b'diff --git a/plone/schemaeditor/tests/robot/test_fields.robot b/plone/schemaeditor/tests/robot/test_fields.robot\nindex 95a992e..25e6bfd 100644\n--- a/plone/schemaeditor/tests/robot/test_fields.robot\n+++ b/plone/schemaeditor/tests/robot/test_fields.robot\n@@ -252,7 +252,8 @@ the field is removed\n \n Click Modal Link\n     [Arguments]    ${SELECTOR}\n-    \n+\n     Click    ${SELECTOR}\n+    Wait For Condition    Element States    //div[@class="modal-wrapper"]    contains    attached    visible\n     Wait For Condition    Classes    //body    contains    modal-open\n     Wait For Condition    Classes    //div[@class="modal-wrapper"]/div/div    contains    show\n'
 
-Repository: plone.autoinclude
+Repository: plone.schemaeditor
 
 
-Branch: refs/heads/main
-Date: 2025-02-26T22:59:53+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.autoinclude/commit/477f81ff5219bbeccf61528cdf543d019bd7e13e
+Branch: refs/heads/master
+Date: 2025-02-27T09:48:46+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/eab300f285fc62af419da7f638801e237177128f
 
-Tox: do not set SETUPTOOLS_USE_DISTUTILS=stdlib in Buildout test env.
+add news
 
-This was an old workaround for 'TypeError: dist must be a Distribution instance' on GHA.
+Files changed:
+A news/130.tests
 
-Now suddenly this old workaround causes an error, on Python 3.12+:
+b'diff --git a/news/130.tests b/news/130.tests\nnew file mode 100644\nindex 0000000..79cc9ff\n--- /dev/null\n+++ b/news/130.tests\n@@ -0,0 +1 @@\n+make the robot test more stable @1letter\n'
 
-```
-$ tox -e buildout
-buildout: commands_pre[0]&gt; python -m pip list
-Package     Version
------------ -------
-packaging   24.2
-pip         25.0.1
-setuptools  75.8.0
-wheel       0.45.1
-zc.buildout 4.0
-buildout: commands_pre[1]&gt; .tox/buildout/bin/buildout -nc /Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/buildout.cfg buildout:directory=/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout
-/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/lib/python3.12/site-packages/_distutils_hack/__init__.py:53: UserWarning: Reliance on distutils from stdlib is deprecated. Users must rely on setuptools to provide the distutils module. Avoid importing distutils or import setuptools first, and avoid setting SETUPTOOLS_USE_DISTUTILS=stdlib. Register concerns at https://github.com/pypa/setuptools/issues/new?template=distutils-deprecation.yml
-  warnings.warn(
-Traceback (most recent call last):
-  File "/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/bin/buildout", line 5, in &lt;module&gt;
-    from zc.buildout.buildout import main
-  File "/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/lib/python3.12/site-packages/zc/buildout/__init__.py", line 21, in &lt;module&gt;
-    import setuptools
-  File "/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/lib/python3.12/site-packages/setuptools/__init__.py", line 24, in &lt;module&gt;
-    from . import logging, monkey
-  File "/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/lib/python3.12/site-packages/setuptools/logging.py", line 5, in &lt;module&gt;
-    from . import monkey
-  File "/Users/maurits/community/plone-coredev/6.2/src/plone.autoinclude/.tox/buildout/lib/python3.12/site-packages/setuptools/monkey.py", line 13, in &lt;module&gt;
-    import distutils.filelist
-ModuleNotFoundError: No module named 'distutils'
-```
+Repository: plone.schemaeditor
+
+
+Branch: refs/heads/master
+Date: 2025-02-27T10:01:05+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/e1903532c69c5e0265600441eec5339bc96fe9a1
+
+fix tox
 
 Files changed:
 M tox.ini
 
-b"diff --git a/tox.ini b/tox.ini\nindex 551c2f0..0a51541 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -142,8 +142,6 @@ commands =\n basepython = python3\n skip_install = true\n setenv =\n-# Work around 'TypeError: dist must be a Distribution instance' on GHA:\n-    SETUPTOOLS_USE_DISTUTILS = stdlib\n deps =\n     pip == 25.0.1\n     setuptools == 75.8.0\n"
+b'diff --git a/tox.ini b/tox.ini\nindex c808e20..46ebb34 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -107,8 +107,7 @@ set_env =\n #  constrain_package_deps = "false"\n ##\n deps =\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n ##\n # Specify additional deps in .meta.toml:\n@@ -151,8 +150,7 @@ set_env =\n ##\n deps =\n     coverage\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     rfbrowser init\n'
 
-Repository: plone.autoinclude
+Repository: plone.schemaeditor
 
 
-Branch: refs/heads/main
-Date: 2025-02-26T22:59:53+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.autoinclude/commit/7230122b825b6ce4a6674098b5004536e856aac0
+Branch: refs/heads/master
+Date: 2025-02-27T10:04:42+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/d280eb43006ec63a8f1b81399fb57af8154952ac
 
-Remove upper setuptools bound in test-packages.
-
-This shows that the fix in our `loader.py` works.
+fix release-check in tox
 
 Files changed:
-M test-packages/ExampleCamelCase/pyproject.toml
-M test-packages/example.addon/pyproject.toml
-M test-packages/example.basetestpackage/pyproject.toml
-M test-packages/example.different/pyproject.toml
-M test-packages/example.different2/pyproject.toml
-M test-packages/example.metaoverrides/pyproject.toml
-M test-packages/example.multipleeps/pyproject.toml
-M test-packages/example.plone-dash-addon/pyproject.toml
-M test-packages/example.ploneaddon/pyproject.toml
-M test-packages/example.ploneintegration/pyproject.toml
-M test-packages/example.zopeaddon/pyproject.toml
-M test-packages/example.zopeintegration/pyproject.toml
-M test-packages/namespaceexample.native/pyproject.toml
-M test-packages/namespaceexample.pkgutilns/pyproject.toml
-
-b'diff --git a/test-packages/ExampleCamelCase/pyproject.toml b/test-packages/ExampleCamelCase/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/ExampleCamelCase/pyproject.toml\n+++ b/test-packages/ExampleCamelCase/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.addon/pyproject.toml b/test-packages/example.addon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.addon/pyproject.toml\n+++ b/test-packages/example.addon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.basetestpackage/pyproject.toml b/test-packages/example.basetestpackage/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.basetestpackage/pyproject.toml\n+++ b/test-packages/example.basetestpackage/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.different/pyproject.toml b/test-packages/example.different/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.different/pyproject.toml\n+++ b/test-packages/example.different/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.different2/pyproject.toml b/test-packages/example.different2/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.different2/pyproject.toml\n+++ b/test-packages/example.different2/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.metaoverrides/pyproject.toml b/test-packages/example.metaoverrides/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.metaoverrides/pyproject.toml\n+++ b/test-packages/example.metaoverrides/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.multipleeps/pyproject.toml b/test-packages/example.multipleeps/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.multipleeps/pyproject.toml\n+++ b/test-packages/example.multipleeps/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.plone-dash-addon/pyproject.toml b/test-packages/example.plone-dash-addon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.plone-dash-addon/pyproject.toml\n+++ b/test-packages/example.plone-dash-addon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.ploneaddon/pyproject.toml b/test-packages/example.ploneaddon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.ploneaddon/pyproject.toml\n+++ b/test-packages/example.ploneaddon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.ploneintegration/pyproject.toml b/test-packages/example.ploneintegration/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.ploneintegration/pyproject.toml\n+++ b/test-packages/example.ploneintegration/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.zopeaddon/pyproject.toml b/test-packages/example.zopeaddon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.zopeaddon/pyproject.toml\n+++ b/test-packages/example.zopeaddon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.zopeintegration/pyproject.toml b/test-packages/example.zopeintegration/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.zopeintegration/pyproject.toml\n+++ b/test-packages/example.zopeintegration/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/namespaceexample.native/pyproject.toml b/test-packages/namespaceexample.native/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/namespaceexample.native/pyproject.toml\n+++ b/test-packages/namespaceexample.native/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/namespaceexample.pkgutilns/pyproject.toml b/test-packages/namespaceexample.pkgutilns/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/namespaceexample.pkgutilns/pyproject.toml\n+++ b/test-packages/namespaceexample.pkgutilns/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\n'
-
-Repository: plone.autoinclude
-
-
-Branch: refs/heads/main
-Date: 2025-02-27T10:14:10+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.autoinclude/commit/0b73ec64db02e4c32456493e5ea0e8f91dd37b8b
-
-Merge pull request #30 from plone/maurits-issue-25-project-versus-module-name
-
-Fix issue 25: project versus module name
-
-Files changed:
-A news/25.bugfix
-M src/plone/autoinclude/loader.py
-M test-packages/ExampleCamelCase/pyproject.toml
-M test-packages/example.addon/pyproject.toml
-M test-packages/example.basetestpackage/pyproject.toml
-M test-packages/example.different/pyproject.toml
-M test-packages/example.different2/pyproject.toml
-M test-packages/example.metaoverrides/pyproject.toml
-M test-packages/example.multipleeps/pyproject.toml
-M test-packages/example.plone-dash-addon/pyproject.toml
-M test-packages/example.ploneaddon/pyproject.toml
-M test-packages/example.ploneintegration/pyproject.toml
-M test-packages/example.zopeaddon/pyproject.toml
-M test-packages/example.zopeintegration/pyproject.toml
-M test-packages/namespaceexample.native/pyproject.toml
-M test-packages/namespaceexample.pkgutilns/pyproject.toml
 M tox.ini
 
-b'diff --git a/news/25.bugfix b/news/25.bugfix\nnew file mode 100644\nindex 0000000..f584126\n--- /dev/null\n+++ b/news/25.bugfix\n@@ -0,0 +1,3 @@\n+Fix importing module when the module name differs from the project name.\n+This can easily happen with ``setuptools`` 75.8.1, though maybe 75.8.2 fixes it in some cases.\n+[maurits]\n\\ No newline at end of file\ndiff --git a/src/plone/autoinclude/loader.py b/src/plone/autoinclude/loader.py\nindex 3ff523d..75997e6 100644\n--- a/src/plone/autoinclude/loader.py\n+++ b/src/plone/autoinclude/loader.py\n@@ -1,3 +1,4 @@\n+from importlib.metadata import distribution\n from pkg_resources import iter_entry_points\n from pkg_resources import resource_filename\n from pkg_resources import working_set\n@@ -30,6 +31,27 @@\n         ALLOW_MODULE_NOT_FOUND_SET = set(_allowed)\n \n \n+def _get_module_name_from_project_name(project_name):\n+    """Get module name from project_name.\n+\n+    We got the project_name from an entry point, so there should be a\n+    distribution that we can find with this name.\n+\n+    From there, we want to get a module or package name.\n+    If we are lucky, this is the same as the project name, but it can differ.\n+\n+    This must be something we can import.  So we at least replace any dashes\n+    with underscores.\n+    """\n+    dist = distribution(project_name)\n+    # In Python 3.9, dist.name does not exist, or maybe not always.\n+    if hasattr(dist, "name"):\n+        dist_name = dist.name\n+    else:\n+        dist_name = dist.metadata["Name"]\n+    return dist_name.replace("-", "_")\n+\n+\n def load_z3c_packages(target=""):\n     """Load packages from the z3c.autoinclude.plugin entry points.\n \n@@ -44,15 +66,19 @@ def load_z3c_packages(target=""):\n         # we can include it.\n         if target and ep.module_name != target:\n             continue\n-        module_name = ep.dist.project_name.replace("-", "_")\n+        # We should always be able to get the distribution.\n+        # Otherwise: how could we have an entry point?\n+        module_name = _get_module_name_from_project_name(ep.dist.project_name)\n         if module_name not in _known_module_names:\n             try:\n-                dist = importlib.import_module(module_name)\n+                module = importlib.import_module(module_name)\n             except ModuleNotFoundError:\n                 # Note: this may happen a lot, at least for z3c.autoinclude,\n                 # because the project name may not be the same as the package/module.\n                 # If we accept it, we may hide real errors though:\n                 # the module may be there but have an ImportError.\n+                # Second note: I am not sure how much this part is still needed\n+                # now that we call \'distribution(ep.dist.project_name)\'.\n                 if (\n                     not ALLOW_MODULE_NOT_FOUND_ALL\n                     and module_name not in ALLOW_MODULE_NOT_FOUND_SET\n@@ -72,10 +98,10 @@ def load_z3c_packages(target=""):\n                 )\n                 _known_module_names[module_name] = None\n                 continue\n-            _known_module_names[module_name] = dist\n-        dist = _known_module_names[module_name]\n-        if dist is not None:\n-            dists[module_name] = dist\n+            _known_module_names[module_name] = module\n+        module = _known_module_names[module_name]\n+        if module is not None:\n+            dists[module_name] = module\n     return dists\n \n \n@@ -110,7 +136,9 @@ def load_own_packages(target=""):\n             if target and eps["target"].module_name != target:\n                 # entry point defines target X but we only want target Y.\n                 continue\n-            module_name = wsdist.project_name.replace("-", "_")\n+            # We should always be able to get the distribution.\n+            # Otherwise: how could we have an entry point?\n+            module_name = _get_module_name_from_project_name(wsdist.project_name)\n         if "module" in eps:\n             # We could load the dist with ep.load(), but we do it differently.\n             module_name = eps["module"].module_name\n@@ -121,11 +149,11 @@ def load_own_packages(target=""):\n             )\n         if module_name not in _known_module_names:\n             # We could try/except ModuleNotFoundError, but this is an unexpected error.\n-            dist = importlib.import_module(module_name)\n-            _known_module_names[module_name] = dist\n+            module = importlib.import_module(module_name)\n+            _known_module_names[module_name] = module\n         else:\n-            dist = _known_module_names[module_name]\n-        dists[module_name] = dist\n+            module = _known_module_names[module_name]\n+        dists[module_name] = module\n     return dists\n \n \ndiff --git a/test-packages/ExampleCamelCase/pyproject.toml b/test-packages/ExampleCamelCase/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/ExampleCamelCase/pyproject.toml\n+++ b/test-packages/ExampleCamelCase/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.addon/pyproject.toml b/test-packages/example.addon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.addon/pyproject.toml\n+++ b/test-packages/example.addon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.basetestpackage/pyproject.toml b/test-packages/example.basetestpackage/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.basetestpackage/pyproject.toml\n+++ b/test-packages/example.basetestpackage/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.different/pyproject.toml b/test-packages/example.different/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.different/pyproject.toml\n+++ b/test-packages/example.different/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.different2/pyproject.toml b/test-packages/example.different2/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.different2/pyproject.toml\n+++ b/test-packages/example.different2/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.metaoverrides/pyproject.toml b/test-packages/example.metaoverrides/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.metaoverrides/pyproject.toml\n+++ b/test-packages/example.metaoverrides/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.multipleeps/pyproject.toml b/test-packages/example.multipleeps/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.multipleeps/pyproject.toml\n+++ b/test-packages/example.multipleeps/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.plone-dash-addon/pyproject.toml b/test-packages/example.plone-dash-addon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.plone-dash-addon/pyproject.toml\n+++ b/test-packages/example.plone-dash-addon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.ploneaddon/pyproject.toml b/test-packages/example.ploneaddon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.ploneaddon/pyproject.toml\n+++ b/test-packages/example.ploneaddon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.ploneintegration/pyproject.toml b/test-packages/example.ploneintegration/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.ploneintegration/pyproject.toml\n+++ b/test-packages/example.ploneintegration/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.zopeaddon/pyproject.toml b/test-packages/example.zopeaddon/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.zopeaddon/pyproject.toml\n+++ b/test-packages/example.zopeaddon/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/example.zopeintegration/pyproject.toml b/test-packages/example.zopeintegration/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/example.zopeintegration/pyproject.toml\n+++ b/test-packages/example.zopeintegration/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/namespaceexample.native/pyproject.toml b/test-packages/namespaceexample.native/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/namespaceexample.native/pyproject.toml\n+++ b/test-packages/namespaceexample.native/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/test-packages/namespaceexample.pkgutilns/pyproject.toml b/test-packages/namespaceexample.pkgutilns/pyproject.toml\nindex 621c81c..b6a6fd7 100644\n--- a/test-packages/namespaceexample.pkgutilns/pyproject.toml\n+++ b/test-packages/namespaceexample.pkgutilns/pyproject.toml\n@@ -1,2 +1,2 @@\n [build-system]\n-requires = ["setuptools>=68.2,<=75.8.0"]\n+requires = ["setuptools>=68.2"]\ndiff --git a/tox.ini b/tox.ini\nindex 551c2f0..0a51541 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -142,8 +142,6 @@ commands =\n basepython = python3\n skip_install = true\n setenv =\n-# Work around \'TypeError: dist must be a Distribution instance\' on GHA:\n-    SETUPTOOLS_USE_DISTUTILS = stdlib\n deps =\n     pip == 25.0.1\n     setuptools == 75.8.0\n'
+b'diff --git a/tox.ini b/tox.ini\nindex 46ebb34..8a73378 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -200,7 +200,7 @@ allowlist_externals =\n deps =\n     pipdeptree\n     pipforester\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     # Generate the full dependency tree\n'
+
+Repository: plone.schemaeditor
+
+
+Branch: refs/heads/master
+Date: 2025-02-27T14:08:33+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/b309eac5c31d6561f99afc6c9eb2d8b9214b4c75
+
+modify modal dialog condition
+
+Files changed:
+M plone/schemaeditor/tests/robot/test_fields.robot
+
+b'diff --git a/plone/schemaeditor/tests/robot/test_fields.robot b/plone/schemaeditor/tests/robot/test_fields.robot\nindex 25e6bfd..9e922fc 100644\n--- a/plone/schemaeditor/tests/robot/test_fields.robot\n+++ b/plone/schemaeditor/tests/robot/test_fields.robot\n@@ -254,6 +254,7 @@ Click Modal Link\n     [Arguments]    ${SELECTOR}\n \n     Click    ${SELECTOR}\n-    Wait For Condition    Element States    //div[@class="modal-wrapper"]    contains    attached    visible\n+    Wait For Condition    Element States    //div[contains(@class,"modal-dialog")]    contains    visible\n+    # Wait For Condition    Element States    //div[@class="modal-wrapper"]    contains    attached    visible\n     Wait For Condition    Classes    //body    contains    modal-open\n     Wait For Condition    Classes    //div[@class="modal-wrapper"]/div/div    contains    show\n'
+
+Repository: plone.schemaeditor
+
+
+Branch: refs/heads/master
+Date: 2025-02-27T15:32:04+01:00
+Author: 1letter (1letter) <1letter@gmx.de>
+Commit: https://github.com/plone/plone.schemaeditor/commit/05d79ea8fad32921d6c668d233f294deb54713a6
+
+Merge pull request #131 from plone/1letter-fix130
+
+Make robot test more stable
+
+Files changed:
+A news/130.tests
+M plone/schemaeditor/tests/robot/test_fields.robot
+M tox.ini
+
+b'diff --git a/news/130.tests b/news/130.tests\nnew file mode 100644\nindex 0000000..79cc9ff\n--- /dev/null\n+++ b/news/130.tests\n@@ -0,0 +1 @@\n+make the robot test more stable @1letter\ndiff --git a/plone/schemaeditor/tests/robot/test_fields.robot b/plone/schemaeditor/tests/robot/test_fields.robot\nindex 95a992e..9e922fc 100644\n--- a/plone/schemaeditor/tests/robot/test_fields.robot\n+++ b/plone/schemaeditor/tests/robot/test_fields.robot\n@@ -252,7 +252,9 @@ the field is removed\n \n Click Modal Link\n     [Arguments]    ${SELECTOR}\n-    \n+\n     Click    ${SELECTOR}\n+    Wait For Condition    Element States    //div[contains(@class,"modal-dialog")]    contains    visible\n+    # Wait For Condition    Element States    //div[@class="modal-wrapper"]    contains    attached    visible\n     Wait For Condition    Classes    //body    contains    modal-open\n     Wait For Condition    Classes    //div[@class="modal-wrapper"]/div/div    contains    show\ndiff --git a/tox.ini b/tox.ini\nindex c808e20..8a73378 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -107,8 +107,7 @@ set_env =\n #  constrain_package_deps = "false"\n ##\n deps =\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n ##\n # Specify additional deps in .meta.toml:\n@@ -151,8 +150,7 @@ set_env =\n ##\n deps =\n     coverage\n-    zope.testrunner\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     rfbrowser init\n@@ -202,7 +200,7 @@ allowlist_externals =\n deps =\n     pipdeptree\n     pipforester\n-    -c https://dist.plone.org/release/6.0-dev/constraints.txt\n+    zope.testrunner -c https://dist.plone.org/release/6.0-dev/constraints.txt\n \n commands =\n     # Generate the full dependency tree\n'
 
