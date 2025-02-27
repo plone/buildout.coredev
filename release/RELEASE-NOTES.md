@@ -1,6 +1,6 @@
 # Release notes for Plone 6.0.15 (unreleased)
 
-* Last updated: February 24, 2025
+* Last updated: February 27, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
@@ -45,6 +45,9 @@ Major changes since 6.0.14:
     Zope 4 and higher no longer have the concept of a products directory.
     You can still use ``packages = path/to/products_dir Products`` if you need something similar.
   * Fix handling checkouts of native namespace packages.
+* `plone.autoinclude`:
+  * Fix importing module when the module name differs from the project name.  This can easily happen with `setuptools` 75.8.1, though maybe 75.8.2 fixes it in some cases.
+  * Require Python 3.9 or higher.
 
 
 ## Volto frontend
