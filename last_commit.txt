@@ -1,48 +1,54 @@
-Repository: plone.testing
+Repository: diazo
 
 
 Branch: refs/heads/master
-Date: 2025-03-04T23:15:21+01:00
+Date: 2025-03-04T12:17:57+01:00
 Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/9afe68a2a2fdcdd30661fe2f29a6603ee1cf9ac8
+Commit: https://github.com/plone/diazo/commit/42aef056064064cd6ca621b2a563e771fa2d5630
 
-chore: drop pkg_resources usage
+fix: replace pkg_resources with importlib
 
 Files changed:
-M src/plone/testing/zope.py
+M src/diazo/compiler.py
+M src/diazo/tests/test_diazo.py
+M src/diazo/utils.py
+M src/diazo/wsgi.py
 
-b'diff --git a/src/plone/testing/zope.py b/src/plone/testing/zope.py\nindex 0a75463..31eae6e 100644\n--- a/src/plone/testing/zope.py\n+++ b/src/plone/testing/zope.py\n@@ -12,8 +12,8 @@\n \n import contextlib\n import os\n-import pkg_resources\n import shutil\n+import sys\n import tempfile\n import transaction\n import Zope2.Startup.run\n@@ -22,6 +22,8 @@\n \n _INSTALLED_PRODUCTS = {}\n \n+PY3_10 = sys.version_info[0:2] >= (3, 10)\n+\n \n class TestIsolationBroken(BaseException):\n     pass\n@@ -951,9 +953,16 @@ def make_wsgi_app(self):\n         Zope2.Startup.run.make_wsgi_app(global_config, zope_conf)\n         app = ZPublisher.WSGIPublisher.publish_module\n \n-        for spec, protocol, name, extra in reversed(self.pipeline):\n-            entrypoint = pkg_resources.get_entry_info(spec, protocol, name)\n-            app = entrypoint.load()(app, global_config, **extra)\n+        if not PY3_10:\n+            return self._handle_entry_points_39(app, global_config)\n+\n+        from importlib.metadata import entry_points\n+\n+        all_entry_points = entry_points()\n+        for _, protocol, name, extra in reversed(self.pipeline):\n+            entry_points = all_entry_points.select(group=protocol, name=name)\n+            for entry_point in entry_points:\n+                app = entry_point.load()(app, global_config, **extra)\n         return app\n \n     def _get_zope_conf(self, dir):\n@@ -962,6 +971,18 @@ def _get_zope_conf(self, dir):\n             zope_conf.write(f"instancehome {os.path.dirname(dir)}\\n")\n         return path\n \n+    def _handle_entry_points_39(self, app, global_config):\n+        """Handle entry points on Python 3.9 or earlier\n+\n+        As soon as Python 3.9 is out of support this method can be removed.\n+        """\n+        import pkg_resources\n+\n+        for spec, protocol, name, extra in reversed(self.pipeline):\n+            entrypoint = pkg_resources.get_entry_info(spec, protocol, name)\n+            app = entrypoint.load()(app, global_config, **extra)\n+        return app\n+\n \n # Fixture layer - use as a base layer, but don\'t use directly, as it has no\n # test lifecycle\n'
+b'diff --git a/src/diazo/compiler.py b/src/diazo/compiler.py\nindex 78e63e9..e8928a7 100644\n--- a/src/diazo/compiler.py\n+++ b/src/diazo/compiler.py\n@@ -16,10 +16,10 @@\n from diazo.utils import pkg_xsl\n from diazo.utils import quote_param\n from diazo.utils import split_params\n+from importlib.resources import files\n from lxml import etree\n \n import logging\n-import pkg_resources\n \n \n logger = logging.getLogger("diazo")\n@@ -27,7 +27,7 @@\n \n \n def set_parser(stylesheet, parser, compiler_parser=None):\n-    file_obj = pkg_resources.resource_filename("diazo", "dummy.html")\n+    file_obj = files("diazo") / "dummy.html"\n     with open(file_obj) as file_handler:\n         dummy_doc = etree.parse(\n             file_handler,\ndiff --git a/src/diazo/tests/test_diazo.py b/src/diazo/tests/test_diazo.py\nindex 08e5ef4..8c8fb14 100644\n--- a/src/diazo/tests/test_diazo.py\n+++ b/src/diazo/tests/test_diazo.py\n@@ -1,4 +1,5 @@\n from diazo.utils import quote_param\n+from importlib.resources import files\n from io import BytesIO\n from io import StringIO\n from lxml import etree\n@@ -8,7 +9,6 @@\n import diazo.run\n import difflib\n import os\n-import pkg_resources\n import sys\n import unittest\n \n@@ -21,10 +21,7 @@\n     __file__ = sys.argv[0]\n \n \n-defaultsfn = pkg_resources.resource_filename(\n-    "diazo.tests",\n-    "default-options.cfg",\n-)\n+defaultsfn = str(files("diazo") / "tests" / "default-options.cfg")\n \n \n def text_compare(t1, t2):\ndiff --git a/src/diazo/utils.py b/src/diazo/utils.py\nindex d7e2e67..4374bb2 100644\n--- a/src/diazo/utils.py\n+++ b/src/diazo/utils.py\n@@ -1,8 +1,8 @@\n+from importlib.resources import files\n from lxml import etree\n from optparse import OptionParser\n \n import logging\n-import pkg_resources\n import sys\n \n \n@@ -82,7 +82,8 @@ def __call__(self, *args, **kw):\n \n \n def pkg_parse(name, parser=None):\n-    with open(pkg_resources.resource_filename("diazo", name)) as f:\n+    path = files("diazo") / name\n+    with path.open() as f:\n         return etree.parse(f, parser=parser)\n \n \ndiff --git a/src/diazo/wsgi.py b/src/diazo/wsgi.py\nindex 60d9c8e..06e6905 100644\n--- a/src/diazo/wsgi.py\n+++ b/src/diazo/wsgi.py\n@@ -1,6 +1,7 @@\n from diazo.compiler import compile_theme\n from diazo.utils import pkg_parse\n from diazo.utils import quote_param\n+from importlib.resources import files\n from lxml import etree\n from repoze.xmliter.serializer import XMLSerializer\n from repoze.xmliter.utils import getHTMLSerializer\n@@ -8,7 +9,6 @@\n from webob import Request\n \n import os.path\n-import pkg_resources\n import re\n \n \n@@ -75,7 +75,7 @@ def resolve(self, system_url, public_id, context):\n \n         spec = system_url[9:]\n         package, resource_name = spec.split("/", 1)\n-        filename = pkg_resources.resource_filename(package, resource_name)\n+        filename = str(files(package) / resource_name)\n \n         return self.resolve_filename(filename, context)\n \n'
 
-Repository: plone.testing
+Repository: diazo
 
 
 Branch: refs/heads/master
-Date: 2025-03-04T23:15:21+01:00
+Date: 2025-03-04T12:17:57+01:00
 Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/c99a2b0c76be71830a57a18b3d6af760f137c48a
+Commit: https://github.com/plone/diazo/commit/e8b02b8e78501799c16142e73d3b6e5de1f2f963
 
 Add news entry
 
 Files changed:
 A news/4126.bugfix
 
-b'diff --git a/news/4126.bugfix b/news/4126.bugfix\nnew file mode 100644\nindex 0000000..cdd0a8c\n--- /dev/null\n+++ b/news/4126.bugfix\n@@ -0,0 +1 @@\n+Replace `pkg_resources` with `importlib.metadata` @gforcada\n'
+b'diff --git a/news/4126.bugfix b/news/4126.bugfix\nnew file mode 100644\nindex 0000000..8716dcf\n--- /dev/null\n+++ b/news/4126.bugfix\n@@ -0,0 +1 @@\n+Replace `pkg_resources` with `importlib.resources` @gforcada\n'
 
-Repository: plone.testing
+Repository: diazo
 
 
 Branch: refs/heads/master
-Date: 2025-03-05T10:43:50+01:00
-Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
-Commit: https://github.com/plone/plone.testing/commit/e3a429efd64557ec25d7e1556b1d08b5c907d2e4
+Date: 2025-03-06T11:33:40+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/diazo/commit/238d998a81e399f97687e374c702a6db1401dfc0
 
-Merge pull request #106 from plone/drop-pkg-resources-usage
+Merge pull request #90 from plone/4126-replace-pkg-resources
 
-Drop pkg resources usage
+Replace pkg_resources
 
 Files changed:
 A news/4126.bugfix
-M src/plone/testing/zope.py
+M src/diazo/compiler.py
+M src/diazo/tests/test_diazo.py
+M src/diazo/utils.py
+M src/diazo/wsgi.py
 
-b'diff --git a/news/4126.bugfix b/news/4126.bugfix\nnew file mode 100644\nindex 0000000..cdd0a8c\n--- /dev/null\n+++ b/news/4126.bugfix\n@@ -0,0 +1 @@\n+Replace `pkg_resources` with `importlib.metadata` @gforcada\ndiff --git a/src/plone/testing/zope.py b/src/plone/testing/zope.py\nindex 0a75463..31eae6e 100644\n--- a/src/plone/testing/zope.py\n+++ b/src/plone/testing/zope.py\n@@ -12,8 +12,8 @@\n \n import contextlib\n import os\n-import pkg_resources\n import shutil\n+import sys\n import tempfile\n import transaction\n import Zope2.Startup.run\n@@ -22,6 +22,8 @@\n \n _INSTALLED_PRODUCTS = {}\n \n+PY3_10 = sys.version_info[0:2] >= (3, 10)\n+\n \n class TestIsolationBroken(BaseException):\n     pass\n@@ -951,9 +953,16 @@ def make_wsgi_app(self):\n         Zope2.Startup.run.make_wsgi_app(global_config, zope_conf)\n         app = ZPublisher.WSGIPublisher.publish_module\n \n-        for spec, protocol, name, extra in reversed(self.pipeline):\n-            entrypoint = pkg_resources.get_entry_info(spec, protocol, name)\n-            app = entrypoint.load()(app, global_config, **extra)\n+        if not PY3_10:\n+            return self._handle_entry_points_39(app, global_config)\n+\n+        from importlib.metadata import entry_points\n+\n+        all_entry_points = entry_points()\n+        for _, protocol, name, extra in reversed(self.pipeline):\n+            entry_points = all_entry_points.select(group=protocol, name=name)\n+            for entry_point in entry_points:\n+                app = entry_point.load()(app, global_config, **extra)\n         return app\n \n     def _get_zope_conf(self, dir):\n@@ -962,6 +971,18 @@ def _get_zope_conf(self, dir):\n             zope_conf.write(f"instancehome {os.path.dirname(dir)}\\n")\n         return path\n \n+    def _handle_entry_points_39(self, app, global_config):\n+        """Handle entry points on Python 3.9 or earlier\n+\n+        As soon as Python 3.9 is out of support this method can be removed.\n+        """\n+        import pkg_resources\n+\n+        for spec, protocol, name, extra in reversed(self.pipeline):\n+            entrypoint = pkg_resources.get_entry_info(spec, protocol, name)\n+            app = entrypoint.load()(app, global_config, **extra)\n+        return app\n+\n \n # Fixture layer - use as a base layer, but don\'t use directly, as it has no\n # test lifecycle\n'
+b'diff --git a/news/4126.bugfix b/news/4126.bugfix\nnew file mode 100644\nindex 0000000..8716dcf\n--- /dev/null\n+++ b/news/4126.bugfix\n@@ -0,0 +1 @@\n+Replace `pkg_resources` with `importlib.resources` @gforcada\ndiff --git a/src/diazo/compiler.py b/src/diazo/compiler.py\nindex 78e63e9..e8928a7 100644\n--- a/src/diazo/compiler.py\n+++ b/src/diazo/compiler.py\n@@ -16,10 +16,10 @@\n from diazo.utils import pkg_xsl\n from diazo.utils import quote_param\n from diazo.utils import split_params\n+from importlib.resources import files\n from lxml import etree\n \n import logging\n-import pkg_resources\n \n \n logger = logging.getLogger("diazo")\n@@ -27,7 +27,7 @@\n \n \n def set_parser(stylesheet, parser, compiler_parser=None):\n-    file_obj = pkg_resources.resource_filename("diazo", "dummy.html")\n+    file_obj = files("diazo") / "dummy.html"\n     with open(file_obj) as file_handler:\n         dummy_doc = etree.parse(\n             file_handler,\ndiff --git a/src/diazo/tests/test_diazo.py b/src/diazo/tests/test_diazo.py\nindex 08e5ef4..8c8fb14 100644\n--- a/src/diazo/tests/test_diazo.py\n+++ b/src/diazo/tests/test_diazo.py\n@@ -1,4 +1,5 @@\n from diazo.utils import quote_param\n+from importlib.resources import files\n from io import BytesIO\n from io import StringIO\n from lxml import etree\n@@ -8,7 +9,6 @@\n import diazo.run\n import difflib\n import os\n-import pkg_resources\n import sys\n import unittest\n \n@@ -21,10 +21,7 @@\n     __file__ = sys.argv[0]\n \n \n-defaultsfn = pkg_resources.resource_filename(\n-    "diazo.tests",\n-    "default-options.cfg",\n-)\n+defaultsfn = str(files("diazo") / "tests" / "default-options.cfg")\n \n \n def text_compare(t1, t2):\ndiff --git a/src/diazo/utils.py b/src/diazo/utils.py\nindex d7e2e67..4374bb2 100644\n--- a/src/diazo/utils.py\n+++ b/src/diazo/utils.py\n@@ -1,8 +1,8 @@\n+from importlib.resources import files\n from lxml import etree\n from optparse import OptionParser\n \n import logging\n-import pkg_resources\n import sys\n \n \n@@ -82,7 +82,8 @@ def __call__(self, *args, **kw):\n \n \n def pkg_parse(name, parser=None):\n-    with open(pkg_resources.resource_filename("diazo", name)) as f:\n+    path = files("diazo") / name\n+    with path.open() as f:\n         return etree.parse(f, parser=parser)\n \n \ndiff --git a/src/diazo/wsgi.py b/src/diazo/wsgi.py\nindex 60d9c8e..06e6905 100644\n--- a/src/diazo/wsgi.py\n+++ b/src/diazo/wsgi.py\n@@ -1,6 +1,7 @@\n from diazo.compiler import compile_theme\n from diazo.utils import pkg_parse\n from diazo.utils import quote_param\n+from importlib.resources import files\n from lxml import etree\n from repoze.xmliter.serializer import XMLSerializer\n from repoze.xmliter.utils import getHTMLSerializer\n@@ -8,7 +9,6 @@\n from webob import Request\n \n import os.path\n-import pkg_resources\n import re\n \n \n@@ -75,7 +75,7 @@ def resolve(self, system_url, public_id, context):\n \n         spec = system_url[9:]\n         package, resource_name = spec.split("/", 1)\n-        filename = pkg_resources.resource_filename(package, resource_name)\n+        filename = str(files(package) / resource_name)\n \n         return self.resolve_filename(filename, context)\n \n'
 
