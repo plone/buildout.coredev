@@ -2,29 +2,34 @@ Repository: plone.exportimport
 
 
 Branch: refs/heads/main
-Date: 2025-03-11T18:36:30-03:00
+Date: 2025-03-11T18:38:11-03:00
 Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.exportimport/commit/ba2caf0c4211cad9619cc3d6f7fb7b519e97d680
+Commit: https://github.com/plone/plone.exportimport/commit/0256febdc4a28e2a12174427b91f2bd12d89c045
 
-Do not stop the import if an object parent is missing (#62)
-
-* Do not stop the import if an object parent is missing (Fixes #56)
-
-* Update src/plone/exportimport/importers/content.py
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
-
-* Safe initialize dropped attribute
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Preparing release 1.1.0
 
 Files changed:
-A news/56.feature
-M src/plone/exportimport/importers/content.py
-M src/plone/exportimport/utils/content/import_helpers.py
-M tests/importers/test_importers_content.py
+M CHANGES.md
+M setup.py
+D news/52.bugfix
+D news/54.feature
+D news/56.feature
+D news/57.bugfix
 
-b'diff --git a/news/56.feature b/news/56.feature\nnew file mode 100644\nindex 0000000..59e3a9a\n--- /dev/null\n+++ b/news/56.feature\n@@ -0,0 +1 @@\n+Do not stop the import if an object parent is missing @ericof\n\\ No newline at end of file\ndiff --git a/src/plone/exportimport/importers/content.py b/src/plone/exportimport/importers/content.py\nindex 643153f..1837041 100644\n--- a/src/plone/exportimport/importers/content.py\n+++ b/src/plone/exportimport/importers/content.py\n@@ -7,9 +7,11 @@\n from plone.exportimport.interfaces import IExportImportRequestMarker\n from plone.exportimport.utils import content as content_utils\n from plone.exportimport.utils import request_provides\n+from Products.CMFPlone.Portal import PloneSite\n from typing import Callable\n from typing import Generator\n from typing import List\n+from typing import Optional\n \n import json\n import transaction\n@@ -19,6 +21,14 @@ class ContentImporter(BaseImporter):\n     name: str = "content"\n     metadata: types.ExportImportMetadata = None\n     languages: types.PortalLanguages = None\n+    dropped: set | None = None\n+\n+    def __init__(\n+        self,\n+        site: PloneSite,\n+    ):\n+        super().__init__(site)\n+        self.dropped = set()\n \n     def all_objects(self) -> Generator:\n         """Return all objects to be serialized."""\n@@ -48,7 +58,7 @@ def deserialize(\n             )\n         return obj\n \n-    def construct(self, item: dict) -> DexterityContent:\n+    def construct(self, item: dict) -> Optional[DexterityContent]:\n         """Serialize object."""\n         item_path = item["@id"]\n         config = types.ImporterConfig(\n@@ -72,6 +82,9 @@ def construct(self, item: dict) -> DexterityContent:\n \n         # Get or Create object instance\n         new = content_utils.get_obj_instance(item, config)\n+        if not new:\n+            logger.warning(f"Skipping {item_path} creation")\n+            return None\n \n         # Apply pre_deserialize hooks\n         pre_deserialize_hooks = self.pre_deserialize_hooks or []\n@@ -109,10 +122,16 @@ def do_import(self) -> str:\n         modified = set()\n         with request_provides(self.request, IExportImportRequestMarker):\n             for index, item in enumerate(self.all_objects(), start=1):\n-                logger.info(f\'{index:07d} - {item["@id"]}\')\n+                item_path = item["@id"]\n+                item_type = item["@type"]\n+                item_uid = item.get("UID", "")\n+                logger.info(f"{index:07d} - {item_path} - ({item_type}) - ({item_uid})")\n                 obj = self.construct(item)\n-                obj_path = "/".join(obj.getPhysicalPath())\n-                objs.append(obj_path)\n+                if obj:\n+                    obj_path = "/".join(obj.getPhysicalPath())\n+                    objs.append(obj_path)\n+                else:\n+                    self.dropped.add(item_path)\n                 if not index % 100:\n                     transaction.savepoint()\n                     logger.info(f"Handled {index} items...")\n@@ -158,6 +177,12 @@ def import_data(\n             base_path, data_hooks, pre_deserialize_hooks, obj_hooks\n         )\n         self.finish()\n+        # Report items that were dropped during the import\n+        dropped = sorted(self.dropped)\n+        if dropped:\n+            logger.warning("List of items dropped during import")\n+            for item_path in dropped:\n+                logger.warning({item_path})\n         return result\n \n     def start(self):\ndiff --git a/src/plone/exportimport/utils/content/import_helpers.py b/src/plone/exportimport/utils/content/import_helpers.py\nindex 022a10a..7ee8f39 100644\n--- a/src/plone/exportimport/utils/content/import_helpers.py\n+++ b/src/plone/exportimport/utils/content/import_helpers.py\n@@ -24,8 +24,10 @@\n )\n from typing import Callable\n from typing import List\n+from typing import Optional\n from unittest.mock import patch\n from urllib.parse import unquote\n+from zExceptions import NotFound\n from zope.component import getMultiAdapter\n \n \n@@ -33,16 +35,19 @@ def get_deserializer(data: dict, request) -> Callable:\n     return getMultiAdapter((data, request), IDeserializeFromJson)\n \n \n-def get_parent_from_item(data: dict) -> DexterityContent:\n+def get_parent_from_item(data: dict) -> Optional[DexterityContent]:\n+    parent_path = str(Path(data["@id"]).parent)\n     if data.get("@type") == "Plone Site":\n         parent = aq_parent(api.portal.get())\n     else:\n-        parent_path = str(Path(data["@id"]).parent)\n-        parent = api.content.get(path=parent_path)\n+        try:\n+            parent = api.content.get(path=parent_path)\n+        except NotFound:\n+            parent = None\n     if not parent:\n-        logger.warning(f"Container for {data[\'@id\']} not found")\n+        logger.warning(f"Container {parent_path} for {data[\'@id\']} not found")\n     elif not getattr(aq_base(parent), "isPrincipiaFolderish", False):\n-        logger.warning(f"Container for {data[\'@id\']} is not folderish")\n+        logger.warning(f"Container {parent_path} for {data[\'@id\']} is not folderish")\n         parent = None\n     return parent\n \n@@ -108,9 +113,13 @@ def _mock_isVersionable(*args, **kwargs):\n     return False\n \n \n-def get_obj_instance(item: dict, config: types.ImporterConfig) -> DexterityContent:\n+def get_obj_instance(\n+    item: dict, config: types.ImporterConfig\n+) -> Optional[DexterityContent]:\n     # Get container\n     container = get_parent_from_item(item)\n+    if not container:\n+        return None\n     # Check if we will update an item\n     update_existing = item["id"] in container\n     if update_existing:\ndiff --git a/tests/importers/test_importers_content.py b/tests/importers/test_importers_content.py\nindex 7ce128e..b540193 100644\n--- a/tests/importers/test_importers_content.py\n+++ b/tests/importers/test_importers_content.py\n@@ -107,7 +107,7 @@ def _init(self, portal, base_import_path, load_json):\n         "data,path",\n         [\n             [\n-                {"@type": "Plone Site"},\n+                {"@id": "/", "@type": "Plone Site"},\n                 "/",\n             ],\n             [\n'
+b'diff --git a/CHANGES.md b/CHANGES.md\nindex 71c03ea..5405981 100644\n--- a/CHANGES.md\n+++ b/CHANGES.md\n@@ -9,6 +9,20 @@\n \n <!-- towncrier release notes start -->\n \n+## 1.1.0 (2025-03-11)\n+\n+\n+### New features:\n+\n+- Report object creation during import using the plone-importer cli. Use --quiet to disable it. @ericof #54\n+- Do not stop the import if an object parent is missing @ericof #56\n+\n+\n+### Bug fixes:\n+\n+- Set site during plone-importer transaction commit. @ericof #52\n+- Sort `relations.json` and `translations.json` so their contents are stable.  @mauritsvanrees #57\n+\n ## 1.0.0 (2025-01-31)\n \n \ndiff --git a/news/52.bugfix b/news/52.bugfix\ndeleted file mode 100644\nindex 23d2c44..0000000\n--- a/news/52.bugfix\n+++ /dev/null\n@@ -1 +0,0 @@\n-Set site during plone-importer transaction commit. @ericof\n\\ No newline at end of file\ndiff --git a/news/54.feature b/news/54.feature\ndeleted file mode 100644\nindex b7c1b46..0000000\n--- a/news/54.feature\n+++ /dev/null\n@@ -1 +0,0 @@\n-Report object creation during import using the plone-importer cli. Use --quiet to disable it. @ericof\n\\ No newline at end of file\ndiff --git a/news/56.feature b/news/56.feature\ndeleted file mode 100644\nindex 59e3a9a..0000000\n--- a/news/56.feature\n+++ /dev/null\n@@ -1 +0,0 @@\n-Do not stop the import if an object parent is missing @ericof\n\\ No newline at end of file\ndiff --git a/news/57.bugfix b/news/57.bugfix\ndeleted file mode 100644\nindex cce7c50..0000000\n--- a/news/57.bugfix\n+++ /dev/null\n@@ -1 +0,0 @@\n-Sort `relations.json` and `translations.json` so their contents are stable.  @mauritsvanrees\ndiff --git a/setup.py b/setup.py\nindex d2046e9..e32bc07 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -10,7 +10,7 @@\n \n setup(\n     name="plone.exportimport",\n-    version="1.0.1.dev0",\n+    version="1.1.0",\n     description="Plone content export / import support",\n     long_description=long_description,\n     long_description_content_type="text/markdown",\n'
+
+Repository: plone.exportimport
+
+
+Branch: refs/heads/main
+Date: 2025-03-11T18:38:46-03:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.exportimport/commit/b89d95a44bbe9941e63366dd3bc53c2b8a0ca9b6
+
+Back to development: 1.1.1
+
+Files changed:
+M setup.py
+
+b'diff --git a/setup.py b/setup.py\nindex e32bc07..f43c026 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -10,7 +10,7 @@\n \n setup(\n     name="plone.exportimport",\n-    version="1.1.0",\n+    version="1.1.1.dev0",\n     description="Plone content export / import support",\n     long_description=long_description,\n     long_description_content_type="text/markdown",\n'
 
