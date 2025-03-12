@@ -1,26 +1,52 @@
-Repository: plone.restapi
+Repository: plone.autoinclude
 
 
 Branch: refs/heads/main
-Date: 2025-03-12T12:38:17-07:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.restapi/commit/4b63e05e01cb646b2361d8cf2512aabac8add192
+Date: 2025-03-12T16:35:19+01:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.autoinclude/commit/657a3a9dbad246747ff3934308b2e6bd708774ce
 
-Apply the resolveuid transform to all JSON fields, not only blocks (#1886)
-
-* Apply the resolveuid transform to all JSON fields, not only blocks
-
-* changelog
-
-* revise changelog
+Try hard to get the distribution normalizing the name like recent setuptools does
 
 Files changed:
-A news/1886.feature
-M src/plone/restapi/deserializer/blocks.py
-M src/plone/restapi/serializer/blocks.py
-M src/plone/restapi/tests/dxtypes.py
-M src/plone/restapi/tests/test_dxfield_deserializer.py
-M src/plone/restapi/tests/test_dxfield_serializer.py
+M src/plone/autoinclude/loader.py
 
-b'diff --git a/news/1886.feature b/news/1886.feature\nnew file mode 100644\nindex 000000000..7067f6871\n--- /dev/null\n+++ b/news/1886.feature\n@@ -0,0 +1,2 @@\n+Apply block serialization and deserialization transforms also to JSON fields.\n+This includes converting internal URLs to resolveuid URLs. @davisagli\ndiff --git a/src/plone/restapi/deserializer/blocks.py b/src/plone/restapi/deserializer/blocks.py\nindex 90d748bd1..1f684a243 100644\n--- a/src/plone/restapi/deserializer/blocks.py\n+++ b/src/plone/restapi/deserializer/blocks.py\n@@ -12,6 +12,7 @@\n from plone.schema import IJSONField\n from zope.component import adapter\n from zope.interface import implementer\n+from zope.interface import Interface\n from zope.publisher.interfaces.browser import IBrowserRequest\n \n import os\n@@ -32,10 +33,11 @@ def iterate_children(value):\n \n \n @implementer(IFieldDeserializer)\n-@adapter(IJSONField, IBlocks, IBrowserRequest)\n+@adapter(IJSONField, Interface, IBrowserRequest)\n class BlocksJSONFieldDeserializer(DefaultFieldDeserializer):\n     def __call__(self, value):\n         value = super().__call__(value)\n+\n         if self.field.getName() == "blocks":\n             for block in visit_blocks(self.context, value):\n                 new_block = block.copy()\n@@ -45,6 +47,14 @@ def __call__(self, value):\n                     new_block = handler(new_block)\n                 block.clear()\n                 block.update(new_block)\n+        else:\n+            fake_block = {"@type": "jsonfield", "value": value}\n+            for handler in iter_block_transform_handlers(\n+                self.context, fake_block, IBlockFieldDeserializationTransformer\n+            ):\n+                fake_block = handler(fake_block)\n+            value = fake_block["value"]\n+\n         return value\n \n \n@@ -145,10 +155,10 @@ def __call__(self, block):\n         return block\n \n \n-@adapter(IBlocks, IBrowserRequest)\n+@adapter(Interface, IBrowserRequest)\n @implementer(IBlockFieldDeserializationTransformer)\n class ResolveUIDDeserializer(ResolveUIDDeserializerBase):\n-    """Deserializer for content-types that implements IBlocks behavior"""\n+    """URL-to-UID transformer for all content types"""\n \n \n @adapter(IPloneSiteRoot, IBrowserRequest)\ndiff --git a/src/plone/restapi/serializer/blocks.py b/src/plone/restapi/serializer/blocks.py\nindex defe1865d..0c1c1700f 100644\n--- a/src/plone/restapi/serializer/blocks.py\n+++ b/src/plone/restapi/serializer/blocks.py\n@@ -26,7 +26,7 @@\n import re\n \n \n-@adapter(IJSONField, IBlocks, Interface)\n+@adapter(IJSONField, Interface, Interface)\n @implementer(IFieldSerializer)\n class BlocksJSONFieldSerializer(DefaultFieldSerializer):\n     def __call__(self):\n@@ -41,6 +41,14 @@ def __call__(self):\n                     new_block = handler(new_block)\n                 block.clear()\n                 block.update(new_block)\n+        else:\n+            fake_block = {"@type": "jsonfield", "value": value}\n+            for handler in iter_block_transform_handlers(\n+                self.context, fake_block, IBlockFieldSerializationTransformer\n+            ):\n+                fake_block = handler(fake_block)\n+            value = fake_block["value"]\n+\n         return json_compatible(value)\n \n \n@@ -112,9 +120,9 @@ def __call__(self, value):\n \n \n @implementer(IBlockFieldSerializationTransformer)\n-@adapter(IBlocks, IBrowserRequest)\n+@adapter(Interface, IBrowserRequest)\n class ResolveUIDSerializer(ResolveUIDSerializerBase):\n-    """Serializer for content-types with IBlocks behavior"""\n+    """UID-to-URL transformer for all content types"""\n \n \n @implementer(IBlockFieldSerializationTransformer)\ndiff --git a/src/plone/restapi/tests/dxtypes.py b/src/plone/restapi/tests/dxtypes.py\nindex c7f8ef148..70a7bd0ef 100644\n--- a/src/plone/restapi/tests/dxtypes.py\n+++ b/src/plone/restapi/tests/dxtypes.py\n@@ -9,6 +9,7 @@\n from plone.dexterity.content import Item\n from plone.namedfile import field as namedfile\n from plone.restapi.tests.helpers import ascii_token\n+from plone.schema import JSONField\n from plone.supermodel import model\n from plone.supermodel.directives import primary\n from Products.CMFCore.utils import getToolByName\n@@ -186,6 +187,7 @@ class IDXTestDocumentSchema(model.Schema):\n     test_float_field = schema.Float(required=False)\n     test_frozenset_field = schema.FrozenSet(required=False)\n     test_int_field = schema.Int(required=False)\n+    test_json_field = JSONField(required=False)\n     test_list_field = schema.List(required=False)\n     test_list_field_with_choice_with_vocabulary = schema.List(\n         value_type=schema.Choice(\ndiff --git a/src/plone/restapi/tests/test_dxfield_deserializer.py b/src/plone/restapi/tests/test_dxfield_deserializer.py\nindex 02c255fa3..6b15d47e7 100644\n--- a/src/plone/restapi/tests/test_dxfield_deserializer.py\n+++ b/src/plone/restapi/tests/test_dxfield_deserializer.py\n@@ -5,7 +5,9 @@\n from decimal import Decimal\n from plone import namedfile\n from plone.app.textfield.value import RichTextValue\n+from plone.dexterity.schema import SCHEMA_CACHE\n from plone.dexterity.utils import iterSchemata\n+from plone.restapi.behaviors import IBlocks\n from plone.restapi.interfaces import IFieldDeserializer\n from plone.restapi.testing import PLONE_RESTAPI_DX_INTEGRATION_TESTING\n from plone.restapi.tests.dxtypes import IDXTestDocumentSchema\n@@ -645,3 +647,19 @@ def test_textline_deserializer_for_links_convert_internal_links(self):\n         self.assertEqual("http://www.plone.com", value)\n         value = self.deserialize("test_textline_field", "http://nohost/plone/doc1")\n         self.assertEqual(self.portal.doc1.absolute_url(), value)\n+\n+    def test_json_field_deserializer_converts_internal_links_to_uid(self):\n+        value = self.deserialize(\n+            "test_json_field", {"@id": self.portal.doc1.absolute_url()}\n+        )\n+        self.assertEqual(value["@id"], f"../resolveuid/{self.portal.doc1.UID()}")\n+\n+    def test_json_field_deserializer_with_blocks(self):\n+        fti = self.portal.portal_types.DXTestDocument\n+        fti.behaviors = ("volto.blocks",)\n+        SCHEMA_CACHE.invalidate("DXTestDocument")\n+        assert IBlocks.providedBy(self.portal.doc1)\n+        value = self.deserialize(\n+            "test_json_field", {"@id": self.portal.doc1.absolute_url()}\n+        )\n+        self.assertEqual(value["@id"], f"../resolveuid/{self.portal.doc1.UID()}")\ndiff --git a/src/plone/restapi/tests/test_dxfield_serializer.py b/src/plone/restapi/tests/test_dxfield_serializer.py\nindex 625ea83d5..e718066f2 100644\n--- a/src/plone/restapi/tests/test_dxfield_serializer.py\n+++ b/src/plone/restapi/tests/test_dxfield_serializer.py\n@@ -5,11 +5,13 @@\n from decimal import Decimal\n from importlib import import_module\n from plone.app.textfield.value import RichTextValue\n+from plone.dexterity.schema import SCHEMA_CACHE\n from plone.dexterity.utils import iterSchemata\n from plone.namedfile.file import NamedBlobFile\n from plone.namedfile.file import NamedBlobImage\n from plone.namedfile.file import NamedFile\n from plone.namedfile.file import NamedImage\n+from plone.restapi.behaviors import IBlocks\n from plone.restapi.interfaces import IFieldSerializer\n from plone.restapi.serializer.dxfields import DefaultFieldSerializer\n from plone.restapi.testing import PLONE_RESTAPI_DX_INTEGRATION_TESTING\n@@ -372,6 +374,22 @@ def test_remoteurl_field_in_links_get_converted(self):\n         dm.set("/doc2")\n         self.assertEqual(serializer(), "/doc2")\n \n+    def test_json_field_serializer_converts_uids_to_urls(self):\n+        value = self.serialize(\n+            "test_json_field", {"@id": f"../resolveuid/{self.portal.doc1.UID()}"}\n+        )\n+        self.assertEqual(value["@id"], self.portal.doc1.absolute_url())\n+\n+    def test_json_field_serializer_with_blocks(self):\n+        fti = self.portal.portal_types.DXTestDocument\n+        fti.behaviors = ("volto.blocks",)\n+        SCHEMA_CACHE.invalidate("DXTestDocument")\n+        assert IBlocks.providedBy(self.portal.doc1)\n+        value = self.serialize(\n+            "test_json_field", {"@id": f"../resolveuid/{self.portal.doc1.UID()}"}\n+        )\n+        self.assertEqual(value["@id"], self.portal.doc1.absolute_url())\n+\n \n class TestDexterityImageFieldSerializingOriginalAndPNGScales(TestCase):\n     layer = PLONE_RESTAPI_DX_INTEGRATION_TESTING\n'
+b'diff --git a/src/plone/autoinclude/loader.py b/src/plone/autoinclude/loader.py\nindex 3983bd0..e7b44b2 100644\n--- a/src/plone/autoinclude/loader.py\n+++ b/src/plone/autoinclude/loader.py\n@@ -1,5 +1,6 @@\n from importlib.metadata import distribution\n from importlib.metadata import distributions\n+from importlib.metadata import PackageNotFoundError\n from importlib.resources import files\n from zope.configuration.xmlconfig import include\n from zope.configuration.xmlconfig import includeOverrides\n@@ -7,6 +8,7 @@\n import importlib\n import logging\n import os\n+import re\n import sys\n \n \n@@ -49,7 +51,19 @@ def _get_module_name_from_project_name(project_name):\n     This must be something we can import.  So we at least replace any dashes\n     with underscores.\n     """\n-    dist = distribution(project_name)\n+    try:\n+        dist = distribution(project_name)\n+    except PackageNotFoundError:\n+        # Recent setuptools versions normalize the project name\n+        # replacing `-_.` with dashes.\n+        #\n+        # Before giving up, we try to do the same exact thing, see:\n+        # https://github.com/pypa/setuptools/blob/84b7b2a2f6eaf992aad6b5af923fa3f48ae7b566/setuptools/_vendor/importlib_metadata/__init__.py#L835-L839C16  # noqa: E501\n+        #\n+        dist = distribution(\n+            re.sub(r"[-_.]+", "-", project_name).lower().replace("-", "_")\n+        )\n+\n     # In Python 3.9, dist.name does not exist, or maybe not always.\n     if hasattr(dist, "name"):\n         dist_name = dist.name\n'
+
+Repository: plone.autoinclude
+
+
+Branch: refs/heads/main
+Date: 2025-03-12T16:44:37+01:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.autoinclude/commit/b17f0f5da5db5e09d7f76f5b4490ee80afedc0f5
+
+Fallback to normalized distribution name
+
+If a distribution is not found, try to normalize the name like recent setuptools is doing and try again.
+
+Fixes #32
+
+Files changed:
+A news/32.bugfix.rst
+
+b'diff --git a/news/32.bugfix.rst b/news/32.bugfix.rst\nnew file mode 100644\nindex 0000000..a7e95ef\n--- /dev/null\n+++ b/news/32.bugfix.rst\n@@ -0,0 +1 @@\n+If a distribution is not found, try to normalize the name like recent setuptools is doing and try again [ale-rt]\n'
+
+Repository: plone.autoinclude
+
+
+Branch: refs/heads/main
+Date: 2025-03-12T23:36:39+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.autoinclude/commit/97c32a84be0da2d21bbfa9b2541d3d6e378a023b
+
+Merge pull request #33 from plone/replace-with-underscores
+
+Replace with underscores
+
+Files changed:
+A news/32.bugfix.rst
+M src/plone/autoinclude/loader.py
+
+b'diff --git a/news/32.bugfix.rst b/news/32.bugfix.rst\nnew file mode 100644\nindex 0000000..a7e95ef\n--- /dev/null\n+++ b/news/32.bugfix.rst\n@@ -0,0 +1 @@\n+If a distribution is not found, try to normalize the name like recent setuptools is doing and try again [ale-rt]\ndiff --git a/src/plone/autoinclude/loader.py b/src/plone/autoinclude/loader.py\nindex 3983bd0..e7b44b2 100644\n--- a/src/plone/autoinclude/loader.py\n+++ b/src/plone/autoinclude/loader.py\n@@ -1,5 +1,6 @@\n from importlib.metadata import distribution\n from importlib.metadata import distributions\n+from importlib.metadata import PackageNotFoundError\n from importlib.resources import files\n from zope.configuration.xmlconfig import include\n from zope.configuration.xmlconfig import includeOverrides\n@@ -7,6 +8,7 @@\n import importlib\n import logging\n import os\n+import re\n import sys\n \n \n@@ -49,7 +51,19 @@ def _get_module_name_from_project_name(project_name):\n     This must be something we can import.  So we at least replace any dashes\n     with underscores.\n     """\n-    dist = distribution(project_name)\n+    try:\n+        dist = distribution(project_name)\n+    except PackageNotFoundError:\n+        # Recent setuptools versions normalize the project name\n+        # replacing `-_.` with dashes.\n+        #\n+        # Before giving up, we try to do the same exact thing, see:\n+        # https://github.com/pypa/setuptools/blob/84b7b2a2f6eaf992aad6b5af923fa3f48ae7b566/setuptools/_vendor/importlib_metadata/__init__.py#L835-L839C16  # noqa: E501\n+        #\n+        dist = distribution(\n+            re.sub(r"[-_.]+", "-", project_name).lower().replace("-", "_")\n+        )\n+\n     # In Python 3.9, dist.name does not exist, or maybe not always.\n     if hasattr(dist, "name"):\n         dist_name = dist.name\n'
 
