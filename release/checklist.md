@@ -51,6 +51,6 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
-- [ ] Maybe make a PR for [`docs.plone.org`](https://github.com/plone/documentation), search and replace the previous bugfix or minor release number.  Currently nothing to do in a bugfix release.
+- [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py#L324), update `SUPPORTED_PYTHON_VERSIONS_PLONE62` as needed. Ask Steve Piercy or do it yourself.
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).  Mostly just a search and replace, except when you want to update Volto as well.
