@@ -1,14 +1,14 @@
-# Release notes for Plone 6.0.15 (unreleased)
+# Release notes for Plone 6.0.15rc1
 
-* Last updated: March 17, 2025
+* Released: March 17, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.15rc1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.15rc1/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0-dev/constraints.txt](https://dist.plone.org/release/6.0-dev/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0-dev/versions.cfg](https://dist.plone.org/release/6.0-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.15rc1/constraints.txt](https://dist.plone.org/release/6.0.15rc1/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.15rc1/versions.cfg](https://dist.plone.org/release/6.0.15rc1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.15rc1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.15rc1/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -16,7 +16,7 @@ If you want to jump straight in, here are some important links:
 
 Major changes since 6.0.14:
 
-* Various packages: drop support for Python 3.8.  Plone 6.0.14 already officially dropped support, but now we are saying: you should not even try anymore.
+* Various packages: drop support for Python 3.8, require Python 3.9 as minimum.  Plone 6.0.14 already officially dropped support, but now we are saying: you should not even try anymore.
 * Lots of packages: Replace `pkg_resources` with `importlib.metadata`/`importlib.resources`.  See the "Distribution not found" section below for why this is important.
 * `Zope`:
   * Add configuration switch to turn off the built-in XML-RPC support.
@@ -34,8 +34,8 @@ Major changes since 6.0.14:
 * `Products.CMFPlone`:
   * RegistrationTool: add method `principal_id_or_login_name_exists`.
     This is factored out from the `isMemberIdAllowed` method, which now calls this after checking the allowed member id pattern.
-  * Fix moving portal actions between categories.
-  * Use contentbrowser options for TinyMCE image/link browser.  This also fixes the `basePath` calculation for uploading.
+  * In the Site Setup, warn that Plone 6.0 is out of maintenance support.
+    Also check the Python version and warn when that is out of support.
 * `collective.recipe.omelette` (only relevant if you use Buildout):
   * No longer generate `__init__.py` files with namespace stanza in `parts/omelette`.
     I think this was originally done to be able to go to `parts/omelette`, start a standard Python, and be able to import everything.
