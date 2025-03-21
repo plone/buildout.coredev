@@ -1,18 +1,25 @@
-# Release notes for Plone 6.1.1rc1
+# Release notes for Plone 6.1.1rc2
 
-* Last updated: March 15, 2025
+* Released: March 21, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.1rc1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.1rc1/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.1rc2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.1rc2/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.1rc1/constraints.txt](https://dist.plone.org/release/6.1.1rc1/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.1rc1/versions.cfg](https://dist.plone.org/release/6.1.1rc1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.1rc1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.1rc1/versions-ecosystem.cfg).
-* Use Docker image `plone-backend`.  For 6.1.1rc1 this may not be available.
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.1rc2/constraints.txt](https://dist.plone.org/release/6.1.1rc2/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.1rc2/versions.cfg](https://dist.plone.org/release/6.1.1rc2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.1rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.1rc2/versions-ecosystem.cfg).
+* Use Docker image `plone-backend`.
 
 
 ## Highlights
+
+These are the main changes since 6.1.1rc1:
+
+* In the first release candidate in most packages we replaced `pkg_resources` with `importlib.metadata`/`importlib.resources`/`packaging`.  See the "Distribution not found" section below for why this is important.
+  But we missed a few packages, and they are handled in this second release candidate: `Products.CMFPlone`, `five.intid`, `plone.app.layout`, `collective.monkeypatcher`, `Products.CMFCore`.
+* Also some small updates in `plone.api`, `plone.app.layout`, `plone.app.z3cform`, `plone.base`, `plone.namedfile`, `plone.restapi`, `plone.staticresources`, and `plonetheme.barceloneta`.
+* `plone.recipe.zeoserver`: Fix KeyError: 'zc.recipe.egg'.  (This package is pinned in `versions-extra.cfg`, which is usually not included in the release notes or the changelog.)
 
 These are the main changes since 6.1.0:
 
@@ -135,6 +142,8 @@ requires = ["setuptools==75.8.0"]
 ```
 
 This needs `zest.releaser` 9.5.0, if you are using this for releasing your packages to PyPI.  See its [changelog](https://github.com/zestsoftware/zest.releaser/blob/9.5.0/CHANGES.rst) for this and other recent changes, also relates to the new `setuptools` versions.
+
+Note that on March 19, `setuptools` 77 was released with initial support for so called "license expressions" ([PEP 639](https://peps.python.org/pep-0639/#add-license-expression-field)).  This gave errors when I tried making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." . So this may need some changes in `setup.py/cfg` or `pyproject.toml`.  So if you try to upload to PyPI and get a similar error, you may indeed want to restrict the setuptools version to something less than 77.
 
 
 ## Installation
