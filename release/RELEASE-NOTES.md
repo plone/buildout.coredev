@@ -1,25 +1,18 @@
-# Release notes for Plone 6.1.1rc2
+# Release notes for Plone 6.1.1
 
-* Released: March 21, 2025
+* Released: March 25, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.1rc2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.1rc2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.1/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.1rc2/constraints.txt](https://dist.plone.org/release/6.1.1rc2/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.1rc2/versions.cfg](https://dist.plone.org/release/6.1.1rc2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.1rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.1rc2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.1/constraints.txt](https://dist.plone.org/release/6.1.1/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.1/versions.cfg](https://dist.plone.org/release/6.1.1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.1/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
 ## Highlights
-
-These are the main changes since 6.1.1rc1:
-
-* In the first release candidate in most packages we replaced `pkg_resources` with `importlib.metadata`/`importlib.resources`/`packaging`.  See the "Distribution not found" section below for why this is important.
-  But we missed a few packages, and they are handled in this second release candidate: `Products.CMFPlone`, `five.intid`, `plone.app.layout`, `collective.monkeypatcher`, `Products.CMFCore`.
-* Also some small updates in `plone.api`, `plone.app.layout`, `plone.app.z3cform`, `plone.base`, `plone.namedfile`, `plone.restapi`, `plone.staticresources`, and `plonetheme.barceloneta`.
-* `plone.recipe.zeoserver`: Fix KeyError: 'zc.recipe.egg'.  (This package is pinned in `versions-extra.cfg`, which is usually not included in the release notes or the changelog.)
 
 These are the main changes since 6.1.0:
 
@@ -56,6 +49,7 @@ These are the main changes since 6.1.0:
     * `api.portal.get_vocabulary`: Get a vocabulary by name.
     * `api.portal.get_vocabulary_names`: Get a list of all available vocabulary names.
   * Add the `api.content.iter_ancestors` function for iterating over an object acquisition chain.
+  * Implement `plone.api.addon` module.
 * `plone.app.users`: Email validation: use new registration tool method `principal_id_or_login_name_exists` if available.
   This helps in some corner cases when email-as-login is used.  The method is in the new `Products.CMFPlone` release.
 * `plone.schema`: Fix email validation:
@@ -117,9 +111,7 @@ In general you are free to use whatever versions work for you, but these worked 
 
 On February 25, `setuptools` 75.8.1 was released.  This had an innocent sounding change: "Fix wheel file naming to follow binary distribution specification."  The consequences were large.  Any namespace packages that are released using this or a later version, have a slightly different "binary wheel" name, for example `plone_autoinclude-2.0.2.whl` with an underscore instead of `plone.autoinclude-2.0.2.whl` with a dot.  Result is that you can easily get a "distribution not found" error when starting Plone, or even during install.
 
-This new Plone 6.1.1rc release should fix all problems, but it is hard to be sure.  This is also the reason why we made a release candidate: please try this out, so we can still try to fix any remaining problems.
-
-If you run into problems with this Plone version or an older one, the following observations may help.
+This new Plone 6.1.1 should fix all problems.  If you run into problems with this Plone version or an older one, the following observations may help.
 
 * `setuptools` 75.8.2 fixes some of the problems: it tries to find a distribution by multiple names, for example `plone.autoinclude`, `plone-autoinclude`, `plone_autoinclude`.  So use this version or a higher one.
 * Buildout had more problems than pip, but that should be fixed with `zc.buildout` 4.1.4.
