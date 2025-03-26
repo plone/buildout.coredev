@@ -12,6 +12,13 @@ If you want to jump straight in, here are some important links:
 * Use Docker image `plone-backend`.
 
 
+## Last maintenance release
+
+Plone 6.0.15 is the last regularly scheduled maintenance release of Plone 6.0. We might do another release a few months from now if it makes sense, but we don't guarantee this. Plone 6.0 has had two years of maintenance support, and meanwhile Plone 6.1 is out. You are encouraged to upgrade.
+
+Plone 6.0 (and any Plone 6 minor release) still gets security support until the end of 2027.
+
+
 ## Highlights
 
 These are the main changes since 6.0.15rc1:
