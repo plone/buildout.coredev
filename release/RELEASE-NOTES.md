@@ -73,7 +73,6 @@ Major changes since 6.0.14:
   * allow ampersand in the user part
   * do not allow spaces.
   * accept TLDs with more than 4 characters
-* `plone.staticresources`: Update to latest `mockup`.  This improves the new content browser widget (used for uploading images or selecting content).
 * `plone.app.caching`:
   * Trigger purge on workflow change.
   * Fix purging for deleted content.
