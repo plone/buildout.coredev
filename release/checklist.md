@@ -9,7 +9,7 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 - [ ] Check Jenkins Status: should be green.  (This should be checked often during the release process.)
 - [ ] In coredev, check packages for updates: `bin/manage report --interactive`.  This is less needed now that we have `mr.roboto` to add packages to the checkouts.  Use `bin/versioncheck` to see if any new PyPI releases are worth adding, or check the artifact of the [versioncheck GitHub Action](https://github.com/plone/buildout.coredev/actions/workflows/versioncheck.yml).
 - [ ] Release individual packages from `checkouts.cfg`.
-- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/master/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v61/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
+- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/6.1.x/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/plone/app/upgrade/v61/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
 - [ ] Handle special packages, often handled by special people.  :-) You can can ping people in the release-team channel on Discord, in the current issue, or individually:
   - [ ] [`plonetheme.barceloneta`](https://github.com/plone/plonetheme.barceloneta) and [`plone.staticresources`](https://github.com/plone/plone.staticresources) need a release on PyPI and npmjs.  Maybe [`plone.classicui`](https://github.com/plone/plone.classicui).  Ask Peter Mathis (petschki), Johannes (thet) or Maik (MrTango).
   - [ ] [`plone.restapi`](https://github.com/plone/plone.restapi) and maybe [`plone.volto`](https://github.com/plone/plone.volto).  Ask David (davisagli) or Timo (tisto).
@@ -51,6 +51,6 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
-- [ ] Maybe make a PR for [`docs.plone.org`](https://github.com/plone/documentation), search and replace the previous bugfix or minor release number.  Currently nothing to do in a bugfix release.
+- [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py#L323), update `SUPPORTED_PYTHON_VERSIONS_PLONE61` as needed. Ask Steve Piercy or do it yourself.
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).  Mostly just a search and replace, except when you want to update Volto as well.
