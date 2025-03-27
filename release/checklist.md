@@ -54,5 +54,5 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
-- [ ] In [`plone/documentation`'s `conf.py`](https://github.com/plone/documentation/blob/6-dev/docs/conf.py#L325-L326), update `PLONE_BACKEND_PATCH_VERSION` and `PLONE_BACKEND_MINOR_VERSION` as needed. Ask Steve Piercy or do it yourself. Here is a [sample PR](https://github.com/plone/documentation/pull/1492/files).
+- [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py#L322), update `SUPPORTED_PYTHON_VERSIONS_PLONE60` as needed. Ask Steve Piercy or do it yourself.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).
