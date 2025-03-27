@@ -1,14 +1,14 @@
-# Release notes for Plone 6.0.15rc2
+# Release notes for Plone 6.0.15
 
-* Released: March 26, 2025
+* Released: March 27, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/upgrade/index.html), explaining the biggest changes compared to 5.2.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.0.15rc2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.15rc2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.0.15/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.0.15/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.15rc2/constraints.txt](https://dist.plone.org/release/6.0.15rc2/constraints.txt)
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.15rc2/versions.cfg](https://dist.plone.org/release/6.0.15rc2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.15rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.15rc2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.0.15/constraints.txt](https://dist.plone.org/release/6.0.15/constraints.txt)
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.0.15/versions.cfg](https://dist.plone.org/release/6.0.15/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.0.15/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.0.15/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -20,14 +20,6 @@ Plone 6.0 (and any Plone 6 minor release) still gets security support until the 
 
 
 ## Highlights
-
-These are the main changes since 6.0.15rc1:
-
-* In the first release candidate in most packages we replaced `pkg_resources` with `importlib.metadata`/`importlib.resources`/`packaging`.  See the "Distribution not found" section below for why this is important.
-  But we missed a few packages, and they are handled in this second release candidate.
-* `plone.recipe.zeoserver`: Fix KeyError: 'zc.recipe.egg'.  (This package is pinned in `versions-extra.cfg`, which is usually not included in the release notes or the changelog.)
-* `plone.api`: Implement `plone.api.addon` module.
-* Also some small updates in `plone.app.layout`, `plone.i18n`, `plone.namedfile`, `plone.restapi`, and `plone.schemaeditor`.
 
 Major changes since 6.0.14:
 
@@ -60,6 +52,7 @@ Major changes since 6.0.14:
     You can still use `packages = path/to/products_dir Products` if you need something similar.
   * Fix handling checkouts of native namespace packages.
 * `plone.api`:
+  * `plone.api`: Implement `plone.api.addon` module.  See the [documentation](https://6.docs.plone.org/plone.api/addon.html).
   * Added the content API helper function `api.content.get_path`, which gets either the relative or absolute path of an object.
   * Added two new portal API functions:
     * `api.portal.get_vocabulary`: Get a vocabulary by name.
