@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: March 17, 2025
+* Last updated: April 2, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -17,6 +17,8 @@ If you want to jump straight in, here are some important links:
 These are the main changes compared to 6.1:
 
 * `five.intid`, `five.customerize`, `five.localsitemanager`: Drop support for `pkg_resources` namespace and replace it with PEP 420 native namespace.
+* `twine`: Add compatibility with setuptools 77+.
+  This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
 
 
 ## Volto frontend
