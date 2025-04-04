@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1.2 (unreleased)
 
-* Last updated: April 2, 2025
+* Last updated: April 4, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -18,6 +18,8 @@ These are the main changes since 6.1.1:
 
 * `twine`: Add compatibility with setuptools 77+.
   This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
+* `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
+* `plone.scale`: Add method to 'scale' SVGs by modifying display size and viewbox.
 
 
 ## Volto frontend
