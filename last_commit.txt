@@ -1,169 +1,51 @@
-Repository: plone.scale
+Repository: plone.distribution
 
 
-Branch: refs/heads/master
-Date: 2025-04-02T14:48:25+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/b47d6c59d67c52e123ebd301d1ed1fb7d4d85867
+Branch: refs/heads/main
+Date: 2025-04-05T10:38:24-03:00
+Author: Érico Andrei (ericof) <ericof@gmail.com>
+Commit: https://github.com/plone/plone.distribution/commit/193dbbcba7e6f77aa4dd026ea14d8ae846e6f5a3
 
-add method to 'scale' svgs by modifying display size and viewbox
+Add package attribution to Distribution class (Fixes #114) (#115)
 
-Files changed:
-M plone/scale/scale.py
+* Add package attribution to Distribution class (Fixes #114)
 
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex afdd0f5..8e3eeac 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -1,6 +1,7 @@\n-from io import BytesIO as StringIO\n+from lxml import etree\n \n import math\n+import io\n import PIL.Image\n import PIL.ImageFile\n import PIL.ImageSequence\n@@ -75,7 +76,7 @@ def scaleImage(\n     not lost, which JPEG does not support.\n     """\n     if isinstance(image, (bytes, str)):\n-        image = StringIO(image)\n+        image = io.BytesIO(image)\n \n     animated_kwargs = {}\n     with PIL.Image.open(image) as img:\n@@ -130,7 +131,7 @@ def scaleImage(\n \n     new_result = False\n     if result is None:\n-        result = StringIO()\n+        result = io.BytesIO()\n         new_result = True\n \n     image.save(\n@@ -493,3 +494,115 @@ def scalePILImage(image, width=None, height=None, mode="scale", direction=None):\n         image = image.crop(dimensions.post_scale_crop)\n \n     return image\n+\n+\n+def _contain_svg_image(root, target_width: int, target_height: int):\n+    """Scale SVG viewbox, modifies tree in place.\n+\n+    Starts by scaling the relatively smallest dimension to the required size and crops the other dimension if needed.\n+    """\n+    viewbox = root.attrib.get("viewBox", "").split(" ")\n+    if len(viewbox) != 4:\n+        return root\n+\n+    try:\n+        viewbox = [int(float(x)) for x in viewbox]\n+    except ValueError:\n+        return target_width, target_height\n+    viewbox_width = viewbox[2]\n+    viewbox_height = viewbox[3]\n+    if not viewbox_width or not viewbox_height:\n+        return target_width, target_height\n+\n+    # if we have a max height set, make it square\n+    if target_width == 65536:\n+        target_width = target_height\n+    elif target_height == 65536:\n+        target_height = target_width\n+\n+    target_ratio = target_width / target_height\n+    view_box_ratio = viewbox_width / viewbox_height\n+    if target_ratio < view_box_ratio:\n+        # narrow down the viewbox width to the same ratio as the target\n+        width = (target_ratio / view_box_ratio) * viewbox_width\n+        margin = (viewbox_width - width) / 2\n+        viewbox[0] = round(viewbox[0] + margin)\n+        viewbox[2] = round(width)\n+    else:\n+        # narrow down the viewbox height to the same ratio as the target\n+        height = (view_box_ratio / target_ratio) * viewbox_height\n+        margin = (viewbox_height - height) / 2\n+        viewbox[1] = round(viewbox[1] + margin)\n+        viewbox[3] = round(height)\n+    root.attrib["viewBox"] = " ".join([str(x) for x in viewbox])\n+    return target_width, target_height\n+\n+\n+def scale_svg_image(\n+    image: str,\n+    target_width: None | int,\n+    target_height: None | int,\n+    mode: str = "contain",\n+) -> tuple[bytes, tuple[int, int]]:\n+    """Scale and crop a SVG image to another display size.\n+\n+    This is all about scaling for the display in a web browser.\n+\n+    Either width or height - or both - must be given.\n+\n+    Three different scaling options are supported via `mode` and correspond to\n+    the CSS background-size values\n+    (see https://developer.mozilla.org/en-US/docs/Web/CSS/background-size):\n+\n+    `contain`\n+        Alternative spellings: `scale-crop-to-fit`, `down`.\n+        Starts by scaling the relatively smallest dimension to the required\n+        size and crops the other dimension if needed.\n+\n+    `cover`\n+        Alternative spellings: `scale-crop-to-fill`, `up`.\n+        Scales the relatively largest dimension up to the required size.\n+        Despite the alternative spelling, I see no cropping happening.\n+\n+    `scale`\n+        Alternative spellings: `keep`, `thumbnail`.\n+        Scales to the requested dimensions without cropping. The resulting\n+        image may have a different size than requested. This option\n+        requires both width and height to be specified.\n+        Does scale up.\n+\n+    The `image` parameter must be bytes of the SVG, utf-8 encoded.\n+\n+    The return value the scaled bytes in the form of another instance of\n+    `PIL.Image`.\n+    """\n+    target_size = target_width, target_height\n+    mode = get_scale_mode(mode)\n+    tree = etree.parse(image)\n+    root = tree.getroot()\n+    try:\n+        source_width, source_height = int(float(root.attrib["width"])), int(float(root.attrib["height"]))\n+    except (KeyError, ValueError):\n+        data = image.read()\n+        if isinstance(data, str):\n+            return data.encode("utf-8")\n+        return data\n+\n+    source_aspectratio = source_width / source_height\n+    target_aspectratio = target_width / target_height\n+    if mode in ["scale", "cover"]:\n+        # check if new width is larger than the one we get with aspect ratio\n+        # if we scale on height\n+        if source_width * target_aspectratio < target_width:\n+            # keep height, new width\n+            target_width = target_height * source_aspectratio\n+        else:\n+            target_height = target_width / source_aspectratio\n+        target_size = target_width, target_height\n+    elif mode == "contain":\n+        target_width, target_height = _contain_svg_image(root, target_width, target_height)\n+\n+    root.attrib["width"] = str(target_width)\n+    root.attrib["height"] = str(target_height)\n+\n+    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (target_width, target_height)\n'
+* Add attribute to class
 
-Repository: plone.scale
+* build-system: restrict to setuptools&lt;77.
 
+This avoids an error while releasing:
 
-Branch: refs/heads/master
-Date: 2025-04-02T14:48:31+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/e1b19516c51c4d16b57864d3abd4f4973de52900
+```
+InvalidDistribution: Metadata is missing required fields: Name, Version
+```
 
-needs now lxml
+Alternatively, we would need to update `constraints.txt` to use Plone 6.0-dev (or 6.1-dev), which has a newer version pin for `twine`:
+`twine` 6.1.0+ can handle the metadata generated by setuptools 77.
 
-Files changed:
-M setup.py
+O, now with still twine 5, I get an error when running `twine check` using Python 3.13:
 
-b'diff --git a/setup.py b/setup.py\nindex 0816549..cdcb841 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -54,6 +54,7 @@\n     python_requires=">=3.8",\n     install_requires=[\n         "Pillow",\n+        "lxml",\n         "setuptools",\n         "zope.annotation",\n         "zope.interface",\n'
+```
+  File "/Users/maurits/community/plone-coredev/6.2/src/plone.distribution/.tox/release-check/lib/python3.13/site-packages/twine/commands/check.py", line 16, in &lt;module&gt;
+    import cgi
+ModuleNotFoundError: No module named 'cgi'
+```
 
-Repository: plone.scale
+On 3.13 you need `legacy-cgi`.  Maybe twine 5 was missing this dependency?  But when using the latest twine it is fine.
+So let's use 6.0-dev so that we get the correct twine version...
 
+---------
 
-Branch: refs/heads/master
-Date: 2025-04-02T14:48:31+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/f67f26444af4e5319599bc2c3f6e500f3a07e30e
-
-old typing usage
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex 8e3eeac..bfeace7 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -6,6 +6,7 @@\n import PIL.ImageFile\n import PIL.ImageSequence\n import sys\n+import typing\n import warnings\n \n \n@@ -540,8 +541,8 @@ def _contain_svg_image(root, target_width: int, target_height: int):\n \n def scale_svg_image(\n     image: str,\n-    target_width: None | int,\n-    target_height: None | int,\n+    target_width: typing.Union[None, int],\n+    target_height: typing.Union[None, int],\n     mode: str = "contain",\n ) -> tuple[bytes, tuple[int, int]]:\n     """Scale and crop a SVG image to another display size.\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:48:31+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/264a18ae36fe3cc8977e0d5d31e036bd58b5dc16
-
-do not use collections in typing directly
+Co-authored-by: Maurits van Rees &lt;maurits@vanrees.org&gt;
 
 Files changed:
-M plone/scale/scale.py
+A news/114.feature
+M CHANGES.md
+M constraints.txt
+M pyproject.toml
+M src/plone/distribution/core.py
+M src/plone/distribution/metaconfigure.py
+M tests/api/test_api_distribution.py
 
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex bfeace7..d3a75f3 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -544,7 +544,7 @@ def scale_svg_image(\n     target_width: typing.Union[None, int],\n     target_height: typing.Union[None, int],\n     mode: str = "contain",\n-) -> tuple[bytes, tuple[int, int]]:\n+) -> typing.Tuple[bytes, typing.Tuple[int, int]]:\n     """Scale and crop a SVG image to another display size.\n \n     This is all about scaling for the display in a web browser.\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:49:38+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/fef67a5198360b014c4a32291f247894fc2c33a9
-
-width and height in SVG may have a unti
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex d3a75f3..cbfe749 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -5,6 +5,7 @@\n import PIL.Image\n import PIL.ImageFile\n import PIL.ImageSequence\n+import re\n import sys\n import typing\n import warnings\n@@ -25,6 +26,7 @@\n # a height of 0 or less is ignored.\n MAX_HEIGHT = 65000\n \n+FLOAT_RE = re.compile(r"(?:\\d*\\.\\d+|\\d+)")\n \n def none_as_int(the_int):\n     """For python 3 compatibility, to make int vs. none comparison possible\n@@ -540,7 +542,7 @@ def _contain_svg_image(root, target_width: int, target_height: int):\n \n \n def scale_svg_image(\n-    image: str,\n+    image: io.StringIO,\n     target_width: typing.Union[None, int],\n     target_height: typing.Union[None, int],\n     mode: str = "contain",\n@@ -577,13 +579,23 @@ def scale_svg_image(\n     The return value the scaled bytes in the form of another instance of\n     `PIL.Image`.\n     """\n-    target_size = target_width, target_height\n     mode = get_scale_mode(mode)\n     tree = etree.parse(image)\n     root = tree.getroot()\n+    source_width, source_height = root.attrib.get("width", ""), root.attrib.get("height", "")\n+\n+    # strip units from width and height\n+    match = FLOAT_RE.match(source_width)\n+    if match:\n+        source_width = match.group(0)\n+    match = FLOAT_RE.match(source_height)\n+    if match:\n+        source_height = match.group(0)\n+\n+    # to float\n     try:\n-        source_width, source_height = int(float(root.attrib["width"])), int(float(root.attrib["height"]))\n-    except (KeyError, ValueError):\n+        source_width, source_height = float(source_width), float(source_height)\n+    except ValueError:\n         data = image.read()\n         if isinstance(data, str):\n             return data.encode("utf-8")\n@@ -599,11 +611,10 @@ def scale_svg_image(\n             target_width = target_height * source_aspectratio\n         else:\n             target_height = target_width / source_aspectratio\n-        target_size = target_width, target_height\n     elif mode == "contain":\n         target_width, target_height = _contain_svg_image(root, target_width, target_height)\n \n-    root.attrib["width"] = str(target_width)\n-    root.attrib["height"] = str(target_height)\n+    root.attrib["width"] = str(int(target_width))\n+    root.attrib["height"] = str(int(target_height))\n \n     return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (target_width, target_height)\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:49:41+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/acdd9eded3f59a3a0d3fb9ddeab12809449cacbd
-
-ad changelog
-
-Files changed:
-A news/68.bugfix
-
-b"diff --git a/news/68.bugfix b/news/68.bugfix\nnew file mode 100644\nindex 0000000..8598223\n--- /dev/null\n+++ b/news/68.bugfix\n@@ -0,0 +1 @@\n+Add method to 'scale' SVGs by modifying display size and viewbox. [jensens[\n"
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:49:41+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/78bf1738d3d4a5178c6d9546a359e85e2460b753
-
-early returns need to provide scale as well, log reason
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex cbfe749..5478ae9 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -2,6 +2,7 @@\n \n import math\n import io\n+import logging\n import PIL.Image\n import PIL.ImageFile\n import PIL.ImageSequence\n@@ -17,6 +18,8 @@\n except AttributeError:\n     LANCZOS = PIL.Image.ANTIALIAS\n \n+logger = logging.getLogger(__name__)\n+\n # When height is higher than this we do not limit the height, but only the width.\n # Otherwise cropping does not make sense, and in a Pillow you may get an error.\n # In a Pillow traceback I saw 65500 as maximum.\n@@ -596,10 +599,11 @@ def scale_svg_image(\n     try:\n         source_width, source_height = float(source_width), float(source_height)\n     except ValueError:\n+        logger.exception("Can not convert source dimensions")\n         data = image.read()\n         if isinstance(data, str):\n-            return data.encode("utf-8")\n-        return data\n+            return data.encode("utf-8"), (target_width, target_height)\n+        return data, (target_width, target_height)\n \n     source_aspectratio = source_width / source_height\n     target_aspectratio = target_width / target_height\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:49:41+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/443fac84e674cbddc4db53a0a5fabd3f8845305e
-
-fix problem with floats returned, but anyway be careful and handle floats
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex 5478ae9..c2a98cf 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -599,11 +599,11 @@ def scale_svg_image(\n     try:\n         source_width, source_height = float(source_width), float(source_height)\n     except ValueError:\n-        logger.exception("Can not convert source dimensions")\n+        logger.exception(f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'")\n         data = image.read()\n         if isinstance(data, str):\n-            return data.encode("utf-8"), (target_width, target_height)\n-        return data, (target_width, target_height)\n+            return data.encode("utf-8"), (int(target_width), int(target_height))\n+        return data, (int(target_width), int(target_height))\n \n     source_aspectratio = source_width / source_height\n     target_aspectratio = target_width / target_height\n@@ -621,4 +621,4 @@ def scale_svg_image(\n     root.attrib["width"] = str(int(target_width))\n     root.attrib["height"] = str(int(target_height))\n \n-    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (target_width, target_height)\n+    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (int(target_width), int(target_height))\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-02T14:51:48+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/8558a3feec539fc40cbe5092e03dc3e43c470e8b
-
-tox -e lint
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex c2a98cf..bae5b61 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -1,8 +1,8 @@\n from lxml import etree\n \n-import math\n import io\n import logging\n+import math\n import PIL.Image\n import PIL.ImageFile\n import PIL.ImageSequence\n@@ -31,6 +31,7 @@\n \n FLOAT_RE = re.compile(r"(?:\\d*\\.\\d+|\\d+)")\n \n+\n def none_as_int(the_int):\n     """For python 3 compatibility, to make int vs. none comparison possible\n     without changing the algorithms below.\n@@ -585,7 +586,9 @@ def scale_svg_image(\n     mode = get_scale_mode(mode)\n     tree = etree.parse(image)\n     root = tree.getroot()\n-    source_width, source_height = root.attrib.get("width", ""), root.attrib.get("height", "")\n+    source_width, source_height = root.attrib.get("width", ""), root.attrib.get(\n+        "height", ""\n+    )\n \n     # strip units from width and height\n     match = FLOAT_RE.match(source_width)\n@@ -599,7 +602,9 @@ def scale_svg_image(\n     try:\n         source_width, source_height = float(source_width), float(source_height)\n     except ValueError:\n-        logger.exception(f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'")\n+        logger.exception(\n+            f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'"\n+        )\n         data = image.read()\n         if isinstance(data, str):\n             return data.encode("utf-8"), (int(target_width), int(target_height))\n@@ -616,9 +621,14 @@ def scale_svg_image(\n         else:\n             target_height = target_width / source_aspectratio\n     elif mode == "contain":\n-        target_width, target_height = _contain_svg_image(root, target_width, target_height)\n+        target_width, target_height = _contain_svg_image(\n+            root, target_width, target_height\n+        )\n \n     root.attrib["width"] = str(int(target_width))\n     root.attrib["height"] = str(int(target_height))\n \n-    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (int(target_width), int(target_height))\n+    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (\n+        int(target_width),\n+        int(target_height),\n+    )\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-03T17:34:49+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/ac11536387cb4d2cfd1c06d08de3bf2f38f74e8a
-
-needs BytesIO in Py 3.13
-
-Files changed:
-M plone/scale/scale.py
-
-b'diff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex bae5b61..6e43b56 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -1,5 +1,6 @@\n from lxml import etree\n \n+import codecs\n import io\n import logging\n import math\n@@ -546,7 +547,7 @@ def _contain_svg_image(root, target_width: int, target_height: int):\n \n \n def scale_svg_image(\n-    image: io.StringIO,\n+    image: io.BytesIO,\n     target_width: typing.Union[None, int],\n     target_height: typing.Union[None, int],\n     mode: str = "contain",\n@@ -584,6 +585,13 @@ def scale_svg_image(\n     `PIL.Image`.\n     """\n     mode = get_scale_mode(mode)\n+\n+    if isinstance(image, io.StringIO):\n+        image = codecs.EncodedFile(image, "utf-8")\n+        warnings.warn(\n+            "The \'image\' is a StringIO, but a BytesIO is needed, autoconvert.",\n+            DeprecationWarning,\n+        )\n     tree = etree.parse(image)\n     root = tree.getroot()\n     source_width, source_height = root.attrib.get("width", ""), root.attrib.get(\n'
-
-Repository: plone.scale
-
-
-Branch: refs/heads/master
-Date: 2025-04-04T13:30:04+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.scale/commit/d7fda96e85d42d3eadf8f9f9e66ab303481da063
-
-Merge pull request #68 from plone/svg-improvements
-
-add method to 'scale' SVGs by modifying display size and viewbox
-
-Files changed:
-A news/68.bugfix
-M plone/scale/scale.py
-M setup.py
-
-b'diff --git a/news/68.bugfix b/news/68.bugfix\nnew file mode 100644\nindex 0000000..8598223\n--- /dev/null\n+++ b/news/68.bugfix\n@@ -0,0 +1 @@\n+Add method to \'scale\' SVGs by modifying display size and viewbox. [jensens[\ndiff --git a/plone/scale/scale.py b/plone/scale/scale.py\nindex afdd0f5..6e43b56 100644\n--- a/plone/scale/scale.py\n+++ b/plone/scale/scale.py\n@@ -1,10 +1,15 @@\n-from io import BytesIO as StringIO\n+from lxml import etree\n \n+import codecs\n+import io\n+import logging\n import math\n import PIL.Image\n import PIL.ImageFile\n import PIL.ImageSequence\n+import re\n import sys\n+import typing\n import warnings\n \n \n@@ -14,6 +19,8 @@\n except AttributeError:\n     LANCZOS = PIL.Image.ANTIALIAS\n \n+logger = logging.getLogger(__name__)\n+\n # When height is higher than this we do not limit the height, but only the width.\n # Otherwise cropping does not make sense, and in a Pillow you may get an error.\n # In a Pillow traceback I saw 65500 as maximum.\n@@ -23,6 +30,8 @@\n # a height of 0 or less is ignored.\n MAX_HEIGHT = 65000\n \n+FLOAT_RE = re.compile(r"(?:\\d*\\.\\d+|\\d+)")\n+\n \n def none_as_int(the_int):\n     """For python 3 compatibility, to make int vs. none comparison possible\n@@ -75,7 +84,7 @@ def scaleImage(\n     not lost, which JPEG does not support.\n     """\n     if isinstance(image, (bytes, str)):\n-        image = StringIO(image)\n+        image = io.BytesIO(image)\n \n     animated_kwargs = {}\n     with PIL.Image.open(image) as img:\n@@ -130,7 +139,7 @@ def scaleImage(\n \n     new_result = False\n     if result is None:\n-        result = StringIO()\n+        result = io.BytesIO()\n         new_result = True\n \n     image.save(\n@@ -493,3 +502,141 @@ def scalePILImage(image, width=None, height=None, mode="scale", direction=None):\n         image = image.crop(dimensions.post_scale_crop)\n \n     return image\n+\n+\n+def _contain_svg_image(root, target_width: int, target_height: int):\n+    """Scale SVG viewbox, modifies tree in place.\n+\n+    Starts by scaling the relatively smallest dimension to the required size and crops the other dimension if needed.\n+    """\n+    viewbox = root.attrib.get("viewBox", "").split(" ")\n+    if len(viewbox) != 4:\n+        return root\n+\n+    try:\n+        viewbox = [int(float(x)) for x in viewbox]\n+    except ValueError:\n+        return target_width, target_height\n+    viewbox_width = viewbox[2]\n+    viewbox_height = viewbox[3]\n+    if not viewbox_width or not viewbox_height:\n+        return target_width, target_height\n+\n+    # if we have a max height set, make it square\n+    if target_width == 65536:\n+        target_width = target_height\n+    elif target_height == 65536:\n+        target_height = target_width\n+\n+    target_ratio = target_width / target_height\n+    view_box_ratio = viewbox_width / viewbox_height\n+    if target_ratio < view_box_ratio:\n+        # narrow down the viewbox width to the same ratio as the target\n+        width = (target_ratio / view_box_ratio) * viewbox_width\n+        margin = (viewbox_width - width) / 2\n+        viewbox[0] = round(viewbox[0] + margin)\n+        viewbox[2] = round(width)\n+    else:\n+        # narrow down the viewbox height to the same ratio as the target\n+        height = (view_box_ratio / target_ratio) * viewbox_height\n+        margin = (viewbox_height - height) / 2\n+        viewbox[1] = round(viewbox[1] + margin)\n+        viewbox[3] = round(height)\n+    root.attrib["viewBox"] = " ".join([str(x) for x in viewbox])\n+    return target_width, target_height\n+\n+\n+def scale_svg_image(\n+    image: io.BytesIO,\n+    target_width: typing.Union[None, int],\n+    target_height: typing.Union[None, int],\n+    mode: str = "contain",\n+) -> typing.Tuple[bytes, typing.Tuple[int, int]]:\n+    """Scale and crop a SVG image to another display size.\n+\n+    This is all about scaling for the display in a web browser.\n+\n+    Either width or height - or both - must be given.\n+\n+    Three different scaling options are supported via `mode` and correspond to\n+    the CSS background-size values\n+    (see https://developer.mozilla.org/en-US/docs/Web/CSS/background-size):\n+\n+    `contain`\n+        Alternative spellings: `scale-crop-to-fit`, `down`.\n+        Starts by scaling the relatively smallest dimension to the required\n+        size and crops the other dimension if needed.\n+\n+    `cover`\n+        Alternative spellings: `scale-crop-to-fill`, `up`.\n+        Scales the relatively largest dimension up to the required size.\n+        Despite the alternative spelling, I see no cropping happening.\n+\n+    `scale`\n+        Alternative spellings: `keep`, `thumbnail`.\n+        Scales to the requested dimensions without cropping. The resulting\n+        image may have a different size than requested. This option\n+        requires both width and height to be specified.\n+        Does scale up.\n+\n+    The `image` parameter must be bytes of the SVG, utf-8 encoded.\n+\n+    The return value the scaled bytes in the form of another instance of\n+    `PIL.Image`.\n+    """\n+    mode = get_scale_mode(mode)\n+\n+    if isinstance(image, io.StringIO):\n+        image = codecs.EncodedFile(image, "utf-8")\n+        warnings.warn(\n+            "The \'image\' is a StringIO, but a BytesIO is needed, autoconvert.",\n+            DeprecationWarning,\n+        )\n+    tree = etree.parse(image)\n+    root = tree.getroot()\n+    source_width, source_height = root.attrib.get("width", ""), root.attrib.get(\n+        "height", ""\n+    )\n+\n+    # strip units from width and height\n+    match = FLOAT_RE.match(source_width)\n+    if match:\n+        source_width = match.group(0)\n+    match = FLOAT_RE.match(source_height)\n+    if match:\n+        source_height = match.group(0)\n+\n+    # to float\n+    try:\n+        source_width, source_height = float(source_width), float(source_height)\n+    except ValueError:\n+        logger.exception(\n+            f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'"\n+        )\n+        data = image.read()\n+        if isinstance(data, str):\n+            return data.encode("utf-8"), (int(target_width), int(target_height))\n+        return data, (int(target_width), int(target_height))\n+\n+    source_aspectratio = source_width / source_height\n+    target_aspectratio = target_width / target_height\n+    if mode in ["scale", "cover"]:\n+        # check if new width is larger than the one we get with aspect ratio\n+        # if we scale on height\n+        if source_width * target_aspectratio < target_width:\n+            # keep height, new width\n+            target_width = target_height * source_aspectratio\n+        else:\n+            target_height = target_width / source_aspectratio\n+    elif mode == "contain":\n+        target_width, target_height = _contain_svg_image(\n+            root, target_width, target_height\n+        )\n+\n+    root.attrib["width"] = str(int(target_width))\n+    root.attrib["height"] = str(int(target_height))\n+\n+    return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (\n+        int(target_width),\n+        int(target_height),\n+    )\ndiff --git a/setup.py b/setup.py\nindex 0816549..cdcb841 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -54,6 +54,7 @@\n     python_requires=">=3.8",\n     install_requires=[\n         "Pillow",\n+        "lxml",\n         "setuptools",\n         "zope.annotation",\n         "zope.interface",\n'
+b'diff --git a/CHANGES.md b/CHANGES.md\nindex 0ccd6d0..31b8102 100644\n--- a/CHANGES.md\n+++ b/CHANGES.md\n@@ -74,7 +74,7 @@\n ### Internal:\n \n - Clarify RestTraverser code.\n-  [maurits] \n+  [maurits]\n \n ## 2.0.0b1 (2024-05-17)\n \ndiff --git a/constraints.txt b/constraints.txt\nindex 8881198..c0e8f2f 100644\n--- a/constraints.txt\n+++ b/constraints.txt\n@@ -1 +1 @@\n--c https://dist.plone.org/release/6.0.11.1/constraints.txt\n+-c https://dist.plone.org/release/6.0-dev/constraints.txt\ndiff --git a/news/114.feature b/news/114.feature\nnew file mode 100644\nindex 0000000..84738de\n--- /dev/null\n+++ b/news/114.feature\n@@ -0,0 +1 @@\n+Add attribute `package` to `plone.distribution.core.Distribution` to store which package registered a specific distribution. @ericof\ndiff --git a/pyproject.toml b/pyproject.toml\nindex c444e7c..e6eb593 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -2,7 +2,7 @@\n # https://github.com/plone/meta/tree/main/config/default\n # See the inline comments on how to expand/tweak this configuration file\n [build-system]\n-requires = ["setuptools>=68.2"]\n+requires = ["setuptools>=68.2,<77"]\n \n [tool.towncrier]\n directory = "news/"\ndiff --git a/src/plone/distribution/core.py b/src/plone/distribution/core.py\nindex 7dda1c3..9e02cee 100644\n--- a/src/plone/distribution/core.py\n+++ b/src/plone/distribution/core.py\n@@ -19,6 +19,7 @@ class Distribution:\n     title: str\n     description: str\n     directory: Path\n+    package: str\n     pre_handler: Optional[Callable]\n     handler: Optional[Callable]\n     post_handler: Optional[Callable]\n@@ -32,6 +33,7 @@ def __init__(\n         title: str,\n         description: str,\n         directory: Path,\n+        package: str = "",\n         pre_handler: Optional[Callable] = None,\n         handler: Optional[Callable] = None,\n         post_handler: Optional[Callable] = None,\n@@ -42,6 +44,7 @@ def __init__(\n         self.title = title\n         self.description = description\n         self.directory = directory\n+        self.package = package\n         self.pre_handler = pre_handler\n         self.handler = handler\n         self.post_handler = post_handler\ndiff --git a/src/plone/distribution/metaconfigure.py b/src/plone/distribution/metaconfigure.py\nindex 3642194..bbb93d8 100644\n--- a/src/plone/distribution/metaconfigure.py\n+++ b/src/plone/distribution/metaconfigure.py\n@@ -114,6 +114,7 @@ def register_distribution(\n         title,\n         description,\n         directory,\n+        product,\n         pre_handler,\n         handler,\n         post_handler,\ndiff --git a/tests/api/test_api_distribution.py b/tests/api/test_api_distribution.py\nindex f6ddd17..b1ef152 100644\n--- a/tests/api/test_api_distribution.py\n+++ b/tests/api/test_api_distribution.py\n@@ -21,15 +21,16 @@ def test_get_distributions(self, integration):\n         assert dist.name == "testing"\n \n     @pytest.mark.parametrize(\n-        "name, title",\n-        [("testing", "Testing Plone Site")],\n+        "name, title, package",\n+        [("testing", "Testing Plone Site", "plone.distribution.testing")],\n     )\n-    def test_get_success(self, integration, name, title):\n+    def test_get_success(self, integration, name: str, title: str, package: str):\n         dist = dist_api.get(name=name)\n         assert isinstance(dist, Distribution)\n         assert repr(dist) == f"<Distribution name=\'{name}\' title=\'{title}\'>"\n         assert dist.name == name\n         assert dist.title == title\n+        assert dist.package == package\n         assert isinstance(dist.schema, dict)\n         assert isinstance(dist.uischema, dict)\n         assert isinstance(dist.image, Path)\n'
 
