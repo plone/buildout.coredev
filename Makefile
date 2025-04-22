@@ -3,6 +3,7 @@
 #
 # DOMAINS:
 #: applications.cookiecutter
+#: applications.plone
 #: applications.zope
 #: core.base
 #: core.help
@@ -133,6 +134,20 @@ ZOPE_USER_NAME?=No Default
 # user name to create
 # Default: No Default
 ZOPE_USER_PASSWORD?=No Default
+
+## applications.plone
+
+# Path to the script to create or purge a Plone site
+# Default: .mxmake/files/plone-site.py
+PLONE_SITE_SCRIPT?=.mxmake/files/plone-site.py
+
+# Exit with an error if the Plone site already exists
+# Default: True
+PLONE_SITE_CREATE_FAIL_IF_EXISTS?=True
+
+# Exit with an error if the Plone site does not exists
+# Default: True
+PLONE_SITE_PURGE_FAIL_IF_NOT_EXISTS?=True
 
 ## core.help
 
@@ -462,6 +477,31 @@ INSTALL_TARGETS+=zope-instance
 DIRTY_TARGETS+=zope-dirty
 CLEAN_TARGETS+=zope-clean
 PURGE_TARGETS+=zope-purge
+
+##############################################################################
+# plone
+##############################################################################
+
+.PHONY: plone-site-create
+plone-site-create: $(ZOPE_RUN_TARGET)
+	@echo "Creating Plone Site"
+	@export PLONE_SITE_PURGE=False
+	@export PLONE_SITE_CREATE=True
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
+
+.PHONY: plone-site-purge
+plone-site-purge: $(ZOPE_RUN_TARGET)
+	@echo "Purging Plone Site"
+	@export PLONE_SITE_PURGE=True
+	@export PLONE_SITE_CREATE=False
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
+
+.PHONY: plone-site-recreate
+plone-site-recreate: $(ZOPE_RUN_TARGET)
+	@echo "Purging Plone Site"
+	@export PLONE_SITE_PURGE=True
+	@export PLONE_SITE_CREATE=True
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
 
 ##############################################################################
 # help
