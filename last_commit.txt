@@ -1,31 +1,203 @@
-Repository: plone.restapi
+Repository: plone.app.multilingual
 
 
-Branch: refs/heads/main
-Date: 2025-04-25T20:31:46-07:00
-Author: Nilesh (nileshgulia1) <nileshgulia@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/bafd748eccf989c23eb7c29e34273bf9f631d8d5
+Branch: refs/heads/master
+Date: 2025-04-23T13:02:05+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/ad1b1525d8562a7c78cbb1b7d422599727c1a153
 
-fix(types/utils): pass root context when no DX content in layout (#1917)
+Consider context without REQUEST in make_relation_root_path
 
-* fix(types/utils): pass root context when no DX content in layout
-
-* chore: amend changelog
-
-* tests(types): patch(update) blocks in DX layout
-
-* tests(types): move tests in existing method
-
-* Get the site root a better way in path2uid
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+In control panels, it can happen that context can be None or context.REQUEST is missing and this function is usedas basepath for widget queries.
 
 Files changed:
-A news/1917.bugfix
-M src/plone/restapi/deserializer/utils.py
-M src/plone/restapi/tests/test_services_types.py
+M src/plone/app/multilingual/browser/interfaces.py
 
-b'diff --git a/news/1917.bugfix b/news/1917.bugfix\nnew file mode 100644\nindex 000000000..289b30d60\n--- /dev/null\n+++ b/news/1917.bugfix\n@@ -0,0 +1 @@\n+Fix `AttributeError` when updating the default blocks layout for a content type. @nileshgulia, @davisagli\ndiff --git a/src/plone/restapi/deserializer/utils.py b/src/plone/restapi/deserializer/utils.py\nindex b97164792..0f5d8e8f3 100644\n--- a/src/plone/restapi/deserializer/utils.py\n+++ b/src/plone/restapi/deserializer/utils.py\n@@ -2,8 +2,9 @@\n from plone.app.redirector.interfaces import IRedirectionStorage\n from plone.uuid.interfaces import IUUID\n from plone.uuid.interfaces import IUUIDAware\n-from zope.component import getMultiAdapter\n+from Products.CMFCore.interfaces import ISiteRoot\n from zope.component import getUtility\n+from zope.component.hooks import getSite\n \n import re\n \n@@ -11,18 +12,26 @@\n PATH_RE = re.compile(r"^(.*?)((?=/@@|#).*)?$")\n \n \n+def get_portal():\n+    closest_site = getSite()\n+    if closest_site is not None:\n+        for potential_portal in closest_site.aq_chain:\n+            if ISiteRoot.providedBy(potential_portal):\n+                return potential_portal\n+    raise Exception("Plone site root not found")\n+\n+\n def path2uid(context, link):\n-    # unrestrictedTraverse requires a string on py3. see:\n-    # https://github.com/zopefoundation/Zope/issues/674\n     if not link:\n         return ""\n-    portal = getMultiAdapter(\n-        (context, context.REQUEST), name="plone_portal_state"\n-    ).portal()\n+    portal = get_portal()\n     portal_url = portal.portal_url()\n     portal_path = "/".join(portal.getPhysicalPath())\n     path = link\n-    context_url = context.absolute_url()\n+    try:\n+        context_url = context.absolute_url()\n+    except AttributeError:\n+        context_url = portal_url\n     relative_up = len(context_url.split("/")) - len(portal_url.split("/"))\n     if path.startswith(portal_url):\n         path = path[len(portal_url) + 1 :]\ndiff --git a/src/plone/restapi/tests/test_services_types.py b/src/plone/restapi/tests/test_services_types.py\nindex 5b45eca16..4c84fa4c3 100644\n--- a/src/plone/restapi/tests/test_services_types.py\n+++ b/src/plone/restapi/tests/test_services_types.py\n@@ -298,6 +298,24 @@ def test_types_document_patch_create_missing(self):\n                             },\n                             "5060e030-727b-47bc-8023-b80b7cccd96f": {"@type": "image"},\n                             "e3d8f8e4-8fee-47e7-9451-28724bf74a90": {"@type": "text"},\n+                            "d6a0a308-0757-4713-bfe0-359817b364cd": {\n+                                "@type": "slate",\n+                                "value": [\n+                                    {\n+                                        "type": "p",\n+                                        "children": [\n+                                            {"text": ""},\n+                                            {\n+                                                "type": "link",\n+                                                "data": {"url": "/doc1"},\n+                                                "children": [{"text": "Plone"}],\n+                                            },\n+                                            {"text": ""},\n+                                        ],\n+                                    }\n+                                ],\n+                                "plaintext": " Plone ",\n+                            },\n                         },\n                     },\n                     "blocks_layout": {\n@@ -311,6 +329,7 @@ def test_types_document_patch_create_missing(self):\n                                 "338013ce-acca-454f-a6f4-14113c187dca",\n                                 "5060e030-727b-47bc-8023-b80b7cccd96f",\n                                 "e3d8f8e4-8fee-47e7-9451-28724bf74a90",\n+                                "d6a0a308-0757-4713-bfe0-359817b364cd",\n                             ]\n                         },\n                     },\n'
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 7190d911..34751c5a 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -27,7 +27,8 @@ def make_relation_root_path(context):\n \n     # Try to find the "closest" object in the target language\n     current_object = context\n-    target_language = context.REQUEST.get("language", None)\n+    request = context.REQUEST if hasattr(context, \'REQUEST\') else getRequest()\n+    target_language = request.get("language", None)\n \n     if target_language is None:\n         return "/".join(site.getPhysicalPath())\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T13:06:05+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/83f46bfb1300f35f76e48454d147a40071a5943a
+
+Create 498.bugfix
+
+news file
+
+Files changed:
+A news/498.bugfix
+
+b'diff --git a/news/498.bugfix b/news/498.bugfix\nnew file mode 100644\nindex 00000000..e74df36c\n--- /dev/null\n+++ b/news/498.bugfix\n@@ -0,0 +1 @@\n+[yurj] In control panels, it can happen that context can be None or context.REQUEST is missing and this function is usedas basepath for widget queries.\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T13:10:44+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/db7760429532bf5887ae92002a672cad9715082f
+
+Update interfaces.py
+
+Add missing import
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 34751c5a..118ec527 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -13,6 +13,7 @@\n from zope.browsermenu.interfaces import IBrowserMenu\n from zope.browsermenu.interfaces import IBrowserSubMenuItem\n from zope.component.hooks import getSite\n+from zope.globalrequest import getRequest\n from zope.interface import provider\n from zope.schema.interfaces import IContextAwareDefaultFactory\n \n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T13:16:52+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/aa1392ae3d7fb7ef8400374e03ce7954a6138123
+
+Update interfaces.py
+
+black fix
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 118ec527..dec632ff 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -28,7 +28,7 @@ def make_relation_root_path(context):\n \n     # Try to find the "closest" object in the target language\n     current_object = context\n-    request = context.REQUEST if hasattr(context, \'REQUEST\') else getRequest()\n+    request = context.REQUEST if hasattr(context, "REQUEST") else getRequest()\n     target_language = request.get("language", None)\n \n     if target_language is None:\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T15:56:24+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/ab79d6924f694b565dcb32db8bf5afe1ebfaf2e7
+
+Update interfaces.py
+
+Use only getRequest and change 'language' to 'LANGUAGE'
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex dec632ff..07b08bcb 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -3,6 +3,7 @@\n from plone.app.multilingual.browser.vocabularies import untranslated_languages\n from plone.app.multilingual.interfaces import ITranslationManager\n from plone.app.z3cform.widgets.contentbrowser import ContentBrowserFieldWidget\n+from plone import api\n from plone.autoform import directives\n from plone.autoform.interfaces import IFormFieldProvider\n from plone.base.interfaces import IPloneSiteRoot\n@@ -28,8 +29,8 @@ def make_relation_root_path(context):\n \n     # Try to find the "closest" object in the target language\n     current_object = context\n-    request = context.REQUEST if hasattr(context, "REQUEST") else getRequest()\n-    target_language = request.get("language", None)\n+    request = getRequest()\n+    target_language = request.get("LANGUAGE", None)\n \n     if target_language is None:\n         return "/".join(site.getPhysicalPath())\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T15:59:21+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/d3bf25496a6788376459d16c0dc72dc7469a275d
+
+Update 498.bugfix
+
+Improve grammar in news
+
+Files changed:
+M news/498.bugfix
+
+b'diff --git a/news/498.bugfix b/news/498.bugfix\nindex e74df36c..0b35612b 100644\n--- a/news/498.bugfix\n+++ b/news/498.bugfix\n@@ -1 +1 @@\n-[yurj] In control panels, it can happen that context can be None or context.REQUEST is missing and this function is usedas basepath for widget queries.\n+[yurj] It can happen that widgets used in the control panel have context as None or that context.REQUEST is missing. This function is used as basepath for widget queries.\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-23T16:00:46+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/648e1d515c4ce75468ad1176a5ef922171a3f063
+
+Update interfaces.py
+
+remove unused import
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 07b08bcb..1510077a 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -3,7 +3,6 @@\n from plone.app.multilingual.browser.vocabularies import untranslated_languages\n from plone.app.multilingual.interfaces import ITranslationManager\n from plone.app.z3cform.widgets.contentbrowser import ContentBrowserFieldWidget\n-from plone import api\n from plone.autoform import directives\n from plone.autoform.interfaces import IFormFieldProvider\n from plone.base.interfaces import IPloneSiteRoot\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-24T09:54:46+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/6c9f8e628d4ddd34fd058fef03d7046ddf125a0c
+
+Update interfaces.py
+
+Don't change existing code, just add the old behavior when the context is None or a REQUEST is missing. The existing code uses 'language' instead of 'LANGUAGE' here and in multilingual.browser.translate.py -&gt; TranslationForm.
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 1510077a..3659209a 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -22,14 +22,18 @@ def make_relation_root_path(context):\n     security_manager = getSecurityManager()\n     site = getSite()\n \n+    # Use the old behavior if context is None or REQUEST is missing, otherwise\n+    # the code below will fail because REQUEST or aq_parent are missing\n+    if context is None or not getattr(context, "REQUEST"):\n+        return "/".join(site.getPhysicalPath())\n+\n     # This should not happen, there\'s no View permission for the current object\n     if not security_manager.checkPermission("View", context):\n         return "/".join(site.getPhysicalPath())\n \n     # Try to find the "closest" object in the target language\n     current_object = context\n-    request = getRequest()\n-    target_language = request.get("LANGUAGE", None)\n+    target_language = context.REQUEST.get("language", None)\n \n     if target_language is None:\n         return "/".join(site.getPhysicalPath())\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-24T09:57:41+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/718174dd37d7060bd716dc1901150af85ca5fd88
+
+Update interfaces.py
+
+remove unused import
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 3659209a..e725041c 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -13,7 +13,6 @@\n from zope.browsermenu.interfaces import IBrowserMenu\n from zope.browsermenu.interfaces import IBrowserSubMenuItem\n from zope.component.hooks import getSite\n-from zope.globalrequest import getRequest\n from zope.interface import provider\n from zope.schema.interfaces import IContextAwareDefaultFactory\n \n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-25T19:28:50+02:00
+Author: Yuri (yurj) <yurj@alfa.it>
+Commit: https://github.com/plone/plone.app.multilingual/commit/75da825ee09331de6ce30e3820c960be24f72394
+
+Update interfaces.py
+
+If getattr fail, we use the old behavior
+
+Files changed:
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex e725041c..878ec2cd 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -23,7 +23,7 @@ def make_relation_root_path(context):\n \n     # Use the old behavior if context is None or REQUEST is missing, otherwise\n     # the code below will fail because REQUEST or aq_parent are missing\n-    if context is None or not getattr(context, "REQUEST"):\n+    if context is None or not getattr(context, "REQUEST", None):\n         return "/".join(site.getPhysicalPath())\n \n     # This should not happen, there\'s no View permission for the current object\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-27T21:38:06-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/6019afa48c67107d03a86123beb99c339eb3d1e7
+
+Update news/498.bugfix
+
+Files changed:
+M news/498.bugfix
+
+b'diff --git a/news/498.bugfix b/news/498.bugfix\nindex 0b35612b..aa8c1124 100644\n--- a/news/498.bugfix\n+++ b/news/498.bugfix\n@@ -1 +1 @@\n-[yurj] It can happen that widgets used in the control panel have context as None or that context.REQUEST is missing. This function is used as basepath for widget queries.\n+Fix the default path for the relation widget if the current context or request are unknown. [yurj]\n'
+
+Repository: plone.app.multilingual
+
+
+Branch: refs/heads/master
+Date: 2025-04-27T21:38:54-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.multilingual/commit/b10b0cb9cf0b7c00ae358af33b6d3dd4393a4467
+
+Merge pull request #499 from plone/yurj-make_relation_root_path-context-1
+
+Consider context None or without REQUEST in make_relation_root_path
+
+Files changed:
+A news/498.bugfix
+M src/plone/app/multilingual/browser/interfaces.py
+
+b'diff --git a/news/498.bugfix b/news/498.bugfix\nnew file mode 100644\nindex 00000000..aa8c1124\n--- /dev/null\n+++ b/news/498.bugfix\n@@ -0,0 +1 @@\n+Fix the default path for the relation widget if the current context or request are unknown. [yurj]\ndiff --git a/src/plone/app/multilingual/browser/interfaces.py b/src/plone/app/multilingual/browser/interfaces.py\nindex 7190d911..878ec2cd 100644\n--- a/src/plone/app/multilingual/browser/interfaces.py\n+++ b/src/plone/app/multilingual/browser/interfaces.py\n@@ -21,6 +21,11 @@ def make_relation_root_path(context):\n     security_manager = getSecurityManager()\n     site = getSite()\n \n+    # Use the old behavior if context is None or REQUEST is missing, otherwise\n+    # the code below will fail because REQUEST or aq_parent are missing\n+    if context is None or not getattr(context, "REQUEST", None):\n+        return "/".join(site.getPhysicalPath())\n+\n     # This should not happen, there\'s no View permission for the current object\n     if not security_manager.checkPermission("View", context):\n         return "/".join(site.getPhysicalPath())\n'
 
