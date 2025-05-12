@@ -2,26 +2,31 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2025-05-12T11:23:38-07:00
+Date: 2025-05-12T11:24:29-07:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.restapi/commit/6f2deda3ba37d95c494ab57ade1a60071950f700
+Commit: https://github.com/plone/plone.restapi/commit/5ac650d947c7f03db4b8551ef3af5b38432fdaf3
 
-Add a way for add-ons to modify the site endpoint response (#1921)
-
-* Add a way for add-ons to modify the site endpoint response
-
-* changelog
-
-* lint
-
-* lint
+Preparing release 9.14.0
 
 Files changed:
-A news/1921.feature
-M docs/source/endpoints/site.md
-M src/plone/restapi/interfaces.py
-M src/plone/restapi/services/site/get.py
-M src/plone/restapi/tests/test_services_site.py
+M CHANGES.md
+M setup.py
+D news/1921.feature
 
-b'diff --git a/docs/source/endpoints/site.md b/docs/source/endpoints/site.md\nindex 1cdecdaf0..567bd876f 100644\n--- a/docs/source/endpoints/site.md\n+++ b/docs/source/endpoints/site.md\n@@ -24,3 +24,37 @@ The response will contain the site information:\n ```{literalinclude} ../../../src/plone/restapi/tests/http-examples/site_get.resp\n :language: http\n ```\n+\n+## Site endpoint expanders\n+\n+```{versionadded} plone.restapi 9.14.0\n+\n+```\n+\n+An add-on can add additional information to the `@site` endpoint by registering an `ISiteEndpointExpander` adapter.\n+\n+For example, this adapter adds a key with a custom setting:\n+\n+```python\n+from plone.restapi.interfaces import ISiteEndpointExpander\n+from zope.component import adapter\n+from zope.interface import implementer\n+from zope.interface import Interface\n+from myaddon.interfaces import IBrowserLayer\n+\n+@adapter(Interface, IBrowserLayer)\n+@implementer(ISiteEndpointExpander)\n+class MyAddonExpander:\n+\n+    def __init__(self, context, request):\n+        self.context = context\n+        self.request = request\n+\n+    def __call__(self, data):\n+        data["myaddon.setting"] = True\n+```\n+\n+```{tip}\n+Use this for data that is needed to render any page, but that does not change depending on the context.\n+If the data is context-dependent, use a custom API expander instead.\n+```\ndiff --git a/news/1921.feature b/news/1921.feature\nnew file mode 100644\nindex 000000000..2c44e07f5\n--- /dev/null\n+++ b/news/1921.feature\n@@ -0,0 +1 @@\n+`@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter. @davisagli\ndiff --git a/src/plone/restapi/interfaces.py b/src/plone/restapi/interfaces.py\nindex 6a51eb2ec..f359eefa0 100644\n--- a/src/plone/restapi/interfaces.py\n+++ b/src/plone/restapi/interfaces.py\n@@ -268,3 +268,10 @@ def get_providers():\n         """\n         return a list of login providers, with its id, title, plugin and url\n         """\n+\n+\n+class ISiteEndpointExpander(Interface):\n+    """An adapter which adds additional data to the @site endpoint."""\n+\n+    def __call__(data):\n+        """Add additional key/values to data"""\ndiff --git a/src/plone/restapi/services/site/get.py b/src/plone/restapi/services/site/get.py\nindex d919e326b..460b2e942 100644\n--- a/src/plone/restapi/services/site/get.py\n+++ b/src/plone/restapi/services/site/get.py\n@@ -8,10 +8,12 @@\n from plone.restapi.bbb import IImagingSchema\n from plone.restapi.bbb import ISiteSchema\n from plone.restapi.interfaces import IExpandableElement\n+from plone.restapi.interfaces import ISiteEndpointExpander\n from plone.restapi.services import Service\n from Products.CMFPlone.controlpanel.browser.redirects import RedirectionSet\n from Products.CMFPlone.utils import getSiteLogo\n from zope.component import adapter\n+from zope.component import getAdapters\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n from zope.interface import implementer\n@@ -58,6 +60,12 @@ def __call__(self, expand=False):\n             }\n         )\n \n+        expanders = getAdapters(\n+            (self.context, self.request), provided=ISiteEndpointExpander\n+        )\n+        for name, expander in expanders:\n+            expander(result["site"])\n+\n         return result\n \n     def plone_timezone(self):\ndiff --git a/src/plone/restapi/tests/test_services_site.py b/src/plone/restapi/tests/test_services_site.py\nindex 2f94e0482..d26494697 100644\n--- a/src/plone/restapi/tests/test_services_site.py\n+++ b/src/plone/restapi/tests/test_services_site.py\n@@ -1,11 +1,16 @@\n from plone.app.multilingual.interfaces import IPloneAppMultilingualInstalled\n from plone.app.testing import setRoles\n from plone.app.testing import TEST_USER_ID\n+from plone.restapi.interfaces import ISiteEndpointExpander\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from plone.restapi.testing import PLONE_RESTAPI_DX_PAM_FUNCTIONAL_TESTING\n from plone.restapi.testing import RelativeSession\n+from zope.component import adapter\n from zope.component import getMultiAdapter\n+from zope.component import provideAdapter\n from zope.interface import alsoProvides\n+from zope.interface import implementer\n+from zope.interface import Interface\n \n import unittest\n \n@@ -42,6 +47,26 @@ def test_get_site(self):\n         self.assertEqual(response.json()["plone.portal_timezone"], "UTC")\n         self.assertEqual(response.json()["features"]["multilingual"], False)\n \n+    def test_get_site_expander(self):\n+        @adapter(Interface, Interface)\n+        @implementer(ISiteEndpointExpander)\n+        class SiteEndpointExpander:\n+            def __init__(self, context, request):\n+                self.context = context\n+                self.request = request\n+\n+            def __call__(self, data):\n+                data["is_test"] = True\n+\n+        provideAdapter(SiteEndpointExpander)\n+\n+        response = self.api_session.get(\n+            "/@site",\n+        )\n+\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["is_test"], True)\n+\n \n class TestServicesSiteMultilingual(unittest.TestCase):\n \n'
+b'diff --git a/CHANGES.md b/CHANGES.md\nindex aa922c552..0400eeb62 100644\n--- a/CHANGES.md\n+++ b/CHANGES.md\n@@ -9,6 +9,13 @@\n \n <!-- towncrier release notes start -->\n \n+## 9.14.0 (2025-05-12)\n+\n+\n+### New features:\n+\n+- `@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter. @davisagli #1921\n+\n ## 9.13.5 (2025-04-27)\n \n \ndiff --git a/news/1921.feature b/news/1921.feature\ndeleted file mode 100644\nindex 2c44e07f5..000000000\n--- a/news/1921.feature\n+++ /dev/null\n@@ -1 +0,0 @@\n-`@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter. @davisagli\ndiff --git a/setup.py b/setup.py\nindex 81fc8d1db..a8abdf851 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -5,7 +5,7 @@\n import sys\n \n \n-version = "9.13.6.dev0"\n+version = "9.14.0"\n \n if sys.version_info.major == 2:\n     raise ValueError(\n'
+
+Repository: plone.restapi
+
+
+Branch: refs/heads/main
+Date: 2025-05-12T11:25:02-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.restapi/commit/0c09f37bc7633efb9e5112404a6384df9cb0b21d
+
+Back to development: 9.14.1
+
+Files changed:
+M setup.py
+
+b'diff --git a/setup.py b/setup.py\nindex a8abdf851..b1bbfc01c 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -5,7 +5,7 @@\n import sys\n \n \n-version = "9.14.0"\n+version = "9.14.1.dev0"\n \n if sys.version_info.major == 2:\n     raise ValueError(\n'
 
