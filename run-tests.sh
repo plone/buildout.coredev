@@ -133,8 +133,7 @@ else
     ARGS=$*
 fi
 
-# Note: the --auto-path requires this PR:
-# https://github.com/zopefoundation/zope.testrunner/pull/198
+# Note: the --auto-path requires this zope.testrunner 7.4 or higher.
 CMD="zope-testrunner --auto-color --auto-progress --auto-path $ARGS"
 echo "Running $CMD"
 $CMD
