@@ -1,15 +1,110 @@
-Repository: plonetheme.barceloneta
+Repository: plone.app.iterate
 
 
 Branch: refs/heads/master
-Date: 2025-06-03T19:09:01+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plonetheme.barceloneta/commit/e5206eb97e07d5117886302804867c51ad7ddd84
+Date: 2025-06-03T09:20:31-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/be5f36a1a43fe93ababa96f520c62912eea35300
 
-Cleanup: Move the important config up.
+Add is_working_copy to catalog metadata
 
 Files changed:
-M plonetheme/barceloneta/configure.zcml
+A news/143.feature
+A plone/app/iterate/profiles/default/catalog.xml
+M plone/app/iterate/configure.zcml
+M plone/app/iterate/profiles/default/metadata.xml
+M plone/app/iterate/setuphandlers.py
+M plone/app/iterate/tests/test_iterate.py
 
-b'diff --git a/plonetheme/barceloneta/configure.zcml b/plonetheme/barceloneta/configure.zcml\nindex 6195fdbe..5e8ccc00 100644\n--- a/plonetheme/barceloneta/configure.zcml\n+++ b/plonetheme/barceloneta/configure.zcml\n@@ -8,6 +8,13 @@\n   <include package="plone.resource" />\n   <include package="plone.app.theming" />\n \n+  <!-- Diazo themes -->\n+  <plone:static\n+      directory="theme"\n+      name="barceloneta"\n+      type="theme"\n+      />\n+\n   <genericsetup:registerProfile\n       name="default"\n       title="Barceloneta Theme"\n@@ -25,11 +32,4 @@\n       import_steps="plone.app.registry"\n       />\n \n-  <!-- Diazo themes -->\n-  <plone:static\n-      directory="theme"\n-      name="barceloneta"\n-      type="theme"\n-      />\n-\n </configure>\n'
+b'diff --git a/news/143.feature b/news/143.feature\nnew file mode 100644\nindex 0000000..946c82f\n--- /dev/null\n+++ b/news/143.feature\n@@ -0,0 +1 @@\n+Add `is_working_copy` column to catalog metadata. @davisagli\ndiff --git a/plone/app/iterate/configure.zcml b/plone/app/iterate/configure.zcml\nindex 53c8e29..27890d7 100644\n--- a/plone/app/iterate/configure.zcml\n+++ b/plone/app/iterate/configure.zcml\n@@ -91,6 +91,21 @@\n         />\n   </genericsetup:upgradeSteps>\n \n+  <genericsetup:upgradeSteps\n+      profile="plone.app.iterate:default"\n+      source="1001"\n+      destination="1002"\n+      >\n+    <genericsetup:upgradeDepends\n+        title="Add is_working_copy column to catalog"\n+        import_steps="catalog"\n+        />\n+    <genericsetup:upgradeStep\n+        title="Reindex working copies"\n+        handler=".setuphandlers.reindex_working_copies"\n+        />\n+  </genericsetup:upgradeSteps>\n+\n   <utility\n       factory=".setuphandlers.HiddenProfiles"\n       name="plone.app.iterate"\ndiff --git a/plone/app/iterate/profiles/default/catalog.xml b/plone/app/iterate/profiles/default/catalog.xml\nnew file mode 100644\nindex 0000000..2d3ac70\n--- /dev/null\n+++ b/plone/app/iterate/profiles/default/catalog.xml\n@@ -0,0 +1,4 @@\n+<?xml version="1.0" encoding="utf-8"?>\n+<object name="portal_catalog">\n+  <column value="is_working_copy" />\n+</object>\ndiff --git a/plone/app/iterate/profiles/default/metadata.xml b/plone/app/iterate/profiles/default/metadata.xml\nindex 9820946..6ba7cc4 100644\n--- a/plone/app/iterate/profiles/default/metadata.xml\n+++ b/plone/app/iterate/profiles/default/metadata.xml\n@@ -1,4 +1,4 @@\n <?xml version="1.0" encoding="utf-8"?>\n <metadata>\n-  <version>1001</version>\n+  <version>1002</version>\n </metadata>\ndiff --git a/plone/app/iterate/setuphandlers.py b/plone/app/iterate/setuphandlers.py\nindex 0c77cb0..0ab290a 100644\n--- a/plone/app/iterate/setuphandlers.py\n+++ b/plone/app/iterate/setuphandlers.py\n@@ -1,6 +1,11 @@\n from plone.base.interfaces.installable import INonInstallable\n+from Products.CMFCore.utils import getToolByName\n from zope.interface import implementer\n \n+import logging\n+\n+logger = logging.getLogger(__name__)\n+\n \n @implementer(INonInstallable)\n class HiddenProfiles:\n@@ -13,3 +18,13 @@ def getNonInstallableProfiles(self):\n             "plone.app.iterate:uninstall",\n             "plone.app.iterate:to1000",\n         ]\n+\n+\n+def reindex_working_copies(context):\n+    logger.info("Reindexing working copies...")\n+    catalog = getToolByName(context, "portal_catalog")\n+    for brain in catalog.unrestrictedSearchResults(\n+        object_provides="plone.app.iterate.interfaces.IWorkingCopy"\n+    ):\n+        obj = brain.getObject()\n+        obj.reindexObject(idxs=["getId"], update_metadata=True)\ndiff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py\nindex 2ecfda1..e1272bd 100644\n--- a/plone/app/iterate/tests/test_iterate.py\n+++ b/plone/app/iterate/tests/test_iterate.py\n@@ -381,3 +381,13 @@ def test_publication_behavior_values_not_changed_value_is_already_set(self):\n         # Values should be the same of the original document\n         self.assertEqual(effective_date, baseline.effective_date)\n         self.assertEqual(original_expiration_date, baseline.expiration_date)\n+\n+    def test_is_working_copy_in_catalog_metadata(self):\n+        # Create a working copy\n+        doc = self.portal.docs.doc1\n+        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)\n+\n+        # Check catalog metadata\n+        catalog = self.portal.portal_catalog\n+        brain = catalog.unrestrictedSearchResults(UID=wc.UID())[0]\n+        self.assertTrue(brain.is_working_copy)\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T16:21:58Z
+Author: pre-commit-ci[bot] (pre-commit-ci[bot]) <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/2eaa445e0c60e8e6e3088b02022825f5640c2c76
+
+[pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+Files changed:
+M plone/app/iterate/setuphandlers.py
+
+b'diff --git a/plone/app/iterate/setuphandlers.py b/plone/app/iterate/setuphandlers.py\nindex 0ab290a..8bb4330 100644\n--- a/plone/app/iterate/setuphandlers.py\n+++ b/plone/app/iterate/setuphandlers.py\n@@ -4,6 +4,7 @@\n \n import logging\n \n+\n logger = logging.getLogger(__name__)\n \n \n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T09:26:13-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/29c15ba9f69d0499dfeb0b38b2b1f3881e72c571
+
+Add the indexer
+
+Files changed:
+A plone/app/iterate/indexer.py
+M plone/app/iterate/configure.zcml
+
+b'diff --git a/plone/app/iterate/configure.zcml b/plone/app/iterate/configure.zcml\nindex 27890d7..0ffe3da 100644\n--- a/plone/app/iterate/configure.zcml\n+++ b/plone/app/iterate/configure.zcml\n@@ -112,6 +112,7 @@\n       />\n \n   <adapter factory=".archiver.ContentArchiver" />\n+  <adapter factory=".indexer.is_working_copy" name="is_working_copy" />\n \n   <!-- Checkout folder locators -->\n   <adapter\ndiff --git a/plone/app/iterate/indexer.py b/plone/app/iterate/indexer.py\nnew file mode 100644\nindex 0000000..732211a\n--- /dev/null\n+++ b/plone/app/iterate/indexer.py\n@@ -0,0 +1,7 @@\n+from plone.indexer import indexer\n+from plone.app.iterate.interfaces import IWorkingCopy\n+\n+\n+@indexer(IWorkingCopy)\n+def is_working_copy(obj):\n+    return True\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T09:27:49-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/e2fa14d5ac48eace4d39fd8acd18888992587e91
+
+fix dependency
+
+Files changed:
+M setup.py
+
+b'diff --git a/setup.py b/setup.py\nindex 9550056..66be454 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -46,6 +46,7 @@\n         "Acquisition",\n         "DateTime",\n         "plone.app.relationfield",\n+        "plone.indexer",\n         "plone.locking",\n         "plone.memoize",\n         "Products.CMFEditions",\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T16:28:12Z
+Author: pre-commit-ci[bot] (pre-commit-ci[bot]) <66853113+pre-commit-ci[bot]@users.noreply.github.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/8ef1988f31618314948e67bc00aae4b1988ca5b5
+
+[pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+Files changed:
+M plone/app/iterate/configure.zcml
+M plone/app/iterate/indexer.py
+
+b'diff --git a/plone/app/iterate/configure.zcml b/plone/app/iterate/configure.zcml\nindex 0ffe3da..f4ed1bc 100644\n--- a/plone/app/iterate/configure.zcml\n+++ b/plone/app/iterate/configure.zcml\n@@ -112,7 +112,10 @@\n       />\n \n   <adapter factory=".archiver.ContentArchiver" />\n-  <adapter factory=".indexer.is_working_copy" name="is_working_copy" />\n+  <adapter\n+      factory=".indexer.is_working_copy"\n+      name="is_working_copy"\n+      />\n \n   <!-- Checkout folder locators -->\n   <adapter\ndiff --git a/plone/app/iterate/indexer.py b/plone/app/iterate/indexer.py\nindex 732211a..9b7dc6d 100644\n--- a/plone/app/iterate/indexer.py\n+++ b/plone/app/iterate/indexer.py\n@@ -1,5 +1,5 @@\n-from plone.indexer import indexer\n from plone.app.iterate.interfaces import IWorkingCopy\n+from plone.indexer import indexer\n \n \n @indexer(IWorkingCopy)\n'
+
+Repository: plone.app.iterate
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T11:12:16-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.app.iterate/commit/3035300d722a74be2343613550d618475d28445f
+
+Merge pull request #144 from plone/143-working-copy-metadata
+
+Add is_working_copy to catalog metadata
+
+Files changed:
+A news/143.feature
+A plone/app/iterate/indexer.py
+A plone/app/iterate/profiles/default/catalog.xml
+M plone/app/iterate/configure.zcml
+M plone/app/iterate/profiles/default/metadata.xml
+M plone/app/iterate/setuphandlers.py
+M plone/app/iterate/tests/test_iterate.py
+M setup.py
+
+b'diff --git a/news/143.feature b/news/143.feature\nnew file mode 100644\nindex 0000000..946c82f\n--- /dev/null\n+++ b/news/143.feature\n@@ -0,0 +1 @@\n+Add `is_working_copy` column to catalog metadata. @davisagli\ndiff --git a/plone/app/iterate/configure.zcml b/plone/app/iterate/configure.zcml\nindex 53c8e29..f4ed1bc 100644\n--- a/plone/app/iterate/configure.zcml\n+++ b/plone/app/iterate/configure.zcml\n@@ -91,12 +91,31 @@\n         />\n   </genericsetup:upgradeSteps>\n \n+  <genericsetup:upgradeSteps\n+      profile="plone.app.iterate:default"\n+      source="1001"\n+      destination="1002"\n+      >\n+    <genericsetup:upgradeDepends\n+        title="Add is_working_copy column to catalog"\n+        import_steps="catalog"\n+        />\n+    <genericsetup:upgradeStep\n+        title="Reindex working copies"\n+        handler=".setuphandlers.reindex_working_copies"\n+        />\n+  </genericsetup:upgradeSteps>\n+\n   <utility\n       factory=".setuphandlers.HiddenProfiles"\n       name="plone.app.iterate"\n       />\n \n   <adapter factory=".archiver.ContentArchiver" />\n+  <adapter\n+      factory=".indexer.is_working_copy"\n+      name="is_working_copy"\n+      />\n \n   <!-- Checkout folder locators -->\n   <adapter\ndiff --git a/plone/app/iterate/indexer.py b/plone/app/iterate/indexer.py\nnew file mode 100644\nindex 0000000..9b7dc6d\n--- /dev/null\n+++ b/plone/app/iterate/indexer.py\n@@ -0,0 +1,7 @@\n+from plone.app.iterate.interfaces import IWorkingCopy\n+from plone.indexer import indexer\n+\n+\n+@indexer(IWorkingCopy)\n+def is_working_copy(obj):\n+    return True\ndiff --git a/plone/app/iterate/profiles/default/catalog.xml b/plone/app/iterate/profiles/default/catalog.xml\nnew file mode 100644\nindex 0000000..2d3ac70\n--- /dev/null\n+++ b/plone/app/iterate/profiles/default/catalog.xml\n@@ -0,0 +1,4 @@\n+<?xml version="1.0" encoding="utf-8"?>\n+<object name="portal_catalog">\n+  <column value="is_working_copy" />\n+</object>\ndiff --git a/plone/app/iterate/profiles/default/metadata.xml b/plone/app/iterate/profiles/default/metadata.xml\nindex 9820946..6ba7cc4 100644\n--- a/plone/app/iterate/profiles/default/metadata.xml\n+++ b/plone/app/iterate/profiles/default/metadata.xml\n@@ -1,4 +1,4 @@\n <?xml version="1.0" encoding="utf-8"?>\n <metadata>\n-  <version>1001</version>\n+  <version>1002</version>\n </metadata>\ndiff --git a/plone/app/iterate/setuphandlers.py b/plone/app/iterate/setuphandlers.py\nindex 0c77cb0..8bb4330 100644\n--- a/plone/app/iterate/setuphandlers.py\n+++ b/plone/app/iterate/setuphandlers.py\n@@ -1,6 +1,12 @@\n from plone.base.interfaces.installable import INonInstallable\n+from Products.CMFCore.utils import getToolByName\n from zope.interface import implementer\n \n+import logging\n+\n+\n+logger = logging.getLogger(__name__)\n+\n \n @implementer(INonInstallable)\n class HiddenProfiles:\n@@ -13,3 +19,13 @@ def getNonInstallableProfiles(self):\n             "plone.app.iterate:uninstall",\n             "plone.app.iterate:to1000",\n         ]\n+\n+\n+def reindex_working_copies(context):\n+    logger.info("Reindexing working copies...")\n+    catalog = getToolByName(context, "portal_catalog")\n+    for brain in catalog.unrestrictedSearchResults(\n+        object_provides="plone.app.iterate.interfaces.IWorkingCopy"\n+    ):\n+        obj = brain.getObject()\n+        obj.reindexObject(idxs=["getId"], update_metadata=True)\ndiff --git a/plone/app/iterate/tests/test_iterate.py b/plone/app/iterate/tests/test_iterate.py\nindex 2ecfda1..e1272bd 100644\n--- a/plone/app/iterate/tests/test_iterate.py\n+++ b/plone/app/iterate/tests/test_iterate.py\n@@ -381,3 +381,13 @@ def test_publication_behavior_values_not_changed_value_is_already_set(self):\n         # Values should be the same of the original document\n         self.assertEqual(effective_date, baseline.effective_date)\n         self.assertEqual(original_expiration_date, baseline.expiration_date)\n+\n+    def test_is_working_copy_in_catalog_metadata(self):\n+        # Create a working copy\n+        doc = self.portal.docs.doc1\n+        wc = ICheckinCheckoutPolicy(doc).checkout(self.portal.workarea)\n+\n+        # Check catalog metadata\n+        catalog = self.portal.portal_catalog\n+        brain = catalog.unrestrictedSearchResults(UID=wc.UID())[0]\n+        self.assertTrue(brain.is_working_copy)\ndiff --git a/setup.py b/setup.py\nindex 9550056..66be454 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -46,6 +46,7 @@\n         "Acquisition",\n         "DateTime",\n         "plone.app.relationfield",\n+        "plone.indexer",\n         "plone.locking",\n         "plone.memoize",\n         "Products.CMFEditions",\n'
 
