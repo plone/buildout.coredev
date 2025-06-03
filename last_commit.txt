@@ -1,39 +1,127 @@
-Repository: plone.app.event
+Repository: plone.session
 
 
 Branch: refs/heads/master
-Date: 2025-06-02T11:52:55+02:00
-Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.app.event/commit/1bc0b2d532f752c49d28251e67f618df2950f479
+Date: 2025-05-25T17:22:05+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/808ab66b2a3aab970213c6e6ee3fc839c7317e1a
 
-Stabilize tests (#423)
-
-* Stabilize tests.
-
-At the end of a month the calendar test was failing due to some dates reaching
-into the next month and not being rendered anymore in the current month.
-This is now stabilized.
-
-* Cleanup: Remove unnecessary setHooks/setSite from tests.
-
-* Cleanup: Restructure test in portlet calendar.
-
-* Update news/+stabilize-tests.internal.rst
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
-
-* Update plone/app/event/tests/test_portlet_calendar.py
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
-
----------
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
+fix: Add validation for session ticket format to prevent ValueError
 
 Files changed:
-A news/+stabilize-tests.internal.rst
-M plone/app/event/tests/test_portlet_calendar.py
-M plone/app/event/tests/test_portlet_events.py
+A news/33.bugfix
+M plone/session/plugins/session.py
 
-b'diff --git a/news/+stabilize-tests.internal.rst b/news/+stabilize-tests.internal.rst\nnew file mode 100644\nindex 00000000..0fe60452\n--- /dev/null\n+++ b/news/+stabilize-tests.internal.rst\n@@ -0,0 +1,5 @@\n+Stabilize tests.\n+\n+At the end of a month the calendar test was failing due to some dates reaching\n+into the next month and not being rendered anymore in the current month.\n+This is now stabilized. [thet]\ndiff --git a/plone/app/event/tests/test_portlet_calendar.py b/plone/app/event/tests/test_portlet_calendar.py\nindex 176a92c2..91f3ceed 100644\n--- a/plone/app/event/tests/test_portlet_calendar.py\n+++ b/plone/app/event/tests/test_portlet_calendar.py\n@@ -19,8 +19,6 @@\n from Products.GenericSetup.utils import _getDottedName\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n-from zope.component.hooks import setHooks\n-from zope.component.hooks import setSite\n \n import pytz\n import unittest\n@@ -38,8 +36,6 @@ def setUp(self):\n         self.portal = portal\n         self.request = self.layer["request"]\n         setRoles(portal, TEST_USER_ID, ["Manager"])\n-        setHooks()\n-        setSite(portal)\n \n     def testPortletTypeRegistered(self):\n         portlet = getUtility(IPortletType, name="portlets.Calendar")\n@@ -100,8 +96,6 @@ def setUp(self):\n         self.wft = getToolByName(self.portal, "portal_workflow")\n         self.wft.setDefaultChain("simple_publication_workflow")\n         setRoles(portal, TEST_USER_ID, ["Manager"])\n-        setHooks()\n-        setSite(portal)\n \n         set_env_timezone(TZNAME)\n         set_timezone(TZNAME)\n@@ -275,17 +269,39 @@ def test_with_collection_as_source(self):\n         are used to build the calendar\n         """\n         tz = pytz.timezone(TZNAME)\n-        start = tz.localize(datetime.now())\n-        end = start + timedelta(hours=1)\n \n-        createContentInContainer(self.portal, PTYPE, title="e1", start=start, end=end)\n-\n-        createContentInContainer(self.portal, PTYPE, title="e2", start=start, end=end)\n+        start = tz.localize(datetime.now())\n+        # Testing at the start or end of the month is prone to a month\n+        # rollover condition, which will cause a test failure. This is not\n+        # a bug in plone.app.event, but merely a test condition failure.\n+        # To avoid this issue, set the start date to roughly in the middle\n+        # of the month.\n+        start = start.replace(day=15)\n \n-        # starts yesterday, ends yesterday\n-        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n-        end_yesterday = start + timedelta(hours=1)\n+        end = start + timedelta(hours=1)\n+        start_yesterday = start - timedelta(days=1)\n+        end_yesterday = start_yesterday + timedelta(hours=1)\n+        start_tomorrow = start + timedelta(days=1)\n+        end_tomorrow = end + timedelta(days=1)\n+        end_tomorrow_1 = end_tomorrow + timedelta(days=1)\n \n+        # Starts today, ends today\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e1",\n+            start=start,\n+            end=end,\n+        )\n+        # 2nd starts today, ends today\n+        createContentInContainer(\n+            self.portal,\n+            PTYPE,\n+            title="e2",\n+            start=start,\n+            end=end,\n+        )\n+        # Starts yesterday, ends yesterday\n         createContentInContainer(\n             self.portal,\n             PTYPE,\n@@ -293,23 +309,15 @@ def test_with_collection_as_source(self):\n             start=start_yesterday,\n             end=end_yesterday,\n         )\n-\n-        # starts today, ends tomorrow\n-        start_today = tz.localize(datetime.now())\n-        end_tomorrow = start + timedelta(days=1)\n-\n+        # Starts today, ends tomorrow\n         createContentInContainer(\n             self.portal,\n             PTYPE,\n             title="e4",\n-            start=start_today,\n+            start=start,\n             end=end_tomorrow,\n         )\n-\n         # starts yesterday, ends tomorrow\n-        start_yesterday = tz.localize(datetime.now() - timedelta(days=1))\n-        end_tomorrow = tz.localize(datetime.now()) + timedelta(days=1)\n-\n         createContentInContainer(\n             self.portal,\n             PTYPE,\n@@ -317,11 +325,7 @@ def test_with_collection_as_source(self):\n             start=start_yesterday,\n             end=end_tomorrow,\n         )\n-\n         # starts tomorrow, ends tomorrow + 1\n-        start_tomorrow = tz.localize(datetime.now() + timedelta(days=1))\n-        end_tomorrow_1 = start_tomorrow + timedelta(days=1)\n-\n         createContentInContainer(\n             self.portal,\n             PTYPE,\n@@ -348,8 +352,14 @@ def test_with_collection_as_source(self):\n                 },\n                 {\n                     "i": "end",\n-                    "o": "plone.app.querystring.operation.date.afterToday",\n-                    "v": "",\n+                    # Normally you wouldn\'t restrict the dates in a calendar to\n+                    # allow browsing historical dates too.\n+                    # And if, you\'d probably want to show future events with\n+                    # "end after today". But here we want reproducible results\n+                    # and not hit by end-of-month boundary effects, where\n+                    # tomorrow is already in another month.\n+                    "o": "plone.app.querystring.operation.date.largerThan",\n+                    "v": start.date().isoformat(),\n                 },\n                 {\n                     "i": "review_state",\ndiff --git a/plone/app/event/tests/test_portlet_events.py b/plone/app/event/tests/test_portlet_events.py\nindex 45a2567f..4910977d 100644\n--- a/plone/app/event/tests/test_portlet_events.py\n+++ b/plone/app/event/tests/test_portlet_events.py\n@@ -23,8 +23,6 @@\n from zExceptions import Unauthorized\n from zope.component import getMultiAdapter\n from zope.component import getUtility\n-from zope.component.hooks import setHooks\n-from zope.component.hooks import setSite\n from zope.interface import alsoProvides\n \n import unittest\n@@ -43,8 +41,6 @@ def setUp(self):\n         self.request = self.layer["request"]\n         alsoProvides(self.request, IPloneFormLayer)\n         setRoles(portal, TEST_USER_ID, ["Manager"])\n-        setHooks()\n-        setSite(portal)\n \n     def testPortletTypeRegistered(self):\n         portlet = getUtility(IPortletType, name="portlets.Events")\n'
+b'diff --git a/news/33.bugfix b/news/33.bugfix\nnew file mode 100644\nindex 0000000..2482c7b\n--- /dev/null\n+++ b/news/33.bugfix\n@@ -0,0 +1,3 @@\n+Fix ValueError when processing malformed session tickets.\n+Added validation in `_validateTicket` to check ticket format before calling `splitTicket`, preventing crashes when invalid cookies are encountered.\n+@rohnsha0\ndiff --git a/plone/session/plugins/session.py b/plone/session/plugins/session.py\nindex bd49f83..3e758f3 100644\n--- a/plone/session/plugins/session.py\n+++ b/plone/session/plugins/session.py\n@@ -227,6 +227,19 @@ def authenticateCredentials(self, credentials):\n         return (info["id"], info["login"])\n \n     def _validateTicket(self, ticket, now=None):\n+        # Validate that the ticket has the minimum expected format\n+        # A valid ticket must be at least 40 bytes: 32 (digest) + 8 (timestamp)\n+        if len(ticket) < 40:\n+            # This is not a valid session ticket format\n+            return None\n+        \n+        # Basic format validation: check if timestamp portion (bytes 32-40) is hex\n+        try:\n+            int(ticket[32:40], 16)\n+        except (ValueError, TypeError):\n+            # Invalid timestamp format - not a valid session ticket\n+            return None\n+        \n         _, userid, _, _, _ = tktauth.splitTicket(ticket)\n \n         if now is None:\n@@ -403,6 +416,7 @@ def _refreshSession(self, request, now=None):\n             ticket = binascii.a2b_base64(request.get(self.cookie_name))\n         except binascii.Error:\n             return None\n+            \n         if now is None:\n             now = time.time()\n         ticket_data = self._validateTicket(ticket, now)\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-25T17:22:38+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/bef7f18fba0dee7df4f9882a9f72dff2b44e2867
+
+refactor: lint
+
+Files changed:
+M plone/session/plugins/session.py
+
+b'diff --git a/plone/session/plugins/session.py b/plone/session/plugins/session.py\nindex 3e758f3..bb35177 100644\n--- a/plone/session/plugins/session.py\n+++ b/plone/session/plugins/session.py\n@@ -232,14 +232,14 @@ def _validateTicket(self, ticket, now=None):\n         if len(ticket) < 40:\n             # This is not a valid session ticket format\n             return None\n-        \n+\n         # Basic format validation: check if timestamp portion (bytes 32-40) is hex\n         try:\n             int(ticket[32:40], 16)\n         except (ValueError, TypeError):\n             # Invalid timestamp format - not a valid session ticket\n             return None\n-        \n+\n         _, userid, _, _, _ = tktauth.splitTicket(ticket)\n \n         if now is None:\n@@ -416,7 +416,7 @@ def _refreshSession(self, request, now=None):\n             ticket = binascii.a2b_base64(request.get(self.cookie_name))\n         except binascii.Error:\n             return None\n-            \n+\n         if now is None:\n             now = time.time()\n         ticket_data = self._validateTicket(ticket, now)\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-28T09:43:54+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/4b2cd2ded4fb91b33ddd586da586eed8f327be82
+
+refactor: remove ticket validation logic from _validateTicket method and handle empty value in splitTicket function
+
+Files changed:
+M plone/session/plugins/session.py
+M plone/session/tktauth.py
+
+b'diff --git a/plone/session/plugins/session.py b/plone/session/plugins/session.py\nindex bb35177..abad93b 100644\n--- a/plone/session/plugins/session.py\n+++ b/plone/session/plugins/session.py\n@@ -227,19 +227,6 @@ def authenticateCredentials(self, credentials):\n         return (info["id"], info["login"])\n \n     def _validateTicket(self, ticket, now=None):\n-        # Validate that the ticket has the minimum expected format\n-        # A valid ticket must be at least 40 bytes: 32 (digest) + 8 (timestamp)\n-        if len(ticket) < 40:\n-            # This is not a valid session ticket format\n-            return None\n-\n-        # Basic format validation: check if timestamp portion (bytes 32-40) is hex\n-        try:\n-            int(ticket[32:40], 16)\n-        except (ValueError, TypeError):\n-            # Invalid timestamp format - not a valid session ticket\n-            return None\n-\n         _, userid, _, _, _ = tktauth.splitTicket(ticket)\n \n         if now is None:\ndiff --git a/plone/session/tktauth.py b/plone/session/tktauth.py\nindex 0637c09..ae3ad15 100755\n--- a/plone/session/tktauth.py\n+++ b/plone/session/tktauth.py\n@@ -243,7 +243,7 @@ def splitTicket(ticket, encoding=None):\n     val = ticket[32:40]\n     remainder = ticket[40:]\n     if not val:\n-        raise ValueError\n+        return None\n     timestamp = int(val, 16)  # convert from hexadecimal+\n \n     remainder = safe_text(remainder)\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-28T09:47:10+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/c2cc8537142e190d32dc151bf365455e251a85c1
+
+update changelog
+
+Files changed:
+M news/33.bugfix
+
+b'diff --git a/news/33.bugfix b/news/33.bugfix\nindex 2482c7b..5aa5967 100644\n--- a/news/33.bugfix\n+++ b/news/33.bugfix\n@@ -1,3 +1 @@\n-Fix ValueError when processing malformed session tickets.\n-Added validation in `_validateTicket` to check ticket format before calling `splitTicket`, preventing crashes when invalid cookies are encountered.\n-@rohnsha0\n+Fix ValueError when processing malformed session tickets. @rohnsha0\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-28T09:59:57+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/22c2505f43922970f07001b549bb781fcf99a683
+
+fix: improve ticket validation to handle badly formatted tickets
+
+Files changed:
+M plone/session/plugins/session.py
+M plone/session/tktauth.py
+
+b'diff --git a/plone/session/plugins/session.py b/plone/session/plugins/session.py\nindex abad93b..f05787d 100644\n--- a/plone/session/plugins/session.py\n+++ b/plone/session/plugins/session.py\n@@ -227,7 +227,11 @@ def authenticateCredentials(self, credentials):\n         return (info["id"], info["login"])\n \n     def _validateTicket(self, ticket, now=None):\n-        _, userid, _, _, _ = tktauth.splitTicket(ticket)\n+        try:\n+            _, userid, _, _, _ = tktauth.splitTicket(ticket)\n+        except ValueError:\n+            # Badly formatted ticket, probably not ours\n+            return None\n \n         if now is None:\n             now = time.time()\ndiff --git a/plone/session/tktauth.py b/plone/session/tktauth.py\nindex ae3ad15..0637c09 100755\n--- a/plone/session/tktauth.py\n+++ b/plone/session/tktauth.py\n@@ -243,7 +243,7 @@ def splitTicket(ticket, encoding=None):\n     val = ticket[32:40]\n     remainder = ticket[40:]\n     if not val:\n-        return None\n+        raise ValueError\n     timestamp = int(val, 16)  # convert from hexadecimal+\n \n     remainder = safe_text(remainder)\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-28T19:13:57+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/639d45d2d70b2605d577045104debd79ffd366e1
+
+test: add unit test for handling invalid session tickets
+
+Files changed:
+M plone/session/tests/testPAS.py
+
+b'diff --git a/plone/session/tests/testPAS.py b/plone/session/tests/testPAS.py\nindex c3cf6ec..a93b86c 100644\n--- a/plone/session/tests/testPAS.py\n+++ b/plone/session/tests/testPAS.py\n@@ -87,6 +87,11 @@ def testCookieLifetimeWithExpirationSet(self):\n             (DateTime() + 100).strftime("%Y%m%d"),\n         )\n \n+    def testHandleBadToken(self):\n+        invalid_ticket = b\'61646d696e:61646d696e\'  # This is "admin:admin" in hex\n+        session = self.folder.pas.session\n+        self.assertIsNone(session._validateTicket(invalid_ticket))\n+\n     def testExtraction(self):\n         session = self.folder.pas.session\n         # We will prepare a request that is equal in Py2 and Py3\n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-05-28T19:14:12+05:30
+Author: Rohan Shaw (rohnsha0) <rohnsha0@gmail.com>
+Commit: https://github.com/plone/plone.session/commit/cdd666e9e494a50e6eb4b67f406da1da8985e6b3
+
+lint
+
+Files changed:
+M plone/session/tests/testPAS.py
+
+b'diff --git a/plone/session/tests/testPAS.py b/plone/session/tests/testPAS.py\nindex a93b86c..efcc31d 100644\n--- a/plone/session/tests/testPAS.py\n+++ b/plone/session/tests/testPAS.py\n@@ -88,7 +88,7 @@ def testCookieLifetimeWithExpirationSet(self):\n         )\n \n     def testHandleBadToken(self):\n-        invalid_ticket = b\'61646d696e:61646d696e\'  # This is "admin:admin" in hex\n+        invalid_ticket = b"61646d696e:61646d696e"  # This is "admin:admin" in hex\n         session = self.folder.pas.session\n         self.assertIsNone(session._validateTicket(invalid_ticket))\n \n'
+
+Repository: plone.session
+
+
+Branch: refs/heads/master
+Date: 2025-06-03T06:07:09+02:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.session/commit/596a084a132c0bee4c929efdf6440839db6096a9
+
+Merge pull request #62 from plone/rohnsha0/issue#33
+
+Add validation for session ticket format to prevent ValueError
+
+Files changed:
+A news/33.bugfix
+M plone/session/plugins/session.py
+M plone/session/tests/testPAS.py
+
+b'diff --git a/news/33.bugfix b/news/33.bugfix\nnew file mode 100644\nindex 0000000..5aa5967\n--- /dev/null\n+++ b/news/33.bugfix\n@@ -0,0 +1 @@\n+Fix ValueError when processing malformed session tickets. @rohnsha0\ndiff --git a/plone/session/plugins/session.py b/plone/session/plugins/session.py\nindex bd49f83..f05787d 100644\n--- a/plone/session/plugins/session.py\n+++ b/plone/session/plugins/session.py\n@@ -227,7 +227,11 @@ def authenticateCredentials(self, credentials):\n         return (info["id"], info["login"])\n \n     def _validateTicket(self, ticket, now=None):\n-        _, userid, _, _, _ = tktauth.splitTicket(ticket)\n+        try:\n+            _, userid, _, _, _ = tktauth.splitTicket(ticket)\n+        except ValueError:\n+            # Badly formatted ticket, probably not ours\n+            return None\n \n         if now is None:\n             now = time.time()\n@@ -403,6 +407,7 @@ def _refreshSession(self, request, now=None):\n             ticket = binascii.a2b_base64(request.get(self.cookie_name))\n         except binascii.Error:\n             return None\n+\n         if now is None:\n             now = time.time()\n         ticket_data = self._validateTicket(ticket, now)\ndiff --git a/plone/session/tests/testPAS.py b/plone/session/tests/testPAS.py\nindex c3cf6ec..efcc31d 100644\n--- a/plone/session/tests/testPAS.py\n+++ b/plone/session/tests/testPAS.py\n@@ -87,6 +87,11 @@ def testCookieLifetimeWithExpirationSet(self):\n             (DateTime() + 100).strftime("%Y%m%d"),\n         )\n \n+    def testHandleBadToken(self):\n+        invalid_ticket = b"61646d696e:61646d696e"  # This is "admin:admin" in hex\n+        session = self.folder.pas.session\n+        self.assertIsNone(session._validateTicket(invalid_ticket))\n+\n     def testExtraction(self):\n         session = self.folder.pas.session\n         # We will prepare a request that is equal in Py2 and Py3\n'
 
