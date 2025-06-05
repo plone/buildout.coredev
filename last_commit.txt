@@ -1,481 +1,72 @@
-Repository: plone.namedfile
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/b4b394c99cf81c36f0a35f89ee4d7349fe344a50
+Branch: refs/heads/6.1.x
+Date: 2025-06-04T20:49:54+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/Products.CMFPlone/commit/debbcb2fd1a14f0db903a7bfaecc3e91c0b49011
 
-fix: fix rendering unrenderable values
+Harden condition of external editor action to not fail when the script is not available.
 
-Files changed:
-M plone/namedfile/test.pt
+In a client project, getting the actions failed, because the `plone_scripts` skin layer was not available.
+This is where the ``externalEditorEnabled`` script still lives.
+So this gave a traceback, for example when getting the `@actions` rest api endpoint:
 
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 5568f1d..266395e 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -198,6 +198,7 @@\n           </p>\n         </section>\n \n+<<<<<<< HEAD\n         <section class="section"\n                  id="stored"\n         >\n@@ -239,6 +240,28 @@\n                 </div>\n               </div>\n             </div>\n+=======\n+  <section class="section" id="stored">\n+    <h3>Stored scales</h3>\n+    <div class="accordion" id="accordion-stored">\n+      <div class="accordion-item" tal:repeat="(uid, info) view/stored_scales">\n+        <h4 class="accordion-header" id="heading-${uid}">\n+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-${uid}" aria-expanded="false" aria-controls="collapse-${uid}">\n+            <code>${uid}</code>\n+          </button>\n+        </h4>\n+        <div id="collapse-${uid}" class="accordion-collapse collapse" aria-labelledby="heading-${uid}" data-bs-parent="#accordion-stored">\n+          <div class="accordion-body">\n+            <tal:block repeat="item python:sorted(info.items())">\n+              <br tal:condition="not:repeat/item/start" />\n+                <code >\n+                <span tal:replace="python:item[0]"/>: <span tal:replace="python:item[1]" tal:on-error="string:Error rendering the value"/>\n+                </code>\n+            </tal:block>\n+            <br />\n+            <a target="_blank"\n+               href="${context_url}/@@images/${uid}">Open in new tab</a>\n+>>>>>>> 4fe955e (fix: fix rendering unrenderable values)\n           </div>\n         </section>\n \n'
+```
+Traceback (innermost last):
+  Module ZPublisher.WSGIPublisher, line 181, in transaction_pubevents
+  Module ZPublisher.WSGIPublisher, line 390, in publish_module
+  Module ZPublisher.WSGIPublisher, line 284, in publish
+  Module ZPublisher.mapply, line 98, in mapply
+  Module ZPublisher.WSGIPublisher, line 68, in call_object
+  Module plone.rest.service, line 21, in __call__
+  Module plone.restapi.services, line 19, in render
+  Module plone.restapi.services.content.get, line 16, in reply
+  Module plone.restapi.serializer.dxcontent, line 168, in __call__
+  Module plone.restapi.serializer.dxcontent, line 127, in __call__
+  Module plone.restapi.serializer.expansion, line 21, in expandable_elements
+  Module plone.restapi.services.actions.get, line 32, in __call__
+  Module plone.memoize.view, line 51, in memogetter
+  Module plone.app.layout.globals.context, line 244, in actions
+  Module Products.CMFPlone.ActionsTool, line 83, in listActionInfos
+  Module Products.CMFCore.ActionInformation, line 211, in __getitem__
+  Module Products.CMFCore.Expression, line 53, in __call__
+  Module zope.tales.expressions, line 248, in __call__
+  Module Products.PageTemplates.Expressions, line 217, in _eval
+  Module zope.tales.expressions, line 153, in _eval
+  Module Products.PageTemplates.Expressions, line 85, in boboAwareZopeTraverse
+  Module OFS.Traversable, line 364, in restrictedTraverse
+  Module OFS.Traversable, line 347, in unrestrictedTraverse
+   - __traceback_info__: ([], 'externalEditorEnabled')
+  Module OFS.Traversable, line 301, in unrestrictedTraverse
+   - __traceback_info__: ([], 'externalEditorEnabled')
+  Module plone.folder.ordered, line 229, in __getitem__
+KeyError: 'externalEditorEnabled'
+```
 
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/0e47b897489fed32cb7fb1dd2f650cc8599fbf2c
-
-feat: add a method to render a img tag with srcset
-
-Files changed:
-M plone/namedfile/scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex f79fc6a..821e3da 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -739,6 +739,67 @@ def picture(\n             fieldname=fieldname,\n         ).prettify()\n \n+    def srcset(\n+        self,\n+        fieldname=None,\n+        scale_in_src="huge",\n+        sizes="",\n+        title=_marker,\n+        alt=_marker,\n+        **kwargs,\n+    ):\n+        if fieldname is None:\n+            try:\n+                primary = IPrimaryFieldInfo(self.context, None)\n+            except TypeError:\n+                return\n+            if primary is None:\n+                return  # 404\n+            fieldname = primary.fieldname\n+\n+        original_width, original_height = self.getImageSize(fieldname)\n+\n+        storage = getMultiAdapter(\n+            (self.context, functools.partial(self.modified, fieldname)),\n+            IImageScaleStorage,\n+        )\n+\n+        srcset_urls = []\n+        for width, height in self.available_sizes.values():\n+            if width <= original_width:\n+                scale = storage.scale(\n+                    fieldname=fieldname, width=width, height=height, mode="scale"\n+                )\n+                extension = scale["data"].contentType.split("/")[-1].lower()\n+                srcset_urls.append(\n+                    f\'{self.context.absolute_url()}/@@images/{scale["uid"]}.{extension} {scale["width"]}w\'\n+                )\n+        attributes = {}\n+        if title is _marker:\n+            attributes["title"] = self.context.Title()\n+        elif title:\n+            attributes["title"] = title\n+        if alt is not _marker:\n+            attributes["alt"] = alt\n+\n+        attributes.update(**kwargs)\n+\n+        attributes["sizes"] = sizes\n+\n+        srcset_string = ", ".join(srcset_urls)\n+        attributes["srcset"] = srcset_string\n+\n+        if scale_in_src not in self.available_sizes:\n+            for key, (width, height) in self.available_sizes.items():\n+                if width <= original_width:\n+                    scale_in_src = key\n+                    break\n+\n+        scale = self.scale(fieldname=fieldname, scale=scale_in_src)\n+        attributes["src"] = scale.url\n+\n+        return _image_tag_from_values(*attributes.items())\n+\n \n class NavigationRootScaling(ImageScaling):\n     @lazy_property\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/1a2c0bb3cb4a63d7e0582fafee2d42212d21e4c4
-
-add tests
-
-Files changed:
-M plone/namedfile/tests/test_scaling.py
-
-b'diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex aa34934..79dbc3c 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -813,6 +813,111 @@ def testOversizedHighPixelDensityScale(self):\n         self.assertEqual(len(foo.srcset), 1)\n         self.assertEqual(foo.srcset[0]["scale"], 2)\n \n+    def testImgSrcSet(self):\n+        """ test rendered srcset values """\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset(\n+            "image",\n+            sizes="50vw"\n+        )\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetCustomSrc(self):\n+        """ test that we can select a custom scale in the src attribute """\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", scale_in_src="mini")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetInexistentScale(self):\n+        """test that when requesting an inexistent scale for the src attribute\n+           we provide the biggest scale we can produce\n+        """\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", scale_in_src="inexistent-scale-name")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetCustomTitle(self):\n+        """test passing a custom title to the srcset method"""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", title="My Custom Title")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="My Custom Title" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetAdditionalAttributes(self):\n+        """test that additional parameters are outputed as is, like alt, loading, ..."""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", title="My Custom Title", alt="This image shows nothing", loading="lazy")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="My Custom Title" alt="This image shows nothing" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n \n class ImageTraverseTests(unittest.TestCase):\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/bb7047c7d1e04752f25b632cd7e648c56c687708
-
-show the srcset example in the image-test view
+I think it is fine to only do this on new sites, and have no upgrade step.
 
 Files changed:
-M plone/namedfile/test.pt
+A news/4179.bugfix
+M Products/CMFPlone/profiles/default/actions.xml
 
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 266395e..f138a85 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -198,6 +198,7 @@\n           </p>\n         </section>\n \n+<<<<<<< HEAD\n <<<<<<< HEAD\n         <section class="section"\n                  id="stored"\n@@ -241,6 +242,27 @@\n               </div>\n             </div>\n =======\n+=======\n+  <section class="section" id="srcset">\n+    <h2>img with srcset attributes</h2>\n+    <p>\n+      srcst allows the browser selecting the correct image depending on the space the image has on a page.\n+    </p>\n+    <p>\n+      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required paramter the value of the sizes attribute that the user of this method has to provide and will be outputed as is in the generated HTML.\n+    </p>\n+    <p>\n+      <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+    </p>\n+    <p>\n+      <code>\n+        <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+      </code>\n+    </p>\n+  </section>\n+\n+\n+>>>>>>> 8c6eb8d (show the srcset example in the image-test view)\n   <section class="section" id="stored">\n     <h3>Stored scales</h3>\n     <div class="accordion" id="accordion-stored">\n'
+b'diff --git a/Products/CMFPlone/profiles/default/actions.xml b/Products/CMFPlone/profiles/default/actions.xml\nindex ef306875cc..46e0a043cd 100644\n--- a/Products/CMFPlone/profiles/default/actions.xml\n+++ b/Products/CMFPlone/profiles/default/actions.xml\n@@ -60,7 +60,7 @@\n       />\n       <property name="url_expr">string:$object_url/external_edit</property>\n       <property name="icon_expr">string:$portal_url/extedit_icon.png</property>\n-      <property name="available_expr">object/externalEditorEnabled</property>\n+      <property name="available_expr">object/externalEditorEnabled|nothing</property>\n       <property name="permissions">\n         <element value="Modify portal content" />\n       </property>\ndiff --git a/news/4179.bugfix b/news/4179.bugfix\nnew file mode 100644\nindex 0000000000..8f39acb659\n--- /dev/null\n+++ b/news/4179.bugfix\n@@ -0,0 +1,2 @@\n+Harden condition of external editor action to not fail when the `externalEditorEnabled` script is not available.\n+[maurits]\n'
 
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/d46112b0a2d75544de25dd2657a23633e348d17d
-
-changelog
-
-Files changed:
-A news/170.feature
-
-b'diff --git a/news/170.feature b/news/170.feature\nnew file mode 100644\nindex 0000000..a6c729d\n--- /dev/null\n+++ b/news/170.feature\n@@ -0,0 +1,2 @@\n+Add a srcset method to the @@images view\n+[erral]\n'
-
-Repository: plone.namedfile
+Repository: Products.CMFPlone
 
 
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/4634b00712f7580c9a3107a2a1de36d686cc8ba3
+Branch: refs/heads/6.1.x
+Date: 2025-06-05T11:02:53+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
+Commit: https://github.com/plone/Products.CMFPlone/commit/40bb4584e855c432d89bda342022f82cc888c1f1
 
-add link in the images test
+Merge pull request #4179 from plone/maurits-external-editor-nothing-61
+
+Harden condition of external editor action to not fail [6.1]
 
 Files changed:
-M plone/namedfile/test.pt
+A news/4179.bugfix
+M Products/CMFPlone/profiles/default/actions.xml
 
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex f138a85..74ff935 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -26,6 +26,7 @@\n       >\n         <p i18n:translate="">\n     Go to:\n+<<<<<<< HEAD\n           <a href="#examples"\n              i18n:name=""\n              i18n:translate=""\n@@ -63,6 +64,26 @@\n               <img tal:replace="structure img_tag" />\n             </a>\n           </figure>\n+=======\n+    <a href="#examples">examples</a>,\n+    <a href="#cover">cover</a>,\n+    <a href="#contain">contain</a>,\n+    <a href="#picture">picture tags</a>,\n+    <a href="#srcset">img tag with srcset</a>,\n+    <a href="#stored">stored scales</a>,\n+    <a href="#clear">clear</a>\n+  </p>\n+  <section class="section section-main">\n+    <h3>Thumb with info</h3>\n+    <p>Standard display of Image content type, but using thumb scale</p>\n+    <figure class="figure">\n+      <a href="${context_url}/image_view_fullscreen"\n+         tal:define="img_tag python:images.tag(\'image\', scale=\'thumb\', css_class=\'figure-img img-fluid\')"\n+         >\n+        <img tal:replace="structure img_tag" />\n+      </a>\n+    </figure>\n+>>>>>>> 14cb618 (add link in the images test)\n \n           <div class="h5 mb-2">\n             <a href="${python:download_url}"\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/2b69491622f0851bcd9379f10e76ed63af221574
-
-test file
-
-Files changed:
-M plone/namedfile/test.pt
-
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 74ff935..6aca89a 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -26,7 +26,6 @@\n       >\n         <p i18n:translate="">\n     Go to:\n-<<<<<<< HEAD\n           <a href="#examples"\n              i18n:name=""\n              i18n:translate=""\n@@ -43,6 +42,7 @@\n              i18n:name=""\n              i18n:translate=""\n           >picture tags</a>,\n+          <a href="#srcset" i18n="name" i18n:translate="">img tag with srcset</a>,\n           <a href="#stored"\n              i18n:name=""\n              i18n:translate=""\n@@ -64,26 +64,6 @@\n               <img tal:replace="structure img_tag" />\n             </a>\n           </figure>\n-=======\n-    <a href="#examples">examples</a>,\n-    <a href="#cover">cover</a>,\n-    <a href="#contain">contain</a>,\n-    <a href="#picture">picture tags</a>,\n-    <a href="#srcset">img tag with srcset</a>,\n-    <a href="#stored">stored scales</a>,\n-    <a href="#clear">clear</a>\n-  </p>\n-  <section class="section section-main">\n-    <h3>Thumb with info</h3>\n-    <p>Standard display of Image content type, but using thumb scale</p>\n-    <figure class="figure">\n-      <a href="${context_url}/image_view_fullscreen"\n-         tal:define="img_tag python:images.tag(\'image\', scale=\'thumb\', css_class=\'figure-img img-fluid\')"\n-         >\n-        <img tal:replace="structure img_tag" />\n-      </a>\n-    </figure>\n->>>>>>> 14cb618 (add link in the images test)\n \n           <div class="h5 mb-2">\n             <a href="${python:download_url}"\n@@ -219,8 +199,24 @@\n           </p>\n         </section>\n \n-<<<<<<< HEAD\n-<<<<<<< HEAD\n+<section class="section" id="srcset">\n+    <h2 i18n:translate="">img with srcset attributes</h2>\n+    <p i18n:translate="">\n+      srcst allows the browser selecting the correct image depending on the space the image has on a page.\n+    </p>\n+    <p i18n:translate="">\n+      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required paramter the value of the sizes attribute that the user of this method has to provide and will be outputed as is in the generated HTML.\n+    </p>\n+    <p>\n+      <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+    </p>\n+    <p>\n+      <code>\n+        <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+      </code>\n+    </p>\n+  </section>\n+\n         <section class="section"\n                  id="stored"\n         >\n@@ -262,49 +258,6 @@\n                 </div>\n               </div>\n             </div>\n-=======\n-=======\n-  <section class="section" id="srcset">\n-    <h2>img with srcset attributes</h2>\n-    <p>\n-      srcst allows the browser selecting the correct image depending on the space the image has on a page.\n-    </p>\n-    <p>\n-      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required paramter the value of the sizes attribute that the user of this method has to provide and will be outputed as is in the generated HTML.\n-    </p>\n-    <p>\n-      <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n-    </p>\n-    <p>\n-      <code>\n-        <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n-      </code>\n-    </p>\n-  </section>\n-\n-\n->>>>>>> 8c6eb8d (show the srcset example in the image-test view)\n-  <section class="section" id="stored">\n-    <h3>Stored scales</h3>\n-    <div class="accordion" id="accordion-stored">\n-      <div class="accordion-item" tal:repeat="(uid, info) view/stored_scales">\n-        <h4 class="accordion-header" id="heading-${uid}">\n-          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-${uid}" aria-expanded="false" aria-controls="collapse-${uid}">\n-            <code>${uid}</code>\n-          </button>\n-        </h4>\n-        <div id="collapse-${uid}" class="accordion-collapse collapse" aria-labelledby="heading-${uid}" data-bs-parent="#accordion-stored">\n-          <div class="accordion-body">\n-            <tal:block repeat="item python:sorted(info.items())">\n-              <br tal:condition="not:repeat/item/start" />\n-                <code >\n-                <span tal:replace="python:item[0]"/>: <span tal:replace="python:item[1]" tal:on-error="string:Error rendering the value"/>\n-                </code>\n-            </tal:block>\n-            <br />\n-            <a target="_blank"\n-               href="${context_url}/@@images/${uid}">Open in new tab</a>\n->>>>>>> 4fe955e (fix: fix rendering unrenderable values)\n           </div>\n         </section>\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/f5133fa2a79041f3fdf07a42fb37143b29a1cfa7
-
-lint
-
-Files changed:
-M plone/namedfile/test.pt
-M plone/namedfile/tests/test_scaling.py
-
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 6aca89a..6775619 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -42,7 +42,10 @@\n              i18n:name=""\n              i18n:translate=""\n           >picture tags</a>,\n-          <a href="#srcset" i18n="name" i18n:translate="">img tag with srcset</a>,\n+          <a href="#srcset"\n+             i18n="name"\n+             i18n:translate=""\n+          >img tag with srcset</a>,\n           <a href="#stored"\n              i18n:name=""\n              i18n:translate=""\n@@ -199,23 +202,25 @@\n           </p>\n         </section>\n \n-<section class="section" id="srcset">\n-    <h2 i18n:translate="">img with srcset attributes</h2>\n-    <p i18n:translate="">\n+        <section class="section"\n+                 id="srcset"\n+        >\n+          <h2 i18n:translate="">img with srcset attributes</h2>\n+          <p i18n:translate="">\n       srcst allows the browser selecting the correct image depending on the space the image has on a page.\n-    </p>\n-    <p i18n:translate="">\n-      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required paramter the value of the sizes attribute that the user of this method has to provide and will be outputed as is in the generated HTML.\n-    </p>\n-    <p>\n-      <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n-    </p>\n-    <p>\n-      <code>\n-        <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n-      </code>\n-    </p>\n-  </section>\n+          </p>\n+          <p i18n:translate="">\n+      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required parameter the value of the sizes attribute that the user of this method has to provide and will be outputted as is in the generated HTML.\n+          </p>\n+          <p>\n+            <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+          </p>\n+          <p>\n+            <code>\n+              <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+            </code>\n+          </p>\n+        </section>\n \n         <section class="section"\n                  id="stored"\ndiff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex 79dbc3c..aec23ff 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -814,7 +814,7 @@ def testOversizedHighPixelDensityScale(self):\n         self.assertEqual(foo.srcset[0]["scale"], 2)\n \n     def testImgSrcSet(self):\n-        """ test rendered srcset values """\n+        """test rendered srcset values"""\n         self.scaling.available_sizes = {\n             "huge": (1600, 65536),\n             "great": (1200, 65536),\n@@ -828,16 +828,13 @@ def testImgSrcSet(self):\n             "icon": (32, 32),\n             "listing": (16, 16),\n         }\n-        tag = self.scaling.srcset(\n-            "image",\n-            sizes="50vw"\n-        )\n+        tag = self.scaling.srcset("image", sizes="50vw")\n         base = self.item.absolute_url()\n         expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetCustomSrc(self):\n-        """ test that we can select a custom scale in the src attribute """\n+        """test that we can select a custom scale in the src attribute"""\n         self.scaling.available_sizes = {\n             "huge": (1600, 65536),\n             "great": (1200, 65536),\n@@ -858,7 +855,7 @@ def testImgSrcSetCustomSrc(self):\n \n     def testImgSrcSetInexistentScale(self):\n         """test that when requesting an inexistent scale for the src attribute\n-           we provide the biggest scale we can produce\n+        we provide the biggest scale we can produce\n         """\n         self.scaling.available_sizes = {\n             "huge": (1600, 65536),\n@@ -873,7 +870,9 @@ def testImgSrcSetInexistentScale(self):\n             "icon": (32, 32),\n             "listing": (16, 16),\n         }\n-        tag = self.scaling.srcset("image", sizes="50vw", scale_in_src="inexistent-scale-name")\n+        tag = self.scaling.srcset(\n+            "image", sizes="50vw", scale_in_src="inexistent-scale-name"\n+        )\n         base = self.item.absolute_url()\n         expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n@@ -899,7 +898,7 @@ def testImgSrcSetCustomTitle(self):\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetAdditionalAttributes(self):\n-        """test that additional parameters are outputed as is, like alt, loading, ..."""\n+        """test that additional parameters are outputted as is, like alt, loading, ..."""\n         self.scaling.available_sizes = {\n             "huge": (1600, 65536),\n             "great": (1200, 65536),\n@@ -913,7 +912,13 @@ def testImgSrcSetAdditionalAttributes(self):\n             "icon": (32, 32),\n             "listing": (16, 16),\n         }\n-        tag = self.scaling.srcset("image", sizes="50vw", title="My Custom Title", alt="This image shows nothing", loading="lazy")\n+        tag = self.scaling.srcset(\n+            "image",\n+            sizes="50vw",\n+            title="My Custom Title",\n+            alt="This image shows nothing",\n+            loading="lazy",\n+        )\n         base = self.item.absolute_url()\n         expected = f"""<img title="My Custom Title" alt="This image shows nothing" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/00166e8704107a6a87a5f388873b3080afc996ba
-
-Update plone/namedfile/test.pt
-
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
-
-Files changed:
-M plone/namedfile/test.pt
-
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 6775619..95e3b71 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -210,7 +210,7 @@\n       srcst allows the browser selecting the correct image depending on the space the image has on a page.\n           </p>\n           <p i18n:translate="">\n-      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has a required parameter the value of the sizes attribute that the user of this method has to provide and will be outputted as is in the generated HTML.\n+      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has as required parameter the value of the sizes attribute that the user of this method has to provide and will be output as is in the generated HTML.\n           </p>\n           <p>\n             <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/08fe009827d9900589fcd337fe2b4ba3f261eb05
-
-Update plone/namedfile/tests/test_scaling.py
-
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
-
-Files changed:
-M plone/namedfile/tests/test_scaling.py
-
-b'diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex aec23ff..e600f51 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -898,7 +898,7 @@ def testImgSrcSetCustomTitle(self):\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetAdditionalAttributes(self):\n-        """test that additional parameters are outputted as is, like alt, loading, ..."""\n+        """test that additional parameters are output as is, like alt, loading, ..."""\n         self.scaling.available_sizes = {\n             "huge": (1600, 65536),\n             "great": (1200, 65536),\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/ac8b949beadaac05075c87f2d7ae3ac5ff432922
-
-Update plone/namedfile/test.pt
-
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
-
-Files changed:
-M plone/namedfile/test.pt
-
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 95e3b71..f202549 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -207,7 +207,7 @@\n         >\n           <h2 i18n:translate="">img with srcset attributes</h2>\n           <p i18n:translate="">\n-      srcst allows the browser selecting the correct image depending on the space the image has on a page.\n+      srcset allows the browser to select the correct image, depending on the space the image has on a page.\n           </p>\n           <p i18n:translate="">\n       To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has as required parameter the value of the sizes attribute that the user of this method has to provide and will be output as is in the generated HTML.\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-03-21T08:31:57+01:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/681facdda1384119bb0c250ed3428165037b7b88
-
-Update plone/namedfile/test.pt
-
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
-
-Files changed:
-M plone/namedfile/test.pt
-
-b'diff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex f202549..51c4b8c 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -209,7 +209,7 @@\n           <p i18n:translate="">\n       srcset allows the browser to select the correct image, depending on the space the image has on a page.\n           </p>\n-          <p i18n:translate="">\n+          <p i18n:translate="msg_images_test_srcset">\n       To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has as required parameter the value of the sizes attribute that the user of this method has to provide and will be output as is in the generated HTML.\n           </p>\n           <p>\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-04-02T14:09:33+02:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/d91357308922d558b80695fadd424c69d282e64c
-
-Merge branch 'main' into erral-img-srcset
-
-Files changed:
-A news/167.bugfix
-M CHANGES.rst
-M plone/namedfile/field.py
-M plone/namedfile/file.py
-M plone/namedfile/interfaces.py
-M plone/namedfile/tests/test_storable.py
-M plone/namedfile/utils/__init__.py
-M setup.py
-D news/+meta.internal
-D news/173.bugfix
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 794c47a..3c88edc 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,23 @@ Changelog\n \n .. towncrier release notes start\n \n+7.0.1 (2025-03-21)\n+------------------\n+\n+Bug fixes:\n+\n+\n+- Work around TypeError: unhashable type: \'list\' on `images-test` view.\n+  [maurits] (#173)\n+\n+\n+Internal:\n+\n+\n+- Update configuration files.\n+  [plone devs]\n+\n+\n 7.0.0 (2025-01-24)\n ------------------\n \ndiff --git a/news/+meta.internal b/news/+meta.internal\ndeleted file mode 100644\nindex c08f539..0000000\n--- a/news/+meta.internal\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Update configuration files.\n-[plone devs]\ndiff --git a/news/167.bugfix b/news/167.bugfix\nnew file mode 100644\nindex 0000000..1832906\n--- /dev/null\n+++ b/news/167.bugfix\n@@ -0,0 +1 @@\n+Adjusted schema validation to prevent file/image loading during upload/import\n\\ No newline at end of file\ndiff --git a/news/173.bugfix b/news/173.bugfix\ndeleted file mode 100644\nindex b27c767..0000000\n--- a/news/173.bugfix\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Work around TypeError: unhashable type: \'list\' on `images-test` view.\n-[maurits]\n-\ndiff --git a/plone/namedfile/field.py b/plone/namedfile/field.py\nindex f761cd6..d6aaa51 100644\n--- a/plone/namedfile/field.py\n+++ b/plone/namedfile/field.py\n@@ -10,6 +10,7 @@\n from plone.namedfile.interfaces import INamedFileField\n from plone.namedfile.interfaces import INamedImage\n from plone.namedfile.interfaces import INamedImageField\n+from plone.namedfile.interfaces import INamedTyped\n from plone.namedfile.interfaces import IPluggableFileFieldValidation\n from plone.namedfile.interfaces import IPluggableImageFieldValidation\n from plone.namedfile.utils import get_contenttype\n@@ -139,7 +140,16 @@ class NamedBlobFile(NamedField):\n     accept = ()\n \n     def validate(self, value):\n-        super().validate(value, IPluggableFileFieldValidation)\n+        # Bit of a hack but we avoid loading the .data into memory\n+        # because schema validation checks the property exists\n+        # which loads the entire file into memory without checking the data.\n+        # This can slow down imports and uploads a lot.\n+        # TODO: mighe be better fixed in zope.schema - https://github.com/zopefoundation/zope.schema/issues/127\n+        self.schema = INamedTyped\n+        try:\n+            super().validate(value, IPluggableFileFieldValidation)\n+        finally:\n+            self.schema = INamedBlobFile\n \n \n @implementer(INamedBlobImageField)\n@@ -151,4 +161,9 @@ class NamedBlobImage(NamedField):\n     accept = ("image/*",)\n \n     def validate(self, value):\n-        super().validate(value, IPluggableImageFieldValidation)\n+        # see NamedBlobFile comment\n+        self.schema = INamedTyped\n+        try:\n+            super().validate(value, IPluggableImageFieldValidation)\n+        finally:\n+            self.schema = INamedBlobImage\ndiff --git a/plone/namedfile/file.py b/plone/namedfile/file.py\nindex 1e055b0..3de4ec7 100644\n--- a/plone/namedfile/file.py\n+++ b/plone/namedfile/file.py\n@@ -390,7 +390,8 @@ def __init__(self, data=b"", contentType="", filename=None):\n         # Allow override of the image sniffer\n         if contentType:\n             self.contentType = contentType\n-        exif_data = get_exif(self.data)\n+        with self.open("r") as fp:\n+            exif_data = get_exif(fp, self.contentType, self._width, self._height)\n         if exif_data is not None:\n             log.debug(\n                 "Image contains Exif Information. "\ndiff --git a/plone/namedfile/interfaces.py b/plone/namedfile/interfaces.py\nindex 2bc243e..641b02b 100644\n--- a/plone/namedfile/interfaces.py\n+++ b/plone/namedfile/interfaces.py\n@@ -11,7 +11,7 @@\n HAVE_BLOBS = True\n \n \n-class IFile(Interface):\n+class ITyped(Interface):\n \n     contentType = schema.NativeStringLine(\n         title="Content Type",\n@@ -21,6 +21,9 @@ class IFile(Interface):\n         missing_value="",\n     )\n \n+\n+class IFile(Interface):\n+\n     data = schema.Bytes(\n         title="Data",\n         description="The actual content of the object.",\n@@ -84,11 +87,15 @@ class INamed(Interface):\n     filename = schema.TextLine(title="Filename", required=False, default=None)\n \n \n-class INamedFile(INamed, IFile):\n+class INamedTyped(INamed, ITyped):\n+    """An item with a filename and contentType"""\n+\n+\n+class INamedFile(INamedTyped, IFile):\n     """A non-BLOB file with a filename"""\n \n \n-class INamedImage(INamed, IImage):\n+class INamedImage(INamedTyped, IImage):\n     """A non-BLOB image with a filename"""\n \n \ndiff --git a/plone/namedfile/tests/test_storable.py b/plone/namedfile/tests/test_storable.py\nindex 8e8309c..bf4dc35 100644\n--- a/plone/namedfile/tests/test_storable.py\n+++ b/plone/namedfile/tests/test_storable.py\n@@ -16,10 +16,14 @@\n ##############################################################################\n \n from OFS.Image import Pdata\n+from plone.namedfile import field\n from plone.namedfile.file import FileChunk\n from plone.namedfile.file import NamedBlobImage\n from plone.namedfile.testing import PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n from plone.namedfile.tests import getFile\n+from unittest.mock import patch\n+from ZODB.blob import Blob\n+from ZODB.blob import BlobFile\n \n import os\n import tempfile\n@@ -56,3 +60,71 @@ def test_opened_file_storable(self):\n             if os.path.exists(path):\n                 os.remove(path)\n         self.assertEqual(303, fi.getSize())\n+\n+    def test_upload_no_read(self):\n+        # ensure we don\'t read the whole file into memory\n+\n+        old_open = Blob.open\n+        blob_read = 0\n+        blob_write = 0\n+        old_read = BlobFile.read\n+        read_bytes = 0\n+\n+        def count_open(self, mode="r"):\n+            nonlocal blob_read, blob_write\n+            blob_read += 1 if "r" in mode else 0\n+            blob_write += 1 if "w" in mode else 0\n+            return old_open(self, mode)\n+\n+        def count_reads(self, size=-1):\n+            nonlocal read_bytes\n+            res = old_read(self, size)\n+            read_bytes += len(res)\n+            return res\n+\n+        with patch.object(Blob, "open", count_open), patch.object(\n+            BlobFile, "read", count_reads\n+        ):\n+            data = getFile("image.jpg")\n+            f = tempfile.NamedTemporaryFile(delete=False)\n+            try:\n+                path = f.name\n+                f.write(data)\n+                f.close()\n+                with open(path, "rb") as f:\n+                    fi = NamedBlobImage(f, filename="image.gif")\n+            finally:\n+                if os.path.exists(path):\n+                    os.remove(path)\n+            self.assertEqual(3641, fi.getSize())\n+            self.assertIn("Exif", fi.exif)\n+            self.assertEqual(500, fi._width)\n+            self.assertEqual(200, fi._height)\n+            self.assertLess(\n+                read_bytes,\n+                fi.getSize(),\n+                "Images should not need to read all data to get exif, dimensions",\n+            )\n+            self.assertEqual(\n+                blob_read, 3, "blob opening for getsize, get_exif and getImageInfo only"\n+            )\n+            self.assertEqual(\n+                blob_write,\n+                1,\n+                "Slow write to blob instead of os rename. Should be only 1 on __init__ to create empty file",\n+            )\n+\n+            # Test validation which should also not read all the data.\n+            blob_read = read_bytes = 0\n+\n+            blob_field = field.NamedBlobImage()\n+            blob_field.validate(fi)\n+            blob_field = field.NamedBlobFile()  # Image is subclass of file\n+            blob_field.validate(fi)\n+\n+            self.assertEqual(\n+                blob_read, 0, "Validation is reading the whole blob in memory"\n+            )\n+            self.assertEqual(\n+                read_bytes, 0, "Validation is reading the whole blob in memory"\n+            )\ndiff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py\nindex 4c69669..54eb026 100644\n--- a/plone/namedfile/utils/__init__.py\n+++ b/plone/namedfile/utils/__init__.py\n@@ -228,17 +228,22 @@ def getImageInfo(data):\n     return content_type, width, height\n \n \n-def get_exif(image):\n+def get_exif(image, content_type=None, width=None, height=None):\n     #\n     exif_data = None\n-    image_data = _ensure_data(image)\n \n-    content_type, width, height = getImageInfo(image_data)\n+    if None in (content_type, width, height):\n+        # if we already got the image info don\'t read the while file into memory\n+        image = _ensure_data(image)\n+        content_type, width, height = getImageInfo(image)\n     if content_type in ["image/jpeg", "image/tiff"]:\n         # Only this two Image Types could have Exif information\n         # see http://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf\n         try:\n-            exif_data = piexif.load(image_data)\n+            # if possible pass filename in instead to prevent reading all data into memory\n+            exif_data = piexif.load(\n+                image.name if getattr(image, "name") else _ensure_data(image)\n+            )\n         except Exception as e:\n             # TODO: determ which error really happens\n             # Should happen if data is to short --> first_bytes\ndiff --git a/setup.py b/setup.py\nindex b265875..c35a6ae 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -4,7 +4,7 @@\n import os\n \n \n-version = "7.0.1.dev0"\n+version = "7.0.2.dev0"\n \n description = "File types and fields for images, files and blob files with filenames"\n long_description = "\\n\\n".join(\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-04-03T09:24:55+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/85ecca37d38d583ce543b34ac2c72152b56c8f32
-
-do not generate the scale itself, but use pre_scale to pre_create it, it will effectively be created when rendering the image
-
-Files changed:
-M plone/namedfile/scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex 821e3da..13d2586 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -767,10 +767,10 @@ def srcset(\n         srcset_urls = []\n         for width, height in self.available_sizes.values():\n             if width <= original_width:\n-                scale = storage.scale(\n+                scale = storage.pre_scale(\n                     fieldname=fieldname, width=width, height=height, mode="scale"\n                 )\n-                extension = scale["data"].contentType.split("/")[-1].lower()\n+                extension = scale["mimetype"].split("/")[-1].lower()\n                 srcset_urls.append(\n                     f\'{self.context.absolute_url()}/@@images/{scale["uid"]}.{extension} {scale["width"]}w\'\n                 )\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-04-03T10:30:07+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/abee1ff8f602d09d75a239fea1d309da7e8dd3da
-
-support passing custom CSS classes
-
-Files changed:
-M plone/namedfile/scaling.py
-M plone/namedfile/tests/test_scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex 13d2586..d6d68d8 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -744,8 +744,9 @@ def srcset(\n         fieldname=None,\n         scale_in_src="huge",\n         sizes="",\n-        title=_marker,\n         alt=_marker,\n+        css_class=None,\n+        title=_marker,\n         **kwargs,\n     ):\n         if fieldname is None:\n@@ -782,6 +783,9 @@ def srcset(\n         if alt is not _marker:\n             attributes["alt"] = alt\n \n+        if css_class is not None:\n+            attributes["class"] = css_class\n+\n         attributes.update(**kwargs)\n \n         attributes["sizes"] = sizes\ndiff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex e600f51..e6abc78 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -915,12 +915,13 @@ def testImgSrcSetAdditionalAttributes(self):\n         tag = self.scaling.srcset(\n             "image",\n             sizes="50vw",\n-            title="My Custom Title",\n             alt="This image shows nothing",\n+            css_class="my-personal-class",\n+            title="My Custom Title",\n             loading="lazy",\n         )\n         base = self.item.absolute_url()\n-        expected = f"""<img title="My Custom Title" alt="This image shows nothing" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        expected = f"""<img title="My Custom Title" alt="This image shows nothing" class="my-personal-class" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-04-03T10:31:45+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/11ce52d56234015571c2be820f7af91b4fc55522
-
-Merge branch 'main' into erral-img-srcset
-
-Files changed:
-A news/133.feature
-
-b'diff --git a/news/133.feature b/news/133.feature\nnew file mode 100644\nindex 0000000..86e4ef5\n--- /dev/null\n+++ b/news/133.feature\n@@ -0,0 +1,3 @@\n+Scale/crop SVG images by using plone.scale new scale_svg_image.\n+This modifies the viewport of the SVG accordingly.\n+[@jensens]\n\\ No newline at end of file\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-04-17T12:08:36+03:00
-Author: Maik Derstappen (MrTango) <md@derico.de>
-Commit: https://github.com/plone/plone.namedfile/commit/77ad0293c03db2741dab5db9a69c5266ddf6e84a
-
-Merge branch 'main' into erral-img-srcset
-
-Files changed:
-M CHANGES.rst
-M setup.py
-D news/133.feature
-D news/167.bugfix
-
-b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 3c88edc..4869b00 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,15 @@ Changelog\n \n .. towncrier release notes start\n \n+7.0.2 (2025-04-04)\n+------------------\n+\n+Bug fixes:\n+\n+\n+- Adjusted schema validation to prevent file/image loading during upload/import (#167)\n+\n+\n 7.0.1 (2025-03-21)\n ------------------\n \ndiff --git a/news/133.feature b/news/133.feature\ndeleted file mode 100644\nindex 86e4ef5..0000000\n--- a/news/133.feature\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-Scale/crop SVG images by using plone.scale new scale_svg_image.\n-This modifies the viewport of the SVG accordingly.\n-[@jensens]\n\\ No newline at end of file\ndiff --git a/news/167.bugfix b/news/167.bugfix\ndeleted file mode 100644\nindex 1832906..0000000\n--- a/news/167.bugfix\n+++ /dev/null\n@@ -1 +0,0 @@\n-Adjusted schema validation to prevent file/image loading during upload/import\n\\ No newline at end of file\ndiff --git a/setup.py b/setup.py\nindex c35a6ae..d8f041f 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -4,7 +4,7 @@\n import os\n \n \n-version = "7.0.2.dev0"\n+version = "7.0.3.dev0"\n \n description = "File types and fields for images, files and blob files with filenames"\n long_description = "\\n\\n".join(\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T09:17:49+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/10a4ac34b003c0ba53b296cf93b6ef524165dc78
-
-documentation
-
-Files changed:
-M plone/namedfile/usage.rst
-
-b'diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex c18cf07..9127721 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -457,3 +457,43 @@ several ways that you may reference scales from page templates.\n 5. and lastly, the short-cut can also be used to render the unscaled image::\n \n      <img tal:replace="structure context/@@images/image" />\n+\n+\n+Image scales and srcset\n+-----------------------\n+\n+Nowadays modern browsers are able to render different images depending on their width\n+if urls and widths are correctly provided in an attribute called `srcset` and the rendered\n+space is provided in the attribute `sizes`.\n+\n+So one can do the following:\n+\n+    <img tal:define="images context/@@images;"\n+         tal:replace="structure python:images.srcset(sizes=\'90vw\')" />\n+\n+\n+This will render the `img` with the urls of all scales configured in Plone, calculating the width\n+of each of the scales and will add the `sizes="90vw"` attribute which instructs the browser to "render\n+the image that best fits as it will take the 90% of the current viewport-width" whichever is the current\n+viewport.\n+\n+This will mean that for bigger screens the browser will download a bigger image while in small screens\n+a smaller scale is enough.\n+\n+This also means that the developer does not need to worry on creating a specific scale, they only need to\n+provide the correct media query to signal the required width.\n+\n+The `scrset` method of the `@@images` view takes also all other parameters that can be rendered in the `img`\n+tag such as `title`, `alt` or `loading`:\n+\n+\n+    <img tal:define="images context/@@images;"\n+         tal:replace="structure python:images.srcset(sizes=\'90vw\',\n+                                                     alt=\'This is the alternative text\',\n+                                                     loading=\'lazy\',\n+                                                     css_class=\'rounded-img\')" />\n+\n+\n+*NOTE*: while using this approach may be useful for projects, using it in reusable addons is not recomended\n+because it may require overriding it to your needs in a project. For such cases, we recomend using configurable\n+picture variants.\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T09:19:56+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/90f75251151ffac5b46bb11ccf28299d439b8d60
-
-Merge branch 'main' into erral-img-srcset
-
-Files changed:
-A news/181.bugfix
-A plone/namedfile/tests/900.webp
-A plone/namedfile/tests/image.bmp
-A plone/namedfile/tests/image_loseless.webp
-A plone/namedfile/tests/image_lossy.webp
-M .gitignore
-M plone/namedfile/tests/test_storable.py
-M plone/namedfile/tests/test_utils.py
-M plone/namedfile/utils/__init__.py
-
-b'diff --git a/.gitignore b/.gitignore\nindex a602abe..6a9a394 100644\n--- a/.gitignore\n+++ b/.gitignore\n@@ -38,6 +38,7 @@ parts/\n pyvenv.cfg\n var/\n local.cfg\n+.python-version\n \n # mxdev\n /instance/\ndiff --git a/news/181.bugfix b/news/181.bugfix\nnew file mode 100644\nindex 0000000..2d1ea98\n--- /dev/null\n+++ b/news/181.bugfix\n@@ -0,0 +1 @@\n+Support for extracting metadata from WebP images without loading the entire image into memory, as already done for other formats. [mamico]\ndiff --git a/plone/namedfile/tests/900.webp b/plone/namedfile/tests/900.webp\nnew file mode 100644\nindex 0000000..c2c4bfd\nBinary files /dev/null and b/plone/namedfile/tests/900.webp differ\ndiff --git a/plone/namedfile/tests/image.bmp b/plone/namedfile/tests/image.bmp\nnew file mode 100644\nindex 0000000..00494d5\nBinary files /dev/null and b/plone/namedfile/tests/image.bmp differ\ndiff --git a/plone/namedfile/tests/image_loseless.webp b/plone/namedfile/tests/image_loseless.webp\nnew file mode 100644\nindex 0000000..db5fcb1\nBinary files /dev/null and b/plone/namedfile/tests/image_loseless.webp differ\ndiff --git a/plone/namedfile/tests/image_lossy.webp b/plone/namedfile/tests/image_lossy.webp\nnew file mode 100644\nindex 0000000..ef78d2e\nBinary files /dev/null and b/plone/namedfile/tests/image_lossy.webp differ\ndiff --git a/plone/namedfile/tests/test_storable.py b/plone/namedfile/tests/test_storable.py\nindex bf4dc35..f163083 100644\n--- a/plone/namedfile/tests/test_storable.py\n+++ b/plone/namedfile/tests/test_storable.py\n@@ -25,7 +25,10 @@\n from ZODB.blob import Blob\n from ZODB.blob import BlobFile\n \n+import io\n import os\n+import piexif\n+import PIL\n import tempfile\n import unittest\n \n@@ -128,3 +131,80 @@ def count_reads(self, size=-1):\n             self.assertEqual(\n                 read_bytes, 0, "Validation is reading the whole blob in memory"\n             )\n+\n+    def test_large_webp_storable(self):\n+        # ensure we don\'t read the whole file into memory\n+\n+        old_open = Blob.open\n+        blob_read = 0\n+        blob_write = 0\n+        old_read = BlobFile.read\n+        read_bytes = 0\n+\n+        def count_open(self, mode="r"):\n+            nonlocal blob_read, blob_write\n+            blob_read += 1 if "r" in mode else 0\n+            blob_write += 1 if "w" in mode else 0\n+            return old_open(self, mode)\n+\n+        def count_reads(self, size=-1):\n+            nonlocal read_bytes\n+            res = old_read(self, size)\n+            read_bytes += len(res)\n+            return res\n+\n+        with patch.object(Blob, "open", count_open), patch.object(\n+            BlobFile, "read", count_reads\n+        ):\n+            fi = NamedBlobImage(getFile("900.webp"), filename="900.webp")\n+            self.assertEqual((900, 900), fi.getImageSize())\n+            self.assertLess(\n+                read_bytes,\n+                fi.getSize(),\n+                "Images should not need to read all data to get exif, dimensions",\n+            )\n+            self.assertEqual(\n+                blob_read, 3, "blob opening for getsize, get_exif and getImageInfo only"\n+            )\n+\n+    def test_rotate(self):\n+        # Create a 200x200 white image\n+        img = PIL.Image.new("RGB", (100, 400), "white")\n+        # Set the top-left pixels to black\n+        img.putpixel((0, 0), (0, 0, 0))\n+\n+        # 270 degree rotation\n+        # Create EXIF dict\n+        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}\n+        exif_dict["0th"][piexif.ImageIFD.Orientation] = 6\n+        exif_bytes = piexif.dump(exif_dict)\n+        # Save image as JPEG with EXIF data\n+        out = io.BytesIO()\n+        img.save(out, format="JPEG", exif=exif_bytes)\n+        fi_jpg = NamedBlobImage(out.getvalue(), filename="image.jpg")\n+        img_jpg = PIL.Image.open(io.BytesIO(fi_jpg.data))\n+        self.assertEqual(fi_jpg.getImageSize(), (400, 100))\n+        self.assertEqual(img_jpg.getpixel((0, 0)), (255, 255, 255))\n+        # The pixel is not exactly black (RGB 0,0,0) due to quantization errors and\n+        # compression artifacts introduced by the JPEG encoding process.\n+        self.assertEqual(img_jpg.getpixel((399, 0)), (10, 10, 10))\n+        self.assertEqual(img_jpg.getpixel((0, 99)), (255, 255, 255))\n+        self.assertEqual(img_jpg.getpixel((399, 99)), (255, 255, 255))\n+\n+        # flip left to right\n+        # Create EXIF dict\n+        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}\n+        exif_dict["0th"][piexif.ImageIFD.Orientation] = 2\n+        exif_bytes = piexif.dump(exif_dict)\n+        # Save image as JPEG with EXIF data\n+        out = io.BytesIO()\n+        img.save(out, format="JPEG", exif=exif_bytes)\n+        fi_jpg = NamedBlobImage(out.getvalue(), filename="image.jpg")\n+        img_jpg = PIL.Image.open(io.BytesIO(fi_jpg.data))\n+        self.assertEqual(fi_jpg.getImageSize(), (100, 400))\n+        self.assertEqual(img_jpg.getpixel((0, 0)), (255, 255, 255))\n+        # The pixel is not exactly black (RGB 0,0,0) due to quantization errors and\n+        # compression artifacts introduced by the JPEG encoding process.\n+        self.assertEqual(img_jpg.getpixel((99, 0)), (8, 8, 8))\n+        self.assertEqual(img_jpg.getpixel((0, 399)), (255, 255, 255))\n+        self.assertEqual(img_jpg.getpixel((99, 399)), (255, 255, 255))\ndiff --git a/plone/namedfile/tests/test_utils.py b/plone/namedfile/tests/test_utils.py\nindex 4ef9bff..b74f412 100644\n--- a/plone/namedfile/tests/test_utils.py\n+++ b/plone/namedfile/tests/test_utils.py\n@@ -1,6 +1,7 @@\n from plone.namedfile.file import NamedImage\n from plone.namedfile.tests import getFile\n from plone.namedfile.utils import get_contenttype\n+from plone.namedfile.utils import getImageInfo\n \n import unittest\n \n@@ -62,3 +63,29 @@ def test_get_contenttype(self):\n             get_contenttype(filename="nothing.plonenamedfile"),\n             "application/octet-stream",\n         )\n+\n+    def test_get_image_info(self):\n+\n+        # WEBP WP8\n+        self.assertEqual(\n+            getImageInfo(getFile("image_lossy.webp")),\n+            ("image/webp", 500, 200),\n+        )\n+\n+        # WEBP WP8L\n+        self.assertEqual(\n+            getImageInfo(getFile("image_loseless.webp")),\n+            ("image/webp", 200, 200),\n+        )\n+\n+        # PNG\n+        self.assertEqual(\n+            getImageInfo(getFile("image.png")),\n+            ("image/png", 200, 200),\n+        )\n+\n+        # BMP3\n+        self.assertEqual(\n+            getImageInfo(getFile("image.bmp")),\n+            ("image/x-ms-bmp", 200, 200),\n+        )\ndiff --git a/plone/namedfile/utils/__init__.py b/plone/namedfile/utils/__init__.py\nindex 54eb026..b240ed7 100644\n--- a/plone/namedfile/utils/__init__.py\n+++ b/plone/namedfile/utils/__init__.py\n@@ -203,11 +203,37 @@ def getImageInfo(data):\n             content_type = "image/x-ms-bmp"\n             width, height = struct.unpack("<LL", data[18:26])\n \n+    elif size > 30 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":\n+        # handle WEBPs\n+        content_type = "image/webp"\n+        chunk_type = data[12:16]\n+        if chunk_type == b"VP8 ":\n+            # WebP lossy (VP8): width and height are at offset 26\xe2\x80\x9330 (2 bytes each, little endian)\n+            width = int.from_bytes(data[26:28], "little") & 0x3FFF\n+            height = int.from_bytes(data[28:30], "little") & 0x3FFF\n+        elif chunk_type == b"VP8L":\n+            # WebP lossless (VP8L): dimensions are encoded in 4 bytes at offset 21\xe2\x80\x9325\n+            b = data[21:25]\n+            b0, b1, b2, b3 = b\n+            width = ((b1 & 0x3F) << 8 | b0) + 1\n+            height = ((b3 & 0xF) << 10 | b2 << 2 | (b1 >> 6)) + 1\n+        elif chunk_type == b"VP8X":\n+            # Extended WebP (VP8X)\n+            # Width: bytes 24-26 (little endian, minus 1)\n+            # Height: bytes 27-29 (little endian, minus 1)\n+            width_bytes = data[24:27]\n+            height_bytes = data[27:30]\n+            width = int.from_bytes(width_bytes, "little") + 1\n+            height = int.from_bytes(height_bytes, "little") + 1\n+        else:\n+            # Not supported: could be animation, etc.\n+            pass\n+\n     elif size and b"http://www.w3.org/2000/svg" in data:\n         # handle SVGs\n         content_type, width, height = process_svg(data)\n \n-    else:\n+    if (width, height) == (-1, -1):\n         # Use PIL / Pillow to determ Image Information\n         try:\n             img = PIL.Image.open(BytesIO(data))\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T09:31:53+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/2dc84ba56c9b63688583d337855bdd8e3901e394
-
-fix spelling
-
-Files changed:
-M plone/namedfile/usage.rst
-
-b'diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex 9127721..3061b7d 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -494,6 +494,6 @@ tag such as `title`, `alt` or `loading`:\n                                                      css_class=\'rounded-img\')" />\n \n \n-*NOTE*: while using this approach may be useful for projects, using it in reusable addons is not recomended\n-because it may require overriding it to your needs in a project. For such cases, we recomend using configurable\n+*NOTE*: while using this approach may be useful for projects, using it in reusable addons is not recommended\n+because it may require overriding it to your needs in a project. For such cases, we recommend using configurable\n picture variants.\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T12:13:43+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/0fc3c04adaf78fc498fc88c5e24842d86ada8bf0
-
-Update plone/namedfile/usage.rst
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
-
-Files changed:
-M plone/namedfile/usage.rst
-
-b'diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex 3061b7d..f22410a 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -463,8 +463,8 @@ Image scales and srcset\n -----------------------\n \n Nowadays modern browsers are able to render different images depending on their width\n-if urls and widths are correctly provided in an attribute called `srcset` and the rendered\n-space is provided in the attribute `sizes`.\n+if URLs and widths are correctly provided in an attribute called ``srcset``, and the rendered\n+space is provided in the attribute ``sizes``.\n \n So one can do the following:\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T12:14:05+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/de4c763b10f2fda7a9aa4e65e9792f651c1e1072
-
-Update plone/namedfile/usage.rst
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
-
-Files changed:
-M plone/namedfile/usage.rst
-
-b'diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex f22410a..450f34f 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -472,8 +472,9 @@ So one can do the following:\n          tal:replace="structure python:images.srcset(sizes=\'90vw\')" />\n \n \n-This will render the `img` with the urls of all scales configured in Plone, calculating the width\n-of each of the scales and will add the `sizes="90vw"` attribute which instructs the browser to "render\n+This will render the ``img`` with the URLs of all scales configured in Plone, calculating the width\n+of each of the scales and will add the ``sizes="90vw"`` attribute. \n+The ``sizes`` attribute instructs the browser to render\n the image that best fits as it will take the 90% of the current viewport-width" whichever is the current\n viewport.\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T12:15:24+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/41be735a8662619e0cc72086a329c56159741647
-
-Apply suggestions from code review
-
-Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
-
-Files changed:
-M plone/namedfile/usage.rst
-
-b'diff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex 450f34f..c1aca57 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -468,6 +468,8 @@ space is provided in the attribute ``sizes``.\n \n So one can do the following:\n \n+.. code-block:: xml\n+\n     <img tal:define="images context/@@images;"\n          tal:replace="structure python:images.srcset(sizes=\'90vw\')" />\n \n@@ -475,17 +477,16 @@ So one can do the following:\n This will render the ``img`` with the URLs of all scales configured in Plone, calculating the width\n of each of the scales and will add the ``sizes="90vw"`` attribute. \n The ``sizes`` attribute instructs the browser to render\n-the image that best fits as it will take the 90% of the current viewport-width" whichever is the current\n-viewport.\n+the image that best fits, as it will take 90% of the current viewport width.\n+\n+This means that, for bigger screens, the browser will download a bigger scaled image, while for smaller screens, a smaller scaled image is enough.\n \n-This will mean that for bigger screens the browser will download a bigger image while in small screens\n-a smaller scale is enough.\n+This also means that the developer does not need to worry about creating a specific scale.\n+They only need to provide the correct media query to signal the required width.\n \n-This also means that the developer does not need to worry on creating a specific scale, they only need to\n-provide the correct media query to signal the required width.\n+The ``scrset`` method of the ``@@images`` view also takes all other parameters that can be rendered in the ``img`` tag, such as ``title``, ``alt``, or ``loading``:\n \n-The `scrset` method of the `@@images` view takes also all other parameters that can be rendered in the `img`\n-tag such as `title`, `alt` or `loading`:\n+.. code-block:: xml\n \n \n     <img tal:define="images context/@@images;"\n@@ -495,6 +496,7 @@ tag such as `title`, `alt` or `loading`:\n                                                      css_class=\'rounded-img\')" />\n \n \n-*NOTE*: while using this approach may be useful for projects, using it in reusable addons is not recommended\n-because it may require overriding it to your needs in a project. For such cases, we recommend using configurable\n-picture variants.\n+.. note::\n+\n+    While using this approach may be useful for projects, using it in reusable add-ons is not recommended, because it may require overriding it to your needs in a project.\n+    For such cases, use configurable picture variants instead.\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T12:32:24+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/0a6f4e0aa2962dc4847e75cafc748a8bd12ee70e
-
-point documentation of this package to Plone docs
-
-Files changed:
-M README.rst
-M plone/namedfile/usage.rst
-
-b'diff --git a/README.rst b/README.rst\nindex 8314989..98a9464 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -12,13 +12,14 @@ and BLOBs to be configured in zope.conf.\n \n plone.supermodel handlers are registered.\n \n-See the ``usage.rst`` doctest for more details.\n+See the `image handling section of Plone documentation <https://6.docs.plone.org/classic-ui/images.html#all-image-scales-in-the-srcset>`_ to learn how to\n+use the features provided by this package.\n \n \n Source Code\n ===========\n \n- Note: This packages is licensed under a *BSD license*. \n+ Note: This packages is licensed under a *BSD license*.\n  Please do not add dependencies on GPL code!\n \n Contributors please read the document `Process for Plone core\'s development <https://docs.plone.org/develop/coredev/docs/index.html>`_\ndiff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex c1aca57..8dbb027 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -403,100 +403,3 @@ We will test this with a dummy request, faking traversal::\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n     "attachment; filename*=UTF-8\'\'test.txt"\n-\n-\n-Image scales\n-------------\n-\n-This package can handle the creation, storage, and retrieval of arbitrarily\n-sized scaled versions of images stored in NamedImage or NamedBlobImage fields.\n-\n-Image scales are accessed via an @@images view that is available for any item\n-providing ``plone.namedfile.interfaces.IImageScaleTraversable``.  There are\n-several ways that you may reference scales from page templates.\n-\n-1. for full control you may do the tag generation explicitly::\n-\n-     <img tal:define="images context/@@images;\n-                      thumbnail python: images.scale(\'image\', width=64, height=64);"\n-          tal:condition="thumbnail"\n-          tal:attributes="src thumbnail/url;\n-                          width thumbnail/width;\n-                          height thumbnail/height" />\n-\n-   This would create an up to 64 by 64 pixel scaled down version of the image\n-   stored in the "image" field.  It also allows for passing in additional\n-   parameters supported by the ``scaleImage`` function from ``plone.scale``,\n-   e.g. ``mode`` or ``quality``.\n-\n-   .. _`plone.scale`: https://pypi.org/project/plone.scale/\n-\n-2. for automatic tag generation with extra parameters you would use::\n-\n-     <img tal:define="images context/@@images"\n-          tal:replace="structure python: images.tag(\'image\',\n-                       width=1200, height=800, mode=\'contain\')" />\n-\n-3. It is possible to access scales via predefined named scale sizes, rather\n-   than hardcoding the dimensions every time you access a scale.  The scale\n-   sizes are found via calling a utility providing\n-   ``plone.namedfile.interfaces.IAvailableSizes``, which should return a dict of\n-   scale name => (width, height).  A scale called \'mini\' could then be accessed\n-   like this::\n-\n-     <img tal:define="images context/@@images"\n-          tal:replace="structure python: images.tag(\'image\', scale=\'mini\')" />\n-\n-   This would use the predefined scale size "mini" to determine the desired\n-   image dimensions, but still allow to pass in extra parameters.\n-\n-4. a convenience short-cut for option 3 can be used::\n-\n-     <img tal:replace="structure context/@@images/image/mini" />\n-\n-5. and lastly, the short-cut can also be used to render the unscaled image::\n-\n-     <img tal:replace="structure context/@@images/image" />\n-\n-\n-Image scales and srcset\n------------------------\n-\n-Nowadays modern browsers are able to render different images depending on their width\n-if URLs and widths are correctly provided in an attribute called ``srcset``, and the rendered\n-space is provided in the attribute ``sizes``.\n-\n-So one can do the following:\n-\n-.. code-block:: xml\n-\n-    <img tal:define="images context/@@images;"\n-         tal:replace="structure python:images.srcset(sizes=\'90vw\')" />\n-\n-\n-This will render the ``img`` with the URLs of all scales configured in Plone, calculating the width\n-of each of the scales and will add the ``sizes="90vw"`` attribute. \n-The ``sizes`` attribute instructs the browser to render\n-the image that best fits, as it will take 90% of the current viewport width.\n-\n-This means that, for bigger screens, the browser will download a bigger scaled image, while for smaller screens, a smaller scaled image is enough.\n-\n-This also means that the developer does not need to worry about creating a specific scale.\n-They only need to provide the correct media query to signal the required width.\n-\n-The ``scrset`` method of the ``@@images`` view also takes all other parameters that can be rendered in the ``img`` tag, such as ``title``, ``alt``, or ``loading``:\n-\n-.. code-block:: xml\n-\n-\n-    <img tal:define="images context/@@images;"\n-         tal:replace="structure python:images.srcset(sizes=\'90vw\',\n-                                                     alt=\'This is the alternative text\',\n-                                                     loading=\'lazy\',\n-                                                     css_class=\'rounded-img\')" />\n-\n-\n-.. note::\n-\n-    While using this approach may be useful for projects, using it in reusable add-ons is not recommended, because it may require overriding it to your needs in a project.\n-    For such cases, use configurable picture variants instead.\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T16:18:43+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/60e3642d22e2ca8a63e5a6768d1547a5a8e30c93
-
-Update plone/namedfile/scaling.py
-
-Co-authored-by: Alessandro Pisa &lt;alessandro.pisa@gmail.com&gt;
-
-Files changed:
-M plone/namedfile/scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex d6d68d8..5f57188 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -777,7 +777,7 @@ def srcset(\n                 )\n         attributes = {}\n         if title is _marker:\n-            attributes["title"] = self.context.Title()\n+            attributes["title"] = self.title\n         elif title:\n             attributes["title"] = title\n         if alt is not _marker:\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T16:19:17+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/30108e72ecac0eff7736897e1dfa248194b940b7
-
-make  attribute generation consistent with the  method
-
-Files changed:
-M plone/namedfile/scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex 5f57188..c4b2a6a 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -780,7 +780,9 @@ def srcset(\n             attributes["title"] = self.title\n         elif title:\n             attributes["title"] = title\n-        if alt is not _marker:\n+        if alt is _marker:\n+            attributes["alt"] = self.title\n+        else:\n             attributes["alt"] = alt\n \n         if css_class is not None:\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T16:40:18+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/0850c09f238f3f0a2562670c5827875a16559d91
-
-self.title does not work
-
-Files changed:
-M plone/namedfile/scaling.py
-
-b'diff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex c4b2a6a..ddf140c 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -777,11 +777,11 @@ def srcset(\n                 )\n         attributes = {}\n         if title is _marker:\n-            attributes["title"] = self.title\n+            attributes["title"] = self.context.Title()\n         elif title:\n             attributes["title"] = title\n         if alt is _marker:\n-            attributes["alt"] = self.title\n+            attributes["alt"] = self.context.Title()\n         else:\n             attributes["alt"] = alt\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-05-27T16:55:22+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/68c3e06b30891f246ffad1a9aef08627c1a9daa0
-
-fix testing after the alt/title changes
-
-Files changed:
-M plone/namedfile/tests/test_scaling.py
-
-b'diff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex e6abc78..47163b8 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -830,7 +830,7 @@ def testImgSrcSet(self):\n         }\n         tag = self.scaling.srcset("image", sizes="50vw")\n         base = self.item.absolute_url()\n-        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetCustomSrc(self):\n@@ -850,7 +850,7 @@ def testImgSrcSetCustomSrc(self):\n         }\n         tag = self.scaling.srcset("image", sizes="50vw", scale_in_src="mini")\n         base = self.item.absolute_url()\n-        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetInexistentScale(self):\n@@ -874,7 +874,7 @@ def testImgSrcSetInexistentScale(self):\n             "image", sizes="50vw", scale_in_src="inexistent-scale-name"\n         )\n         base = self.item.absolute_url()\n-        expected = f"""<img title="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetCustomTitle(self):\n@@ -894,7 +894,7 @@ def testImgSrcSetCustomTitle(self):\n         }\n         tag = self.scaling.srcset("image", sizes="50vw", title="My Custom Title")\n         base = self.item.absolute_url()\n-        expected = f"""<img title="My Custom Title" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        expected = f"""<img title="My Custom Title" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n     def testImgSrcSetAdditionalAttributes(self):\n@@ -921,6 +921,7 @@ def testImgSrcSetAdditionalAttributes(self):\n             loading="lazy",\n         )\n         base = self.item.absolute_url()\n+\n         expected = f"""<img title="My Custom Title" alt="This image shows nothing" class="my-personal-class" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n         self.assertTrue(_ellipsis_match(expected, tag.strip()))\n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2025-06-04T08:38:36+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/589f687034da36de41e377b6cf68f2f4a57bed2b
-
-Merge pull request #170 from plone/erral-img-srcset
-
-Add a method to the @@images view to render a img tag with srcset
-
-Files changed:
-A news/170.feature
-M README.rst
-M plone/namedfile/scaling.py
-M plone/namedfile/test.pt
-M plone/namedfile/tests/test_scaling.py
-M plone/namedfile/usage.rst
-
-b'diff --git a/README.rst b/README.rst\nindex 8314989..98a9464 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -12,13 +12,14 @@ and BLOBs to be configured in zope.conf.\n \n plone.supermodel handlers are registered.\n \n-See the ``usage.rst`` doctest for more details.\n+See the `image handling section of Plone documentation <https://6.docs.plone.org/classic-ui/images.html#all-image-scales-in-the-srcset>`_ to learn how to\n+use the features provided by this package.\n \n \n Source Code\n ===========\n \n- Note: This packages is licensed under a *BSD license*. \n+ Note: This packages is licensed under a *BSD license*.\n  Please do not add dependencies on GPL code!\n \n Contributors please read the document `Process for Plone core\'s development <https://docs.plone.org/develop/coredev/docs/index.html>`_\ndiff --git a/news/170.feature b/news/170.feature\nnew file mode 100644\nindex 0000000..a6c729d\n--- /dev/null\n+++ b/news/170.feature\n@@ -0,0 +1,2 @@\n+Add a srcset method to the @@images view\n+[erral]\ndiff --git a/plone/namedfile/scaling.py b/plone/namedfile/scaling.py\nindex f79fc6a..ddf140c 100644\n--- a/plone/namedfile/scaling.py\n+++ b/plone/namedfile/scaling.py\n@@ -739,6 +739,73 @@ def picture(\n             fieldname=fieldname,\n         ).prettify()\n \n+    def srcset(\n+        self,\n+        fieldname=None,\n+        scale_in_src="huge",\n+        sizes="",\n+        alt=_marker,\n+        css_class=None,\n+        title=_marker,\n+        **kwargs,\n+    ):\n+        if fieldname is None:\n+            try:\n+                primary = IPrimaryFieldInfo(self.context, None)\n+            except TypeError:\n+                return\n+            if primary is None:\n+                return  # 404\n+            fieldname = primary.fieldname\n+\n+        original_width, original_height = self.getImageSize(fieldname)\n+\n+        storage = getMultiAdapter(\n+            (self.context, functools.partial(self.modified, fieldname)),\n+            IImageScaleStorage,\n+        )\n+\n+        srcset_urls = []\n+        for width, height in self.available_sizes.values():\n+            if width <= original_width:\n+                scale = storage.pre_scale(\n+                    fieldname=fieldname, width=width, height=height, mode="scale"\n+                )\n+                extension = scale["mimetype"].split("/")[-1].lower()\n+                srcset_urls.append(\n+                    f\'{self.context.absolute_url()}/@@images/{scale["uid"]}.{extension} {scale["width"]}w\'\n+                )\n+        attributes = {}\n+        if title is _marker:\n+            attributes["title"] = self.context.Title()\n+        elif title:\n+            attributes["title"] = title\n+        if alt is _marker:\n+            attributes["alt"] = self.context.Title()\n+        else:\n+            attributes["alt"] = alt\n+\n+        if css_class is not None:\n+            attributes["class"] = css_class\n+\n+        attributes.update(**kwargs)\n+\n+        attributes["sizes"] = sizes\n+\n+        srcset_string = ", ".join(srcset_urls)\n+        attributes["srcset"] = srcset_string\n+\n+        if scale_in_src not in self.available_sizes:\n+            for key, (width, height) in self.available_sizes.items():\n+                if width <= original_width:\n+                    scale_in_src = key\n+                    break\n+\n+        scale = self.scale(fieldname=fieldname, scale=scale_in_src)\n+        attributes["src"] = scale.url\n+\n+        return _image_tag_from_values(*attributes.items())\n+\n \n class NavigationRootScaling(ImageScaling):\n     @lazy_property\ndiff --git a/plone/namedfile/test.pt b/plone/namedfile/test.pt\nindex 5568f1d..51c4b8c 100644\n--- a/plone/namedfile/test.pt\n+++ b/plone/namedfile/test.pt\n@@ -42,6 +42,10 @@\n              i18n:name=""\n              i18n:translate=""\n           >picture tags</a>,\n+          <a href="#srcset"\n+             i18n="name"\n+             i18n:translate=""\n+          >img tag with srcset</a>,\n           <a href="#stored"\n              i18n:name=""\n              i18n:translate=""\n@@ -198,6 +202,26 @@\n           </p>\n         </section>\n \n+        <section class="section"\n+                 id="srcset"\n+        >\n+          <h2 i18n:translate="">img with srcset attributes</h2>\n+          <p i18n:translate="">\n+      srcset allows the browser to select the correct image, depending on the space the image has on a page.\n+          </p>\n+          <p i18n:translate="msg_images_test_srcset">\n+      To do so, the @@images view provides a srcset method, that will output the full srcset of this image, using all available image scales. It has as required parameter the value of the sizes attribute that the user of this method has to provide and will be output as is in the generated HTML.\n+          </p>\n+          <p>\n+            <img tal:replace="structure python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+          </p>\n+          <p>\n+            <code>\n+              <img tal:replace="python:images.srcset(\'image\', sizes=\'(min-width: 1400px) 550px, 90vw\')" />\n+            </code>\n+          </p>\n+        </section>\n+\n         <section class="section"\n                  id="stored"\n         >\ndiff --git a/plone/namedfile/tests/test_scaling.py b/plone/namedfile/tests/test_scaling.py\nindex aa34934..47163b8 100644\n--- a/plone/namedfile/tests/test_scaling.py\n+++ b/plone/namedfile/tests/test_scaling.py\n@@ -813,6 +813,118 @@ def testOversizedHighPixelDensityScale(self):\n         self.assertEqual(len(foo.srcset), 1)\n         self.assertEqual(foo.srcset[0]["scale"], 2)\n \n+    def testImgSrcSet(self):\n+        """test rendered srcset values"""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetCustomSrc(self):\n+        """test that we can select a custom scale in the src attribute"""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", scale_in_src="mini")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetInexistentScale(self):\n+        """test that when requesting an inexistent scale for the src attribute\n+        we provide the biggest scale we can produce\n+        """\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset(\n+            "image", sizes="50vw", scale_in_src="inexistent-scale-name"\n+        )\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="foo" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-200-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetCustomTitle(self):\n+        """test passing a custom title to the srcset method"""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset("image", sizes="50vw", title="My Custom Title")\n+        base = self.item.absolute_url()\n+        expected = f"""<img title="My Custom Title" alt="foo" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n+    def testImgSrcSetAdditionalAttributes(self):\n+        """test that additional parameters are output as is, like alt, loading, ..."""\n+        self.scaling.available_sizes = {\n+            "huge": (1600, 65536),\n+            "great": (1200, 65536),\n+            "larger": (1000, 65536),\n+            "large": (800, 65536),\n+            "teaser": (600, 65536),\n+            "preview": (400, 65536),\n+            "mini": (200, 65536),\n+            "thumb": (128, 128),\n+            "tile": (64, 64),\n+            "icon": (32, 32),\n+            "listing": (16, 16),\n+        }\n+        tag = self.scaling.srcset(\n+            "image",\n+            sizes="50vw",\n+            alt="This image shows nothing",\n+            css_class="my-personal-class",\n+            title="My Custom Title",\n+            loading="lazy",\n+        )\n+        base = self.item.absolute_url()\n+\n+        expected = f"""<img title="My Custom Title" alt="This image shows nothing" class="my-personal-class" loading="lazy" sizes="50vw" srcset="{base}/@@images/image-200-....png 200w, {base}/@@images/image-128-....png 128w, {base}/@@images/image-64-....png 64w, {base}/@@images/image-32-....png 32w, {base}/@@images/image-16-....png 16w" src="{base}/@@images/image-1600-....png".../>"""\n+        self.assertTrue(_ellipsis_match(expected, tag.strip()))\n+\n \n class ImageTraverseTests(unittest.TestCase):\n \ndiff --git a/plone/namedfile/usage.rst b/plone/namedfile/usage.rst\nindex c18cf07..8dbb027 100644\n--- a/plone/namedfile/usage.rst\n+++ b/plone/namedfile/usage.rst\n@@ -403,57 +403,3 @@ We will test this with a dummy request, faking traversal::\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n     "attachment; filename*=UTF-8\'\'test.txt"\n-\n-\n-Image scales\n-------------\n-\n-This package can handle the creation, storage, and retrieval of arbitrarily\n-sized scaled versions of images stored in NamedImage or NamedBlobImage fields.\n-\n-Image scales are accessed via an @@images view that is available for any item\n-providing ``plone.namedfile.interfaces.IImageScaleTraversable``.  There are\n-several ways that you may reference scales from page templates.\n-\n-1. for full control you may do the tag generation explicitly::\n-\n-     <img tal:define="images context/@@images;\n-                      thumbnail python: images.scale(\'image\', width=64, height=64);"\n-          tal:condition="thumbnail"\n-          tal:attributes="src thumbnail/url;\n-                          width thumbnail/width;\n-                          height thumbnail/height" />\n-\n-   This would create an up to 64 by 64 pixel scaled down version of the image\n-   stored in the "image" field.  It also allows for passing in additional\n-   parameters supported by the ``scaleImage`` function from ``plone.scale``,\n-   e.g. ``mode`` or ``quality``.\n-\n-   .. _`plone.scale`: https://pypi.org/project/plone.scale/\n-\n-2. for automatic tag generation with extra parameters you would use::\n-\n-     <img tal:define="images context/@@images"\n-          tal:replace="structure python: images.tag(\'image\',\n-                       width=1200, height=800, mode=\'contain\')" />\n-\n-3. It is possible to access scales via predefined named scale sizes, rather\n-   than hardcoding the dimensions every time you access a scale.  The scale\n-   sizes are found via calling a utility providing\n-   ``plone.namedfile.interfaces.IAvailableSizes``, which should return a dict of\n-   scale name => (width, height).  A scale called \'mini\' could then be accessed\n-   like this::\n-\n-     <img tal:define="images context/@@images"\n-          tal:replace="structure python: images.tag(\'image\', scale=\'mini\')" />\n-\n-   This would use the predefined scale size "mini" to determine the desired\n-   image dimensions, but still allow to pass in extra parameters.\n-\n-4. a convenience short-cut for option 3 can be used::\n-\n-     <img tal:replace="structure context/@@images/image/mini" />\n-\n-5. and lastly, the short-cut can also be used to render the unscaled image::\n-\n-     <img tal:replace="structure context/@@images/image" />\n'
+b'diff --git a/Products/CMFPlone/profiles/default/actions.xml b/Products/CMFPlone/profiles/default/actions.xml\nindex ef306875cc..46e0a043cd 100644\n--- a/Products/CMFPlone/profiles/default/actions.xml\n+++ b/Products/CMFPlone/profiles/default/actions.xml\n@@ -60,7 +60,7 @@\n       />\n       <property name="url_expr">string:$object_url/external_edit</property>\n       <property name="icon_expr">string:$portal_url/extedit_icon.png</property>\n-      <property name="available_expr">object/externalEditorEnabled</property>\n+      <property name="available_expr">object/externalEditorEnabled|nothing</property>\n       <property name="permissions">\n         <element value="Modify portal content" />\n       </property>\ndiff --git a/news/4179.bugfix b/news/4179.bugfix\nnew file mode 100644\nindex 0000000000..8f39acb659\n--- /dev/null\n+++ b/news/4179.bugfix\n@@ -0,0 +1,2 @@\n+Harden condition of external editor action to not fail when the `externalEditorEnabled` script is not available.\n+[maurits]\n'
 
