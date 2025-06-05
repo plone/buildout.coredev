@@ -1,38 +1,72 @@
-Repository: plone.protect
+Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2025-06-04T12:21:40+02:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/plone.protect/commit/71975c0239019b1fd4776c0606e4ec4add6f17f3
-
-Do not allow the confirm-action view to be called without a valid authenticator
-
-Files changed:
-A news/131.bugfix.rxt
-M plone/protect/auto.py
-M plone/protect/tests/test_confirm_view.py
-M plone/protect/views.py
-
-b'diff --git a/news/131.bugfix.rxt b/news/131.bugfix.rxt\nnew file mode 100644\nindex 0000000..ec25219\n--- /dev/null\n+++ b/news/131.bugfix.rxt\n@@ -0,0 +1 @@\n+Do not allow the confirm-action view to be called without a valid authenticator. [ale-rt]\ndiff --git a/plone/protect/auto.py b/plone/protect/auto.py\nindex 094b03f..9c27694 100644\n--- a/plone/protect/auto.py\n+++ b/plone/protect/auto.py\n@@ -301,6 +301,10 @@ def _check(self):\n                     if self.site and (resp.status in (301, 302) or "text/html" in ct):\n                         data = self.request.form.copy()\n                         data["original_url"] = self.request.URL\n+                        # NOTE: self.key_manager is initialized in the transformIterable\n+                        # method, which calls the check method and thus this\n+                        # _check method.\n+                        data["_authenticator"] = createToken(manager=self.key_manager)\n                         resp.redirect(\n                             "{}/@@confirm-action?{}".format(\n                                 self.site.absolute_url(), urlencode(data)\ndiff --git a/plone/protect/tests/test_confirm_view.py b/plone/protect/tests/test_confirm_view.py\nindex 46c0881..1b62d6e 100644\n--- a/plone/protect/tests/test_confirm_view.py\n+++ b/plone/protect/tests/test_confirm_view.py\n@@ -1,3 +1,4 @@\n+from plone.protect.authenticator import createToken\n from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING\n from zExceptions import Forbidden\n from zope.component import getMultiAdapter\n@@ -12,12 +13,26 @@ def test_regression(self):\n         portal = self.layer["portal"]\n         request = self.layer["request"]\n         view = getMultiAdapter((portal, request), name="confirm-action")\n-        request.form.update({"original_url": "foobar"})\n+        request.form.update({"original_url": "foobar", "_authenticator": createToken()})\n         self.assertTrue(\'value="foobar"\' in view())\n \n     def test_valid_url(self):\n         portal = self.layer["portal"]\n         request = self.layer["request"]\n         view = getMultiAdapter((portal, request), name="confirm-action")\n-        request.form.update({"original_url": "javascript:alert(1)"})\n+        request.form.update(\n+            {"original_url": "javascript:alert(1)", "_authenticator": createToken()}\n+        )\n         self.assertRaises(Forbidden, view)\n+\n+    def test_valid_authenticator(self):\n+        portal = self.layer["portal"]\n+        request = self.layer["request"]\n+        view = getMultiAdapter((portal, request), name="confirm-action")\n+        request.form.update(\n+            {"original_url": portal.absolute_url(), "_authenticator": "foobar"}\n+        )\n+\n+        with self.assertRaises(Forbidden) as cm:\n+            view()\n+        self.assertEqual(str(cm.exception), "Form authenticator is invalid.")\ndiff --git a/plone/protect/views.py b/plone/protect/views.py\nindex 9e1f56a..aed64d7 100644\n--- a/plone/protect/views.py\n+++ b/plone/protect/views.py\n@@ -1,3 +1,4 @@\n+from plone.protect.authenticator import check\n from plone.protect.interfaces import IConfirmView\n from Products.CMFCore.utils import getToolByName\n from Products.Five import BrowserView\n@@ -7,7 +8,9 @@\n \n @implementer(IConfirmView)\n class ConfirmView(BrowserView):\n+\n     def __call__(self):\n+        check(self.request)\n         urltool = getToolByName(self.context, "portal_url")\n         original_url = getattr(self.request, "original_url", "")\n         if not original_url or not urltool.isURLInPortal(original_url):\n'
-
-Repository: plone.protect
-
-
-Branch: refs/heads/master
-Date: 2025-06-04T17:08:24+02:00
+Date: 2025-06-04T20:46:37+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.protect/commit/b91506b388e597e4b9a3ee6b46a965878d79db03
+Commit: https://github.com/plone/Products.CMFPlone/commit/6c39a11fdf6796e274082cc089e710f359fc7a2a
 
-Merge pull request #131 from plone/protect-confirm-action
+Harden condition of external editor action to not fail when the script is not available.
 
-Strict protection on the confirm-action view
+In a client project, getting the actions failed, because the `plone_scripts` skin layer was not available.
+This is where the ``externalEditorEnabled`` script still lives.
+So this gave a traceback, for example when getting the `@actions` rest api endpoint:
+
+```
+Traceback (innermost last):
+  Module ZPublisher.WSGIPublisher, line 181, in transaction_pubevents
+  Module ZPublisher.WSGIPublisher, line 390, in publish_module
+  Module ZPublisher.WSGIPublisher, line 284, in publish
+  Module ZPublisher.mapply, line 98, in mapply
+  Module ZPublisher.WSGIPublisher, line 68, in call_object
+  Module plone.rest.service, line 21, in __call__
+  Module plone.restapi.services, line 19, in render
+  Module plone.restapi.services.content.get, line 16, in reply
+  Module plone.restapi.serializer.dxcontent, line 168, in __call__
+  Module plone.restapi.serializer.dxcontent, line 127, in __call__
+  Module plone.restapi.serializer.expansion, line 21, in expandable_elements
+  Module plone.restapi.services.actions.get, line 32, in __call__
+  Module plone.memoize.view, line 51, in memogetter
+  Module plone.app.layout.globals.context, line 244, in actions
+  Module Products.CMFPlone.ActionsTool, line 83, in listActionInfos
+  Module Products.CMFCore.ActionInformation, line 211, in __getitem__
+  Module Products.CMFCore.Expression, line 53, in __call__
+  Module zope.tales.expressions, line 248, in __call__
+  Module Products.PageTemplates.Expressions, line 217, in _eval
+  Module zope.tales.expressions, line 153, in _eval
+  Module Products.PageTemplates.Expressions, line 85, in boboAwareZopeTraverse
+  Module OFS.Traversable, line 364, in restrictedTraverse
+  Module OFS.Traversable, line 347, in unrestrictedTraverse
+   - __traceback_info__: ([], 'externalEditorEnabled')
+  Module OFS.Traversable, line 301, in unrestrictedTraverse
+   - __traceback_info__: ([], 'externalEditorEnabled')
+  Module plone.folder.ordered, line 229, in __getitem__
+KeyError: 'externalEditorEnabled'
+```
+
+I think it is fine to only do this on new sites, and have no upgrade step.
 
 Files changed:
-A news/131.bugfix.rxt
-M plone/protect/auto.py
-M plone/protect/tests/test_confirm_view.py
-M plone/protect/views.py
+A news/4179.bugfix
+M Products/CMFPlone/profiles/default/actions.xml
 
-b'diff --git a/news/131.bugfix.rxt b/news/131.bugfix.rxt\nnew file mode 100644\nindex 0000000..ec25219\n--- /dev/null\n+++ b/news/131.bugfix.rxt\n@@ -0,0 +1 @@\n+Do not allow the confirm-action view to be called without a valid authenticator. [ale-rt]\ndiff --git a/plone/protect/auto.py b/plone/protect/auto.py\nindex 094b03f..9c27694 100644\n--- a/plone/protect/auto.py\n+++ b/plone/protect/auto.py\n@@ -301,6 +301,10 @@ def _check(self):\n                     if self.site and (resp.status in (301, 302) or "text/html" in ct):\n                         data = self.request.form.copy()\n                         data["original_url"] = self.request.URL\n+                        # NOTE: self.key_manager is initialized in the transformIterable\n+                        # method, which calls the check method and thus this\n+                        # _check method.\n+                        data["_authenticator"] = createToken(manager=self.key_manager)\n                         resp.redirect(\n                             "{}/@@confirm-action?{}".format(\n                                 self.site.absolute_url(), urlencode(data)\ndiff --git a/plone/protect/tests/test_confirm_view.py b/plone/protect/tests/test_confirm_view.py\nindex 46c0881..1b62d6e 100644\n--- a/plone/protect/tests/test_confirm_view.py\n+++ b/plone/protect/tests/test_confirm_view.py\n@@ -1,3 +1,4 @@\n+from plone.protect.authenticator import createToken\n from plone.protect.testing import PROTECT_FUNCTIONAL_TESTING\n from zExceptions import Forbidden\n from zope.component import getMultiAdapter\n@@ -12,12 +13,26 @@ def test_regression(self):\n         portal = self.layer["portal"]\n         request = self.layer["request"]\n         view = getMultiAdapter((portal, request), name="confirm-action")\n-        request.form.update({"original_url": "foobar"})\n+        request.form.update({"original_url": "foobar", "_authenticator": createToken()})\n         self.assertTrue(\'value="foobar"\' in view())\n \n     def test_valid_url(self):\n         portal = self.layer["portal"]\n         request = self.layer["request"]\n         view = getMultiAdapter((portal, request), name="confirm-action")\n-        request.form.update({"original_url": "javascript:alert(1)"})\n+        request.form.update(\n+            {"original_url": "javascript:alert(1)", "_authenticator": createToken()}\n+        )\n         self.assertRaises(Forbidden, view)\n+\n+    def test_valid_authenticator(self):\n+        portal = self.layer["portal"]\n+        request = self.layer["request"]\n+        view = getMultiAdapter((portal, request), name="confirm-action")\n+        request.form.update(\n+            {"original_url": portal.absolute_url(), "_authenticator": "foobar"}\n+        )\n+\n+        with self.assertRaises(Forbidden) as cm:\n+            view()\n+        self.assertEqual(str(cm.exception), "Form authenticator is invalid.")\ndiff --git a/plone/protect/views.py b/plone/protect/views.py\nindex 9e1f56a..aed64d7 100644\n--- a/plone/protect/views.py\n+++ b/plone/protect/views.py\n@@ -1,3 +1,4 @@\n+from plone.protect.authenticator import check\n from plone.protect.interfaces import IConfirmView\n from Products.CMFCore.utils import getToolByName\n from Products.Five import BrowserView\n@@ -7,7 +8,9 @@\n \n @implementer(IConfirmView)\n class ConfirmView(BrowserView):\n+\n     def __call__(self):\n+        check(self.request)\n         urltool = getToolByName(self.context, "portal_url")\n         original_url = getattr(self.request, "original_url", "")\n         if not original_url or not urltool.isURLInPortal(original_url):\n'
+b'diff --git a/Products/CMFPlone/profiles/default/actions.xml b/Products/CMFPlone/profiles/default/actions.xml\nindex ef306875cc..46e0a043cd 100644\n--- a/Products/CMFPlone/profiles/default/actions.xml\n+++ b/Products/CMFPlone/profiles/default/actions.xml\n@@ -60,7 +60,7 @@\n       />\n       <property name="url_expr">string:$object_url/external_edit</property>\n       <property name="icon_expr">string:$portal_url/extedit_icon.png</property>\n-      <property name="available_expr">object/externalEditorEnabled</property>\n+      <property name="available_expr">object/externalEditorEnabled|nothing</property>\n       <property name="permissions">\n         <element value="Modify portal content" />\n       </property>\ndiff --git a/news/4179.bugfix b/news/4179.bugfix\nnew file mode 100644\nindex 0000000000..8f39acb659\n--- /dev/null\n+++ b/news/4179.bugfix\n@@ -0,0 +1,2 @@\n+Harden condition of external editor action to not fail when the `externalEditorEnabled` script is not available.\n+[maurits]\n'
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2025-06-05T11:02:39+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
+Commit: https://github.com/plone/Products.CMFPlone/commit/8953874a5f34401bbbbad1e99febc7e9bf740b93
+
+Merge pull request #4189 from plone/maurits-external-editor-nothing-62
+
+Harden condition of external editor action to not fail [6.2]
+
+Files changed:
+A news/4179.bugfix
+M Products/CMFPlone/profiles/default/actions.xml
+
+b'diff --git a/Products/CMFPlone/profiles/default/actions.xml b/Products/CMFPlone/profiles/default/actions.xml\nindex ef306875cc..46e0a043cd 100644\n--- a/Products/CMFPlone/profiles/default/actions.xml\n+++ b/Products/CMFPlone/profiles/default/actions.xml\n@@ -60,7 +60,7 @@\n       />\n       <property name="url_expr">string:$object_url/external_edit</property>\n       <property name="icon_expr">string:$portal_url/extedit_icon.png</property>\n-      <property name="available_expr">object/externalEditorEnabled</property>\n+      <property name="available_expr">object/externalEditorEnabled|nothing</property>\n       <property name="permissions">\n         <element value="Modify portal content" />\n       </property>\ndiff --git a/news/4179.bugfix b/news/4179.bugfix\nnew file mode 100644\nindex 0000000000..8f39acb659\n--- /dev/null\n+++ b/news/4179.bugfix\n@@ -0,0 +1,2 @@\n+Harden condition of external editor action to not fail when the `externalEditorEnabled` script is not available.\n+[maurits]\n'
 
