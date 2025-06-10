@@ -3,8 +3,10 @@
 #
 # DOMAINS:
 #: applications.cookiecutter
+#: applications.plone
 #: applications.zope
 #: core.base
+#: core.help
 #: core.mxenv
 #: core.mxfiles
 #: core.packages
@@ -124,6 +126,34 @@ ZOPE_BASE_FOLDER?=.
 # script to run
 # Default: No Default
 ZOPE_SCRIPTNAME?=No Default
+
+# user name to create
+# Default: No Default
+ZOPE_USER_NAME?=No Default
+
+# user name to create
+# Default: No Default
+ZOPE_USER_PASSWORD?=No Default
+
+## applications.plone
+
+# Path to the script to create or purge a Plone site
+# Default: .mxmake/files/plone-site.py
+PLONE_SITE_SCRIPT?=.mxmake/files/plone-site.py
+
+# Exit with an error if the Plone site already exists
+# Default: True
+PLONE_SITE_CREATE_FAIL_IF_EXISTS?=True
+
+# Exit with an error if the Plone site does not exists
+# Default: True
+PLONE_SITE_PURGE_FAIL_IF_NOT_EXISTS?=True
+
+## core.help
+
+# Request to show all targets, descriptions and arguments for a given domain.
+# No default value.
+HELP_DOMAIN?=
 
 ##############################################################################
 # END SETTINGS - DO NOT EDIT BELOW THIS LINE
@@ -425,6 +455,11 @@ zope-runscript: $(ZOPE_RUN_TARGET)
 	@echo "Run Zope/Plone Console Script $(ZOPE_SCRIPTNAME) in $(ZOPE_INSTANCE_FOLDER)"
 	@zconsole run "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf" $(ZOPE_SCRIPTNAME)
 
+.PHONY: zope-adduser
+zope-adduser: $(ZOPE_RUN_TARGET)
+	@echo "Run Zope addzopeuser to create an emergency user '$(ZOPE_USER_NAME)' with role 'Manager'"
+	@addzopeuser -c "$(ZOPE_INSTANCE_FOLDER)/etc/zope.conf" $(ZOPE_USER_NAME) $(ZOPE_USER_PASSWORD)
+
 .PHONY: zope-dirty
 zope-dirty:
 	@touch ${ZOPE_CONFIGURATION_FILE}
@@ -441,6 +476,40 @@ zope-purge: zope-dirty
 INSTALL_TARGETS+=zope-instance
 DIRTY_TARGETS+=zope-dirty
 CLEAN_TARGETS+=zope-clean
+PURGE_TARGETS+=zope-purge
+
+##############################################################################
+# plone
+##############################################################################
+
+.PHONY: plone-site-create
+plone-site-create: $(ZOPE_RUN_TARGET)
+	@echo "Creating Plone Site"
+	@export PLONE_SITE_PURGE=False
+	@export PLONE_SITE_CREATE=True
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
+
+.PHONY: plone-site-purge
+plone-site-purge: $(ZOPE_RUN_TARGET)
+	@echo "Purging Plone Site"
+	@export PLONE_SITE_PURGE=True
+	@export PLONE_SITE_CREATE=False
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
+
+.PHONY: plone-site-recreate
+plone-site-recreate: $(ZOPE_RUN_TARGET)
+	@echo "Purging Plone Site"
+	@export PLONE_SITE_PURGE=True
+	@export PLONE_SITE_CREATE=True
+	@zconsole run $(ZOPE_INSTANCE_FOLDER)/etc/zope.conf $(PLONE_SITE_SCRIPT)
+
+##############################################################################
+# help
+##############################################################################
+
+.PHONY: help
+help: $(MXENV_TARGET)
+	@mxmake help-generator
 
 ##############################################################################
 # Custom includes
