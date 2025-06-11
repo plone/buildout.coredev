@@ -2,26 +2,19 @@ Repository: plone.distribution
 
 
 Branch: refs/heads/main
-Date: 2025-06-11T15:31:16-03:00
+Date: 2025-06-11T17:04:27-03:00
 Author: Érico Andrei (ericof) <ericof@gmail.com>
-Commit: https://github.com/plone/plone.distribution/commit/bb9bd90d596a7ee083f10f48a5929458d2675a9d
+Commit: https://github.com/plone/plone.distribution/commit/8cd41916a88d196eacdb3f1bf2254ba705afa75e
 
-Fix PosKeyError in tests (#121)
+Set the site hook when accessing the migration tool for a site (#120)
 
-* Fix PosKeyError in tests by adding a transaction.savepoint after importing default content with plone.exportimport. (Fixes #119)
+* Set the site hook when accessing the migration tool for a site (Fixes #117).
 
 * Fix tests
 
-* Update news/119.bugfix
-
----------
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
-
 Files changed:
-A news/119.bugfix
-M src/plone/distribution/handler.py
-M tests/distributions/test_distributions_testing.py
+A news/117.bugfix
+M src/plone/distribution/services/sites/get.py
 
-b'diff --git a/news/119.bugfix b/news/119.bugfix\nnew file mode 100644\nindex 0000000..ae47aa9\n--- /dev/null\n+++ b/news/119.bugfix\n@@ -0,0 +1 @@\n+Fix POSKeyError in tests by adding a transaction.savepoint after importing default content with plone.exportimport. @ericof\ndiff --git a/src/plone/distribution/handler.py b/src/plone/distribution/handler.py\nindex b5a7e4a..a6c86d0 100644\n--- a/src/plone/distribution/handler.py\n+++ b/src/plone/distribution/handler.py\n@@ -27,6 +27,8 @@ def default_handler(\n \n     # Add default content if needed\n     if setup_content:\n+        # If there is no savepoint most tests fail with a PosKeyError\n+        transaction.savepoint(optimistic=True)\n         contents = distribution.contents\n         # First process any content profiles\n         content_profiles = contents["profiles"]\n@@ -35,13 +37,14 @@ def default_handler(\n         # Process content import from json\n         content_json_path = contents["json"]\n         if content_json_path:\n-            # If there is no savepoint most tests fail with a PosKeyError\n-            transaction.savepoint(optimistic=True)\n             # Invalidate the schema cache to make sure we get up to date behaviors.\n             # Normally this happens on commit, but we didn\'t commit yet.\n             SCHEMA_CACHE.clear()\n             importer = get_importer(site)\n             importer.import_site(content_json_path)\n+            # Create a savepoint to ensure the import is atomic\n+            transaction.savepoint(optimistic=True)\n+            # Commit the transaction to finalize the import\n             transaction.commit()\n     return site\n \ndiff --git a/tests/distributions/test_distributions_testing.py b/tests/distributions/test_distributions_testing.py\nindex 5164a71..8734119 100644\n--- a/tests/distributions/test_distributions_testing.py\n+++ b/tests/distributions/test_distributions_testing.py\n@@ -17,7 +17,6 @@ class TestDistributionDefault:\n         [\n             ("title", "Testing Plone Site"),\n             ("description", "A Plone Site"),\n-            ("exclude_from_nav", False),\n         ],\n     )\n     def test_plone_site_attributes(self, portal, attr, expected):\n'
+b'diff --git a/news/117.bugfix b/news/117.bugfix\nnew file mode 100644\nindex 0000000..080d54c\n--- /dev/null\n+++ b/news/117.bugfix\n@@ -0,0 +1 @@\n+Set the site hook when accessing the migration tool for a site. @ericof\ndiff --git a/src/plone/distribution/services/sites/get.py b/src/plone/distribution/services/sites/get.py\nindex 102632e..ecd8471 100644\n--- a/src/plone/distribution/services/sites/get.py\n+++ b/src/plone/distribution/services/sites/get.py\n@@ -6,8 +6,10 @@\n from plone.distribution.utils.schema import should_provide_default_language_default\n from plone.restapi.services import Service\n from Products.CMFCore.permissions import ManagePortal\n+from Products.CMFPlone.Portal import PloneSite\n from typing import List\n from zExceptions import BadRequest\n+from zope.component.hooks import site\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n \n@@ -17,10 +19,14 @@\n DEFAULT_ID = "Plone"\n \n \n-def _is_outdated(site) -> bool:\n-    """Check if site needs an upgrade."""\n-    mig = getattr(site, "portal_migration", None) or site.get("portal_migration", None)\n-    return mig.needUpgrading() if mig else False\n+def _is_outdated(plone_site: PloneSite) -> bool:\n+    """Check if a Portal needs to be upgraded."""\n+    with site(plone_site):\n+        mig = getattr(plone_site, "portal_migration", None) or plone_site.get(\n+            "portal_migration", None\n+        )\n+        is_outdated = mig.needUpgrading() if mig else False\n+    return is_outdated\n \n \n _no_content_marker = object()\n@@ -68,17 +74,17 @@ def get_sites(self) -> List[dict]:\n         """Return a list of site information."""\n         response = []\n         sites = site_api.get_sites(self.context)\n-        for site in sites:\n-            dist_report = dist_api.get_creation_report(site)\n+        for plone_site in sites:\n+            dist_report = dist_api.get_creation_report(plone_site)\n             distribution_name = dist_report.name if dist_report else ""\n             response.append(\n                 {\n-                    "@id": site.absolute_url(),\n-                    "id": site.id,\n-                    "title": site.title,\n-                    "description": site.description,\n-                    "creation_date": site.CreationDate(),\n-                    "needs_upgrade": _is_outdated(site),\n+                    "@id": plone_site.absolute_url(),\n+                    "id": plone_site.id,\n+                    "title": plone_site.title,\n+                    "description": plone_site.description,\n+                    "creation_date": plone_site.CreationDate(),\n+                    "needs_upgrade": _is_outdated(plone_site),\n                     "distribution": distribution_name,\n                 }\n             )\n'
 
