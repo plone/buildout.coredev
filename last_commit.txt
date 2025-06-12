@@ -1,69 +1,73 @@
-Repository: plone.app.multilingual
+Repository: plone.z3cform
 
 
 Branch: refs/heads/master
-Date: 2025-05-29T18:22:14+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/76e8c5680da39cedae2d49814e4d08087e109857
+Date: 2025-05-09T11:13:30+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.z3cform/commit/eb53082bb09490b36b9a8e16c5871d4eab98d14c
 
-feat: run the SetupMultilingualSite with an event subscriber
+Fix traversing to widgets nested in an object widget
+
+Fixes #29
 
 Files changed:
-A news/501.feature
-M src/plone/app/multilingual/browser/controlpanel.py
-M src/plone/app/multilingual/configure.zcml
-M src/plone/app/multilingual/subscriber.py
+A news/29.bugfix.rst
+M src/plone/z3cform/traversal.py
+M src/plone/z3cform/traversal.txt
 
-b'diff --git a/news/501.feature b/news/501.feature\nnew file mode 100644\nindex 000000000..281fc8972\n--- /dev/null\n+++ b/news/501.feature\n@@ -0,0 +1 @@\n+Run the SetupMultilingualSite actions with an event subscriber @erral\ndiff --git a/src/plone/app/multilingual/browser/controlpanel.py b/src/plone/app/multilingual/browser/controlpanel.py\nindex 8b919fbba..380850267 100644\n--- a/src/plone/app/multilingual/browser/controlpanel.py\n+++ b/src/plone/app/multilingual/browser/controlpanel.py\n@@ -52,10 +52,6 @@ def handleSave(self, action):\n \n         self.applyChanges(data)\n \n-        setupTool = SetupMultilingualSite()\n-        output = setupTool.setupSite(self.context)\n-        self.status += output\n-\n     @button.buttonAndHandler(_("Cancel"), name="cancel")\n     def handleCancel(self, action):\n         IStatusMessage(self.request).addStatusMessage(_("Changes canceled."), "info")\ndiff --git a/src/plone/app/multilingual/configure.zcml b/src/plone/app/multilingual/configure.zcml\nindex 2eef1c924..3169bb6a5 100644\n--- a/src/plone/app/multilingual/configure.zcml\n+++ b/src/plone/app/multilingual/configure.zcml\n@@ -192,4 +192,10 @@\n       handler=".setuphandlers.step_uninstall_various"\n       />\n \n+  <subscriber\n+    for="plone.i18n.interfaces.ILanguageSchema\n+         plone.registry.interfaces.IRecordModifiedEvent"\n+    handler=".subscriber.change_language_settings" />\n+\n+\n </configure>\ndiff --git a/src/plone/app/multilingual/subscriber.py b/src/plone/app/multilingual/subscriber.py\nindex 6f71c7add..f2d58852b 100644\n--- a/src/plone/app/multilingual/subscriber.py\n+++ b/src/plone/app/multilingual/subscriber.py\n@@ -179,3 +179,15 @@ def createdEvent(obj, event):\n     tm = ITranslationManager(obj)\n     old_obj = tm.get_translation(ti["source_language"])\n     ILanguageIndependentFieldsManager(old_obj).copy_fields(obj)\n+\n+\n+def change_language_settings(proxy, settings):\n+    request = getRequest()\n+    if IPloneAppMultilingualInstalled.providedBy(request):\n+        # We can\'t restrict subscribers to be run when some browser layer\n+        # is provided, so we check it here\n+        from plone.app.multilingual.browser.controlpanel import SetupMultilingualSite\n+\n+        setupTool = SetupMultilingualSite()\n+        portal = getSite()\n+        setupTool.setupSite(portal)\n'
+b'diff --git a/news/29.bugfix.rst b/news/29.bugfix.rst\nnew file mode 100644\nindex 0000000..8601c8c\n--- /dev/null\n+++ b/news/29.bugfix.rst\n@@ -0,0 +1 @@\n+Fix traversing to widgets nested in an object widget [ale-rt]\ndiff --git a/src/plone/z3cform/traversal.py b/src/plone/z3cform/traversal.py\nindex 93e72ea..61764ed 100644\n--- a/src/plone/z3cform/traversal.py\n+++ b/src/plone/z3cform/traversal.py\n@@ -4,6 +4,7 @@\n from plone.z3cform.interfaces import IDeferSecurityCheck\n from plone.z3cform.interfaces import IFormWrapper\n from z3c.form import util\n+from z3c.form.browser.object import ObjectWidget\n from z3c.form.interfaces import IForm\n from zope.component import adapter\n from zope.interface import alsoProvides\n@@ -86,6 +87,14 @@ def traverse(self, name, ignored):\n                         parts.remove("widgets")\n                     else:\n                         raise TraversalError("\'" + part + "\' not valid index")\n+            elif isinstance(target, ObjectWidget):\n+                # ObjectWidget is a special case, we need to look for\n+                # the name in the widget list\n+                try:\n+                    name = parts.pop(0)\n+                    target = target.widgets[name]\n+                except (IndexError, KeyError):\n+                    target = None\n             elif hasattr(target, "widgets"):  # Either base form, or subform\n                 # Check to see if we can find a "Behaviour.widget"\n                 new_target = None\ndiff --git a/src/plone/z3cform/traversal.txt b/src/plone/z3cform/traversal.txt\nindex 20689d5..8724a12 100644\n--- a/src/plone/z3cform/traversal.txt\n+++ b/src/plone/z3cform/traversal.txt\n@@ -211,16 +211,33 @@ We can find this object widget\n     >>> obj_widget\n     <ObjectWidget \'form.widgets.obj_field\'>\n \n-And traverse through to the form within\n+We initialize the traverses to the form within:\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> list_widget = traverser.traverse(\'obj_field.list_field\', [])\n+\n+The form is the traverser context:\n+    >>> traverser.context.__class__\n+    <class \'MyParentForm\'>\n+\n+We want to traverse to the list_field widget within the object field:\n+    >>> traverser.context.update()\n+    Updating test form\n+    >>> list_field_widget = traverser.context.widgets["obj_field"].widgets["list_field"]\n+    >>> list_field_widget\n+    <MultiWidget \'form.widgets.obj_field.widgets.list_field\'>\n+\n+The widget as a prefix:\n+    >>> list_field_widget.prefix\n+    \'form.widgets.obj_field.widgets.list_field\'\n+\n+To traverse to it we need to remove the form and widgets prefixes:\n+    >>> list_widget = traverser.traverse(\'obj_field.widgets.list_field\', [])\n     Updating test form\n     >>> list_widget\n     <MultiWidget \'form.widgets.obj_field.widgets.list_field\'>\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> age_widget = traverser.traverse(\'obj_field.list_field.0\', [])\n+    >>> age_widget = traverser.traverse(\'obj_field.widgets.list_field.0\', [])\n     Updating test form\n     >>> age_widget\n     <TextWidget \'form.widgets.obj_field.widgets.list_field.0\'>\n@@ -230,10 +247,10 @@ And traverse through to the form within\n Missing widgets are LocationErrors\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> list_widget = traverser.traverse(\'obj_field.camel_field\', [])\n+    >>> list_widget = traverser.traverse(\'obj_field.widgets.camel_field\', [])\n     Traceback (most recent call last):\n       File "<stdin>", line 1, in ?\n-    zope.location.interfaces.LocationError: \'camel_field\'\n+    zope.location.interfaces.LocationError: \'widgets\'\n \n Looking for anything other than \'widgets\' is also an error\n \n'
 
-Repository: plone.app.multilingual
+Repository: plone.z3cform
 
 
 Branch: refs/heads/master
-Date: 2025-05-29T18:22:43+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/6e49b8df2dafdb7318489f0174b3ab7497f9070a
+Date: 2025-05-12T12:14:32+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.z3cform/commit/418422d164e307d51c2e5414d661023bc6d2c043
 
-lint
+Fix traversal for widget in multiwidgets that are added on the fly
+
+Solves the use case of traversing a new widget that is not initialized by
+default.
+This mimics what happens when you click the add button.
 
 Files changed:
-M src/plone/app/multilingual/browser/controlpanel.py
-M src/plone/app/multilingual/configure.zcml
+M src/plone/z3cform/traversal.py
+M src/plone/z3cform/traversal.txt
 
-b'diff --git a/src/plone/app/multilingual/browser/controlpanel.py b/src/plone/app/multilingual/browser/controlpanel.py\nindex 38085026..29c173e6 100644\n--- a/src/plone/app/multilingual/browser/controlpanel.py\n+++ b/src/plone/app/multilingual/browser/controlpanel.py\n@@ -1,4 +1,3 @@\n-from plone.app.multilingual.browser.setup import SetupMultilingualSite\n from plone.app.multilingual.interfaces import IMultiLanguageExtraOptionsSchema\n from plone.app.registry.browser import controlpanel\n from plone.app.uuid.utils import uuidToObject\ndiff --git a/src/plone/app/multilingual/configure.zcml b/src/plone/app/multilingual/configure.zcml\nindex 3169bb6a..659345ec 100644\n--- a/src/plone/app/multilingual/configure.zcml\n+++ b/src/plone/app/multilingual/configure.zcml\n@@ -193,9 +193,10 @@\n       />\n \n   <subscriber\n-    for="plone.i18n.interfaces.ILanguageSchema\n-         plone.registry.interfaces.IRecordModifiedEvent"\n-    handler=".subscriber.change_language_settings" />\n+      for="plone.i18n.interfaces.ILanguageSchema\n+           plone.registry.interfaces.IRecordModifiedEvent"\n+      handler=".subscriber.change_language_settings"\n+      />\n \n \n </configure>\n'
+b'diff --git a/src/plone/z3cform/traversal.py b/src/plone/z3cform/traversal.py\nindex 61764ed..a532274 100644\n--- a/src/plone/z3cform/traversal.py\n+++ b/src/plone/z3cform/traversal.py\n@@ -72,7 +72,7 @@ def traverse(self, name, ignored):\n                     # part should be integer index in list, look it up\n                     target = target.widgets[int(part)]\n                 except IndexError:\n-                    raise TraversalError("\'" + part + "\' not in range")\n+                    target = target.getWidget(int(part))\n                 except ValueError:\n                     # HACK: part isn\'t integer. Iterate through widgets to\n                     # find matching name. This is required for\ndiff --git a/src/plone/z3cform/traversal.txt b/src/plone/z3cform/traversal.txt\nindex 8724a12..482d987 100644\n--- a/src/plone/z3cform/traversal.txt\n+++ b/src/plone/z3cform/traversal.txt\n@@ -154,13 +154,16 @@ And traverse through to individual items.\n     >>> age_widget.value\n     \'50\'\n \n-Out of range errors are LocationErrors\n+Sometimes you want to traverse to a widget that does not yet exist,\n+e.g. the one that is added when you click the add button:\n \n     >>> traverser = get_traverser(Bar(),u"test-list-form")\n     >>> age_widget = traverser.traverse(\'list_field.9\', [])\n-    Traceback (most recent call last):\n-      File "<stdin>", line 1, in ?\n-    zope.location.interfaces.LocationError: "\'9\' not in range"\n+    Updating test form\n+    >>> age_widget\n+    <TextWidget \'form.widgets.list_field.9\'>\n+    >>> age_widget.value\n+    \'\'\n \n Non-integer values are also LocationErrors\n \n'
 
-Repository: plone.app.multilingual
+Repository: plone.z3cform
 
 
 Branch: refs/heads/master
-Date: 2025-05-29T18:33:36+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/6c40e46cb4a5301ed8075ac18cf949fbbd0ab51d
+Date: 2025-05-13T08:09:17+02:00
+Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
+Commit: https://github.com/plone/plone.z3cform/commit/eb891178f3d2805c509fe9b4ae92caf3664c80df
 
-fix imports
+fixup! Fix traversal for widget in multiwidgets that are added on the fly
 
 Files changed:
-M src/plone/app/multilingual/subscriber.py
+M src/plone/z3cform/traversal.txt
 
-b"diff --git a/src/plone/app/multilingual/subscriber.py b/src/plone/app/multilingual/subscriber.py\nindex f2d58852..f1d7efc9 100644\n--- a/src/plone/app/multilingual/subscriber.py\n+++ b/src/plone/app/multilingual/subscriber.py\n@@ -186,7 +186,9 @@ def change_language_settings(proxy, settings):\n     if IPloneAppMultilingualInstalled.providedBy(request):\n         # We can't restrict subscribers to be run when some browser layer\n         # is provided, so we check it here\n-        from plone.app.multilingual.browser.controlpanel import SetupMultilingualSite\n+        #\n+        # The import is added here to avoid circular import errors\n+        from plone.app.multilingual.browser.setup import SetupMultilingualSite\n \n         setupTool = SetupMultilingualSite()\n         portal = getSite()\n"
+b'diff --git a/src/plone/z3cform/traversal.txt b/src/plone/z3cform/traversal.txt\nindex 482d987..a9868a4 100644\n--- a/src/plone/z3cform/traversal.txt\n+++ b/src/plone/z3cform/traversal.txt\n@@ -214,7 +214,7 @@ We can find this object widget\n     >>> obj_widget\n     <ObjectWidget \'form.widgets.obj_field\'>\n \n-We initialize the traverses to the form within:\n+We initialize the traverser to the form within:\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n \n'
 
-Repository: plone.app.multilingual
+Repository: plone.z3cform
 
 
 Branch: refs/heads/master
-Date: 2025-06-12T14:57:54+02:00
+Date: 2025-06-12T15:36:39+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.multilingual/commit/979915ca75d12f60e6ba4501f718caf90bd4fd34
+Commit: https://github.com/plone/plone.z3cform/commit/f019fa64ca16b936fce94dc3bdd32873dfbb0ef8
 
-Merge pull request #502 from plone/erral-issue-501
+Merge pull request #30 from plone/ale/29/fix
 
-Run the SetupMultilingualSite with an event subscriber
+Fix traversing to widgets nested in an object widget
 
 Files changed:
-A news/501.feature
-M src/plone/app/multilingual/browser/controlpanel.py
-M src/plone/app/multilingual/configure.zcml
-M src/plone/app/multilingual/subscriber.py
+A news/29.bugfix.rst
+M src/plone/z3cform/traversal.py
+M src/plone/z3cform/traversal.txt
 
-b'diff --git a/news/501.feature b/news/501.feature\nnew file mode 100644\nindex 00000000..281fc897\n--- /dev/null\n+++ b/news/501.feature\n@@ -0,0 +1 @@\n+Run the SetupMultilingualSite actions with an event subscriber @erral\ndiff --git a/src/plone/app/multilingual/browser/controlpanel.py b/src/plone/app/multilingual/browser/controlpanel.py\nindex 8b919fbb..29c173e6 100644\n--- a/src/plone/app/multilingual/browser/controlpanel.py\n+++ b/src/plone/app/multilingual/browser/controlpanel.py\n@@ -1,4 +1,3 @@\n-from plone.app.multilingual.browser.setup import SetupMultilingualSite\n from plone.app.multilingual.interfaces import IMultiLanguageExtraOptionsSchema\n from plone.app.registry.browser import controlpanel\n from plone.app.uuid.utils import uuidToObject\n@@ -52,10 +51,6 @@ def handleSave(self, action):\n \n         self.applyChanges(data)\n \n-        setupTool = SetupMultilingualSite()\n-        output = setupTool.setupSite(self.context)\n-        self.status += output\n-\n     @button.buttonAndHandler(_("Cancel"), name="cancel")\n     def handleCancel(self, action):\n         IStatusMessage(self.request).addStatusMessage(_("Changes canceled."), "info")\ndiff --git a/src/plone/app/multilingual/configure.zcml b/src/plone/app/multilingual/configure.zcml\nindex 2eef1c92..659345ec 100644\n--- a/src/plone/app/multilingual/configure.zcml\n+++ b/src/plone/app/multilingual/configure.zcml\n@@ -192,4 +192,11 @@\n       handler=".setuphandlers.step_uninstall_various"\n       />\n \n+  <subscriber\n+      for="plone.i18n.interfaces.ILanguageSchema\n+           plone.registry.interfaces.IRecordModifiedEvent"\n+      handler=".subscriber.change_language_settings"\n+      />\n+\n+\n </configure>\ndiff --git a/src/plone/app/multilingual/subscriber.py b/src/plone/app/multilingual/subscriber.py\nindex 6f71c7ad..f1d7efc9 100644\n--- a/src/plone/app/multilingual/subscriber.py\n+++ b/src/plone/app/multilingual/subscriber.py\n@@ -179,3 +179,17 @@ def createdEvent(obj, event):\n     tm = ITranslationManager(obj)\n     old_obj = tm.get_translation(ti["source_language"])\n     ILanguageIndependentFieldsManager(old_obj).copy_fields(obj)\n+\n+\n+def change_language_settings(proxy, settings):\n+    request = getRequest()\n+    if IPloneAppMultilingualInstalled.providedBy(request):\n+        # We can\'t restrict subscribers to be run when some browser layer\n+        # is provided, so we check it here\n+        #\n+        # The import is added here to avoid circular import errors\n+        from plone.app.multilingual.browser.setup import SetupMultilingualSite\n+\n+        setupTool = SetupMultilingualSite()\n+        portal = getSite()\n+        setupTool.setupSite(portal)\n'
+b'diff --git a/news/29.bugfix.rst b/news/29.bugfix.rst\nnew file mode 100644\nindex 0000000..8601c8c\n--- /dev/null\n+++ b/news/29.bugfix.rst\n@@ -0,0 +1 @@\n+Fix traversing to widgets nested in an object widget [ale-rt]\ndiff --git a/src/plone/z3cform/traversal.py b/src/plone/z3cform/traversal.py\nindex 93e72ea..a532274 100644\n--- a/src/plone/z3cform/traversal.py\n+++ b/src/plone/z3cform/traversal.py\n@@ -4,6 +4,7 @@\n from plone.z3cform.interfaces import IDeferSecurityCheck\n from plone.z3cform.interfaces import IFormWrapper\n from z3c.form import util\n+from z3c.form.browser.object import ObjectWidget\n from z3c.form.interfaces import IForm\n from zope.component import adapter\n from zope.interface import alsoProvides\n@@ -71,7 +72,7 @@ def traverse(self, name, ignored):\n                     # part should be integer index in list, look it up\n                     target = target.widgets[int(part)]\n                 except IndexError:\n-                    raise TraversalError("\'" + part + "\' not in range")\n+                    target = target.getWidget(int(part))\n                 except ValueError:\n                     # HACK: part isn\'t integer. Iterate through widgets to\n                     # find matching name. This is required for\n@@ -86,6 +87,14 @@ def traverse(self, name, ignored):\n                         parts.remove("widgets")\n                     else:\n                         raise TraversalError("\'" + part + "\' not valid index")\n+            elif isinstance(target, ObjectWidget):\n+                # ObjectWidget is a special case, we need to look for\n+                # the name in the widget list\n+                try:\n+                    name = parts.pop(0)\n+                    target = target.widgets[name]\n+                except (IndexError, KeyError):\n+                    target = None\n             elif hasattr(target, "widgets"):  # Either base form, or subform\n                 # Check to see if we can find a "Behaviour.widget"\n                 new_target = None\ndiff --git a/src/plone/z3cform/traversal.txt b/src/plone/z3cform/traversal.txt\nindex 20689d5..a9868a4 100644\n--- a/src/plone/z3cform/traversal.txt\n+++ b/src/plone/z3cform/traversal.txt\n@@ -154,13 +154,16 @@ And traverse through to individual items.\n     >>> age_widget.value\n     \'50\'\n \n-Out of range errors are LocationErrors\n+Sometimes you want to traverse to a widget that does not yet exist,\n+e.g. the one that is added when you click the add button:\n \n     >>> traverser = get_traverser(Bar(),u"test-list-form")\n     >>> age_widget = traverser.traverse(\'list_field.9\', [])\n-    Traceback (most recent call last):\n-      File "<stdin>", line 1, in ?\n-    zope.location.interfaces.LocationError: "\'9\' not in range"\n+    Updating test form\n+    >>> age_widget\n+    <TextWidget \'form.widgets.list_field.9\'>\n+    >>> age_widget.value\n+    \'\'\n \n Non-integer values are also LocationErrors\n \n@@ -211,16 +214,33 @@ We can find this object widget\n     >>> obj_widget\n     <ObjectWidget \'form.widgets.obj_field\'>\n \n-And traverse through to the form within\n+We initialize the traverser to the form within:\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> list_widget = traverser.traverse(\'obj_field.list_field\', [])\n+\n+The form is the traverser context:\n+    >>> traverser.context.__class__\n+    <class \'MyParentForm\'>\n+\n+We want to traverse to the list_field widget within the object field:\n+    >>> traverser.context.update()\n+    Updating test form\n+    >>> list_field_widget = traverser.context.widgets["obj_field"].widgets["list_field"]\n+    >>> list_field_widget\n+    <MultiWidget \'form.widgets.obj_field.widgets.list_field\'>\n+\n+The widget as a prefix:\n+    >>> list_field_widget.prefix\n+    \'form.widgets.obj_field.widgets.list_field\'\n+\n+To traverse to it we need to remove the form and widgets prefixes:\n+    >>> list_widget = traverser.traverse(\'obj_field.widgets.list_field\', [])\n     Updating test form\n     >>> list_widget\n     <MultiWidget \'form.widgets.obj_field.widgets.list_field\'>\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> age_widget = traverser.traverse(\'obj_field.list_field.0\', [])\n+    >>> age_widget = traverser.traverse(\'obj_field.widgets.list_field.0\', [])\n     Updating test form\n     >>> age_widget\n     <TextWidget \'form.widgets.obj_field.widgets.list_field.0\'>\n@@ -230,10 +250,10 @@ And traverse through to the form within\n Missing widgets are LocationErrors\n \n     >>> traverser = get_traverser(Bar(),u"test-parent-form")\n-    >>> list_widget = traverser.traverse(\'obj_field.camel_field\', [])\n+    >>> list_widget = traverser.traverse(\'obj_field.widgets.camel_field\', [])\n     Traceback (most recent call last):\n       File "<stdin>", line 1, in ?\n-    zope.location.interfaces.LocationError: \'camel_field\'\n+    zope.location.interfaces.LocationError: \'widgets\'\n \n Looking for anything other than \'widgets\' is also an error\n \n'
 
