@@ -1,4 +1,4 @@
-# Release notes for Plone 6.1.2 (unreleased)
+# Release notes for Plone 6.1.2 (2025-06-20)
 
 * Last updated: June 20th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
