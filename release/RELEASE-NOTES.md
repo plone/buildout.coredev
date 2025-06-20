@@ -28,22 +28,32 @@ These are the main changes since 6.1.1:
   * Support for required and invalid styles on form tabs.
 * All packages in the `five` and `z3c` namespaces have dropped support for ``pkg_resources`` namespace and replaced it with PEP 420 native namespace.
   Caution: if you are using any other packages in these namespaces for which we have no versoin pin, you should switch these to versions using a PEP 420 namespace as well.
-* `twine`: Add compatibility with setuptools 77+.
-  This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
-* `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
 * `Products.CMFPlone`: Make resource registry more robust against broken resources.
   Don't break the resource registry when a resource error happens (missing dependency, circular dependency, file not found, etc).
   Admins will see a warning badge and can fix the problem in the resource registry user interface.
   Previously such errors broke the rendering of the whole site, making fixes very fiddly.
-* `plone.app.dexterity`: Include `obj` in the results from the `INextPreviousProvider` adapter.
 * `plone.app.discussion`:
   * Implement `auto_approve_admin_comments` based on specified roles.
   * Add Volto control panel.
-* `plone.app.iterate`: Add `is_working_copy` column to catalog metadata.
-* `plone.app.multilingual`: Run the SetupMultilingualSite actions with an event subscriber.
+* `plone.volto`:
+  * Enable automatic versioning for content types with blocks.
+  * Enable preview image link behavior by default for most content types.
+  * Put preview image fields in their own fieldset, and the navigation title field in the Settings fieldset.
+  * Enable navigation title by default for most content types.
+  * Create a separate `initial` profile which is used to set up the Volto distribution.
+    The existing `default` profile defines the Volto add-on, and makes minimal changes to existing content types.
+    The `initial` profile includes the `plone.app.contenttypes:default` profile and fully controls the behaviors for the included content types.
+* `plone.staticresources`: Update to [mockup 5.4.0](https://github.com/plone/mockup/releases/tag/5.4.0).
+  NOTE: This updates the selection button and popover.
+  The selection button shows now the number of selected and maximum number of items within the current folder.
+  The corresponding popover offers the option to select all items, all visible items on the page and to cancel the selection.
+  The previous popover to manage the selected items is gone.
 * `plone.base`:
   * Refactoring Interface ITinyMCEPluginSchema, field `menubar` is not longer a `List`, it's now a `TextLine` Field.
   * Add a "is_truthy" utility to test for true-ish and false-ish string values.
+* `plone.app.dexterity`: Include `obj` in the results from the `INextPreviousProvider` adapter.
+* `plone.app.iterate`: Add `is_working_copy` column to catalog metadata.
+* `plone.app.multilingual`: Run the SetupMultilingualSite actions with an event subscriber.
 * `plone.distribution`:
   * Add attribute `package` to `plone.distribution.core.Distribution` to store which package registered a specific distribution.
   * Support specifying a base GenericSetup profile during distribution registration.
@@ -54,19 +64,9 @@ These are the main changes since 6.1.1:
   * `@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter.
   * Include all summary fields when serializing `next_item` and `previous_item`.
 * `plone.scale`: Add method to 'scale' SVGs by modifying display size and viewbox.
-* `plone.staticresources`: Update to [mockup 5.4.0](https://github.com/plone/mockup/releases/tag/5.4.0).
-  NOTE: This updates the selection button and popover.
-  The selection button shows now the number of selected and maximum number of items within the current folder.
-  The corresponding popover offers the option to select all items, all visible items on the page and to cancel the selection.
-  The previous popover to manage the selected items is gone.
-* `plone.volto`:
-  * Enable automatic versioning for content types with blocks.
-  * Enable preview image link behavior by default for most content types.
-  * Put preview image fields in their own fieldset, and the navigation title field in the Settings fieldset.
-  * Enable navigation title by default for most content types.
-  * Create a separate `initial` profile which is used to set up the Volto distribution.
-    The existing `default` profile defines the Volto add-on, and makes minimal changes to existing content types.
-    The `initial` profile includes the `plone.app.contenttypes:default` profile and fully controls the behaviors for the included content types.
+* `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
+* `twine`: Add compatibility with setuptools 77+.
+  This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
 
 
 ## Volto frontend
