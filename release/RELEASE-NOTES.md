@@ -16,11 +16,25 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes since 6.1.1:
 
+* `plonetheme.barceloneta`:
+  * (Re)Introduce the ajax_load theme parameter and skip diazo theming, if set.
+    Note: when you upgrade an existing Classic UI site to this version, the site will look broken at first.
+    Just run the upgrades on the standard `plone-upgrade` page, and all should be fine.
+    Alternatively, go to the Theming controlpanel, deactivate the Barceloneta theme, and then activate it again.
+  * Add a dedicated barceloneta-toolbar stylesheet.
+    Add a new stylesheet which only compiles the barceloneta toolbar styles.
+    This stylesheet can be used in situations where only the toolbar is wanted but
+    not the whole Barceloneta design system.
+  * Support for required and invalid styles on form tabs.
 * All packages in the `five` and `z3c` namespaces have dropped support for ``pkg_resources`` namespace and replaced it with PEP 420 native namespace.
   Caution: if you are using any other packages in these namespaces for which we have no versoin pin, you should switch these to versions using a PEP 420 namespace as well.
 * `twine`: Add compatibility with setuptools 77+.
   This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
 * `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
+* `Products.CMFPlone`: Make resource registry more robust against broken resources.
+  Don't break the resource registry when a resource error happens (missing dependency, circular dependency, file not found, etc).
+  Admins will see a warning badge and can fix the problem in the resource registry user interface.
+  Previously such errors broke the rendering of the whole site, making fixes very fiddly.
 * `plone.app.dexterity`: Include `obj` in the results from the `INextPreviousProvider` adapter.
 * `plone.app.discussion`:
   * Implement `auto_approve_admin_comments` based on specified roles.
@@ -40,6 +54,11 @@ These are the main changes since 6.1.1:
   * `@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter.
   * Include all summary fields when serializing `next_item` and `previous_item`.
 * `plone.scale`: Add method to 'scale' SVGs by modifying display size and viewbox.
+* `plone.staticresources`: Update to [mockup 5.4.0](https://github.com/plone/mockup/releases/tag/5.4.0).
+  NOTE: This updates the selection button and popover.
+  The selection button shows now the number of selected and maximum number of items within the current folder.
+  The corresponding popover offers the option to select all items, all visible items on the page and to cancel the selection.
+  The previous popover to manage the selected items is gone.
 * `plone.volto`:
   * Enable automatic versioning for content types with blocks.
   * Enable preview image link behavior by default for most content types.
@@ -48,7 +67,6 @@ These are the main changes since 6.1.1:
   * Create a separate `initial` profile which is used to set up the Volto distribution.
     The existing `default` profile defines the Volto add-on, and makes minimal changes to existing content types.
     The `initial` profile includes the `plone.app.contenttypes:default` profile and fully controls the behaviors for the included content types.
-* `plonetheme.barceloneta`: Support for required and invalid styles on form tabs.
 
 
 ## Volto frontend
