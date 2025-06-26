@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: June 10th, 2025
+* Last updated: June 26th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -16,23 +16,8 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes compared to 6.1:
 
-* `five.intid`, `five.customerize`, `five.localsitemanager`: Drop support for `pkg_resources` namespace and replace it with PEP 420 native namespace.
-* `twine`: Add compatibility with setuptools 77+.
-  This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
-* `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
-* `plone.app.dexterity`: Include `obj` in the results from the `INextPreviousProvider` adapter.
-* `plone.app.discussion`: Implement `auto_approve_admin_comments` based on specified roles.
-* `plone.app.iterate`: Add `is_working_copy` column to catalog metadata.
-* `plone.distribution`: Add attribute `package` to `plone.distribution.core.Distribution` to store which package registered a specific distribution.
-* `plone.namedfile`: Add a `srcset` method to the `@@images` view.
-* `plone.restapi`: `@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter.
-* `plone.scale`: Add method to 'scale' SVGs by modifying display size and viewbox.
-* `plone.volto`:
-  * Enable automatic versioning for content types with blocks.
-  * Enable preview image link behavior by default for most content types.
-  * Put preview image fields in their own fieldset, and the navigation title field in the Settings fieldset.
-  * Enable navigation title by default for most content types.
-* `plonetheme.barceloneta`: Support for required and invalid styles on form tabs.
+* Nothing yet, but some templates are being moved to `plone.app.layout`.
+* The plan is also to switch to native namespaces for `plone.*` and `Products.*`.
 
 
 ## Volto frontend
@@ -41,7 +26,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 18.
-Latest release is [18.22.0](https://www.npmjs.com/package/@plone/volto/v/18.22.0).  See the [changelog](https://github.com/plone/volto/blob/18.22.0/packages/volto/CHANGELOG.md).
+Latest release is [18.23.0](https://www.npmjs.com/package/@plone/volto/v/18.23.0).  See the [changelog](https://github.com/plone/volto/blob/18.23.0/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
@@ -62,9 +47,9 @@ In Plone core we use these versions to install Plone:
 ```
 packaging==25.0
 pip==25.1.1
-setuptools==79.0.1
-wheel==0.46.1
-zc.buildout==4.1.10
+setuptools==80.9.0
+wheel==0.45.1
+zc.buildout==4.1.12
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
