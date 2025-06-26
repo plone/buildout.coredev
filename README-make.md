@@ -126,6 +126,6 @@ Let's give an example.
 * Run `make mxfiles` again, and nothing happens, because everything is up to date.
 * `make mxfiles-dirty` signals to make that the `mxfiles` target is "dirty".
 * This means that the next run of `make mxfiles` will create the files again.
-* You can also call `make mxfiles-clean.
+* You can also call `make mxfiles-clean`.
   This has the same effect as `make mxfiles-dirty`, but it also cleans:
   it removes the files that were created by the previous `make mxfiles` call.
