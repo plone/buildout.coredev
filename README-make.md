@@ -132,6 +132,16 @@ A few sample commands that work for me:
 .venv/bin/zope-testrunner --test-path .venv/lib/python3.12/site-packages -s plone.memoize
 ```
 
+#### Robot tests
+
+To watch the browser run Robot Framework tests, use `zope-testrunner` and set the `ROBOT_BROWSER` environment variable.
+
+The following example runs a specific Robot test with the Chrome browser visible:
+
+```shell
+ROBOT_BROWSER=chrome .venv/bin/zope-testrunner --path=src/plone.schemaeditor --all -t "Add a fieldSet and move a field into this fieldset"
+```
+
 
 ### Dirty and clean
 
