@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: June 26th, 2025
+* Last updated: September 10th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -16,7 +16,11 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes compared to 6.1:
 
-* Nothing yet, but some templates are being moved to `plone.app.layout`.
+* Move to src-layout for a lot of packages.  This is ongoing.  An internal thing.
+* Some templates are being moved to `plone.app.layout`, this is ongoing.  Progress so far:
+  * Moved lock info viewlet from `plone.locking`.
+  * Modify `plone.protect.confirm` to use a simpler template that does not assume Classic UI is installed.
+    The previous template was moved to `plone.app.layout`.
 * The plan is also to switch to native namespaces for `plone.*` and `Products.*`.
 
 
@@ -26,7 +30,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 18.
-Latest release is [18.23.0](https://www.npmjs.com/package/@plone/volto/v/18.23.0).  See the [changelog](https://github.com/plone/volto/blob/18.23.0/packages/volto/CHANGELOG.md).
+Latest release is [18.25.0](https://www.npmjs.com/package/@plone/volto/v/18.25.0).  See the [changelog](https://github.com/plone/volto/blob/18.25.0/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
@@ -53,8 +57,6 @@ zc.buildout==4.1.12
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
-
-Note that the latest Buildout release does not yet support `setuptools` 80, but that will soon change.
 
 
 ## Installation
