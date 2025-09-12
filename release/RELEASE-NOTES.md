@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: September 10th, 2025
+* Last updated: September 12th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -22,6 +22,9 @@ These are the main changes compared to 6.1:
   * Modify `plone.protect.confirm` to use a simpler template that does not assume Classic UI is installed.
     The previous template was moved to `plone.app.layout`.
 * The plan is also to switch to native namespaces for `plone.*` and `Products.*`.
+  We updated `zc.buildout` to version 5, and in the `requirements.txt` we have added `horse-with-no-namespace`.
+  That helps avoid problems when not all packages in a namespace are using the same namespace style.
+  See also below, in de section about "pip, buildout, setuptools".
 
 
 ## Volto frontend
@@ -50,13 +53,39 @@ In Plone core we use these versions to install Plone:
 
 ```
 packaging==25.0
-pip==25.1.1
+pip==25.2
 setuptools==80.9.0
 wheel==0.45.1
-zc.buildout==4.1.12
+zc.buildout==5.0.0a2
+horse-with-no-namespace==20250705.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
+
+Problems start when you have multiple packages in the same namespace, that use different namespace implementations.
+Then on startup of Plone you may get an error saying "Package not found".
+This depends on what you use to install the packages.
+In the following examples, we have two packages in the same namespace, say ``ns.native`` (using native namespaces) and ``ns.deprecated`` (using pkg_resources style).
+
+* Make editable installs of both packages (``pip install -e`` or in buildout, ``develop =``):
+
+  - This works neither in pip nor in buildout.
+  - You can install the `horse-with-no-namespace <https://pypi.org/project/horse-with-no-namespace/>`_ package to get this working.
+
+* Make a normal install of both packages:
+
+  - This works fine in pip.
+  - This fails in buildout 4.x.
+  - This works fine in buildout 5.x.
+
+* Make a normal install of one package and an editable install of the other:
+
+  - This works fine in pip.
+  - This fails in buildout 4.x.
+  - This fails in buildout 5.x as well.  But again, you can use ``horse-with-no-namespace`` to get this working.
+
+For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0a2/), the part about
+"native namespaces and breaking changes in 5.x".  This is also good to read if you use pip instead of Buildout.
 
 
 ## Installation
