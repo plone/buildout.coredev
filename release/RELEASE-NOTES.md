@@ -26,6 +26,12 @@ These are the main changes compared to 6.1:
   That helps avoid problems when not all packages in a namespace are using the same namespace style.
   See also below, in de section about "pip, buildout, setuptools".
 * `plone.base`: `IClassicUISchema`: Add new control panel.
+* `plone.app.layout`: Add the new property `is_ajax` to the Plone layout view.
+  This returns True, if an AJAX request is detected. This is done by checking if the `HTTP_X_REQUESTED_WITH` request header is set to `XMLHttpRequest`.
+  Note: this is an unreliable way to detect AJAX requests. While many client-side
+  libraries (like jQuery) add this request header automatically, the Fetch API
+  does not. When using fetch, it is recommended to wrap it with a helper function
+  that adds this header to each request.
 
 
 ## Volto frontend
