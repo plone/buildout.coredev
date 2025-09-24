@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: September 12th, 2025
+* Last updated: September 24th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -25,6 +25,7 @@ These are the main changes compared to 6.1:
   We updated `zc.buildout` to version 5, and in the `requirements.txt` we have added `horse-with-no-namespace`.
   That helps avoid problems when not all packages in a namespace are using the same namespace style.
   See also below, in de section about "pip, buildout, setuptools".
+* `plone.base`: `IClassicUISchema`: Add new control panel.
 
 
 ## Volto frontend
