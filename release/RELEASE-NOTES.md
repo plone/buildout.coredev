@@ -72,12 +72,12 @@ In general you are free to use whatever versions work for you, but these worked 
 Problems start when you have multiple packages in the same namespace, that use different namespace implementations.
 Then on startup of Plone you may get an error saying "Package not found".
 This depends on what you use to install the packages.
-In the following examples, we have two packages in the same namespace, say ``ns.native`` (using native namespaces) and ``ns.deprecated`` (using pkg_resources style).
+In the following examples, we have two packages in the same namespace, say `ns.native` (using native namespaces) and `ns.deprecated` (using pkg_resources style).
 
-* Make editable installs of both packages (``pip install -e`` or in buildout, ``develop =``):
+* Make editable installs of both packages (`pip install -e` or in buildout, `develop =`):
 
   - This works neither in pip nor in buildout.
-  - You can install the `horse-with-no-namespace <https://pypi.org/project/horse-with-no-namespace/>`_ package to get this working.
+  - You can install the [`horse-with-no-namespace`](https://pypi.org/project/horse-with-no-namespace/) package to get this working.
 
 * Make a normal install of both packages:
 
@@ -89,9 +89,9 @@ In the following examples, we have two packages in the same namespace, say ``ns.
 
   - This works fine in pip.
   - This fails in buildout 4.x.
-  - This fails in buildout 5.x as well.  But again, you can use ``horse-with-no-namespace`` to get this working.
+  - This fails in buildout 5.x as well.  But again, you can use `horse-with-no-namespace` to get this working.
 
-For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0a2/), the part about
+For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0a3/), the part about
 "native namespaces and breaking changes in 5.x".  This is also good to read if you use pip instead of Buildout.
 
 
