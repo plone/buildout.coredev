@@ -1,6 +1,6 @@
-# Release notes for Plone 6.1.2 (2025-06-20)
+# Release notes for Plone 6.1.3 (unreleased)
 
-* Last updated: June 20th, 2025
+* Last updated: October 1st, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -14,60 +14,19 @@ If you want to jump straight in, here are some important links:
 
 ## Highlights
 
-These are the main changes since 6.1.1:
+These are the main changes since 6.1.2:
 
-* `plonetheme.barceloneta`:
-  * (Re)Introduce the ajax_load theme parameter and skip diazo theming, if set.
-    Note: when you upgrade an existing Classic UI site to this version, the site will look broken at first.
-    Just run the upgrades on the standard `plone-upgrade` page, and all should be fine.
-    Alternatively, go to the Theming controlpanel, deactivate the Barceloneta theme, and then activate it again.
-  * Add a dedicated barceloneta-toolbar stylesheet.
-    Add a new stylesheet which only compiles the barceloneta toolbar styles.
-    This stylesheet can be used in situations where only the toolbar is wanted but
-    not the whole Barceloneta design system.
-  * Support for required and invalid styles on form tabs.
-* All packages in the `five` and `z3c` namespaces have dropped support for ``pkg_resources`` namespace and replaced it with PEP 420 native namespace.
-  Caution: if you are using any other packages in these namespaces for which we have no versoin pin, you should switch these to versions using a PEP 420 namespace as well.
-* `Products.CMFPlone`: Make resource registry more robust against broken resources.
-  Don't break the resource registry when a resource error happens (missing dependency, circular dependency, file not found, etc).
-  Admins will see a warning badge and can fix the problem in the resource registry user interface.
-  Previously such errors broke the rendering of the whole site, making fixes very fiddly.
-* `plone.app.discussion`:
-  * Implement `auto_approve_admin_comments` based on specified roles.
-  * Add Volto control panel.
-* `plone.volto`:
-  * Enable automatic versioning for content types with blocks.
-  * Enable preview image link behavior by default for most content types.
-  * Put preview image fields in their own fieldset, and the navigation title field in the Settings fieldset.
-  * Enable navigation title by default for most content types.
-  * Create a separate `initial` profile which is used to set up the Volto distribution.
-    The existing `default` profile defines the Volto add-on, and makes minimal changes to existing content types.
-    The `initial` profile includes the `plone.app.contenttypes:default` profile and fully controls the behaviors for the included content types.
-* `plone.staticresources`: Update to [mockup 5.4.0](https://github.com/plone/mockup/releases/tag/5.4.0).
-  NOTE: This updates the selection button and popover.
-  The selection button shows now the number of selected and maximum number of items within the current folder.
-  The corresponding popover offers the option to select all items, all visible items on the page and to cancel the selection.
-  The previous popover to manage the selected items is gone.
-* `plone.base`:
-  * Refactoring Interface ITinyMCEPluginSchema, field `menubar` is not longer a `List`, it's now a `TextLine` Field.
-  * Add a "is_truthy" utility to test for true-ish and false-ish string values.
-* `plone.app.dexterity`: Include `obj` in the results from the `INextPreviousProvider` adapter.
-* `plone.app.iterate`: Add `is_working_copy` column to catalog metadata.
-* `plone.app.multilingual`: Run the SetupMultilingualSite actions with an event subscriber.
-* `plone.distribution`:
-  * Add attribute `package` to `plone.distribution.core.Distribution` to store which package registered a specific distribution.
-  * Support specifying a base GenericSetup profile during distribution registration.
-* `plone.namedfile`:
-  * Add a `srcset` method to the `@@images` view.
-  * "Scale" SVGs by setting the correct height and width for the given scale in its metadata.
-* `plone.restapi`:
-  * `@site` service: Add a way for add-ons to add additional data using an `ISiteEndpointExpander` adapter.
-  * Include all summary fields when serializing `next_item` and `previous_item`.
-* `plone.scale`: Add method to 'scale' SVGs by modifying display size and viewbox.
-* `plone.recipe.zope2instance`: Check for presence of Products.CMFPlone with multiple keys.  This is needed, depending on the used `zc.buildout` and `setuptools` versions.
-* `twine`: Add compatibility with setuptools 77+.
-  This fixes errors when making releases to PyPI: "twine.exceptions.InvalidDistribution: Metadata is missing required fields: Name, Version." .
-
+* `plone.app.iterate`: Add working copy support for `LRF` type (Language Root Folder).
+* `plone.app.multilingual`: Add `plone.locking` behavior to `LRF` type. This is required for the working copy to work in `LRF`.
+* `plone.exportimport`:
+  * Support export/import of user `login_name`.
+  * Support non-root PloneSite import/export.
+* `plone.rest`: Add a `context` URL to exception responses.
+  This can be used by a client to retrieve contextual data that may be needed to display the exception.
+* `plone.app.vocabularies`: Now in CatalogVocabulary getTerm raises LookupError when it cannot find the referred object instead of returning None.
+* `plone.base`: Cleanup `TinyMCESchema.plugins` to the actual existing plugins.
+* `plonetheme.barceloneta`: Update to Bootstrap 5.3.8.
+* Internal change in lots of packages: Move distribution to src layout.
 
 ## Volto frontend
 
@@ -95,15 +54,45 @@ In Plone core we use these versions to install Plone:
 
 ```
 packaging==25.0
-pip==25.1.1
+pip==25.2
 setuptools==80.9.0
-wheel==0.46.1
+wheel==0.45.1
 zc.buildout==4.1.12
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
-
 Note that if you use Buildout and are on `setuptools` 80+, you need the latest `zc.buildout` 4.1.12.
+
+If you use `zc.buildout`, you can also choose to upgrade to version 5.x, currently in alpha release.
+That helps avoid problems when not all packages in a namespace are using the same namespace style.
+When using either `zc.buildout` or `pip` (or `uv`) you can also choose to install the `horse-with-no-namespace` package.
+Plone 6.2 (under development) already uses both.
+
+Let's explain why you may want to do this.
+Problems start when you have multiple packages in the same namespace, that use different namespace implementations.
+Then on startup of Plone you may get an error saying "Package not found".
+This depends on what you use to install the packages.
+In the following examples, we have two packages in the same namespace, say `ns.native` (using native namespaces) and `ns.deprecated` (using pkg_resources style).
+
+* Make editable installs of both packages (`pip install -e` or in buildout, `develop =`):
+
+  - This works neither in pip nor in buildout.
+  - You can install the [`horse-with-no-namespace`](https://pypi.org/project/horse-with-no-namespace/) package to get this working.
+
+* Make a normal install of both packages:
+
+  - This works fine in pip.
+  - This fails in buildout 4.x.
+  - This works fine in buildout 5.x.
+
+* Make a normal install of one package and an editable install of the other:
+
+  - This works fine in pip.
+  - This fails in buildout 4.x.
+  - This fails in buildout 5.x as well.  But again, you can use `horse-with-no-namespace` to get this working.
+
+For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0a3/), the part about
+"native namespaces and breaking changes in 5.x".  This is also good to read if you use pip instead of Buildout.
 
 
 ## Installation
