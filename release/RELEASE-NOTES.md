@@ -75,7 +75,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.27.2](https://www.npmjs.com/package/@plone/volto/v/18.27.2).  See the [changelog](https://github.com/plone/volto/blob/18.27.2/packages/volto/CHANGELOG.md).
+Latest release is [18.27.3](https://www.npmjs.com/package/@plone/volto/v/18.27.3).  See the [changelog](https://github.com/plone/volto/blob/18.27.3/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
