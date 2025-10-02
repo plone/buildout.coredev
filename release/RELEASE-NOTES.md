@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: September 24th, 2025
+* Last updated: October 2nd, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -16,7 +16,6 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes compared to 6.1:
 
-* Move to src-layout for a lot of packages.  This is ongoing.  An internal thing.
 * Some templates are being moved to `plone.app.layout`, this is ongoing.  Progress so far:
   * Moved lock info viewlet from `plone.locking`.
   * Modify `plone.protect.confirm` to use a simpler template that does not assume Classic UI is installed.
