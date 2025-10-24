@@ -45,26 +45,30 @@ EXTRA_PATH?=
 
 # Primary Python interpreter to use. It is used to create the
 # virtual environment if `VENV_ENABLED` and `VENV_CREATE` are set to `true`.
+# If global `uv` is used, this value is passed as `--python VALUE` to the venv creation.
+# uv then downloads the Python interpreter if it is not available.
+# for more on this feature read the [uv python documentation](https://docs.astral.sh/uv/concepts/python-versions/)
 # Default: python3
 PRIMARY_PYTHON?=python3
 
 # Minimum required Python version.
-# Default: 3.9
+# Default: 3.10
 PYTHON_MIN_VERSION?=3.10
 
 # Install packages using the given package installer method.
-# Supported are `pip` and `uv`. If uv is used, its global availability is
-# checked. Otherwise, it is installed, either in the virtual environment or
-# using the `PRIMARY_PYTHON`, dependent on the `VENV_ENABLED` setting. If
-# `VENV_ENABLED` and uv is selected, uv is used to create the virtual
-# environment.
+# Supported are `pip` and `uv`. When `uv` is selected, a global installation
+# is auto-detected and used if available. Otherwise, uv is installed in the
+# virtual environment or using `PRIMARY_PYTHON`, depending on the
+# `VENV_ENABLED` setting.
 # Default: pip
 PYTHON_PACKAGE_INSTALLER?=uv
 
-# Flag whether to use a global installed 'uv' or install
-# it in the virtual environment.
-# Default: false
-MXENV_UV_GLOBAL?=false
+# Python version for UV to install/use when creating virtual
+# environments with global UV. Passed to `uv venv -p VALUE`. Supports version
+# specs like `3.11`, `3.14`, `cpython@3.14`. Defaults to PRIMARY_PYTHON value
+# for backward compatibility.
+# Default: $(PRIMARY_PYTHON)
+UV_PYTHON?=$(PRIMARY_PYTHON)
 
 # Flag whether to use virtual environment. If `false`, the
 # interpreter according to `PRIMARY_PYTHON` found in `PATH` is used.
@@ -210,7 +214,7 @@ $(SENTINEL): $(firstword $(MAKEFILE_LIST))
 # mxenv
 ##############################################################################
 
-export OS:=$(OS)
+OS?=
 
 # Determine the executable path
 ifeq ("$(VENV_ENABLED)", "true")
@@ -226,26 +230,61 @@ else
 MXENV_PYTHON=$(PRIMARY_PYTHON)
 endif
 
-# Determine the package installer
+# Determine the package installer with non-interactive flags
 ifeq ("$(PYTHON_PACKAGE_INSTALLER)","uv")
-PYTHON_PACKAGE_COMMAND=uv pip
+PYTHON_PACKAGE_COMMAND=uv pip --no-progress
 else
 PYTHON_PACKAGE_COMMAND=$(MXENV_PYTHON) -m pip
 endif
 
+# Auto-detect global uv availability (simple existence check)
+ifeq ("$(PYTHON_PACKAGE_INSTALLER)","uv")
+UV_AVAILABLE:=$(shell command -v uv >/dev/null 2>&1 && echo "true" || echo "false")
+else
+UV_AVAILABLE:=false
+endif
+
+# Determine installation strategy
+# depending on the PYTHON_PACKAGE_INSTALLER and UV_AVAILABLE
+# - both vars can be false or
+# - one of them can be true,
+# - but never boths.
+USE_GLOBAL_UV:=$(shell [[ "$(PYTHON_PACKAGE_INSTALLER)" == "uv" && "$(UV_AVAILABLE)" == "true" ]] && echo "true" || echo "false")
+USE_LOCAL_UV:=$(shell [[ "$(PYTHON_PACKAGE_INSTALLER)" == "uv" && "$(UV_AVAILABLE)" == "false" ]] && echo "true" || echo "false")
+
+# Check if global UV is outdated (non-blocking warning)
+ifeq ("$(USE_GLOBAL_UV)","true")
+UV_OUTDATED:=$(shell uv self update --dry-run 2>&1 | grep -q "Would update" && echo "true" || echo "false")
+else
+UV_OUTDATED:=false
+endif
+
 MXENV_TARGET:=$(SENTINEL_FOLDER)/mxenv.sentinel
 $(MXENV_TARGET): $(SENTINEL)
+	# Validation: Check Python version if not using global uv
+ifneq ("$(USE_GLOBAL_UV)","true")
 	@$(PRIMARY_PYTHON) -c "import sys; vi = sys.version_info; sys.exit(1 if (int(vi[0]), int(vi[1])) >= tuple(map(int, '$(PYTHON_MIN_VERSION)'.split('.'))) else 0)" \
 		&& echo "Need Python >= $(PYTHON_MIN_VERSION)" && exit 1 || :
+else
+	@echo "Using global uv for Python $(UV_PYTHON)"
+endif
+	# Validation: Check VENV_FOLDER is set if venv enabled
 	@[[ "$(VENV_ENABLED)" == "true" && "$(VENV_FOLDER)" == "" ]] \
 		&& echo "VENV_FOLDER must be configured if VENV_ENABLED is true" && exit 1 || :
-	@[[ "$(VENV_ENABLED)$(PYTHON_PACKAGE_INSTALLER)" == "falseuv" ]] \
+	# Validation: Check uv not used with system Python
+	@[[ "$(VENV_ENABLED)" == "false" && "$(PYTHON_PACKAGE_INSTALLER)" == "uv" ]] \
 		&& echo "Package installer uv does not work with a global Python interpreter." && exit 1 || :
+	# Warning: Notify if global UV is outdated
+ifeq ("$(UV_OUTDATED)","true")
+	@echo "WARNING: A newer version of uv is available. Run 'uv self update' to upgrade."
+endif
+
+	# Create virtual environment
 ifeq ("$(VENV_ENABLED)", "true")
 ifeq ("$(VENV_CREATE)", "true")
-ifeq ("$(PYTHON_PACKAGE_INSTALLER)$(MXENV_UV_GLOBAL)","uvtrue")
-	@echo "Setup Python Virtual Environment using package 'uv' at '$(VENV_FOLDER)'"
-	@uv venv -p $(PRIMARY_PYTHON) --seed $(VENV_FOLDER)
+ifeq ("$(USE_GLOBAL_UV)","true")
+	@echo "Setup Python Virtual Environment using global uv at '$(VENV_FOLDER)'"
+	@uv venv --allow-existing --no-progress -p $(UV_PYTHON) --seed $(VENV_FOLDER)
 else
 	@echo "Setup Python Virtual Environment using module 'venv' at '$(VENV_FOLDER)'"
 	@$(PRIMARY_PYTHON) -m venv $(VENV_FOLDER)
@@ -255,10 +294,14 @@ endif
 else
 	@echo "Using system Python interpreter"
 endif
-ifeq ("$(PYTHON_PACKAGE_INSTALLER)$(MXENV_UV_GLOBAL)","uvfalse")
-	@echo "Install uv"
+
+	# Install uv locally if needed
+ifeq ("$(USE_LOCAL_UV)","true")
+	@echo "Install uv in virtual environment"
 	@$(MXENV_PYTHON) -m pip install uv
 endif
+
+	# Install/upgrade core packages
 	@$(PYTHON_PACKAGE_COMMAND) install -U pip setuptools wheel
 	@echo "Install/Update MXStack Python packages"
 	@$(PYTHON_PACKAGE_COMMAND) install -U $(MXDEV) $(MXMAKE)
@@ -293,7 +336,7 @@ CLEAN_TARGETS+=mxenv-clean
 SOURCES_TARGET:=$(SENTINEL_FOLDER)/sources.sentinel
 $(SOURCES_TARGET): $(PROJECT_CONFIG) $(MXENV_TARGET)
 	@echo "Checkout project sources"
-	@mxdev -o -c $(PROJECT_CONFIG)
+	@mxdev -f -c $(PROJECT_CONFIG)
 	@touch $(SOURCES_TARGET)
 
 .PHONY: sources
@@ -487,7 +530,7 @@ $(ZOPE_INSTANCE_TARGET): $(COOKIECUTTER_TARGET) $(ZOPE_CONFIGURATION_FILE)
 	@cookiecutter -f --no-input ${ZOPE_COOKIECUTTER_TEMPLATE_OPTIONS} --config-file $(ZOPE_CONFIGURATION_FILE) --output-dir $(ZOPE_BASE_FOLDER) $(ZOPE_TEMPLATE)
 
 .PHONY: zope-instance
-zope-instance: $(ZOPE_INSTANCE_TARGET) $(SOURCES)
+zope-instance: $(ZOPE_INSTANCE_TARGET) $(SOURCES_TARGET)
 
 .PHONY: zope-start
 zope-start: $(ZOPE_RUN_TARGET)
