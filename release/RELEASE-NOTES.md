@@ -1,36 +1,23 @@
-# Release notes for Plone 6.1.3 (2025-10-02)
+# Release notes for Plone 6.1.4 (unreleased)
 
-* Last updated: October 2nd, 2025
+* Last updated: October 24th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.3/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.3/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.3/constraints.txt](https://dist.plone.org/release/6.1.3/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.3/versions.cfg](https://dist.plone.org/release/6.1.3/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.3/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.3/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
 ## Highlights
 
-These are the main changes since 6.1.2:
+These are the main changes since 6.1.3:
 
-* `plone.app.iterate`: Add working copy support for `LRF` type (Language Root Folder).
-* `plone.app.multilingual`: Add `plone.locking` behavior to `LRF` type. This is required for the working copy to work in `LRF`.
-* `plone.exportimport`:
-  * Support export/import of user `login_name`.
-  * Support non-root PloneSite import/export.
-* `plone.rest`: Add a `context` URL to exception responses.
-  This can be used by a client to retrieve contextual data that may be needed to display the exception.
-* `plone.app.vocabularies`: Now in CatalogVocabulary getTerm raises LookupError when it cannot find the referred object instead of returning None.
-* `plone.base`: Cleanup `TinyMCESchema.plugins` to the actual existing plugins.
-* `plone.staticresources`:
-  * Update `mockup` from 5.4.0 to 5.4.4.
-  * pat contentbrowser: Check browseable items automatically with `is_folderish` metadata.
-* `plonetheme.barceloneta`: Update to Bootstrap 5.3.8.
-* `plone.app.upgrade`:  Add ``utils.remove_utility`` helper function.  Code taken over from ``collective.migrationhelpers``.
-* Internal change in lots of packages: Move distribution to src layout.
+* `plone.app.upgrade`: Fix upgrading TinyMCE plugins with invalid/outdated plugins.
+* `plone.exportimport`: Implement regular commits to reduce memory usage in larger import processes.
 
 
 ## Volto frontend
