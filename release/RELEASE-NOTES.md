@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: October 2nd, 2025
+* Last updated: October 28th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -24,6 +24,7 @@ These are the main changes compared to 6.1:
   We updated `zc.buildout` to version 5, and in the `requirements.txt` we have added `horse-with-no-namespace`.
   That helps avoid problems when not all packages in a namespace are using the same namespace style.
   See also below, in de section about "pip, buildout, setuptools".
+* `plone.protect`: We include 6.0.0a2, which is the first release of a `plone` namespace package that uses native namespaces.
 * `plone.base`: `IClassicUISchema`: Add new control panel.
 * `plone.app.layout`: Add the new property `is_ajax` to the Plone layout view.
   This returns True, if an AJAX request is detected. This is done by checking if the `HTTP_X_REQUESTED_WITH` request header is set to `XMLHttpRequest`.
@@ -62,7 +63,7 @@ packaging==25.0
 pip==25.2
 setuptools==80.9.0
 wheel==0.45.1
-zc.buildout==5.0.0a2
+zc.buildout==5.0.0a3
 horse-with-no-namespace==20250705.0
 ```
 
