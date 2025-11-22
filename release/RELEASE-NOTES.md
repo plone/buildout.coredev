@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: November 20th, 2025
+* Last updated: November 22nd, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -22,6 +22,7 @@ These are the main changes compared to 6.1:
     The previous template was moved to `plone.app.layout`.
 * We are in the middle of switching to native namespaces for `plone.*` and `Products.*`.
   We use alpha releases of dozens of plone packages now with native namespaces.
+* We use Zope 6.0b1, pinning versions with native namespaces.
 * We have updated `zc.buildout` to version 5, and in the `requirements.txt` we have added `horse-with-no-namespace`.
   That helps avoid problems when not all packages in a namespace are using the same namespace style.
   See also below, in the section about "pip, buildout, setuptools".
@@ -62,12 +63,12 @@ This release supports Python 3.10, 3.11, 3.12, and 3.13.
 In Plone core we use these versions to install Plone:
 
 ```
+horse-with-no-namespace==20251105.1
 packaging==25.0
-pip==25.2
+pip==25.3
 setuptools==80.9.0
 wheel==0.45.1
-zc.buildout==5.0.0a3
-horse-with-no-namespace==20251105.1
+zc.buildout==5.1.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
