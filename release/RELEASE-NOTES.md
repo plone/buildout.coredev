@@ -1,6 +1,6 @@
 # Release notes for Plone 6.1.4 (unreleased)
 
-* Last updated: October 24th, 2025
+* Last updated: November 26th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -18,7 +18,7 @@ These are the main changes since 6.1.3:
 
 * `plone.app.upgrade`: Fix upgrading TinyMCE plugins with invalid/outdated plugins.
 * `plone.exportimport`: Implement regular commits to reduce memory usage in larger import processes.
-
+* Updated robotframework related versions, used in acceptance testing.
 
 ## Volto frontend
 
@@ -26,7 +26,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.27.3](https://www.npmjs.com/package/@plone/volto/v/18.27.3).  See the [changelog](https://github.com/plone/volto/blob/18.27.3/packages/volto/CHANGELOG.md).
+Latest release is [18.29.1](https://www.npmjs.com/package/@plone/volto/v/18.29.1).  See the [changelog](https://github.com/plone/volto/blob/18.29.1/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
@@ -55,7 +55,7 @@ zc.buildout==4.1.12
 In general you are free to use whatever versions work for you, but these worked for us.
 Note that if you use Buildout and are on `setuptools` 80+, you need the latest `zc.buildout` 4.1.12.
 
-If you use `zc.buildout`, you can also choose to upgrade to version 5.x, currently in alpha release.
+If you use `zc.buildout`, you can also choose to upgrade to version 5.x.
 That helps avoid problems when not all packages in a namespace are using the same namespace style.
 When using either `zc.buildout` or `pip` (or `uv`) you can also choose to install the `horse-with-no-namespace` package.
 Plone 6.2 (under development) already uses both.
