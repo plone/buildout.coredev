@@ -7,7 +7,9 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 ## Release packages, update versions
 
 - [ ] Check Jenkins Status: should be green.  (This should be checked often during the release process.)
-- [ ] In coredev, check packages for updates: `bin/manage report --interactive`.  This is less needed now that we have `mr.roboto` to add packages to the checkouts.  Use `bin/versioncheck` to see if any new PyPI releases are worth adding, or check the artifact of the [versioncheck GitHub Action](https://github.com/plone/buildout.coredev/actions/workflows/versioncheck.yml).
+- [ ] In coredev, optionally check packages for updates: `bin/manage report --interactive`.  I never do this anymore, but the option is there.  This is not really needed now that we have `mr.roboto` to add packages to the checkouts.
+- [ ] Optionally use `bin/versioncheck` to see if any new PyPI releases are worth adding, or check the artifact of the [versioncheck GitHub Action](https://github.com/plone/buildout.coredev/actions/workflows/versioncheck.yml).
+- [ ] Check that the overrides in `versions.cfg` and `mx.ini` are in sync.
 - [ ] Release individual packages from `checkouts.cfg`.
 - [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/master/src/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/src/plone/app/upgrade/v62/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
 - [ ] Handle special packages, often handled by special people.  :-) You can can ping people in the release-team channel on Discord, in the current issue, or individually:
