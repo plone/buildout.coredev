@@ -39,6 +39,7 @@ plone.app.querystring
 plone.app.redirector
 plone.app.registry
 plone.app.relationfield
+plone.app.robotframework
 plone.app.testing
 plone.app.textfield
 plone.app.theming
