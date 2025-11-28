@@ -124,10 +124,24 @@ Run `make zope-start` to start the Zope instance.
 
 ### Run tests
 
-This is not in the Makefile yet.  We need to figure out how best to run the tests first.
-A few sample commands that work for me:
+Use the `make test` target to run unit tests for a package:
 
+```bash
+# Run all unit tests for a package (package is required)
+make test package=plone.namedfile
+
+# Run a specific test
+make test package=plone.namedfile test=test_scaling
 ```
+
+The target automatically detects the correct path for:
+- Packages in development with modern layout (`src/package/src/`)
+- Packages in development with legacy layout (`src/package/`)
+- Packages installed in the virtual environment
+
+You can also run tests directly with `zope-testrunner`:
+
+```bash
 .venv/bin/zope-testrunner --test-path src/Products.CMFPlone -u
 .venv/bin/zope-testrunner --test-path .venv/lib/python3.12/site-packages -s plone.memoize
 ```

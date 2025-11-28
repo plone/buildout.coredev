@@ -46,3 +46,32 @@ run-presources: $(PRE_SOURCES_TARGET)
 	@touch $(PRE_SOURCES_TARGET)
 
 INSTALL_TARGETS+=run-presources
+
+##############################################################################
+# test
+##############################################################################
+
+# Usage:
+#   make test package=plone.namedfile
+#   make test package=plone.namedfile test=test_scaling
+#
+.PHONY: test
+test: $(PACKAGES_TARGET)
+ifndef package
+	$(error package is required. Usage: make test package=plone.namedfile [test=test_name])
+endif
+	$(eval TEST_PATH := $(shell \
+		if [ -d "src/$(package)/src" ]; then \
+			echo "src/$(package)/src"; \
+		elif [ -d "src/$(package)" ]; then \
+			echo "src/$(package)"; \
+		else \
+			.venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"; \
+		fi))
+ifdef test
+	@echo "Running test '$(test)' from package '$(package)' (path: $(TEST_PATH))"
+	@.venv/bin/zope-testrunner -u --test-path $(TEST_PATH) -s $(package) -t $(test)
+else
+	@echo "Running all unit tests from package '$(package)' (path: $(TEST_PATH))"
+	@.venv/bin/zope-testrunner -u --test-path $(TEST_PATH) -s $(package)
+endif
