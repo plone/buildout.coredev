@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: December 9th, 2025
+* Last updated: December 18th, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -27,7 +27,9 @@ These are the main changes compared to 6.1:
   That helps avoid problems when not all packages in a namespace are using the same namespace style.
   See also below, in the section about "pip, buildout, setuptools".
 * `plone.protect`: We include 6.0.0a2, which is the first release of a `plone` namespace package that uses native namespaces.
-* `plone.base`: `IClassicUISchema`: Add new control panel.
+* `plone.base`:
+  * `IClassicUISchema`: Add new control panel.
+  * Add "license key" field to TinyMCE schema.
 * `plone.app.layout`: Add the new property `is_ajax` to the Plone layout view.
   This returns True, if an AJAX request is detected. This is done by checking if the `HTTP_X_REQUESTED_WITH` request header is set to `XMLHttpRequest`.
   `plone.app.theming` has related changes.
@@ -36,6 +38,7 @@ These are the main changes compared to 6.1:
   does not. When using fetch, it is recommended to wrap it with a helper function
   that adds this header to each request.
 * `icalendar` has various breaking changes, but that should only affect you if you directly interact with that package.
+* `plone.app.multilingual`: Adds the `volto.blocks` behavior to LRF if `plone.volto` is installed.
 
 
 ## Volto frontend
