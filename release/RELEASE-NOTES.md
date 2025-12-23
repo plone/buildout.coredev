@@ -1,8 +1,8 @@
 # Release notes for Plone 6.2.0a1 (unreleased)
 
-* Last updated: December 18th, 2025
+* Last updated: December 23rd, 2025
 * Check the [release schedule](https://plone.org/download/release-schedule).
-* TODO Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.1.
+* Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
@@ -39,6 +39,7 @@ These are the main changes compared to 6.1:
   that adds this header to each request.
 * `icalendar` has various breaking changes, but that should only affect you if you directly interact with that package.
 * `plone.app.multilingual`: Adds the `volto.blocks` behavior to LRF if `plone.volto` is installed.
+* `plone.staticresources`: Update to `mockup` 5.5.0 with TinyMCE 8.
 
 
 ## Volto frontend
