@@ -2,32 +2,31 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2026-01-13T18:25:01-08:00
-Author: dependabot[bot] (dependabot[bot]) <49699333+dependabot[bot]@users.noreply.github.com>
-Commit: https://github.com/plone/plone.restapi/commit/f11b17d22138c000fa105c9a89196a981467ba63
+Date: 2026-01-13T19:04:29-08:00
+Author: Wesley Barroso Lopes (wesleybl) <wesleybl@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/6ea5567e7d4c8b12ade498835bea3906af74e931
 
-Bump actions/checkout from 5 to 6 (#1958)
+Remove default limit of 1000 from QuerystringSearch (#1963)
 
-Bumps [actions/checkout](https://github.com/actions/checkout) from 5 to 6.
-- [Release notes](https://github.com/actions/checkout/releases)
-- [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md)
-- [Commits](https://github.com/actions/checkout/compare/v5...v6)
+* Remove default limit of 1000 from QuerystringSearch
 
----
-updated-dependencies:
-- dependency-name: actions/checkout
-  dependency-version: '6'
-  dependency-type: direct:production
-  update-type: version-update:semver-major
-...
+Previously, QuerystringSearch imposed a hardcoded limit=1000 on all
+queries, even when the user did not specify a limit. This caused
+unexpected truncation of results.
 
-Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
-Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
-Co-authored-by: Maurits van Rees &lt;maurits@vanrees.org&gt;
+Now the limit parameter is only passed to querybuilder when explicitly provided in the request data.
+
+* Update docs
+
+---------
+
+Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-M .github/workflows/test-matrix.yml
-M .github/workflows/tests.yml
+A news/1955.bugfix
+M docs/source/endpoints/querystringsearch.md
+M src/plone/restapi/services/querystringsearch/get.py
+M src/plone/restapi/tests/test_services_querystringsearch.py
 
-b'diff --git a/.github/workflows/test-matrix.yml b/.github/workflows/test-matrix.yml\nindex bdc2d1652..abbb13c09 100644\n--- a/.github/workflows/test-matrix.yml\n+++ b/.github/workflows/test-matrix.yml\n@@ -31,7 +31,7 @@ jobs:\n     if: github.event_name != \'pull_request\' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name\n     name: ${{ matrix.config[1] }}\n     steps:\n-    - uses: actions/checkout@v5\n+    - uses: actions/checkout@v6\n       with:\n         persist-credentials: false\n     - name: Set up Python\ndiff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml\nindex 6400f0e77..73a78438e 100644\n--- a/.github/workflows/tests.yml\n+++ b/.github/workflows/tests.yml\n@@ -22,7 +22,7 @@ jobs:\n             plone-version: "6.2"\n     steps:\n       # git checkout\n-      - uses: actions/checkout@v5\n+      - uses: actions/checkout@v6\n \n       # Python setup\n       - name: Set up Python ${{ matrix.python-version }}\n'
+b'diff --git a/docs/source/endpoints/querystringsearch.md b/docs/source/endpoints/querystringsearch.md\nindex 3ea397121..bc0ab8e42 100644\n--- a/docs/source/endpoints/querystringsearch.md\n+++ b/docs/source/endpoints/querystringsearch.md\n@@ -138,7 +138,7 @@ The sort_order can be either `ascending` or `descending`.\n \n ### Limit\n \n-Querystring `query` with a `limit` parameter:\n+Use the `limit` parameter to set a maximum number of results that will be returned:\n \n ```\n {\n@@ -154,7 +154,7 @@ Querystring `query` with a `limit` parameter:\n ```\n \n The `limit` parameter is optional.\n-The default value is `1000`.\n+The default value is no limit (but a single page of results will still have a size determined by the Batch Size).\n \n ### Query\n \ndiff --git a/news/1955.bugfix b/news/1955.bugfix\nnew file mode 100644\nindex 000000000..139b71244\n--- /dev/null\n+++ b/news/1955.bugfix\n@@ -0,0 +1 @@\n+Remove default limit of 1000 from service @querystring-search. @wesleybl\ndiff --git a/src/plone/restapi/services/querystringsearch/get.py b/src/plone/restapi/services/querystringsearch/get.py\nindex db98aceed..14a37511e 100644\n--- a/src/plone/restapi/services/querystringsearch/get.py\n+++ b/src/plone/restapi/services/querystringsearch/get.py\n@@ -38,7 +38,9 @@ def __call__(self):\n         b_size = parse_int(data, "b_size", 25)\n         sort_on = data.get("sort_on", None)\n         sort_order = data.get("sort_order", None)\n-        limit = parse_int(data, "limit", 1000)\n+        limit = data.get("limit")\n+        if limit is not None:\n+            limit = parse_int(data, "limit", None)\n         fullobjects = bool(data.get("fullobjects", False))\n \n         if not query:\ndiff --git a/src/plone/restapi/tests/test_services_querystringsearch.py b/src/plone/restapi/tests/test_services_querystringsearch.py\nindex 442935a7a..bf52c28ef 100644\n--- a/src/plone/restapi/tests/test_services_querystringsearch.py\n+++ b/src/plone/restapi/tests/test_services_querystringsearch.py\n@@ -4,6 +4,7 @@\n from plone.app.testing import TEST_USER_ID\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from plone.restapi.testing import RelativeSession\n+from unittest import mock\n \n import transaction\n import unittest\n@@ -361,3 +362,55 @@ def test_querystringsearch__bad_operation(self):\n             },\n         )\n         self.assertEqual(response.status_code, 400)\n+\n+    def test_querystringsearch_should_return_all_results_without_limit(self):\n+        """Test that all results are returned when user doesn\'t specify limit.\n+\n+        Mocks Catalog._search_index to return 1001 items.\n+        """\n+        from BTrees.IIBTree import IISet\n+        from plone.restapi.serializer.summary import DefaultJSONSummarySerializer\n+        from Products.ZCatalog.Catalog import Catalog\n+\n+        num_results = 1001\n+        mock_rs = IISet(range(num_results))\n+        mock_brain = object()\n+\n+        def mock_search_index(catalog_self, cr, index_id, query, rs):\n+            return mock_rs\n+\n+        def mock_getitem(catalog_self, index):\n+            return mock_brain\n+\n+        original_serializer = DefaultJSONSummarySerializer.__call__\n+\n+        def mock_serializer(self):\n+            if self.context is mock_brain:\n+                return {}\n+            return original_serializer(self)\n+\n+        with mock.patch.object(Catalog, "_search_index", mock_search_index):\n+            with mock.patch.object(Catalog, "__getitem__", mock_getitem):\n+                with mock.patch.object(\n+                    DefaultJSONSummarySerializer, "__call__", mock_serializer\n+                ):\n+                    response = self.api_session.post(\n+                        "/@querystring-search",\n+                        json={\n+                            "query": [\n+                                {\n+                                    "i": "portal_type",\n+                                    "o": "plone.app.querystring.operation.selection.is",\n+                                    "v": ["Document"],\n+                                }\n+                            ]\n+                        },\n+                    )\n+\n+                    self.assertEqual(response.status_code, 200)\n+                    self.assertEqual(\n+                        response.json()["items_total"],\n+                        num_results,\n+                        f"Expected {num_results} results, got {response.json()[\'items_total\']}. "\n+                        "QuerystringSearch should not impose a default limit.",\n+                    )\n'
 
