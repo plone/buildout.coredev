@@ -54,5 +54,6 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
 - [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py#L324), update `SUPPORTED_PYTHON_VERSIONS_PLONE62` as needed. Ask Steve Piercy or do it yourself.
+- [ ] Check if the [version policy in Volto](https://github.com/plone/volto/blob/main/docs/source/contributing/version-policy.md) is still up to date.
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).  Mostly just a search and replace, except when you want to update Volto as well.
