@@ -1,36 +1,30 @@
-# Release notes for Plone 6.1.3 (2025-10-02)
+# Release notes for Plone 6.1.4 (2026-01-15)
 
-* Last updated: October 2nd, 2025
+* Last updated: January 15, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.3/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.3/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.4/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.4/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.3/constraints.txt](https://dist.plone.org/release/6.1.3/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.3/versions.cfg](https://dist.plone.org/release/6.1.3/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.3/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.3/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.4/constraints.txt](https://dist.plone.org/release/6.1.4/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.4/versions.cfg](https://dist.plone.org/release/6.1.4/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.4/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.4/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
 ## Highlights
 
-These are the main changes since 6.1.2:
+These are the main changes since 6.1.3:
 
-* `plone.app.iterate`: Add working copy support for `LRF` type (Language Root Folder).
-* `plone.app.multilingual`: Add `plone.locking` behavior to `LRF` type. This is required for the working copy to work in `LRF`.
-* `plone.exportimport`:
-  * Support export/import of user `login_name`.
-  * Support non-root PloneSite import/export.
-* `plone.rest`: Add a `context` URL to exception responses.
-  This can be used by a client to retrieve contextual data that may be needed to display the exception.
-* `plone.app.vocabularies`: Now in CatalogVocabulary getTerm raises LookupError when it cannot find the referred object instead of returning None.
-* `plone.base`: Cleanup `TinyMCESchema.plugins` to the actual existing plugins.
-* `plone.staticresources`:
-  * Update `mockup` from 5.4.0 to 5.4.4.
-  * pat contentbrowser: Check browseable items automatically with `is_folderish` metadata.
-* `plonetheme.barceloneta`: Update to Bootstrap 5.3.8.
-* `plone.app.upgrade`:  Add ``utils.remove_utility`` helper function.  Code taken over from ``collective.migrationhelpers``.
-* Internal change in lots of packages: Move distribution to src layout.
+* `plone.app.upgrade`: Fix upgrading TinyMCE plugins with invalid/outdated plugins.
+* `plone.exportimport`: Implement regular commits to reduce memory usage in larger import processes.
+* Updated robotframework related versions, used in acceptance testing.
+* `plone.app.multilingual`: Adds the `volto.blocks` behavior to LRF if `plone.volto` is installed.
+* `plone.namedfile`: Add default width and height attributes if none provided when using the srcset method.
+* `plone.scale`: Handle animated WebP images.
+* `plone.staticresources`: Update mockup=5.4.6. See https://github.com/plone/mockup/releases/tag/5.4.6.
+* `plone.volto`: Support collective.html2blocks to convert HTML to Volto blocks as a replacement for blocks-conversion-tool.
+* `plonetheme.barceloneta`: Add a bit more separation between the menu and the search field in the mobile menu.
 
 
 ## Volto frontend
@@ -39,7 +33,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.27.3](https://www.npmjs.com/package/@plone/volto/v/18.27.3).  See the [changelog](https://github.com/plone/volto/blob/18.27.3/packages/volto/CHANGELOG.md).
+Latest release is [18.32.0](https://www.npmjs.com/package/@plone/volto/v/18.32.0).  See the [changelog](https://github.com/plone/volto/blob/18.32.0/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
@@ -59,7 +53,7 @@ In Plone core we use these versions to install Plone:
 
 ```
 packaging==25.0
-pip==25.2
+pip==25.3
 setuptools==80.9.0
 wheel==0.45.1
 zc.buildout==4.1.12
@@ -68,7 +62,7 @@ zc.buildout==4.1.12
 In general you are free to use whatever versions work for you, but these worked for us.
 Note that if you use Buildout and are on `setuptools` 80+, you need the latest `zc.buildout` 4.1.12.
 
-If you use `zc.buildout`, you can also choose to upgrade to version 5.x, currently in alpha release.
+If you use `zc.buildout`, you can also choose to upgrade to version 5.x.
 That helps avoid problems when not all packages in a namespace are using the same namespace style.
 When using either `zc.buildout` or `pip` (or `uv`) you can also choose to install the `horse-with-no-namespace` package.
 Plone 6.2 (under development) already uses both.
