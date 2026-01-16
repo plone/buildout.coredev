@@ -43,9 +43,52 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.0.0-alpha.21](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.21).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.21/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready for a final release.  Volto is just waiting for the Plone 6.2 final release.
+Latest release is [19.0.0-alpha.21](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.21).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.21/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
-Volto related changes in the Python backend:
+Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
+
+### Key New Features in Volto 19
+
+* Support for Subpath Domains (PLIP plone/volto#4290)
+* Restore Unsaved Changes (PLIP plone/volto#4168)
+* Improved Image Upload Widget (PLIP plone/volto#4268)
+
+### General UI / Editor Improvements
+
+* Cross-language support in the Blocks chooser search, improving block discovery on multilingual sites.
+* Drag-and-drop file uploads directly into folder contents.
+* New widgets: Size/Width/BlockAlignment
+* Single-selection mode added to the SelectAutoComplete widget.
+
+### Developer Tooling
+
+* @plone/components library is now core, thus, it is allowed to be used in core
+* Migration from Jest to Vitest as the default unit testing framework.
+* Continued refactoring of core components towards modern React patterns (hooks and TypeScript).
+* Internationalization and Accessibility
+* Internationalised help text for selected fields (for example, Group Name).
+* Improved screen-reader labels and more accessible button text across the UI.
+* Improved toolbar accessibility and fixed several editor crashes.
+
+### Breaking Changes and Important Upgrades
+
+* Jest is no longer supported and removed from core
+* The default language is now loaded from the backend API instead of being controlled via environment variables.
+* Build tooling was forked (@plone/razzle and related Babel presets) to maintain long-term compatibility after upstream changes.
+* Several widgets (such as AlignWidget and ButtonsWidget) were moved to @plone/components, which may require styling adjustments in custom projects.
+* Updates to the Node.js toolchain, including dropping Node 20 support and now uses pnpm 10 with catalog support.
+* Image handling changes require add-ons to use the Volto Image component instead of raw <img> tags.
+* Related items (showRelatedItems) are now enabled by default.
+
+### Bug Fixes and Quality Improvements
+
+* Many miscellaneous bugfixes
+* Multiple fixes to drag-and-drop interactions and folder contents behavior.
+* Resolved login, redirect, and multilingual navigation issues.
+* Increased stability of Cypress and other automated tests.
+* Fixes related to server-side rendering hydration, image uploads, and schema handling.
+
+### Volto related changes in the Python backend:
 
 * `plone.volto`: Add larger scales to `plone.allowed_sizes` for new sites. This helps avoid the need to serve the original image which can be very large.
   * `2k` is large enough for a default-width image on a high-density display.
