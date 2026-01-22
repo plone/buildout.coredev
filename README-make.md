@@ -111,7 +111,7 @@ This is not in the Makefile yet.  We need to figure out how best to run the test
 A few sample commands that work for me:
 
 ```
-.venv/bin/zope-testrunner --test-path src/Products.CMFPlone -u
+.venv/bin/zope-testrunner --test-path src/Products.CMFPlone/src -u
 .venv/bin/zope-testrunner --test-path .venv/lib/python3.12/site-packages -s plone.memoize
 ```
 
