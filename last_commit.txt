@@ -2,33 +2,29 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/9.x.x
-Date: 2026-02-08T14:23:42-08:00
+Date: 2026-02-08T14:31:59-08:00
 Author: Wesley Barroso Lopes (wesleybl) <wesleybl@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/45f91a26b66fd3dd73c5d0d030e81502c14f0f76
+Commit: https://github.com/plone/plone.restapi/commit/a3da466e012bb3096ea9dc4f99e1cd59139efe31
 
-Remove default limit of 1000 from QuerystringSearch (#1978)
+fix: the search handler removes sort_order if present (#1980)
 
-Remove default limit of 1000 from QuerystringSearch (#1963)
+fix: the search handler removes sort_order if present (#1954)
 
-* Remove default limit of 1000 from QuerystringSearch
+* fix: search handler remove sort_order if present
 
-Previously, QuerystringSearch imposed a hardcoded limit=1000 on all
-queries, even when the user did not specify a limit. This caused
-unexpected truncation of results.
+* changelog
 
-Now the limit parameter is only passed to querybuilder when explicitly provided in the request data.
-
-* Update docs
+* Rewrite for clarity, add test, edit news
 
 ---------
 
+Co-authored-by: Mauro Amico &lt;mauro.amico@gmail.com&gt;
 Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
 
 Files changed:
-A news/1955.bugfix
-M docs/source/endpoints/querystringsearch.md
-M src/plone/restapi/services/querystringsearch/get.py
-M src/plone/restapi/tests/test_services_querystringsearch.py
+A news/1954.bugfix
+M src/plone/restapi/search/handler.py
+M src/plone/restapi/tests/test_search.py
 
-b'diff --git a/docs/source/endpoints/querystringsearch.md b/docs/source/endpoints/querystringsearch.md\nindex 7cc566663..b22b54ae5 100644\n--- a/docs/source/endpoints/querystringsearch.md\n+++ b/docs/source/endpoints/querystringsearch.md\n@@ -138,7 +138,7 @@ The sort_order can be either `ascending` or `descending`.\n \n ### Limit\n \n-Querystring `query` with a `limit` parameter:\n+Use the `limit` parameter to set a maximum number of results that will be returned:\n \n ```\n {\n@@ -154,7 +154,7 @@ Querystring `query` with a `limit` parameter:\n ```\n \n The `limit` parameter is optional.\n-The default value is `1000`.\n+The default value is no limit (but a single page of results will still have a size determined by the Batch Size).\n \n ### Query\n \ndiff --git a/news/1955.bugfix b/news/1955.bugfix\nnew file mode 100644\nindex 000000000..139b71244\n--- /dev/null\n+++ b/news/1955.bugfix\n@@ -0,0 +1 @@\n+Remove default limit of 1000 from service @querystring-search. @wesleybl\ndiff --git a/src/plone/restapi/services/querystringsearch/get.py b/src/plone/restapi/services/querystringsearch/get.py\nindex db98aceed..14a37511e 100644\n--- a/src/plone/restapi/services/querystringsearch/get.py\n+++ b/src/plone/restapi/services/querystringsearch/get.py\n@@ -38,7 +38,9 @@ def __call__(self):\n         b_size = parse_int(data, "b_size", 25)\n         sort_on = data.get("sort_on", None)\n         sort_order = data.get("sort_order", None)\n-        limit = parse_int(data, "limit", 1000)\n+        limit = data.get("limit")\n+        if limit is not None:\n+            limit = parse_int(data, "limit", None)\n         fullobjects = bool(data.get("fullobjects", False))\n \n         if not query:\ndiff --git a/src/plone/restapi/tests/test_services_querystringsearch.py b/src/plone/restapi/tests/test_services_querystringsearch.py\nindex 442935a7a..bf52c28ef 100644\n--- a/src/plone/restapi/tests/test_services_querystringsearch.py\n+++ b/src/plone/restapi/tests/test_services_querystringsearch.py\n@@ -4,6 +4,7 @@\n from plone.app.testing import TEST_USER_ID\n from plone.restapi.testing import PLONE_RESTAPI_DX_FUNCTIONAL_TESTING\n from plone.restapi.testing import RelativeSession\n+from unittest import mock\n \n import transaction\n import unittest\n@@ -361,3 +362,55 @@ def test_querystringsearch__bad_operation(self):\n             },\n         )\n         self.assertEqual(response.status_code, 400)\n+\n+    def test_querystringsearch_should_return_all_results_without_limit(self):\n+        """Test that all results are returned when user doesn\'t specify limit.\n+\n+        Mocks Catalog._search_index to return 1001 items.\n+        """\n+        from BTrees.IIBTree import IISet\n+        from plone.restapi.serializer.summary import DefaultJSONSummarySerializer\n+        from Products.ZCatalog.Catalog import Catalog\n+\n+        num_results = 1001\n+        mock_rs = IISet(range(num_results))\n+        mock_brain = object()\n+\n+        def mock_search_index(catalog_self, cr, index_id, query, rs):\n+            return mock_rs\n+\n+        def mock_getitem(catalog_self, index):\n+            return mock_brain\n+\n+        original_serializer = DefaultJSONSummarySerializer.__call__\n+\n+        def mock_serializer(self):\n+            if self.context is mock_brain:\n+                return {}\n+            return original_serializer(self)\n+\n+        with mock.patch.object(Catalog, "_search_index", mock_search_index):\n+            with mock.patch.object(Catalog, "__getitem__", mock_getitem):\n+                with mock.patch.object(\n+                    DefaultJSONSummarySerializer, "__call__", mock_serializer\n+                ):\n+                    response = self.api_session.post(\n+                        "/@querystring-search",\n+                        json={\n+                            "query": [\n+                                {\n+                                    "i": "portal_type",\n+                                    "o": "plone.app.querystring.operation.selection.is",\n+                                    "v": ["Document"],\n+                                }\n+                            ]\n+                        },\n+                    )\n+\n+                    self.assertEqual(response.status_code, 200)\n+                    self.assertEqual(\n+                        response.json()["items_total"],\n+                        num_results,\n+                        f"Expected {num_results} results, got {response.json()[\'items_total\']}. "\n+                        "QuerystringSearch should not impose a default limit.",\n+                    )\n'
+b'diff --git a/news/1954.bugfix b/news/1954.bugfix\nnew file mode 100644\nindex 000000000..6908abbfa\n--- /dev/null\n+++ b/news/1954.bugfix\n@@ -0,0 +1 @@\n+In the `@search` service, fix a case where the `sort_order` parameter was ignored. @mamico, @davisagli\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 1f6bba6b8..7469277ea 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -131,23 +131,19 @@ def filter_query(self, query):\n                 bits = query["path"]["query"].split("/")[len(vhm_physical_path) :]\n                 query["path"]["query"] = "/".join(bits) or "/"\n \n-        default_sort_on = search_settings.sort_on\n-\n+        # Get default sort_on from registry if not specified in query\n         if "sort_on" not in query:\n-            if default_sort_on != "relevance":\n-                query["sort_on"] = self.default_sort_on\n-        elif query["sort_on"] == "relevance":\n-            del query["sort_on"]\n-\n-        if not query.get("sort_order") and (\n-            query.get("sort_on", "") == "Date"\n-            or query.get("sort_on", "") == "effective"  # compatibility with Volto\n-        ):\n-            query["sort_order"] = "reverse"\n-        elif "sort_order" in query:\n-            del query["sort_order"]\n-\n-        if "sort_order" in query and not query["sort_order"]:\n+            query["sort_on"] = search_settings.sort_on\n+            # To rank by relevance, sort_on must be omitted\n+            if query["sort_on"] == "relevance":\n+                del query["sort_on"]\n+\n+        sort_on = query.get("sort_on")\n+        # Remove sort_order if sort_on is not set\n+        if not sort_on and "sort_order" in query:\n             del query["sort_order"]\n+        # Default to reverse sort_order if sort_on is a date\n+        elif sort_on in ("Date", "effective") and not query.get("sort_order"):\n+            query["sort_order"] = "reverse"\n \n         return query\ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 321755ef1..88820f6c6 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -765,6 +765,19 @@ def test_search_use_site_search_settings_for_default_sort_order(self):\n             "Other Document",\n         )\n \n+        response = self.api_session.get(\n+            "/@search",\n+            params={\n+                "use_site_search_settings": 1,\n+                "sort_on": "effective",\n+                "sort_order": "reverse",\n+            },\n+        ).json()\n+        self.assertEqual(\n+            [item["title"] for item in response["items"]][0],\n+            "Other Document",\n+        )\n+\n     def test_search_use_site_search_settings_with_navigation_root(self):\n \n         alsoProvides(self.folder, INavigationRoot)\n'
 
