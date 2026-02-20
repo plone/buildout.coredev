@@ -2,55 +2,40 @@ Repository: plone.base
 
 
 Branch: refs/heads/main
-Date: 2026-02-20T12:22:03+01:00
+Date: 2026-02-20T18:34:03+01:00
 Author: Johannes Raggam (thet) <thetetet@gmail.com>
-Commit: https://github.com/plone/plone.base/commit/6199787f553ad5cc18ad33188e8fd6b40d1e81b3
+Commit: https://github.com/plone/plone.base/commit/98fdc66d1a38892b907fd41178086ab1972eb270
 
-Fix issues with dependencychecker and current setuptools by reconfiguring with plone.meta.
+Allow to create content with `index_html` id on the site root.
 
-Ref: https://github.com/reinout/z3c.dependencychecker/issues/119
+The portal root has a `index_html` method which prevented content with the id
+`index_html` to be created and used as a default page.
+
+Fixes: https://github.com/plone/Products.CMFPlone/issues/4278
 
 Files changed:
-A news/+fix-dependencychecker-failure.bugfix.rst
-M .meta.toml
-M tox.ini
+A news/4278.bugfix.rst
+M src/plone/base/tests/test_utils.py
+M src/plone/base/utils.py
 
-b'diff --git a/.meta.toml b/.meta.toml\nindex 66cc9f4..f4a4db4 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -3,7 +3,7 @@\n # See the inline comments on how to expand/tweak this configuration file\n [meta]\n template = "default"\n-commit-id = "2.2.2"\n+commit-id = "2.3.3.dev0"\n \n [tox]\n test_matrix = {"6.2" = ["*"]}\ndiff --git a/news/+fix-dependencychecker-failure.bugfix.rst b/news/+fix-dependencychecker-failure.bugfix.rst\nnew file mode 100644\nindex 0000000..5eff34c\n--- /dev/null\n+++ b/news/+fix-dependencychecker-failure.bugfix.rst\n@@ -0,0 +1,5 @@\n+Fix issues with dependencychecker and current setuptools by reconfiguring with plone.meta.\n+\n+Ref: https://github.com/reinout/z3c.dependencychecker/issues/119\n+\n+@thet\ndiff --git a/tox.ini b/tox.ini\nindex e7d213a..8e86d06 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -18,6 +18,7 @@ envlist =\n # Add extra configuration options in .meta.toml:\n # - to specify a custom testing combination of Plone and python versions, use `test_matrix`\n #   Use ["*"] to use all supported Python versions for this Plone version.\n+# - to disable the test matrix entirely, set `use_test_matrix = false`\n # - to specify extra custom environments, use `envlist_lines`\n # - to specify extra `tox` top-level options, use `config_lines`\n #  [tox]\n@@ -62,6 +63,7 @@ description = check if the package defines all its dependencies\n skip_install = true\n deps =\n     build\n+    setuptools<82.0.0\n     z3c.dependencychecker==2.14.3\n commands =\n     python -m build --sdist\n@@ -130,6 +132,7 @@ extras =\n ##\n # Add extra configuration options in .meta.toml:\n #  [tox]\n+#  skip_test_extra = true\n #  test_extras = """\n #      tests\n #      widgets\n'
+b'diff --git a/news/4278.bugfix.rst b/news/4278.bugfix.rst\nnew file mode 100644\nindex 0000000..5869b19\n--- /dev/null\n+++ b/news/4278.bugfix.rst\n@@ -0,0 +1,8 @@\n+Allow to create content with `index_html` id on the site root.\n+\n+The portal root has a `index_html` method which prevented content with the id\n+`index_html` to be created and used as a default page.\n+\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/4278\n+\n+@thet\ndiff --git a/src/plone/base/tests/test_utils.py b/src/plone/base/tests/test_utils.py\nindex e9f8bac..6a5e0a5 100644\n--- a/src/plone/base/tests/test_utils.py\n+++ b/src/plone/base/tests/test_utils.py\n@@ -217,3 +217,58 @@ def test_is_truthy(self):\n         self.assertFalse(is_truthy("NO"))\n         self.assertFalse(is_truthy("no"))\n         self.assertFalse(is_truthy("foo"))\n+\n+    def test_check_for_collision(self):\n+        from plone.base.utils import _check_for_collision\n+\n+        class Container(dict):\n+            def __getattribute__(self, name):\n+                if name in self:\n+                    return self[name]\n+                return object.__getattribute__(self, name)\n+\n+            def portal_type(self):\n+                """Necessary to fulfill protocol."""\n+\n+            def index_html(self):\n+                """Common attribute - content with id index_html should be\n+                addable."""\n+\n+            def some_attr(self):\n+                """Random attribute - content with id some_attr should not be\n+                addable."""\n+\n+        container = Container()\n+        container["test"] = Container()\n+\n+        # "test" is already taken\n+        self.assertIn(\n+            "There is already an item named",\n+            _check_for_collision(container, "test"),\n+        )\n+\n+        # "tiptop" is not yet taken\n+        self.assertEqual(\n+            _check_for_collision(container, "tiptop"),\n+            None,\n+        )\n+\n+        # "index_html" is not yet taken\n+        self.assertEqual(\n+            _check_for_collision(container, "index_html"),\n+            None,\n+        )\n+\n+        container["index_html"] = Container()\n+\n+        # `False` as "index_html" is now taken\n+        self.assertIn(\n+            "There is already an item named",\n+            _check_for_collision(container, "index_html"),\n+        )\n+\n+        # Content ids are not addable, if the id is an container attribute.\n+        self.assertIn(\n+            "is reserved",\n+            _check_for_collision(container, "some_attr"),\n+        )\ndiff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 8a79d27..97a4cea 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -506,6 +506,10 @@ def _check_for_collision(contained_by, cid, **kwargs):\n                 mapping={"name": cid},\n             )\n \n+    if cid == "index_html":\n+        # always allow index_html\n+        return\n+\n     # containers may have a field / attribute of the same name\n     if base_hasattr(contained_by, cid):\n         return _("${name} is reserved.", mapping={"name": cid})\n@@ -533,9 +537,6 @@ def _check_for_collision(contained_by, cid, **kwargs):\n     # However, we do want to allow overriding of *content* in the object\'s\n     # parent path, including the portal root.\n \n-    if cid == "index_html":\n-        # always allow index_html\n-        return\n     portal = getSite()\n     if portal and cid in portal.contentIds():\n         # Fine to use the same id as a *content* item from the root.\n'
 
 Repository: plone.base
 
 
 Branch: refs/heads/main
-Date: 2026-02-20T08:48:53-08:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.base/commit/9309077f07a737c4c572f995abf9846cef093d1f
+Date: 2026-02-20T20:45:17+01:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.base/commit/756e77e3856f8d9b323f662b0136c1451b4bc9b4
 
-Use .internal for towncrier
+Merge pull request #107 from plone/thet/4278-index-html
 
-(since it's a fix for dev tooling, not relevant to users of the package)
-
-Files changed:
-A news/+fix-dependencychecker-failure.internal.rst
-D news/+fix-dependencychecker-failure.bugfix.rst
-
-b'diff --git a/news/+fix-dependencychecker-failure.bugfix.rst b/news/+fix-dependencychecker-failure.internal.rst\nsimilarity index 100%\nrename from news/+fix-dependencychecker-failure.bugfix.rst\nrename to news/+fix-dependencychecker-failure.internal.rst\n'
-
-Repository: plone.base
-
-
-Branch: refs/heads/main
-Date: 2026-02-20T08:49:24-08:00
-Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.base/commit/119685fe755bdadf9052040dfb92e327648ca782
-
-Merge pull request #108 from plone/thet/fix-dependencychecker-failure
-
-Fix issues with dependencychecker and current setuptools.
+Allow to create content with `index_html` id on the site root.
 
 Files changed:
-A news/+fix-dependencychecker-failure.internal.rst
-M .meta.toml
-M tox.ini
+A news/4278.bugfix.rst
+M src/plone/base/tests/test_utils.py
+M src/plone/base/utils.py
 
-b'diff --git a/.meta.toml b/.meta.toml\nindex 66cc9f4..f4a4db4 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -3,7 +3,7 @@\n # See the inline comments on how to expand/tweak this configuration file\n [meta]\n template = "default"\n-commit-id = "2.2.2"\n+commit-id = "2.3.3.dev0"\n \n [tox]\n test_matrix = {"6.2" = ["*"]}\ndiff --git a/news/+fix-dependencychecker-failure.internal.rst b/news/+fix-dependencychecker-failure.internal.rst\nnew file mode 100644\nindex 0000000..5eff34c\n--- /dev/null\n+++ b/news/+fix-dependencychecker-failure.internal.rst\n@@ -0,0 +1,5 @@\n+Fix issues with dependencychecker and current setuptools by reconfiguring with plone.meta.\n+\n+Ref: https://github.com/reinout/z3c.dependencychecker/issues/119\n+\n+@thet\ndiff --git a/tox.ini b/tox.ini\nindex e7d213a..8e86d06 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -18,6 +18,7 @@ envlist =\n # Add extra configuration options in .meta.toml:\n # - to specify a custom testing combination of Plone and python versions, use `test_matrix`\n #   Use ["*"] to use all supported Python versions for this Plone version.\n+# - to disable the test matrix entirely, set `use_test_matrix = false`\n # - to specify extra custom environments, use `envlist_lines`\n # - to specify extra `tox` top-level options, use `config_lines`\n #  [tox]\n@@ -62,6 +63,7 @@ description = check if the package defines all its dependencies\n skip_install = true\n deps =\n     build\n+    setuptools<82.0.0\n     z3c.dependencychecker==2.14.3\n commands =\n     python -m build --sdist\n@@ -130,6 +132,7 @@ extras =\n ##\n # Add extra configuration options in .meta.toml:\n #  [tox]\n+#  skip_test_extra = true\n #  test_extras = """\n #      tests\n #      widgets\n'
+b'diff --git a/news/4278.bugfix.rst b/news/4278.bugfix.rst\nnew file mode 100644\nindex 0000000..5869b19\n--- /dev/null\n+++ b/news/4278.bugfix.rst\n@@ -0,0 +1,8 @@\n+Allow to create content with `index_html` id on the site root.\n+\n+The portal root has a `index_html` method which prevented content with the id\n+`index_html` to be created and used as a default page.\n+\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/4278\n+\n+@thet\ndiff --git a/src/plone/base/tests/test_utils.py b/src/plone/base/tests/test_utils.py\nindex e9f8bac..6a5e0a5 100644\n--- a/src/plone/base/tests/test_utils.py\n+++ b/src/plone/base/tests/test_utils.py\n@@ -217,3 +217,58 @@ def test_is_truthy(self):\n         self.assertFalse(is_truthy("NO"))\n         self.assertFalse(is_truthy("no"))\n         self.assertFalse(is_truthy("foo"))\n+\n+    def test_check_for_collision(self):\n+        from plone.base.utils import _check_for_collision\n+\n+        class Container(dict):\n+            def __getattribute__(self, name):\n+                if name in self:\n+                    return self[name]\n+                return object.__getattribute__(self, name)\n+\n+            def portal_type(self):\n+                """Necessary to fulfill protocol."""\n+\n+            def index_html(self):\n+                """Common attribute - content with id index_html should be\n+                addable."""\n+\n+            def some_attr(self):\n+                """Random attribute - content with id some_attr should not be\n+                addable."""\n+\n+        container = Container()\n+        container["test"] = Container()\n+\n+        # "test" is already taken\n+        self.assertIn(\n+            "There is already an item named",\n+            _check_for_collision(container, "test"),\n+        )\n+\n+        # "tiptop" is not yet taken\n+        self.assertEqual(\n+            _check_for_collision(container, "tiptop"),\n+            None,\n+        )\n+\n+        # "index_html" is not yet taken\n+        self.assertEqual(\n+            _check_for_collision(container, "index_html"),\n+            None,\n+        )\n+\n+        container["index_html"] = Container()\n+\n+        # `False` as "index_html" is now taken\n+        self.assertIn(\n+            "There is already an item named",\n+            _check_for_collision(container, "index_html"),\n+        )\n+\n+        # Content ids are not addable, if the id is an container attribute.\n+        self.assertIn(\n+            "is reserved",\n+            _check_for_collision(container, "some_attr"),\n+        )\ndiff --git a/src/plone/base/utils.py b/src/plone/base/utils.py\nindex 8a79d27..97a4cea 100644\n--- a/src/plone/base/utils.py\n+++ b/src/plone/base/utils.py\n@@ -506,6 +506,10 @@ def _check_for_collision(contained_by, cid, **kwargs):\n                 mapping={"name": cid},\n             )\n \n+    if cid == "index_html":\n+        # always allow index_html\n+        return\n+\n     # containers may have a field / attribute of the same name\n     if base_hasattr(contained_by, cid):\n         return _("${name} is reserved.", mapping={"name": cid})\n@@ -533,9 +537,6 @@ def _check_for_collision(contained_by, cid, **kwargs):\n     # However, we do want to allow overriding of *content* in the object\'s\n     # parent path, including the portal root.\n \n-    if cid == "index_html":\n-        # always allow index_html\n-        return\n     portal = getSite()\n     if portal and cid in portal.contentIds():\n         # Fine to use the same id as a *content* item from the root.\n'
 
