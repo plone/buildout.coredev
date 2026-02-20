@@ -2,24 +2,30 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2026-02-19T21:19:12-08:00
-Author: Gangadhar Yadav (aryan7081) <haryan458@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/ecf452ad498834df7f8b7269d7f11384a91e1616
+Date: 2026-02-19T22:15:18-08:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.restapi/commit/2ed6c70b9dc2f96bdb19ec91e2c4bbe31d22e3fe
 
-Fix relatedItems [null] for deleted relations (#1979)
+Explain how to customize a serializer (#1976)
 
-* Fix relatedItems [null] for deleted relations
+* docs: explain how to customize a serializer
 
-* Update news/965.bugfix
+* Add news entry
+
+* Apply suggestions from code review
+
+Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
+
+* Fix code block captions in customization.md
 
 ---------
 
 Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Co-authored-by: Steve Piercy &lt;web@stevepiercy.com&gt;
 
 Files changed:
-A news/965.bugfix
-M src/plone/restapi/serializer/relationfield.py
-M src/plone/restapi/tests/test_content_get.py
+A news/1975.documentation
+M docs/source/usage/customization.md
 
-b'diff --git a/news/965.bugfix b/news/965.bugfix\nnew file mode 100644\nindex 000000000..37f1bd87b\n--- /dev/null\n+++ b/news/965.bugfix\n@@ -0,0 +1 @@\n+When serializing RelationList fields, don\'t include a null for broken relations. @aryan7081\ndiff --git a/src/plone/restapi/serializer/relationfield.py b/src/plone/restapi/serializer/relationfield.py\nindex 5d862bd3b..182ae7e88 100644\n--- a/src/plone/restapi/serializer/relationfield.py\n+++ b/src/plone/restapi/serializer/relationfield.py\n@@ -44,7 +44,9 @@ def get_value(self, default=None):\n         """\n         value = super().get_value()\n         if value:\n-            return [el for el in value if el.to_id]\n+            # Only include relations that still resolve (skip broken relations\n+            # e.g. when the target content was deleted). Avoids [null] in JSON.\n+            return [el for el in value if el.to_object]\n         if default is None:\n             return []\n         return default\ndiff --git a/src/plone/restapi/tests/test_content_get.py b/src/plone/restapi/tests/test_content_get.py\nindex 6e90b6052..17c36c7f2 100644\n--- a/src/plone/restapi/tests/test_content_get.py\n+++ b/src/plone/restapi/tests/test_content_get.py\n@@ -179,6 +179,23 @@ def test_get_content_related_items_without_workflow(self):\n             response.json()["relatedItems"],\n         )\n \n+    def test_get_content_related_items_returns_empty_list_when_related_deleted(self):\n+        """When a related item is deleted, REST API should return [] not [null]."""\n+        intids = getUtility(IIntIds)\n+        self.portal.folder1.folder2.doc2.relatedItems = [\n+            RelationValue(intids.getId(self.portal.folder1.doc1))\n+        ]\n+        transaction.commit()\n+        self.portal.folder1.manage_delObjects(["doc1"])\n+        transaction.commit()\n+        response = requests.get(\n+            self.portal.folder1.folder2.doc2.absolute_url() + "?fullobjects",\n+            headers={"Accept": "application/json"},\n+            auth=(SITE_OWNER_NAME, SITE_OWNER_PASSWORD),\n+        )\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json().get("relatedItems"), [])\n+\n \n class TestBlocksContentGet(unittest.TestCase):\n     layer = PLONE_RESTAPI_BLOCKS_FUNCTIONAL_TESTING\n'
+b'diff --git a/docs/source/usage/customization.md b/docs/source/usage/customization.md\nindex 0125b9367..8afc15915 100644\n--- a/docs/source/usage/customization.md\n+++ b/docs/source/usage/customization.md\n@@ -62,3 +62,89 @@ It is recommended to pass all values through `json_compatible` in order to valid\n \n For customizing a specific field instance, a named `IFieldSerializer` adapter can be registered.\n The name may either be the full dotted name of the field, such as `plone.app.dexterity.behaviors.exclfromnav.IExcludeFromNavigation.exclude_from_nav`, or the shortname of the field, such as `exclude_from_nav`.\n+\n+\n+### Dexterity content types\n+\n+The API automatically provides a default serialization for all Dexterity content types.\n+\n+To customize the serialization of a given content type, define a custom adapter as shown.\n+\n+```{code-block} xml\n+:caption: `configure.zcml`\n+<adapter\n+    factory=".serializers.MySerializer"\n+    provides="plone.restapi.interfaces.ISerializeToJson"\n+    for="my.package.interfaces.IMyContentType\n+        zope.interface.Interface"\n+    />\n+```\n+\n+```{code-block} python\n+:caption: `serializers.py`\n+from plone import api\n+from plone.restapi.serializer.dxcontent import SerializeToJson\n+\n+\n+class MySerializer(SerializeToJson):\n+\n+    def __call__(self, version=None, include_items=True, include_expansion=True):\n+        # default provided by Plone\n+        result = super().__call__(\n+            version=version,\n+            include_items=include_items,\n+            include_expansion=include_expansion,\n+        )\n+        #\n+        # here goes your custom logic\n+        #\n+        return result\n+```\n+\n+\n+```{warning}\n+If you modify the serialization of a content type, you might need to customize its deserialization as described in the next section.\n+```\n+\n+#### Deserialization\n+\n+The reverse of serialization is deserialization.\n+\n+The API provides a default deserializer.\n+You can customize it with an adapter as shown.\n+\n+```{code-block} xml\n+:caption: `configure.zcml`\n+<adapter\n+    factory=".deserialiers.MyDeserializer"\n+    provides="plone.restapi.interfaces.IDeserializeFromJson"\n+    for="my.package.interfaces.IMyContentType\n+        zope.interface.Interface"\n+    />\n+```\n+\n+```{code-block} python\n+:caption: `deserializers.py`\n+from plone import api\n+from plone.restapi.deserializer.dxcontent import DeserializeFromJson\n+\n+\n+class MyDeserializer(DeserializeFromJson):\n+\n+    def __call__(\n+        self, validate_all=False, data=None, create=False, mask_validation_errors=True\n+    ):\n+        #\n+        # your custom logic goes here, you might want to manipulate the `data` value\n+        #\n+\n+        # after your custom logic, you might rely on the default provided by Plone\n+        result = super().__call__(\n+            validate_all=validate_all,\n+            data=data,\n+            create=create,\n+            mask_validation_errors=mask_validation_errors,\n+        )\n+        return result\n+```\n+\ndiff --git a/news/1975.documentation b/news/1975.documentation\nnew file mode 100644\nindex 000000000..76208b43c\n--- /dev/null\n+++ b/news/1975.documentation\n@@ -0,0 +1 @@\n+Explain how to customize serializers for content types @gforcada\n'
 
