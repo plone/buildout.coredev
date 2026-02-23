@@ -46,3 +46,10 @@ run-presources: $(PRE_SOURCES_TARGET)
 	@touch $(PRE_SOURCES_TARGET)
 
 INSTALL_TARGETS+=run-presources
+
+## robotframework browser support
+
+.PHONY: rfbrowser
+rfbrowser: $(FILES_TARGET) $(SOURCES_TARGET) $(PACKAGES_TARGET) $(TEST_TARGET) $(TEST_DEPENDENCY_TARGETS)
+	@echo "Initializing robotframework browser"
+	@/usr/bin/env bash -c "rfbrowser init"

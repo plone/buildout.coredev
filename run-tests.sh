@@ -5,6 +5,26 @@
 
 set -e
 
+# Make sure these variables exist in the script, whether they are passed via
+# 'make test' or the OS environment, or not at all.
+TEST_ARGS="${TEST_ARGS}"
+TEST_PACKAGE="${TEST_PACKAGE}"
+
+if [ -z "$TEST_ARGS" ] && [ -z "$TEST_PACKAGE" ]; then
+    echo """
+** Running ALL tests (except robot) for the PRE-DEFINED packages. **
+
+You can pass test arguments with a TEST_ARGS variable.
+You can specify a single test package with a TEST_PACKAGE variable.
+This can be an environment variable or you pass it to 'make test'.
+For example:
+
+make test TEST_ARGS=--all TEST_PACKAGE=plone.app.discussion
+
+For more control call $0 directly and pass arguments for zope-testrunner.
+"""
+fi
+
 # PACKAGES are manually copied and then adapted from test-eggs in tests.cfg.
 # The [test] extras should not be here.
 # Please keep these lists in sync.
@@ -121,21 +141,27 @@ Products.ZopeVersionControl
 repoze.xmliter
 """
 
-ARG_COUNT=$#
-if test $ARG_COUNT -eq 0; then
-    # As proof of concept, we only run the unit tests.
-    # Locally for me (Maurits) it works without '-u' as well.
-    # I did not try the robot tests.
-    ARGS="-u"
-    for package in $PACKAGES; do
-      ARGS="$ARGS -s $package"
-    done
-else
-    ARGS=$*
+if [[ "$TEST_ARGS" == *"--all"* ]]; then
+    echo """Running robot tests, if they are there, due to TEST_ARGS=\"${TEST_ARGS}\"
+You are responsible for initializing the robotframework browser first.
+If you want to run *only* robot test of a package, do something like this:
+
+.venv/bin/rfbrowser init
+export ROBOTSUITE_PREFIX=ONLYROBOT
+make test TEST_ARGS=\"-t ONLYROBOT --all\" TEST_PACKAGE=plone.app.discussion
+"""
 fi
 
-# Note: the --auto-path requires this zope.testrunner 7.4 or higher.
-CMD="zope-testrunner --auto-color --auto-progress --auto-path $ARGS"
+if [ -z "$TEST_PACKAGE" ]; then
+    for package in $PACKAGES; do
+      TEST_ARGS="$TEST_ARGS -s $package"
+    done
+else
+    TEST_ARGS="$TEST_ARGS -s $TEST_PACKAGE"
+fi
+
+# Note: the --auto-path requires zope.testrunner 7.4 or higher.
+CMD="zope-testrunner --auto-color --auto-progress --auto-path $TEST_ARGS"
 echo "Running $CMD"
 $CMD
 
