@@ -1,14 +1,14 @@
-# Release notes for Plone 6.2.0a1 (2026-01-15)
+# Release notes for Plone 6.2.0a2 (unreleased)
 
-* Last updated: January 15th, 2026
+* Last updated: February 23rd, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2.0a1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.0a1/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.0a1/constraints.txt](https://dist.plone.org/release/6.2.0a1/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.0a1/versions.cfg](https://dist.plone.org/release/6.2.0a1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.0a1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.0a1/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2-dev/constraints.txt](https://dist.plone.org/release/6.2-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2-dev/versions.cfg](https://dist.plone.org/release/6.2-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2-dev/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -20,6 +20,18 @@ Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we
 
 
 ## Highlights
+
+These are the main changes compared to 6.2.0a1:
+
+* `lxml`: updated from 5.4.0 to 6.0.2.
+  This parses html slightly differently. The update caused [problems in diazo](https://github.com/plone/diazo/pull/92), which have been fixed.
+  On Classic UI you should check if your theme still renders correctly.  Most sites are expected to be fine though.
+* `plone.app.content`: Alphabetically sort the list of portal types in the constraints configuration form.
+* `plone.app.z3cform`:
+  * Remove EmailWidget template and use generic attributes instead.
+  * Implement URI widget for `type="url"` inputs.
+* `plone.exportimport`: Add `@export` and `@import` REST API services.
+* `plone.formwidget.recurrence`: Disable additional dates (RDATE) feature in recurrence widget to prevent interoperability issues with Outlook and Android calendar clients when exporting/importing iCal events.
 
 These are the main changes compared to 6.1:
 
@@ -43,7 +55,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.0.0-alpha.21](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.21).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.21/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
+Latest release is [19.0.0-alpha.26](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.26).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.26/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
 
@@ -129,17 +141,22 @@ Support for Python 3.14 is expected in the next alpha or first beta release of 6
 In Plone core we use these versions to install Plone:
 
 ```
-horse-with-no-namespace==20251105.1
+horse-with-no-namespace==20260202.0
 packaging==25.0
-pip==25.3
-setuptools==80.9.0
-wheel==0.45.1
-zc.buildout==5.1.1
+pip==26.0.1
+setuptools==81.0.0
+wheel==0.46.3
+zc.buildout==5.1.2
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
 
-Problems start when you have multiple packages in the same namespace, that use different namespace implementations.
+`setuptools` 82.0.0 was released, which removed the `pkg_resources` module.
+So if you want to use this `setuptools` version, *none* of the packages that you use should use `pkg_resources` style namespaces.
+If that is no problem, then `setuptools` 82 is fine if you use `pip`, but not if you use `zc.buildout`.
+The reason is that `zc.buildout` still uses `pkg_resources` code (not its namespaces, but other parts).
+
+On `setuptools` 81 and older, problems start when you have multiple packages in the same namespace, that use different namespace implementations.
 Then on startup of Plone you may get an error saying "Package not found".
 This depends on what you use to install the packages.
 In the following examples, we have two packages in the same namespace, say `ns.native` (using native namespaces) and `ns.deprecated` (using pkg_resources style).
