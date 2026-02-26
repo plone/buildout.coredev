@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a2 (unreleased)
 
-* Last updated: February 23rd, 2026
+* Last updated: February 26rd, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -32,6 +32,10 @@ These are the main changes compared to 6.2.0a1:
   * Implement URI widget for `type="url"` inputs.
 * `plone.exportimport`: Add `@export` and `@import` REST API services.
 * `plone.formwidget.recurrence`: Disable additional dates (RDATE) feature in recurrence widget to prevent interoperability issues with Outlook and Android calendar clients when exporting/importing iCal events.
+* `plone.registry`: Add per-request cache for registry value and forInterface proxy lookups, avoiding repeated OOBTree traversals within a single request.
+* `plone.volto`:
+  * Add `/@blocktypes` endpoint to expose `block_types` index.
+  * Added a `block_types` metadata column to the catalog to include a count for each type.
 
 These are the main changes compared to 6.1:
 
