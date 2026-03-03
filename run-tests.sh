@@ -163,6 +163,10 @@ fi
 # Note: the --auto-path requires zope.testrunner 7.4 or higher.
 CMD="zope-testrunner --auto-color --auto-progress --auto-path $TEST_ARGS"
 echo "Running $CMD"
-$CMD
+
+# In most cases we can call $CMD directly.
+# But when you have quotes within quotes, 'eval' helps.  For example:
+# make test TEST_ARGS='--all -t "Add a fieldSet and move a field into this fieldset"'
+eval $CMD
 
 exit 0
