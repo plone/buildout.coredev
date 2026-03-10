@@ -1,42 +1,37 @@
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2026-03-09T14:24:53+01:00
-Author: ale-rt (ale-rt) <alessandro.pisa@gmail.com>
-Commit: https://github.com/plone/Products.CMFPlone/commit/aaad9641b6ff30b82eb2bc13d03002821e10ef13
+Date: 2026-03-09T15:07:56+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.dexterity/commit/da1bc4c7f4d565348ffe58d1adf1e4a7a0c64068
 
-Fix the usergroup-userprefs form
+Use raw rich text value instead of output when indexing.
 
-Fix an issue that prevents Site Administrators to use the form when we
-have some users that have the Manager role set through the portal_role
-plugin.
-
-Fixes https://github.com/plone/Products.CMFPlone/issues/4287
+This prevents an extra indexing round.
+Fixes https://github.com/plone/plone.app.dexterity/issues/423
 
 Files changed:
-A news/4287.bugfix.md
-M src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py
-M src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py
+A news/423.bugfix.rst
+M src/plone/app/dexterity/textindexer/converters.py
 
-b'diff --git a/news/4287.bugfix.md b/news/4287.bugfix.md\nnew file mode 100644\nindex 0000000000..4d4ac957e0\n--- /dev/null\n+++ b/news/4287.bugfix.md\n@@ -0,0 +1,2 @@\n+Allow a Site Administrator to manage the users roles if there are users that have the Manager role set through the portal_role plugin.\n+[ale-rt]\ndiff --git a/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py b/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\nindex e102111e40..184ad9a84d 100644\n--- a/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\n+++ b/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\n@@ -198,8 +198,17 @@ def manageUser(self, users=[], resetpassword=[], delete=[]):\n                 roles = user.get("roles", [])\n                 if not self.is_zope_manager:\n                     # don\'t allow adding or removing the Manager role\n-                    if ("Manager" in roles) != ("Manager" in current_roles):\n-                        raise Forbidden\n+                    if "Manager" in current_roles:\n+                        # The manager checkbox is disabled in the form,\n+                        # so if the user has it already, we need to manually restore it.\n+                        if "Manager" not in roles:\n+                            roles.append("Manager")\n+                    else:\n+                        # This should not happen because the Manager role\n+                        # should not be available in the form, but just in case,\n+                        # we want to make sure it cannot be added.\n+                        if "Manager" in roles:\n+                            raise Forbidden\n \n                 acl_users.userFolderEditUser(\n                     user.id, pw, roles, member.getDomains(), REQUEST=context.REQUEST\ndiff --git a/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py b/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\nindex ec54a9c863..b1d3d60892 100644\n--- a/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\n+++ b/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\n@@ -121,6 +121,29 @@ def testNonManagersCannotDelegateManagerRoleForUsers(self):\n         roles = self.portal.acl_users.getUserById(self.normal_user).getRoles()\n         self.assertEqual(["Member", "Authenticated"], roles)\n \n+    def testNonManagersCanDelegateRolesIfAManagerEsists(self):\n+        # A user without the Manager role cannot remove the Manager role\n+        # but can still use the form\n+        self.browser.addHeader("Authorization", f"Basic siteadmin:{TEST_USER_PASSWORD}")\n+        self.browser.open(self.usergroups_url)\n+        form = [\n+            ("_authenticator", self._get_authenticator()),\n+            ("users.id:records", self.normal_user),\n+            ("users.roles:list:records", ["Member"]),\n+            ("users.id:records", "root"),\n+            ("users.roles:list:records", ["Member"]),\n+            ("form.button.Modify", "Save"),\n+            ("form.submitted", 1),\n+        ]\n+        post_data = urlencode(form, doseq=True)\n+        self.browser.post(self.usergroups_url, post_data)\n+\n+        roles = set(self.portal.acl_users.getUserById(self.normal_user).getRoles())\n+        self.assertSetEqual({"Member", "Authenticated"}, roles)\n+\n+        roles = set(self.portal.acl_users.getUserById("root").getRoles())\n+        self.assertSetEqual({"Member", "Manager", "Authenticated"}, roles)\n+\n     def testNonManagersCanEditOtherRolesOfUsersWithManagerRole(self):\n         roles = self.portal.acl_users.getUserById("root").getRoles()\n         self.assertEqual(["Manager", "Authenticated"], roles)\n'
+b'diff --git a/news/423.bugfix.rst b/news/423.bugfix.rst\nnew file mode 100644\nindex 00000000..76b9c039\n--- /dev/null\n+++ b/news/423.bugfix.rst\n@@ -0,0 +1 @@\n+Use raw rich text value instead of output when indexing.  [maurits]\ndiff --git a/src/plone/app/dexterity/textindexer/converters.py b/src/plone/app/dexterity/textindexer/converters.py\nindex 5a28f9a0..4c5ec144 100644\n--- a/src/plone/app/dexterity/textindexer/converters.py\n+++ b/src/plone/app/dexterity/textindexer/converters.py\n@@ -61,7 +61,11 @@ def convert(self):\n         textvalue = self.field.get(self.context)\n         if textvalue is None:\n             return ""\n-        html = safe_text(textvalue.output)\n+        # Before you think about switching raw/output or\n+        # mimeType/outputMimeType, first read\n+        # https://github.com/plone/Products.CMFPlone/issues/2066\n+        # And https://github.com/plone/plone.app.dexterity/issues/423\n+        html = safe_text(textvalue.raw)\n         transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype=textvalue.mimeType)\n         return stream.getData().strip()\n'
 
-Repository: Products.CMFPlone
+Repository: plone.app.dexterity
 
 
 Branch: refs/heads/master
-Date: 2026-03-09T21:23:43+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
-Commit: https://github.com/plone/Products.CMFPlone/commit/79ea61125bbc40d8a735e31d4da0a49fbf3668b8
+Date: 2026-03-10T09:47:52+01:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.dexterity/commit/633bfdf572e0b3d3ad7adaf5f2d963fb67a1fd5c
 
-Merge pull request #4288 from plone/ale/4287/fix-usergroup-userprefs
+Merge pull request #425 from plone/maurits-raw-rich-text-indexing-master
 
-Fix the usergroup-userprefs form
+Use raw rich text value instead of output when indexing. [master]
 
 Files changed:
-A news/4287.bugfix.md
-M src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py
-M src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py
+A news/423.bugfix.rst
+M src/plone/app/dexterity/textindexer/converters.py
 
-b'diff --git a/news/4287.bugfix.md b/news/4287.bugfix.md\nnew file mode 100644\nindex 0000000000..4d4ac957e0\n--- /dev/null\n+++ b/news/4287.bugfix.md\n@@ -0,0 +1,2 @@\n+Allow a Site Administrator to manage the users roles if there are users that have the Manager role set through the portal_role plugin.\n+[ale-rt]\ndiff --git a/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py b/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\nindex e102111e40..184ad9a84d 100644\n--- a/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\n+++ b/src/Products/CMFPlone/controlpanel/browser/usergroups_usersoverview.py\n@@ -198,8 +198,17 @@ def manageUser(self, users=[], resetpassword=[], delete=[]):\n                 roles = user.get("roles", [])\n                 if not self.is_zope_manager:\n                     # don\'t allow adding or removing the Manager role\n-                    if ("Manager" in roles) != ("Manager" in current_roles):\n-                        raise Forbidden\n+                    if "Manager" in current_roles:\n+                        # The manager checkbox is disabled in the form,\n+                        # so if the user has it already, we need to manually restore it.\n+                        if "Manager" not in roles:\n+                            roles.append("Manager")\n+                    else:\n+                        # This should not happen because the Manager role\n+                        # should not be available in the form, but just in case,\n+                        # we want to make sure it cannot be added.\n+                        if "Manager" in roles:\n+                            raise Forbidden\n \n                 acl_users.userFolderEditUser(\n                     user.id, pw, roles, member.getDomains(), REQUEST=context.REQUEST\ndiff --git a/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py b/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\nindex ec54a9c863..b1d3d60892 100644\n--- a/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\n+++ b/src/Products/CMFPlone/controlpanel/tests/test_controlpanel_browser_usergroups_siteadmin_role.py\n@@ -121,6 +121,29 @@ def testNonManagersCannotDelegateManagerRoleForUsers(self):\n         roles = self.portal.acl_users.getUserById(self.normal_user).getRoles()\n         self.assertEqual(["Member", "Authenticated"], roles)\n \n+    def testNonManagersCanDelegateRolesIfAManagerEsists(self):\n+        # A user without the Manager role cannot remove the Manager role\n+        # but can still use the form\n+        self.browser.addHeader("Authorization", f"Basic siteadmin:{TEST_USER_PASSWORD}")\n+        self.browser.open(self.usergroups_url)\n+        form = [\n+            ("_authenticator", self._get_authenticator()),\n+            ("users.id:records", self.normal_user),\n+            ("users.roles:list:records", ["Member"]),\n+            ("users.id:records", "root"),\n+            ("users.roles:list:records", ["Member"]),\n+            ("form.button.Modify", "Save"),\n+            ("form.submitted", 1),\n+        ]\n+        post_data = urlencode(form, doseq=True)\n+        self.browser.post(self.usergroups_url, post_data)\n+\n+        roles = set(self.portal.acl_users.getUserById(self.normal_user).getRoles())\n+        self.assertSetEqual({"Member", "Authenticated"}, roles)\n+\n+        roles = set(self.portal.acl_users.getUserById("root").getRoles())\n+        self.assertSetEqual({"Member", "Manager", "Authenticated"}, roles)\n+\n     def testNonManagersCanEditOtherRolesOfUsersWithManagerRole(self):\n         roles = self.portal.acl_users.getUserById("root").getRoles()\n         self.assertEqual(["Manager", "Authenticated"], roles)\n'
+b'diff --git a/news/423.bugfix.rst b/news/423.bugfix.rst\nnew file mode 100644\nindex 00000000..76b9c039\n--- /dev/null\n+++ b/news/423.bugfix.rst\n@@ -0,0 +1 @@\n+Use raw rich text value instead of output when indexing.  [maurits]\ndiff --git a/src/plone/app/dexterity/textindexer/converters.py b/src/plone/app/dexterity/textindexer/converters.py\nindex 5a28f9a0..4c5ec144 100644\n--- a/src/plone/app/dexterity/textindexer/converters.py\n+++ b/src/plone/app/dexterity/textindexer/converters.py\n@@ -61,7 +61,11 @@ def convert(self):\n         textvalue = self.field.get(self.context)\n         if textvalue is None:\n             return ""\n-        html = safe_text(textvalue.output)\n+        # Before you think about switching raw/output or\n+        # mimeType/outputMimeType, first read\n+        # https://github.com/plone/Products.CMFPlone/issues/2066\n+        # And https://github.com/plone/plone.app.dexterity/issues/423\n+        html = safe_text(textvalue.raw)\n         transforms = getToolByName(self.context, "portal_transforms")\n         stream = transforms.convertTo("text/plain", html, mimetype=textvalue.mimeType)\n         return stream.getData().strip()\n'
 
