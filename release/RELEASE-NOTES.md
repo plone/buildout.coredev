@@ -27,6 +27,7 @@ These are the main changes compared to 6.2.0a1:
   This parses html slightly differently. The update caused [problems in diazo](https://github.com/plone/diazo/pull/92), which have been fixed.
   On Classic UI you should check if your theme still renders correctly.  Most sites are expected to be fine though.
 * `plone.app.content`: Alphabetically sort the list of portal types in the constraints configuration form.
+* `plone.app.users`: Extract ``generate_user_id`` and ``generate_login_name`` as standalone functions in ``plone.app.users.utils``, enabling reuse from ``plone.api`` and ``plone.restapi`` without form view dependency.
 * `plone.app.z3cform`:
   * Remove EmailWidget template and use generic attributes instead.
   * Implement URI widget for `type="url"` inputs.
