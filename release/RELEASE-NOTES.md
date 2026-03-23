@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0a2 (unreleased)
 
-* Last updated: February 26rd, 2026
+* Last updated: March 23rd, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -30,8 +30,14 @@ These are the main changes compared to 6.2.0a1:
 * `plone.app.z3cform`:
   * Remove EmailWidget template and use generic attributes instead.
   * Implement URI widget for `type="url"` inputs.
+* `plone.base`: Add boolean utils: `is_truthy` (improved), `is_falsy` and `boolean_value`.
 * `plone.exportimport`: Add `@export` and `@import` REST API services.
 * `plone.formwidget.recurrence`: Disable additional dates (RDATE) feature in recurrence widget to prevent interoperability issues with Outlook and Android calendar clients when exporting/importing iCal events.
+* `plone.namedfile`:
+  * Extract `_scale_url()` method on `ImageScale` and `ImageScaling` for overridable scale URL generation.
+    Accepts an optional `scale_info` dict with scale metadata (width, height, mode, fieldname, mimetype, etc.).
+    With this, custom image backends (e.g. Thumbor) can generate URLs with full context by overriding a single method.
+  * Add original image size url in the srcset generated in the srcset method
 * `plone.registry`: Add per-request cache for registry value and forInterface proxy lookups, avoiding repeated OOBTree traversals within a single request.
 * `plone.volto`:
   * Add `/@blocktypes` endpoint to expose `block_types` index.
@@ -50,6 +56,8 @@ These are the main changes compared to 6.1:
     The previous template was moved to `plone.app.layout`.
 * `icalendar` has various breaking changes, but that should only affect you if you directly interact with that package.
 * `plone.restapi`: `@aliases` service: Add support for filtering aliases for a non-root item.
+* `Products.isurlinportal`: Prevent URLs that start with more than two slashes to be considered as URLs in portal.
+  See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
 * `Products.PluggableAuthService`: Add property to clear session data at login boundary to the session auth helper.  This property defaults to ``False`` to preserve the current behavior.  Clearing session data during login helps mitigate session fixation attacks: https://owasp.org/www-community/attacks/Session_fixation
 
 
@@ -146,7 +154,6 @@ In Plone core we use these versions to install Plone:
 
 ```
 horse-with-no-namespace==20260202.0
-packaging==25.0
 pip==26.0.1
 setuptools==81.0.0
 wheel==0.46.3
