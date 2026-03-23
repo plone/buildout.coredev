@@ -107,22 +107,97 @@ Run `make zope-start` to start the Zope instance.
 
 ### Run tests
 
-This is not in the Makefile yet.  We need to figure out how best to run the tests first.
-A few sample commands that work for me:
+Use the `make test` target to run tests for one or more packages.
+Without extra arguments, this runs all tests (except robot tests) for all packages that we want to test in core.
 
+```shell
+make test
 ```
-.venv/bin/zope-testrunner --test-path src/Products.CMFPlone/src -u
-.venv/bin/zope-testrunner --test-path .venv/lib/python3.12/site-packages -s plone.memoize
+
+To influence what tests are run, you can use `TEST_ARGS` and/or `TEST_PACKAGE`.
+You can pass these on the command line or set them as an environment variable.
+
+Run all unit and functional tests for a given package:
+
+```shell
+make test TEST_PACKAGE=plone.namedfile
 ```
+
+Alternatively:
+
+```shell
+export TEST_PACKAGE=plone.namedfile
+make test
+```
+
+Under the hood this calls `zope-testrunner`.
+To find out which arguments this supports, ask for help:
+
+```shell
+make test TEST_ARGS=--help
+```
+
+Run all pure unit tests (so no test layers) for all packages:
+
+```shell
+make test TEST_ARGS=-u
+```
+
+Enter an interactive prompt after the first test failure:
+
+```shell
+make test TEST_ARGS=-D
+```
+
+List all tests for a given package
+
+```shell
+make test TEST_ARGS=--list-tests TEST_PACKAGE=plone.namedfile
+```
+
+Run tests for multiple packages:
+
+```shell
+make test TEST_ARGS='-m plone.namedfile -m plone.scale'
+```
+
+Note: using `-s` instead of `-m` in the previous example won't work.
+`make test` calls a command that already passes about 100 packages with `-s`, unless you override it with `TEST_PACKAGE`.
+
 
 #### Robot tests
 
-To watch the browser run Robot Framework tests, use `zope-testrunner` and set the `ROBOT_BROWSER` environment variable.
+To run robot tests, you must do two things.
+First you must install or sync the robotframework browser packages, which is done with NodeJS:
+
+```shell
+make rfbrowser
+```
+
+You need to do this only once per testing session:
+you can make multiple `make test` calls with robot tests after this.
+
+Second: pass the `--all` argument.
+Otherwise robot tests are skipped.
+
+Run all pure unit, functional, and robot tests for a package:
+
+```shell
+make test TEST_ARGS=--all TEST_PACKAGE=Products.CMFPlone
+```
+
+Run only the robot tests for a package:
+
+```shell
+make test TEST_ARGS='-t ONLYROBOT --all' TEST_PACKAGE=Products.CMFPlone
+```
+
+To watch the browser run Robot Framework tests, set the `ROBOT_BROWSER` environment variable.
 
 The following example runs a specific Robot test with the Chrome browser visible:
 
 ```shell
-ROBOT_BROWSER=chrome .venv/bin/zope-testrunner --path=src/plone.schemaeditor --all -t "Add a fieldSet and move a field into this fieldset"
+ROBOT_BROWSER=chrome make test TEST_PACKAGE=plone.schemaeditor TEST_ARGS='--all -t "Add a fieldSet and move a field into this fieldset"'
 ```
 
 
