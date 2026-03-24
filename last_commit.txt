@@ -1,115 +1,54 @@
-Repository: plone.api
+Repository: plone.portlets
 
 
-Branch: refs/heads/main
-Date: 2026-03-17T14:19:27+01:00
+Branch: refs/heads/master
+Date: 2026-03-24T01:11:44+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.api/commit/6d58ef4a30cf610b2c912a1e34c629b412fe76a8
+Commit: https://github.com/plone/plone.portlets/commit/4457a85a93b9c2e17a8299d7f9fb095b63033593
 
-Fix user.create() to respect use_uuid_as_userid setting
+Gracefully handle missing portlet renderers
 
-Use generate_user_id/generate_login_name from plone.app.users.utils
-instead of hardcoded user_id logic. This respects use_uuid_as_userid,
-use_email_as_login, and custom IUserIdGenerator/ILoginNameGenerator
-utilities.
+Use queryMultiAdapter instead of getMultiAdapter in _dataToPortlet
+and skip portlets with no renderer instead of crashing the page.
 
-Part of PLIP 4292.
-
-Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Fixes plone/Products.CMFPlone#1727
 
 Files changed:
-A news/4292.bugfix
-M setup.py
-M src/plone/api/user.py
+A news/1727.bugfix
+M src/plone/portlets/manager.py
 
-b'diff --git a/news/4292.bugfix b/news/4292.bugfix\nnew file mode 100644\nindex 00000000..d3e01008\n--- /dev/null\n+++ b/news/4292.bugfix\n@@ -0,0 +1,3 @@\n+Fix ``plone.api.user.create()`` to respect ``use_uuid_as_userid`` and\n+``use_email_as_login`` registry settings, as well as custom ``IUserIdGenerator``\n+and ``ILoginNameGenerator`` utilities.\ndiff --git a/setup.py b/setup.py\nindex fbf415e0..11688d91 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -28,6 +28,7 @@\n         "Products.PlonePAS",\n         "Products.CMFPlone",\n         "decorator",\n+        "plone.app.users",\n         "plone.app.uuid",\n         "plone.app.dexterity",\n         "plone.app.intid",\ndiff --git a/src/plone/api/user.py b/src/plone/api/user.py\nindex 96a47083..5402b2c2 100644\n--- a/src/plone/api/user.py\n+++ b/src/plone/api/user.py\n@@ -65,16 +65,31 @@ def create(\n             "that is not email so you need to pass a username.",\n         )\n \n+    # Generate user_id and login_name using the canonical implementation\n+    # from plone.app.users, respecting use_uuid_as_userid,\n+    # use_email_as_login, IUserIdGenerator, and ILoginNameGenerator.\n+    from plone.app.users.utils import generate_login_name\n+    from plone.app.users.utils import generate_user_id\n+\n+    site = portal.get()\n+    data = {\n+        "username": username,\n+        "email": email,\n+        "fullname": properties.get("fullname", ""),\n+    }\n+    generate_user_id(site, data)\n+    generate_login_name(site, data)\n+    user_id = data["user_id"]\n+    login_name = data.get("login_name", username or email)\n+\n     registration = portal.get_tool("portal_registration")\n-    user_id = use_email_as_username and email or username\n \n     # Generate a random 8-char password\n     if not password:\n         chars = string.ascii_letters + string.digits\n         password = "".join(random.choice(chars) for char in range(8))\n \n-    properties.update(username=user_id)\n-    properties.update(email=email)\n+    properties.update(username=user_id, email=email)\n \n     registration.addMember(\n         user_id,\n@@ -82,7 +97,14 @@ def create(\n         roles,\n         properties=properties,\n     )\n-    return get(username=user_id)\n+\n+    # If user_id differs from login_name (e.g. UUID as user id with\n+    # email as login), update the login name accordingly.\n+    if user_id != login_name:\n+        pas = portal.get_tool("acl_users")\n+        pas.updateLoginName(user_id, login_name)\n+\n+    return get(userid=user_id)\n \n \n @mutually_exclusive_parameters("userid", "username")\n'
+b'diff --git a/news/1727.bugfix b/news/1727.bugfix\nnew file mode 100644\nindex 0000000..25ce79e\n--- /dev/null\n+++ b/news/1727.bugfix\n@@ -0,0 +1,2 @@\n+Use ``queryMultiAdapter`` instead of ``getMultiAdapter`` in ``_dataToPortlet`` so a missing portlet renderer (e.g., after uninstalling an add-on) no longer crashes the page.\n+@jensens\ndiff --git a/src/plone/portlets/manager.py b/src/plone/portlets/manager.py\nindex 0d30db9..0172683 100644\n--- a/src/plone/portlets/manager.py\n+++ b/src/plone/portlets/manager.py\n@@ -9,6 +9,7 @@\n from ZODB.POSException import ConflictError\n from zope.component import adapter\n from zope.component import getMultiAdapter\n+from zope.component import queryMultiAdapter\n from zope.component import getUtilitiesFor\n from zope.contentprovider.interfaces import UpdateNotCalled\n from zope.interface import implementer\n@@ -106,6 +107,14 @@ def _lazyLoadPortlets(self, manager):\n         items = []\n         for p in self.filter(retriever.getPortlets()):\n             renderer = self._dataToPortlet(p["assignment"].data)\n+            if renderer is None:\n+                logger.warning(\n+                    "No renderer found for portlet (%r %r %r), skipping.",\n+                    p["category"],\n+                    p["key"],\n+                    p["name"],\n+                )\n+                continue\n             info = p.copy()\n             info["manager"] = self.manager.__name__\n             info["renderer"] = renderer\n@@ -133,7 +142,7 @@ def _dataToPortlet(self, data):\n         """Helper method to get the correct IPortletRenderer for the given\n         data object.\n         """\n-        return getMultiAdapter(\n+        return queryMultiAdapter(\n             (self.context, self.request, self.__parent__, self.manager, data),\n             IPortletRenderer,\n         )\n'
 
-Repository: plone.api
+Repository: plone.portlets
 
 
-Branch: refs/heads/main
-Date: 2026-03-20T01:01:15+01:00
+Branch: refs/heads/master
+Date: 2026-03-24T01:14:13+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.api/commit/5c8377efdabeab454e00fd40074429eec7ec3ece
+Commit: https://github.com/plone/plone.portlets/commit/c093808a8ba5eb824ef1dd88c1647db555659842
 
-Merge branch 'main' into plip-4292-fix-user-creation
+Fix isort import ordering
 
 Files changed:
-A news/+meta.internal
-M .github/workflows/test-matrix.yml
-M .meta.toml
-M .pre-commit-config.yaml
-M docs/conf.py
-M fix-converted-myst.py
-M pyproject.toml
-M setup.py
-M src/plone/api/addon.py
-M src/plone/api/content.py
-M src/plone/api/env.py
-M src/plone/api/portal.py
-M src/plone/api/relation.py
-M src/plone/api/tests/test_addon.py
-M src/plone/api/tests/test_doctests.py
-M src/plone/api/tests/test_portal.py
-M tox.ini
+M src/plone/portlets/manager.py
 
-b'diff --git a/.github/workflows/test-matrix.yml b/.github/workflows/test-matrix.yml\nindex 05872b5a..8b2da2b5 100644\n--- a/.github/workflows/test-matrix.yml\n+++ b/.github/workflows/test-matrix.yml\n@@ -19,7 +19,7 @@ jobs:\n         - ["ubuntu", "ubuntu-latest"]\n         config:\n         # [Python version, visual name, tox env]\n-        - ["3.13", "6.2 on py3.13", "py313-plone62"]\n+        - ["3.14", "6.2 on py3.14", "py314-plone62"]\n         - ["3.10", "6.2 on py3.10", "py310-plone62"]\n \n     runs-on: ${{ matrix.os[1] }}\ndiff --git a/.meta.toml b/.meta.toml\nindex 05c15b12..3f2d2570 100644\n--- a/.meta.toml\n+++ b/.meta.toml\n@@ -3,7 +3,7 @@\n # See the inline comments on how to expand/tweak this configuration file\n [meta]\n template = "default"\n-commit-id = "2.3.1"\n+commit-id = "2.5.1"\n \n [pre_commit]\n codespell_extra_lines = """\n@@ -46,8 +46,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    tests\n+extras = {[base]extras}\n deps =\n     -r requirements-docs.txt\n commands =\n@@ -60,8 +59,7 @@ commands =\n basepython = python3.11\n skip_install = False\n constrain_package_deps = True\n-extras =\n-    tests\n+extras = {[base]extras}\n deps =\n     -r requirements-docs.txt\n commands =\n@@ -74,8 +72,7 @@ skip_install = False\n usedevelop = True\n allowlist_externals =\n     mkdir\n-extras =\n-    tests\n+extras = {[base]extras}\n \n deps =\n     -r requirements-docs.txt\n@@ -95,8 +92,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    {[testenv:plone6docs]extras}\n+extras = {[base]extras}\n deps =\n     {[testenv:plone6docs]deps}\n commands =\n@@ -111,8 +107,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    {[testenv:plone6docs]extras}\n+extras = {[base]extras}\n deps =\n     {[testenv:plone6docs]deps}\n commands =\ndiff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml\nindex e894b502..a5645ef4 100644\n--- a/.pre-commit-config.yaml\n+++ b/.pre-commit-config.yaml\n@@ -7,16 +7,16 @@ ci:\n \n repos:\n -   repo: https://github.com/asottile/pyupgrade\n-    rev: v3.21.0\n+    rev: v3.21.2\n     hooks:\n     -   id: pyupgrade\n-        args: [--py38-plus]\n+        args: [--py310-plus]\n -   repo: https://github.com/pycqa/isort\n-    rev: 7.0.0\n+    rev: 8.0.1\n     hooks:\n     -   id: isort\n -   repo: https://github.com/psf/black-pre-commit-mirror\n-    rev: 25.9.0\n+    rev: 26.1.0\n     hooks:\n     -   id: black\n -   repo: https://github.com/collective/zpretty\n@@ -63,16 +63,16 @@ repos:\n     hooks:\n     -   id: check-manifest\n -   repo: https://github.com/regebro/pyroma\n-    rev: "5.0"\n+    rev: "5.0.1"\n     hooks:\n     -   id: pyroma\n -   repo: https://github.com/mgedmin/check-python-versions\n-    rev: "0.23.0"\n+    rev: "0.24.0"\n     hooks:\n     -   id: check-python-versions\n         args: [\'--only\', \'setup.py,pyproject.toml\']\n -   repo: https://github.com/collective/i18ndude\n-    rev: "6.2.1"\n+    rev: "6.3.0"\n     hooks:\n     -   id: i18ndude\n \ndiff --git a/docs/conf.py b/docs/conf.py\nindex bcc56e9c..fd9d3be7 100644\n--- a/docs/conf.py\n+++ b/docs/conf.py\n@@ -2,7 +2,6 @@\n \n import sys\n \n-\n project = "plone.api"\n copyright = "2012, Plone Foundation"\n \ndiff --git a/fix-converted-myst.py b/fix-converted-myst.py\nindex 3091a14c..cefe3003 100644\n--- a/fix-converted-myst.py\n+++ b/fix-converted-myst.py\n@@ -2,7 +2,6 @@\n import os\n import re\n \n-\n logging.basicConfig()\n logger = logging.getLogger("fix converted MyST documentation")\n logger.setLevel(logging.INFO)\ndiff --git a/news/+meta.internal b/news/+meta.internal\nnew file mode 100644\nindex 00000000..1336cd39\n--- /dev/null\n+++ b/news/+meta.internal\n@@ -0,0 +1 @@\n+Update configuration files @plone\ndiff --git a/pyproject.toml b/pyproject.toml\nindex 9d2dfcb3..31f54a7b 100644\n--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -2,7 +2,7 @@\n # https://github.com/plone/meta/tree/main/src/plone/meta/default\n # See the inline comments on how to expand/tweak this configuration file\n [build-system]\n-requires = ["setuptools>=68.2,<80", "wheel"]\n+requires = ["setuptools>=68.2,<83", "wheel"]\n \n [tool.towncrier]\n directory = "news/"\n@@ -14,32 +14,32 @@ underlines = ["", "", ""]\n \n [[tool.towncrier.type]]\n directory = "breaking"\n-name = "Breaking changes:"\n+name = "Breaking changes"\n showcontent = true\n \n [[tool.towncrier.type]]\n directory = "feature"\n-name = "New features:"\n+name = "New features"\n showcontent = true\n \n [[tool.towncrier.type]]\n directory = "bugfix"\n-name = "Bug fixes:"\n+name = "Bug fixes"\n showcontent = true\n \n [[tool.towncrier.type]]\n directory = "internal"\n-name = "Internal:"\n+name = "Internal"\n showcontent = true\n \n [[tool.towncrier.type]]\n directory = "documentation"\n-name = "Documentation:"\n+name = "Documentation"\n showcontent = true\n \n [[tool.towncrier.type]]\n directory = "tests"\n-name = "Tests:"\n+name = "Tests"\n showcontent = true\n \n ##\n@@ -62,7 +62,7 @@ profile = "plone"\n ##\n \n [tool.black]\n-target-version = ["py38"]\n+target-version = ["py310"]\n \n ##\n # Add extra configuration options in .meta.toml:\ndiff --git a/setup.py b/setup.py\nindex 11688d91..7355b7b0 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -1,7 +1,6 @@\n from pathlib import Path\n from setuptools import setup\n \n-\n version = "3.0.0a3.dev0"\n \n long_description = "\\n".join(\ndiff --git a/src/plone/api/addon.py b/src/plone/api/addon.py\nindex f2b25a2c..8fc8bf71 100644\n--- a/src/plone/api/addon.py\n+++ b/src/plone/api/addon.py\n@@ -11,15 +11,11 @@\n from plone.base.utils import get_installer\n from Products.CMFPlone.controlpanel.browser.quickinstaller import InstallerView\n from Products.GenericSetup import EXTENSION\n-from typing import Dict\n-from typing import List\n-from typing import Tuple\n from zope.component import getAllUtilitiesRegisteredFor\n from zope.globalrequest import getRequest\n \n import logging\n \n-\n logger = logging.getLogger("plone.api.addon")\n \n \n@@ -39,8 +35,8 @@\n class NonInstallableAddons:\n     """Set of add-ons not available for installation."""\n \n-    profiles: List[str]\n-    products: List[str]\n+    profiles: list[str]\n+    products: list[str]\n \n \n @dataclass\n@@ -52,14 +48,14 @@ class AddonInformation:\n     title: str\n     description: str\n \n-    upgrade_profiles: Dict\n-    other_profiles: List[List]\n-    install_profile: Dict\n-    uninstall_profile: Dict\n+    upgrade_profiles: dict\n+    other_profiles: list[list]\n+    install_profile: dict\n+    uninstall_profile: dict\n     profile_type: str\n-    upgrade_info: Dict\n+    upgrade_info: dict\n     valid: bool\n-    flags: List[str]\n+    flags: list[str]\n \n     def __repr__(self) -> str:\n         """Return a string representation of this object."""\n@@ -98,7 +94,7 @@ def _get_non_installable_addons() -> NonInstallableAddons:\n \n \n @lru_cache(maxsize=1)\n-def _cached_addons() -> Tuple[Tuple[str, AddonInformation]]:\n+def _cached_addons() -> tuple[tuple[str, AddonInformation]]:\n     """Return information about add-ons in this installation.\n \n     :returns: Tuple of tuples with add-on id and AddonInformation.\n@@ -198,7 +194,7 @@ def _update_addon_info(\n     return addon\n \n \n-def _get_addons() -> List[AddonInformation]:\n+def _get_addons() -> list[AddonInformation]:\n     """Return an updated list of add-on information.\n \n     :returns: List of AddonInformation.\n@@ -212,7 +208,7 @@ def _get_addons() -> List[AddonInformation]:\n     return result\n \n \n-def get_addons(limit: str = "") -> List[AddonInformation]:\n+def get_addons(limit: str = "") -> list[AddonInformation]:\n     """List add-ons in this Plone site.\n \n     :param limit: Limit list of add-ons.\n@@ -239,7 +235,7 @@ def get_addons(limit: str = "") -> List[AddonInformation]:\n     return addons\n \n \n-def get_addon_ids(limit: str = "") -> List[str]:\n+def get_addon_ids(limit: str = "") -> list[str]:\n     """List add-ons ids in this Plone site.\n \n     :param limit: Limit list of add-ons.\ndiff --git a/src/plone/api/content.py b/src/plone/api/content.py\nindex a0a660f0..9d4c6d91 100644\n--- a/src/plone/api/content.py\n+++ b/src/plone/api/content.py\n@@ -25,7 +25,6 @@\n import transaction\n import uuid\n \n-\n _marker = []\n \n # Maximum number of attempts to generate a unique random ID\ndiff --git a/src/plone/api/env.py b/src/plone/api/env.py\nindex e6530fea..a65ce64b 100644\n--- a/src/plone/api/env.py\n+++ b/src/plone/api/env.py\n@@ -18,7 +18,6 @@\n import traceback\n import Zope2\n \n-\n IS_TEST = None\n \n \ndiff --git a/src/plone/api/portal.py b/src/plone/api/portal.py\nindex a3d21b5c..6d3f1b46 100644\n--- a/src/plone/api/portal.py\n+++ b/src/plone/api/portal.py\n@@ -24,7 +24,6 @@\n import datetime as dtime\n import re\n \n-\n logger = getLogger("plone.api.portal")\n \n try:\ndiff --git a/src/plone/api/relation.py b/src/plone/api/relation.py\nindex 10a0fa10..c46e7816 100644\n--- a/src/plone/api/relation.py\n+++ b/src/plone/api/relation.py\n@@ -26,7 +26,6 @@\n \n import logging\n \n-\n try:\n     distribution("plone.app.iterate")\n except PackageNotFoundError:\ndiff --git a/src/plone/api/tests/test_addon.py b/src/plone/api/tests/test_addon.py\nindex cf4093b0..24d528d2 100644\n--- a/src/plone/api/tests/test_addon.py\n+++ b/src/plone/api/tests/test_addon.py\n@@ -6,7 +6,6 @@\n \n import unittest\n \n-\n ADDON = "plone.session"\n \n \ndiff --git a/src/plone/api/tests/test_doctests.py b/src/plone/api/tests/test_doctests.py\nindex 5a94579e..f0ab669e 100644\n--- a/src/plone/api/tests/test_doctests.py\n+++ b/src/plone/api/tests/test_doctests.py\n@@ -21,7 +21,6 @@\n import re\n import unittest\n \n-\n logger = getLogger(__name__)\n \n try:\ndiff --git a/src/plone/api/tests/test_portal.py b/src/plone/api/tests/test_portal.py\nindex a822aab5..ac8124d7 100644\n--- a/src/plone/api/tests/test_portal.py\n+++ b/src/plone/api/tests/test_portal.py\n@@ -25,7 +25,6 @@\n import DateTime\n import unittest\n \n-\n try:\n     # Python 3\n     from email import message_from_bytes\ndiff --git a/tox.ini b/tox.ini\nindex af38719a..4991aa99 100644\n--- a/tox.ini\n+++ b/tox.ini\n@@ -7,6 +7,7 @@ min_version = 4.4.0\n envlist =\n     lint\n     test\n+    py314-plone62\n     py313-plone62\n     py312-plone62\n     py311-plone62\n@@ -22,6 +23,7 @@ skip_missing_interpreters = True\n # Add extra configuration options in .meta.toml:\n # - to specify a custom testing combination of Plone and python versions, use `test_matrix`\n #   Use ["*"] to use all supported Python versions for this Plone version.\n+# - to disable the test matrix entirely, set `use_test_matrix = false`\n # - to specify extra custom environments, use `envlist_lines`\n # - to specify extra `tox` top-level options, use `config_lines`\n #  [tox]\n@@ -66,6 +68,7 @@ description = check if the package defines all its dependencies\n skip_install = true\n deps =\n     build\n+    setuptools<82.0.0\n     z3c.dependencychecker==2.14.3\n commands =\n     python -m build --sdist\n@@ -134,6 +137,7 @@ extras =\n ##\n # Add extra configuration options in .meta.toml:\n #  [tox]\n+#  skip_test_extra = true\n #  test_extras = """\n #      tests\n #      widgets\n@@ -241,8 +245,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    tests\n+extras = {[base]extras}\n deps =\n     -r requirements-docs.txt\n commands =\n@@ -255,8 +258,7 @@ commands =\n basepython = python3.11\n skip_install = False\n constrain_package_deps = True\n-extras =\n-    tests\n+extras = {[base]extras}\n deps =\n     -r requirements-docs.txt\n commands =\n@@ -269,8 +271,7 @@ skip_install = False\n usedevelop = True\n allowlist_externals =\n     mkdir\n-extras =\n-    tests\n+extras = {[base]extras}\n \n deps =\n     -r requirements-docs.txt\n@@ -290,8 +291,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    {[testenv:plone6docs]extras}\n+extras = {[base]extras}\n deps =\n     {[testenv:plone6docs]deps}\n commands =\n@@ -306,8 +306,7 @@ constrain_package_deps = True\n package = editable\n allowlist_externals =\n     mkdir\n-extras =\n-    {[testenv:plone6docs]extras}\n+extras = {[base]extras}\n deps =\n     {[testenv:plone6docs]deps}\n commands =\n'
+b'diff --git a/src/plone/portlets/manager.py b/src/plone/portlets/manager.py\nindex 0172683..1f2d4ad 100644\n--- a/src/plone/portlets/manager.py\n+++ b/src/plone/portlets/manager.py\n@@ -9,8 +9,8 @@\n from ZODB.POSException import ConflictError\n from zope.component import adapter\n from zope.component import getMultiAdapter\n-from zope.component import queryMultiAdapter\n from zope.component import getUtilitiesFor\n+from zope.component import queryMultiAdapter\n from zope.contentprovider.interfaces import UpdateNotCalled\n from zope.interface import implementer\n from zope.interface import Interface\n'
 
-Repository: plone.api
+Repository: plone.portlets
 
 
-Branch: refs/heads/main
-Date: 2026-03-23T17:07:37+01:00
+Branch: refs/heads/master
+Date: 2026-03-24T17:43:23+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.api/commit/af0002bfc73ee6b2043b49162bfd30ac287ea954
+Commit: https://github.com/plone/plone.portlets/commit/268e39e161ad24a5255247e0f47437c689f10cfb
 
-Update src/plone/api/user.py
+Merge pull request #44 from plone/fix/1727-graceful-missing-portlet-renderer
 
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
-
-Files changed:
-M src/plone/api/user.py
-
-b'diff --git a/src/plone/api/user.py b/src/plone/api/user.py\nindex 5402b2c2..2e93b98f 100644\n--- a/src/plone/api/user.py\n+++ b/src/plone/api/user.py\n@@ -77,10 +77,8 @@ def create(\n         "email": email,\n         "fullname": properties.get("fullname", ""),\n     }\n-    generate_user_id(site, data)\n-    generate_login_name(site, data)\n-    user_id = data["user_id"]\n-    login_name = data.get("login_name", username or email)\n+    user_id = generate_user_id(site, data) or username or email\n+    login_name = generate_login_name(site, data) or username or email\n \n     registration = portal.get_tool("portal_registration")\n \n'
-
-Repository: plone.api
-
-
-Branch: refs/heads/main
-Date: 2026-03-23T19:08:56+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.api/commit/6d536674c012a73a5c8b19d14d840cbcb33cdfef
-
-Fix test_create_with_username to work with generate_user_id
-
-With the new generate_user_id(), both calls (with and without email
-login) produce the same user_id "chuck" from the username. Delete
-the first user before recreating with different login settings.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Gracefully handle missing portlet renderers
 
 Files changed:
-M src/plone/api/tests/test_user.py
+A news/1727.bugfix
+M src/plone/portlets/manager.py
 
-b'diff --git a/src/plone/api/tests/test_user.py b/src/plone/api/tests/test_user.py\nindex a7140bdb..4f8283fb 100644\n--- a/src/plone/api/tests/test_user.py\n+++ b/src/plone/api/tests/test_user.py\n@@ -113,6 +113,9 @@ def test_create_with_username(self):\n         )\n         self.assertEqual(user.getUserName(), "chuck@norris.org")\n \n+        # Delete user before recreating with different login settings,\n+        # because generate_user_id uses username as user_id in both cases.\n+        api.user.delete(user=user)\n         self._set_emaillogin(False)\n \n         user = api.user.create(\n'
-
-Repository: plone.api
-
-
-Branch: refs/heads/main
-Date: 2026-03-24T17:00:49+01:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
-Commit: https://github.com/plone/plone.api/commit/72874f631b0faf5ca5ac82bfe6af266c33364e03
-
-Merge pull request #600 from plone/plip-4292-fix-user-creation
-
-Fix user.create() to respect use_uuid_as_userid
-
-Files changed:
-A news/4292.bugfix
-M setup.py
-M src/plone/api/tests/test_user.py
-M src/plone/api/user.py
-
-b'diff --git a/news/4292.bugfix b/news/4292.bugfix\nnew file mode 100644\nindex 00000000..d3e01008\n--- /dev/null\n+++ b/news/4292.bugfix\n@@ -0,0 +1,3 @@\n+Fix ``plone.api.user.create()`` to respect ``use_uuid_as_userid`` and\n+``use_email_as_login`` registry settings, as well as custom ``IUserIdGenerator``\n+and ``ILoginNameGenerator`` utilities.\ndiff --git a/setup.py b/setup.py\nindex 2d2d1dd4..7355b7b0 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -27,6 +27,7 @@\n         "Products.PlonePAS",\n         "Products.CMFPlone",\n         "decorator",\n+        "plone.app.users",\n         "plone.app.uuid",\n         "plone.app.dexterity",\n         "plone.app.intid",\ndiff --git a/src/plone/api/tests/test_user.py b/src/plone/api/tests/test_user.py\nindex a7140bdb..4f8283fb 100644\n--- a/src/plone/api/tests/test_user.py\n+++ b/src/plone/api/tests/test_user.py\n@@ -113,6 +113,9 @@ def test_create_with_username(self):\n         )\n         self.assertEqual(user.getUserName(), "chuck@norris.org")\n \n+        # Delete user before recreating with different login settings,\n+        # because generate_user_id uses username as user_id in both cases.\n+        api.user.delete(user=user)\n         self._set_emaillogin(False)\n \n         user = api.user.create(\ndiff --git a/src/plone/api/user.py b/src/plone/api/user.py\nindex 96a47083..2e93b98f 100644\n--- a/src/plone/api/user.py\n+++ b/src/plone/api/user.py\n@@ -65,16 +65,29 @@ def create(\n             "that is not email so you need to pass a username.",\n         )\n \n+    # Generate user_id and login_name using the canonical implementation\n+    # from plone.app.users, respecting use_uuid_as_userid,\n+    # use_email_as_login, IUserIdGenerator, and ILoginNameGenerator.\n+    from plone.app.users.utils import generate_login_name\n+    from plone.app.users.utils import generate_user_id\n+\n+    site = portal.get()\n+    data = {\n+        "username": username,\n+        "email": email,\n+        "fullname": properties.get("fullname", ""),\n+    }\n+    user_id = generate_user_id(site, data) or username or email\n+    login_name = generate_login_name(site, data) or username or email\n+\n     registration = portal.get_tool("portal_registration")\n-    user_id = use_email_as_username and email or username\n \n     # Generate a random 8-char password\n     if not password:\n         chars = string.ascii_letters + string.digits\n         password = "".join(random.choice(chars) for char in range(8))\n \n-    properties.update(username=user_id)\n-    properties.update(email=email)\n+    properties.update(username=user_id, email=email)\n \n     registration.addMember(\n         user_id,\n@@ -82,7 +95,14 @@ def create(\n         roles,\n         properties=properties,\n     )\n-    return get(username=user_id)\n+\n+    # If user_id differs from login_name (e.g. UUID as user id with\n+    # email as login), update the login name accordingly.\n+    if user_id != login_name:\n+        pas = portal.get_tool("acl_users")\n+        pas.updateLoginName(user_id, login_name)\n+\n+    return get(userid=user_id)\n \n \n @mutually_exclusive_parameters("userid", "username")\n'
+b'diff --git a/news/1727.bugfix b/news/1727.bugfix\nnew file mode 100644\nindex 0000000..25ce79e\n--- /dev/null\n+++ b/news/1727.bugfix\n@@ -0,0 +1,2 @@\n+Use ``queryMultiAdapter`` instead of ``getMultiAdapter`` in ``_dataToPortlet`` so a missing portlet renderer (e.g., after uninstalling an add-on) no longer crashes the page.\n+@jensens\ndiff --git a/src/plone/portlets/manager.py b/src/plone/portlets/manager.py\nindex 0d30db9..1f2d4ad 100644\n--- a/src/plone/portlets/manager.py\n+++ b/src/plone/portlets/manager.py\n@@ -10,6 +10,7 @@\n from zope.component import adapter\n from zope.component import getMultiAdapter\n from zope.component import getUtilitiesFor\n+from zope.component import queryMultiAdapter\n from zope.contentprovider.interfaces import UpdateNotCalled\n from zope.interface import implementer\n from zope.interface import Interface\n@@ -106,6 +107,14 @@ def _lazyLoadPortlets(self, manager):\n         items = []\n         for p in self.filter(retriever.getPortlets()):\n             renderer = self._dataToPortlet(p["assignment"].data)\n+            if renderer is None:\n+                logger.warning(\n+                    "No renderer found for portlet (%r %r %r), skipping.",\n+                    p["category"],\n+                    p["key"],\n+                    p["name"],\n+                )\n+                continue\n             info = p.copy()\n             info["manager"] = self.manager.__name__\n             info["renderer"] = renderer\n@@ -133,7 +142,7 @@ def _dataToPortlet(self, data):\n         """Helper method to get the correct IPortletRenderer for the given\n         data object.\n         """\n-        return getMultiAdapter(\n+        return queryMultiAdapter(\n             (self.context, self.request, self.__parent__, self.manager, data),\n             IPortletRenderer,\n         )\n'
 
