@@ -1,54 +1,41 @@
-Repository: plone.base
+Repository: plone.stringinterp
 
 
-Branch: refs/heads/main
-Date: 2026-03-24T23:32:57+01:00
+Branch: refs/heads/master
+Date: 2026-03-24T19:39:50+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.base/commit/0da681dc7075ed936cbe37f0a3a5fc8fd8a16313
+Commit: https://github.com/plone/plone.stringinterp/commit/5ec1e0ceda022c8c63f70c3ac8bfa97576881c32
 
-Change nonfolderish_tabs default to False
+Gracefully handle substitution adapter exceptions
 
-Only folders appear as portal tabs by default. No migration step —
-existing sites keep their current registry value.
+Catch exceptions raised during adapter execution in LazyDict,
+log them, and treat the variable as missing instead of crashing.
 
-Fixes plone/Products.CMFPlone#2337
+Fixes plone/Products.CMFPlone#1358
 
 Files changed:
-A news/2337.bugfix
-M src/plone/base/interfaces/controlpanel.py
+A news/1358.bugfix
+A src/plone/stringinterp/tests/test_dollarreplace.py
+M src/plone/stringinterp/dollarReplace.py
 
-b'diff --git a/news/2337.bugfix b/news/2337.bugfix\nnew file mode 100644\nindex 0000000..971dee3\n--- /dev/null\n+++ b/news/2337.bugfix\n@@ -0,0 +1,2 @@\n+Change default of ``nonfolderish_tabs`` to ``False`` so File/Image in the portal root no longer appear as portal tabs.\n+@jensens\ndiff --git a/src/plone/base/interfaces/controlpanel.py b/src/plone/base/interfaces/controlpanel.py\nindex b4cbea6..9789856 100644\n--- a/src/plone/base/interfaces/controlpanel.py\n+++ b/src/plone/base/interfaces/controlpanel.py\n@@ -823,12 +823,12 @@ class INavigationSchema(Interface):\n     nonfolderish_tabs = schema.Bool(\n         title=_("Generate tabs for items other than folders."),\n         description=_(\n-            "By default, any content item in the root of the portal will "\n-            "appear as a tab. If you turn this option off, only folders "\n-            "will be shown. This only has an effect if \'automatically "\n-            "generate tabs\' is enabled."\n+            "By default, only folders in the root of the portal will "\n+            "appear as tabs. If you turn this option on, other content "\n+            "items will be shown as well. This only has an effect if "\n+            "\'automatically generate tabs\' is enabled."\n         ),\n-        default=True,\n+        default=False,\n         required=False,\n     )\n \n'
+b'diff --git a/news/1358.bugfix b/news/1358.bugfix\nnew file mode 100644\nindex 0000000..5b45687\n--- /dev/null\n+++ b/news/1358.bugfix\n@@ -0,0 +1,2 @@\n+Catch exceptions from string substitution adapters instead of crashing. Fixes content rule email actions failing when a substitution variable raises an error.\n+@jensens\ndiff --git a/src/plone/stringinterp/dollarReplace.py b/src/plone/stringinterp/dollarReplace.py\nindex a72ccf5..694ff54 100644\n--- a/src/plone/stringinterp/dollarReplace.py\n+++ b/src/plone/stringinterp/dollarReplace.py\n@@ -15,8 +15,11 @@\n from zope.component import getAdapter\n from zope.interface import implementer\n \n+import logging\n import string\n \n+logger = logging.getLogger(__name__)\n+\n _marker = "_bad_"\n \n \n@@ -37,6 +40,11 @@ def __getitem__(self, key):\n                     res = _marker\n                 except Unauthorized:\n                     res = "Unauthorized"\n+                except Exception:\n+                    logger.warning(\n+                        "Error in string substitution for \'%s\'.", key, exc_info=True\n+                    )\n+                    res = _marker\n \n                 self._cache[key] = res\n \ndiff --git a/src/plone/stringinterp/tests/test_dollarreplace.py b/src/plone/stringinterp/tests/test_dollarreplace.py\nnew file mode 100644\nindex 0000000..d3d3533\n--- /dev/null\n+++ b/src/plone/stringinterp/tests/test_dollarreplace.py\n@@ -0,0 +1,64 @@\n+from plone.stringinterp.dollarReplace import LazyDict\n+from plone.stringinterp.interfaces import IStringSubstitution\n+from zope.component import provideAdapter\n+from zope.interface import implementer\n+from zope.interface import Interface\n+\n+import unittest\n+\n+\n+class IDummyContent(Interface):\n+    pass\n+\n+\n+@implementer(IDummyContent)\n+class DummyContent:\n+    pass\n+\n+\n+@implementer(IStringSubstitution)\n+class GoodSubstitution:\n+    def __init__(self, context):\n+        self.context = context\n+\n+    def __call__(self):\n+        return "good value"\n+\n+\n+@implementer(IStringSubstitution)\n+class FailingSubstitution:\n+    def __init__(self, context):\n+        self.context = context\n+\n+    def __call__(self):\n+        raise RuntimeError("Adapter execution failed")\n+\n+\n+class TestLazyDict(unittest.TestCase):\n+    def setUp(self):\n+        provideAdapter(\n+            GoodSubstitution, (IDummyContent,), IStringSubstitution, name="good"\n+        )\n+        provideAdapter(\n+            FailingSubstitution, (IDummyContent,), IStringSubstitution, name="failing"\n+        )\n+        self.context = DummyContent()\n+\n+    def test_good_substitution(self):\n+        lazy = LazyDict(self.context)\n+        self.assertEqual(lazy["good"], "good value")\n+\n+    def test_missing_substitution_raises_keyerror(self):\n+        lazy = LazyDict(self.context)\n+        with self.assertRaises(KeyError):\n+            lazy["nonexistent"]\n+\n+    def test_failing_adapter_does_not_crash(self):\n+        """An adapter that raises during execution should not crash.\n+\n+        Regression test for\n+        https://github.com/plone/Products.CMFPlone/issues/1358\n+        """\n+        lazy = LazyDict(self.context)\n+        with self.assertRaises(KeyError):\n+            lazy["failing"]\n'
 
-Repository: plone.base
+Repository: plone.stringinterp
 
 
-Branch: refs/heads/main
-Date: 2026-03-25T20:55:17+01:00
+Branch: refs/heads/master
+Date: 2026-03-25T21:05:28+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.base/commit/61cc5858bf18d8c0d22c81e52f7df81acba046cb
+Commit: https://github.com/plone/plone.stringinterp/commit/e0436e889adabcc23541f7fd24c2243f26c5e967
 
-Use 'containers' instead of 'folders' in nonfolderish_tabs description
+Merge pull request #52 from plone/fix/1358-graceful-substitution-errors
+
+Gracefully handle substitution adapter exceptions
 
 Files changed:
-M src/plone/base/interfaces/controlpanel.py
+A news/1358.bugfix
+A src/plone/stringinterp/tests/test_dollarreplace.py
+M src/plone/stringinterp/dollarReplace.py
 
-b'diff --git a/src/plone/base/interfaces/controlpanel.py b/src/plone/base/interfaces/controlpanel.py\nindex 9789856..5c8a0f7 100644\n--- a/src/plone/base/interfaces/controlpanel.py\n+++ b/src/plone/base/interfaces/controlpanel.py\n@@ -821,9 +821,9 @@ class INavigationSchema(Interface):\n     )\n \n     nonfolderish_tabs = schema.Bool(\n-        title=_("Generate tabs for items other than folders."),\n+        title=_("Generate tabs for items other than containers."),\n         description=_(\n-            "By default, only folders in the root of the portal will "\n+            "By default, only containers in the root of the portal will "\n             "appear as tabs. If you turn this option on, other content "\n             "items will be shown as well. This only has an effect if "\n             "\'automatically generate tabs\' is enabled."\n'
-
-Repository: plone.base
-
-
-Branch: refs/heads/main
-Date: 2026-03-25T21:03:35+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.base/commit/ded28ca5d44f3f63a91686b15bbe9667b383d850
-
-Merge pull request #116 from plone/fix/2337-nonfolderish-tabs-default
-
-Change nonfolderish_tabs default to False
-
-Files changed:
-A news/2337.bugfix
-M src/plone/base/interfaces/controlpanel.py
-
-b'diff --git a/news/2337.bugfix b/news/2337.bugfix\nnew file mode 100644\nindex 0000000..971dee3\n--- /dev/null\n+++ b/news/2337.bugfix\n@@ -0,0 +1,2 @@\n+Change default of ``nonfolderish_tabs`` to ``False`` so File/Image in the portal root no longer appear as portal tabs.\n+@jensens\ndiff --git a/src/plone/base/interfaces/controlpanel.py b/src/plone/base/interfaces/controlpanel.py\nindex b4cbea6..5c8a0f7 100644\n--- a/src/plone/base/interfaces/controlpanel.py\n+++ b/src/plone/base/interfaces/controlpanel.py\n@@ -821,14 +821,14 @@ class INavigationSchema(Interface):\n     )\n \n     nonfolderish_tabs = schema.Bool(\n-        title=_("Generate tabs for items other than folders."),\n+        title=_("Generate tabs for items other than containers."),\n         description=_(\n-            "By default, any content item in the root of the portal will "\n-            "appear as a tab. If you turn this option off, only folders "\n-            "will be shown. This only has an effect if \'automatically "\n-            "generate tabs\' is enabled."\n+            "By default, only containers in the root of the portal will "\n+            "appear as tabs. If you turn this option on, other content "\n+            "items will be shown as well. This only has an effect if "\n+            "\'automatically generate tabs\' is enabled."\n         ),\n-        default=True,\n+        default=False,\n         required=False,\n     )\n \n'
+b'diff --git a/news/1358.bugfix b/news/1358.bugfix\nnew file mode 100644\nindex 0000000..5b45687\n--- /dev/null\n+++ b/news/1358.bugfix\n@@ -0,0 +1,2 @@\n+Catch exceptions from string substitution adapters instead of crashing. Fixes content rule email actions failing when a substitution variable raises an error.\n+@jensens\ndiff --git a/src/plone/stringinterp/dollarReplace.py b/src/plone/stringinterp/dollarReplace.py\nindex a72ccf5..694ff54 100644\n--- a/src/plone/stringinterp/dollarReplace.py\n+++ b/src/plone/stringinterp/dollarReplace.py\n@@ -15,8 +15,11 @@\n from zope.component import getAdapter\n from zope.interface import implementer\n \n+import logging\n import string\n \n+logger = logging.getLogger(__name__)\n+\n _marker = "_bad_"\n \n \n@@ -37,6 +40,11 @@ def __getitem__(self, key):\n                     res = _marker\n                 except Unauthorized:\n                     res = "Unauthorized"\n+                except Exception:\n+                    logger.warning(\n+                        "Error in string substitution for \'%s\'.", key, exc_info=True\n+                    )\n+                    res = _marker\n \n                 self._cache[key] = res\n \ndiff --git a/src/plone/stringinterp/tests/test_dollarreplace.py b/src/plone/stringinterp/tests/test_dollarreplace.py\nnew file mode 100644\nindex 0000000..d3d3533\n--- /dev/null\n+++ b/src/plone/stringinterp/tests/test_dollarreplace.py\n@@ -0,0 +1,64 @@\n+from plone.stringinterp.dollarReplace import LazyDict\n+from plone.stringinterp.interfaces import IStringSubstitution\n+from zope.component import provideAdapter\n+from zope.interface import implementer\n+from zope.interface import Interface\n+\n+import unittest\n+\n+\n+class IDummyContent(Interface):\n+    pass\n+\n+\n+@implementer(IDummyContent)\n+class DummyContent:\n+    pass\n+\n+\n+@implementer(IStringSubstitution)\n+class GoodSubstitution:\n+    def __init__(self, context):\n+        self.context = context\n+\n+    def __call__(self):\n+        return "good value"\n+\n+\n+@implementer(IStringSubstitution)\n+class FailingSubstitution:\n+    def __init__(self, context):\n+        self.context = context\n+\n+    def __call__(self):\n+        raise RuntimeError("Adapter execution failed")\n+\n+\n+class TestLazyDict(unittest.TestCase):\n+    def setUp(self):\n+        provideAdapter(\n+            GoodSubstitution, (IDummyContent,), IStringSubstitution, name="good"\n+        )\n+        provideAdapter(\n+            FailingSubstitution, (IDummyContent,), IStringSubstitution, name="failing"\n+        )\n+        self.context = DummyContent()\n+\n+    def test_good_substitution(self):\n+        lazy = LazyDict(self.context)\n+        self.assertEqual(lazy["good"], "good value")\n+\n+    def test_missing_substitution_raises_keyerror(self):\n+        lazy = LazyDict(self.context)\n+        with self.assertRaises(KeyError):\n+            lazy["nonexistent"]\n+\n+    def test_failing_adapter_does_not_crash(self):\n+        """An adapter that raises during execution should not crash.\n+\n+        Regression test for\n+        https://github.com/plone/Products.CMFPlone/issues/1358\n+        """\n+        lazy = LazyDict(self.context)\n+        with self.assertRaises(KeyError):\n+            lazy["failing"]\n'
 
