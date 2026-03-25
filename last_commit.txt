@@ -2,38 +2,55 @@ Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2026-03-25T21:07:20+01:00
+Date: 2026-03-25T21:06:49+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/dc7a774439d19b29d12434fc58e5646875292086
+Commit: https://github.com/plone/Products.CMFPlone/commit/0f2d63188392c234d057519388aaaf7c734f3e3f
 
-Fix broken links in accessibility-info page
+Set no-cache headers on login views
 
-- VPAT PDF: plone.org/plone-vpat.pdf/view → plone.org/accessibility
-- About VPAT: state.gov (dead) → section508.gov/sell/acr/
+Prevent proxy caches from serving stale came_from values by setting
+Cache-Control and Expires headers on LoginForm and FailsafeLoginForm.
 
-Fixes #3697
+Fixes #3403
 
 Files changed:
-A news/3697.bugfix.md
-M src/Products/CMFPlone/browser/templates/accessibility-info.pt
+A news/3403.bugfix.md
+M src/Products/CMFPlone/browser/login/login.py
+M src/Products/CMFPlone/tests/test_login_form.py
 
-b'diff --git a/news/3697.bugfix.md b/news/3697.bugfix.md\nnew file mode 100644\nindex 0000000000..5841ea827c\n--- /dev/null\n+++ b/news/3697.bugfix.md\n@@ -0,0 +1,3 @@\n+Fix broken links in accessibility-info page: VPAT PDF and state.gov reference.\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/3697\n+[jensens]\ndiff --git a/src/Products/CMFPlone/browser/templates/accessibility-info.pt b/src/Products/CMFPlone/browser/templates/accessibility-info.pt\nindex 1b7a1b15c2..de9c03965a 100644\n--- a/src/Products/CMFPlone/browser/templates/accessibility-info.pt\n+++ b/src/Products/CMFPlone/browser/templates/accessibility-info.pt\n@@ -64,11 +64,11 @@\n         <p i18n:translate="description_vpat">\n           View\n             <a title="Plone\'s Voluntary Product Accessibility Template (VPAT)"\n-               href="https://plone.org/plone-vpat.pdf/view"\n+               href="https://plone.org/accessibility"\n                i18n:attributes="title title_plone_vpat;">\n                Plone\'s VPAT\n             </a>\n-            <a href="https://www.state.gov/m/irm/impact/126340.htm">\n+            <a href="https://www.section508.gov/sell/acr/">\n                 <acronym i18n:name="vpat" title="About VPAT" i18n:attributes="title title_vpat;">(about VPAT)</acronym>\n             </a>\n         </p>\n'
+b'diff --git a/news/3403.bugfix.md b/news/3403.bugfix.md\nnew file mode 100644\nindex 0000000000..9d50505297\n--- /dev/null\n+++ b/news/3403.bugfix.md\n@@ -0,0 +1,3 @@\n+Set no-cache headers on login and failsafe login views to prevent proxy caches from serving stale ``came_from`` values.\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/3403\n+[jensens]\ndiff --git a/src/Products/CMFPlone/browser/login/login.py b/src/Products/CMFPlone/browser/login/login.py\nindex 488a2c823b..1fa02ab91b 100644\n--- a/src/Products/CMFPlone/browser/login/login.py\n+++ b/src/Products/CMFPlone/browser/login/login.py\n@@ -61,11 +61,24 @@ class LoginForm(form.EditForm):\n     ignoreContext = True\n     prefix = ""\n \n+    def _set_no_cache_headers(self):\n+        """Prevent proxy caches from caching the login page.\n+\n+        The came_from hidden field is populated from HTTP_REFERER and\n+        varies per request. Without no-cache headers, a proxy could\n+        serve a cached login page with the wrong came_from value.\n+        See: https://github.com/plone/Products.CMFPlone/issues/3403\n+        """\n+        response = self.request.response\n+        response.setHeader("Expires", "Sat, 1 Jan 2000 00:00:00 GMT")\n+        response.setHeader("Cache-Control", "max-age=0, must-revalidate, private")\n+\n     def render(self):\n         registry = queryUtility(IRegistry)\n         ext_login_url = registry["plone.external_login_url"]\n         if ext_login_url:\n             return self._handle_external_login(ext_login_url)\n+        self._set_no_cache_headers()\n         return self.index()\n \n     def _handle_external_login(self, url):\n@@ -248,6 +261,7 @@ def use_email_as_login(self):\n \n class FailsafeLoginForm(LoginForm):\n     def render(self):\n+        self._set_no_cache_headers()\n         return self.index()\n \n \ndiff --git a/src/Products/CMFPlone/tests/test_login_form.py b/src/Products/CMFPlone/tests/test_login_form.py\nindex 3c1b66e4a9..aaedda8ab8 100644\n--- a/src/Products/CMFPlone/tests/test_login_form.py\n+++ b/src/Products/CMFPlone/tests/test_login_form.py\n@@ -29,6 +29,30 @@ def test_login_view(self):\n         view = getMultiAdapter((self.portal, self.request), name="login")\n         self.assertTrue(view())\n \n+    def test_login_view_sets_no_cache_headers(self):\n+        view = getMultiAdapter((self.portal, self.request), name="login")\n+        view()\n+        response = self.request.response\n+        self.assertEqual(\n+            response.getHeader("Cache-Control"),\n+            "max-age=0, must-revalidate, private",\n+        )\n+        self.assertEqual(\n+            response.getHeader("Expires"),\n+            "Sat, 1 Jan 2000 00:00:00 GMT",\n+        )\n+\n+    def test_failsafe_login_view_sets_no_cache_headers(self):\n+        view = getMultiAdapter(\n+            (self.portal, self.request), name="failsafe_login"\n+        )\n+        view()\n+        response = self.request.response\n+        self.assertEqual(\n+            response.getHeader("Cache-Control"),\n+            "max-age=0, must-revalidate, private",\n+        )\n+\n     def _setup_authenticator_request(self):\n         self.request.set("REQUEST_METHOD", "POST")\n         authenticator = getMultiAdapter(\n'
 
 Repository: Products.CMFPlone
 
 
 Branch: refs/heads/master
-Date: 2026-03-25T21:12:45+01:00
+Date: 2026-03-25T21:06:49+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/Products.CMFPlone/commit/4e19e4ff5d7c20bb2ab71149f4633d47866d369b
+Commit: https://github.com/plone/Products.CMFPlone/commit/433f30ceee81d1809876bf1767b16713a10842be
 
-Merge pull request #4299 from plone/fix/3697-accessibility-broken-links
-
-Fix broken links in accessibility-info page
+Fix black formatting
 
 Files changed:
-A news/3697.bugfix.md
-M src/Products/CMFPlone/browser/templates/accessibility-info.pt
+M src/Products/CMFPlone/tests/test_login_form.py
 
-b'diff --git a/news/3697.bugfix.md b/news/3697.bugfix.md\nnew file mode 100644\nindex 0000000000..5841ea827c\n--- /dev/null\n+++ b/news/3697.bugfix.md\n@@ -0,0 +1,3 @@\n+Fix broken links in accessibility-info page: VPAT PDF and state.gov reference.\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/3697\n+[jensens]\ndiff --git a/src/Products/CMFPlone/browser/templates/accessibility-info.pt b/src/Products/CMFPlone/browser/templates/accessibility-info.pt\nindex 1b7a1b15c2..de9c03965a 100644\n--- a/src/Products/CMFPlone/browser/templates/accessibility-info.pt\n+++ b/src/Products/CMFPlone/browser/templates/accessibility-info.pt\n@@ -64,11 +64,11 @@\n         <p i18n:translate="description_vpat">\n           View\n             <a title="Plone\'s Voluntary Product Accessibility Template (VPAT)"\n-               href="https://plone.org/plone-vpat.pdf/view"\n+               href="https://plone.org/accessibility"\n                i18n:attributes="title title_plone_vpat;">\n                Plone\'s VPAT\n             </a>\n-            <a href="https://www.state.gov/m/irm/impact/126340.htm">\n+            <a href="https://www.section508.gov/sell/acr/">\n                 <acronym i18n:name="vpat" title="About VPAT" i18n:attributes="title title_vpat;">(about VPAT)</acronym>\n             </a>\n         </p>\n'
+b'diff --git a/src/Products/CMFPlone/tests/test_login_form.py b/src/Products/CMFPlone/tests/test_login_form.py\nindex aaedda8ab8..9e59eb25e1 100644\n--- a/src/Products/CMFPlone/tests/test_login_form.py\n+++ b/src/Products/CMFPlone/tests/test_login_form.py\n@@ -43,9 +43,7 @@ def test_login_view_sets_no_cache_headers(self):\n         )\n \n     def test_failsafe_login_view_sets_no_cache_headers(self):\n-        view = getMultiAdapter(\n-            (self.portal, self.request), name="failsafe_login"\n-        )\n+        view = getMultiAdapter((self.portal, self.request), name="failsafe_login")\n         view()\n         response = self.request.response\n         self.assertEqual(\n'
+
+Repository: Products.CMFPlone
+
+
+Branch: refs/heads/master
+Date: 2026-03-25T21:24:40+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/Products.CMFPlone/commit/2e2f3c497a0915f2ee29bccf498a17f280573460
+
+Merge pull request #4298 from plone/fix/3403-login-cache-headers
+
+Set no-cache headers on login views
+
+Files changed:
+A news/3403.bugfix.md
+M src/Products/CMFPlone/browser/login/login.py
+M src/Products/CMFPlone/tests/test_login_form.py
+
+b'diff --git a/news/3403.bugfix.md b/news/3403.bugfix.md\nnew file mode 100644\nindex 0000000000..9d50505297\n--- /dev/null\n+++ b/news/3403.bugfix.md\n@@ -0,0 +1,3 @@\n+Set no-cache headers on login and failsafe login views to prevent proxy caches from serving stale ``came_from`` values.\n+Fixes: https://github.com/plone/Products.CMFPlone/issues/3403\n+[jensens]\ndiff --git a/src/Products/CMFPlone/browser/login/login.py b/src/Products/CMFPlone/browser/login/login.py\nindex 488a2c823b..1fa02ab91b 100644\n--- a/src/Products/CMFPlone/browser/login/login.py\n+++ b/src/Products/CMFPlone/browser/login/login.py\n@@ -61,11 +61,24 @@ class LoginForm(form.EditForm):\n     ignoreContext = True\n     prefix = ""\n \n+    def _set_no_cache_headers(self):\n+        """Prevent proxy caches from caching the login page.\n+\n+        The came_from hidden field is populated from HTTP_REFERER and\n+        varies per request. Without no-cache headers, a proxy could\n+        serve a cached login page with the wrong came_from value.\n+        See: https://github.com/plone/Products.CMFPlone/issues/3403\n+        """\n+        response = self.request.response\n+        response.setHeader("Expires", "Sat, 1 Jan 2000 00:00:00 GMT")\n+        response.setHeader("Cache-Control", "max-age=0, must-revalidate, private")\n+\n     def render(self):\n         registry = queryUtility(IRegistry)\n         ext_login_url = registry["plone.external_login_url"]\n         if ext_login_url:\n             return self._handle_external_login(ext_login_url)\n+        self._set_no_cache_headers()\n         return self.index()\n \n     def _handle_external_login(self, url):\n@@ -248,6 +261,7 @@ def use_email_as_login(self):\n \n class FailsafeLoginForm(LoginForm):\n     def render(self):\n+        self._set_no_cache_headers()\n         return self.index()\n \n \ndiff --git a/src/Products/CMFPlone/tests/test_login_form.py b/src/Products/CMFPlone/tests/test_login_form.py\nindex 3c1b66e4a9..9e59eb25e1 100644\n--- a/src/Products/CMFPlone/tests/test_login_form.py\n+++ b/src/Products/CMFPlone/tests/test_login_form.py\n@@ -29,6 +29,28 @@ def test_login_view(self):\n         view = getMultiAdapter((self.portal, self.request), name="login")\n         self.assertTrue(view())\n \n+    def test_login_view_sets_no_cache_headers(self):\n+        view = getMultiAdapter((self.portal, self.request), name="login")\n+        view()\n+        response = self.request.response\n+        self.assertEqual(\n+            response.getHeader("Cache-Control"),\n+            "max-age=0, must-revalidate, private",\n+        )\n+        self.assertEqual(\n+            response.getHeader("Expires"),\n+            "Sat, 1 Jan 2000 00:00:00 GMT",\n+        )\n+\n+    def test_failsafe_login_view_sets_no_cache_headers(self):\n+        view = getMultiAdapter((self.portal, self.request), name="failsafe_login")\n+        view()\n+        response = self.request.response\n+        self.assertEqual(\n+            response.getHeader("Cache-Control"),\n+            "max-age=0, must-revalidate, private",\n+        )\n+\n     def _setup_authenticator_request(self):\n         self.request.set("REQUEST_METHOD", "POST")\n         authenticator = getMultiAdapter(\n'
 
