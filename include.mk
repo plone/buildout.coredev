@@ -54,4 +54,4 @@ rfbrowser: $(FILES_TARGET) $(SOURCES_TARGET) $(PACKAGES_TARGET) $(TEST_TARGET) $
 	@echo "Installing Playwright system dependencies"
 	@npx playwright install-deps
 	@echo "Initializing robotframework browser"
-	@/usr/bin/env bash -c "rfbrowser init"
+	@/usr/bin/env bash -c "rfbrowser init chromium"
