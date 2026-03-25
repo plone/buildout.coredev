@@ -51,5 +51,7 @@ INSTALL_TARGETS+=run-presources
 
 .PHONY: rfbrowser
 rfbrowser: $(FILES_TARGET) $(SOURCES_TARGET) $(PACKAGES_TARGET) $(TEST_TARGET) $(TEST_DEPENDENCY_TARGETS)
+	@echo "Installing Playwright system dependencies"
+	@npx playwright install-deps
 	@echo "Initializing robotframework browser"
 	@/usr/bin/env bash -c "rfbrowser init"
