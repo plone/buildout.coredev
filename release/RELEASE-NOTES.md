@@ -1,6 +1,6 @@
-# Release notes for Plone 6.2.0a2 (unreleased)
+# Release notes for Plone 6.2.0b1 (unreleased)
 
-* Last updated: March 23rd, 2026
+* Last updated: March 25th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -31,7 +31,9 @@ These are the main changes compared to 6.2.0a1:
 * `plone.app.z3cform`:
   * Remove EmailWidget template and use generic attributes instead.
   * Implement URI widget for `type="url"` inputs.
-* `plone.base`: Add boolean utils: `is_truthy` (improved), `is_falsy` and `boolean_value`.
+* `plone.base`:
+  * Add boolean utils: `is_truthy` (improved), `is_falsy` and `boolean_value`.
+  * Add ``plone.base.interfaces.IAddonList``.
 * `plone.exportimport`: Add `@export` and `@import` REST API services.
 * `plone.formwidget.recurrence`: Disable additional dates (RDATE) feature in recurrence widget to prevent interoperability issues with Outlook and Android calendar clients when exporting/importing iCal events.
 * `plone.namedfile`:
@@ -138,15 +140,13 @@ Classic UI related changes:
     libraries (like jQuery) add this request header automatically, the Fetch API
     does not. When using fetch, it is recommended to wrap it with a helper function
     that adds this header to each request.
-* `plone.staticresources`: Update `mockup` from 5.4 to 5.5.1 with TinyMCE 8.  See also [`mockup` 5.5.1 changelog](https://github.com/plone/mockup/releases/tag/5.5.1).
+* `plone.staticresources`: Update `mockup` from 5.4 to 5.6.0 with TinyMCE 8.  See also [`mockup` 5.6.0 changelog](https://github.com/plone/mockup/releases/tag/5.6.0).
 * `plone.classicui`: Install the `plone.app.layout` default profile when creating a site using the classic distribution.
 
 
 ## Python compatibility
 
-This release supports Python 3.10, 3.11, 3.12, and 3.13.
-
-Support for Python 3.14 is expected in the next alpha or first beta release of 6.2.
+This release supports Python 3.10, 3.11, 3.12, 3.13, and 3.14.
 
 
 ## pip, buildout, setuptools
