@@ -1,6 +1,6 @@
-# Release notes for Plone 6.2.0b1 (unreleased)
+# Release notes for Plone 6.2.0rc1 (unreleased)
 
-* Last updated: March 25th, 2026
+* Last updated: March 27th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -12,9 +12,9 @@ If you want to jump straight in, here are some important links:
 * Use Docker image `plone-backend`.
 
 
-## Please test and help
+## Please test
 
-This is the first alpha release of Plone 6.2.  We don't recommend this for production use, but please try it out in your projects.  You can report issues in the [`Products.CMFPlone` tracker](https://github.com/plone/Products.CMFPlone/issues/).
+This is the first release candidate of Plone 6.2.  We don't recommend this for production use, but please try it out in your projects.  You can report issues in the [`Products.CMFPlone` tracker](https://github.com/plone/Products.CMFPlone/issues/).
 
 Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we recommend that you switch to native namespaces.  This includes all packages in the `collective` namespace.  See the section "Move to native namespaces" in the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html).  This should be considered a breaking change, so you should do this in a new major version of your add-on.  Still, as explained in the upgrade guide and below, it should work fine to use such a new major version in Plone 6.0 and 6.1.  But you may need to use `zc.buildout` 5 and/or install `horse-with-no-namespace` in your virtualenv.
 
@@ -42,6 +42,12 @@ These are the main changes compared to 6.2.0a1:
     With this, custom image backends (e.g. Thumbor) can generate URLs with full context by overriding a single method.
   * Add original image size url in the srcset generated in the srcset method
 * `plone.registry`: Add per-request cache for registry value and forInterface proxy lookups, avoiding repeated OOBTree traversals within a single request.
+* `plone.restapi`:
+  * Services which take boolean parameters now check the input more strictly, using the `boolean_value` util.
+  * The `@controlpanel` service now includes `searchable_text` for each control panel.
+  * Added support for sorting vocabularies by title before batching for the `@vocabularies` endpoint.
+  * Add CSV import and export support to the @users endpoint.
+  * Redirect documentation from Read the Docs to https://6.docs.plone.org/plone.restapi/docs/source/.
 * `plone.volto`:
   * Add `/@blocktypes` endpoint to expose `block_types` index.
   * Added a `block_types` metadata column to the catalog to include a count for each type.
@@ -70,7 +76,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.0.0-alpha.26](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.26).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.26/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
+Latest release is [19.0.0-alpha.27](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.27).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.27/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
 
@@ -158,7 +164,7 @@ horse-with-no-namespace==20260202.0
 pip==26.0.1
 setuptools==81.0.0
 wheel==0.46.3
-zc.buildout==5.1.2
+zc.buildout==5.1.3
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
