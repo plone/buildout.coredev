@@ -51,6 +51,18 @@ These are the main changes compared to 6.2.0a1:
 * `plone.volto`:
   * Add `/@blocktypes` endpoint to expose `block_types` index.
   * Added a `block_types` metadata column to the catalog to include a count for each type.
+* `Products.CMFPlone`:
+  * `MigrationTool`: Prepare support for custom base profiles without subclassing.
+    Make `AddonList` a named utility and register ours under the name `Products.CMFPlone`.
+    The utility must have an `addon_list` property and optionally may have a `pre_addon_list`, which gets upgraded before the base profile upgrade.
+    Add `MigrationTool.get_profile` method, returning the base profile id that was set, by default `Products.CMFPlone:plone`.
+    Add `MigrationTool.get_package_name` method, taking the package name from the profile, so by default `Products.CMFPlone`.
+    In `MigrationTool.coreVersions` return `core_package` and `core_version`.  If `core_package` is not `Products.CMFPlone`, show this version in the overview control panel.
+  * Resource registry: Allow to use `*` dependencies.
+    Earlier we added the `all` keyword for the `depends` attribute of resource registry entries to define a resource which should be loaded after all others.
+    In Plone 5 we had the `*` keyword for exactly that.
+    This brings now back `*` in addition to `all` for the same purpose.
+    This might also allow for a smoother upgrade experience.
 
 These are the main changes compared to 6.1:
 
