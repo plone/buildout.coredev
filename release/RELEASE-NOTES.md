@@ -77,6 +77,9 @@ These are the main changes compared to 6.1:
     The previous template was moved to `plone.app.layout`.
 * `icalendar` has various breaking changes, but that should only affect you if you directly interact with that package.
 * `plone.restapi`: `@aliases` service: Add support for filtering aliases for a non-root item.
+* `plone.volto`: Add larger scales to `plone.allowed_sizes` for new sites. This helps avoid the need to serve the original image which can be very large.
+  * `2k` is large enough for a default-width image on a high-density display.
+  * `4k` is large enough for a full-width images on high-density viewports up to 2000 pixels wide.
 * `Products.isurlinportal`: Prevent URLs that start with more than two slashes to be considered as URLs in portal.
   See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
 * `Products.PluggableAuthService`: Add property to clear session data at login boundary to the session auth helper.  This property defaults to ``False`` to preserve the current behavior.  Clearing session data during login helps mitigate session fixation attacks: https://owasp.org/www-community/attacks/Session_fixation
@@ -91,53 +94,6 @@ Plone 6.2 is meant to be used with Volto 19.
 Latest release is [19.0.0-alpha.27](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.27).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.27/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
-
-### Key New Features in Volto 19
-
-* Support for Subpath Domains (PLIP plone/volto#4290)
-* Restore Unsaved Changes (PLIP plone/volto#4168)
-* Improved Image Upload Widget (PLIP plone/volto#4268)
-
-### General UI / Editor Improvements
-
-* Cross-language support in the Blocks chooser search, improving block discovery on multilingual sites.
-* Drag-and-drop file uploads directly into folder contents.
-* New widgets: Size/Width/BlockAlignment
-* Single-selection mode added to the SelectAutoComplete widget.
-
-### Developer Tooling
-
-* @plone/components library is now core, thus, it is allowed to be used in core
-* Migration from Jest to Vitest as the default unit testing framework.
-* Continued refactoring of core components towards modern React patterns (hooks and TypeScript).
-* Internationalization and Accessibility
-* Internationalised help text for selected fields (for example, Group Name).
-* Improved screen-reader labels and more accessible button text across the UI.
-* Improved toolbar accessibility and fixed several editor crashes.
-
-### Breaking Changes and Important Upgrades
-
-* Jest is no longer supported and removed from core
-* The default language is now loaded from the backend API instead of being controlled via environment variables.
-* Build tooling was forked (@plone/razzle and related Babel presets) to maintain long-term compatibility after upstream changes.
-* Several widgets (such as AlignWidget and ButtonsWidget) were moved to @plone/components, which may require styling adjustments in custom projects.
-* Updates to the Node.js toolchain, including dropping Node 20 support and now uses pnpm 10 with catalog support.
-* Image handling changes require add-ons to use the Volto Image component instead of raw <img> tags.
-* Related items (showRelatedItems) are now enabled by default.
-
-### Bug Fixes and Quality Improvements
-
-* Many miscellaneous bugfixes
-* Multiple fixes to drag-and-drop interactions and folder contents behavior.
-* Resolved login, redirect, and multilingual navigation issues.
-* Increased stability of Cypress and other automated tests.
-* Fixes related to server-side rendering hydration, image uploads, and schema handling.
-
-### Volto related changes in the Python backend:
-
-* `plone.volto`: Add larger scales to `plone.allowed_sizes` for new sites. This helps avoid the need to serve the original image which can be very large.
-  * `2k` is large enough for a default-width image on a high-density display.
-  * `4k` is large enough for a full-width images on high-density viewports up to 2000 pixels wide.
 
 
 ## Classic UI
