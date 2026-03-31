@@ -160,8 +160,15 @@ else
     TEST_ARGS="$TEST_ARGS -s $TEST_PACKAGE"
 fi
 
+# Add --path for each package checked out in the src/ folder so zope-testrunner
+# uses the local source instead of the installed site-packages copy.
+PATH_ARGS=""
+for src_pkg in src/*/src; do
+    PATH_ARGS="$PATH_ARGS --path $src_pkg"
+done
+
 # Note: the --auto-path requires zope.testrunner 7.4 or higher.
-CMD="zope-testrunner --auto-color --auto-progress --auto-path $TEST_ARGS"
+CMD="zope-testrunner --auto-color --auto-progress --auto-path $PATH_ARGS $TEST_ARGS"
 echo "Running $CMD"
 
 # In most cases we can call $CMD directly.
