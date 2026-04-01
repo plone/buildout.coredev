@@ -99,11 +99,35 @@ Main results:
 * In `.venv` there is a virtual environment with Plone and all test requirements installed.
 * In `instance` a Zope instance is created.
 
+Important: you may need to run `make install` twice, especially after you change something.
+These large Makefiles are tricky.
 
 ### Start
 
 Run `make zope-start` to start the Zope instance.
 
+### Manage checkouts and versions
+
+The `manage` command from `plone.releaser` can be used in various ways.
+It knows how to query or update files from both buildout and pip:
+
+See the help text:
+
+```shell
+make manage ARGS="--help"
+```
+
+Add a package to the checkouts:
+
+```shell
+make manage ARGS="add-checkout plone.restapi"
+```
+
+Update a package version:
+
+```shell
+make manage ARGS="set-package-version plone.restapi 10.0.0"
+```
 
 ### Run tests
 
@@ -130,7 +154,11 @@ export TEST_PACKAGE=plone.namedfile
 make test
 ```
 
-Under the hood this calls `zope-testrunner`.
+Note that this tests the *installed* version of the package.
+This can be a final version in `site-packages` or a source checkout.
+See the section "Manage checkouts and versions" on how to influence what is installed.
+
+Under the hood, the `test` target calls `zope-testrunner`.
 To find out which arguments this supports, ask for help:
 
 ```shell

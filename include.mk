@@ -16,6 +16,10 @@ plonereleaser-dirty:
 plonereleaser-clean: plonereleaser-dirty
 	@test -e $(MXENV_PYTHON) && $(MXENV_PYTHON) -m pip uninstall -y plone.releaser || :
 
+.PHONY: manage
+manage: $(PLONERELEASER_TARGET)
+	@manage ${ARGS}
+
 INSTALL_TARGETS+=$(PLONERELEASER_TARGET)
 DIRTY_TARGETS+=plonereleaser-dirty
 CLEAN_TARGETS+=plonereleaser-clean
