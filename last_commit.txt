@@ -1,17 +1,97 @@
-Repository: plone.restapi
+Repository: plone.namedfile
 
 
 Branch: refs/heads/main
-Date: 2026-04-08T08:55:15+02:00
-Author: Timo Stollenwerk (tisto) <stollenwerk@kitconcept.com>
-Commit: https://github.com/plone/plone.restapi/commit/92c7631bf0c978fa5ce9d3bbc786b8a1f533f148
+Date: 2026-04-08T09:38:56+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/c69b6983872653045c8a8e4a8923b285afd4229d
 
-Revert "Add changelog (just to make the CI pass"
+Fix scale caching when _p_mtime is None
 
-This reverts commit 35995d013483725709e0af514076e0420f87bc56.
+For unsaved persistent objects (common in tests), _p_mtime is None.
+DateTime(None) returns "now", so every call to modified() produced a
+different timestamp and cached scales were never reused.
+
+Fall back to 0 (epoch) when mtime is None, giving a stable value
+that allows the scale cache to work correctly.
+
+Fixes #58
 
 Files changed:
-D news/1997.feature
+A news/58.bugfix
+M src/plone/namedfile/scaling.py
+M src/plone/namedfile/tests/test_scaling.py
 
-b'diff --git a/news/1997.feature b/news/1997.feature\ndeleted file mode 100644\nindex bbc11c7f4..000000000\n--- a/news/1997.feature\n+++ /dev/null\n@@ -1 +0,0 @@\n-Add Markdown support. @tisto\n'
+b'diff --git a/news/58.bugfix b/news/58.bugfix\nnew file mode 100644\nindex 00000000..117d99df\n--- /dev/null\n+++ b/news/58.bugfix\n@@ -0,0 +1,4 @@\n+Fix image scale caching when ``_p_mtime`` is ``None`` (unsaved objects).\n+``DateTime(None)`` returns "now", so every cache check saw a different timestamp and scales were regenerated on every access.\n+Fall back to epoch (0) for a stable value.\n+@jensens\ndiff --git a/src/plone/namedfile/scaling.py b/src/plone/namedfile/scaling.py\nindex 4ec8da71..047bdbeb 100644\n--- a/src/plone/namedfile/scaling.py\n+++ b/src/plone/namedfile/scaling.py\n@@ -606,10 +606,15 @@ def modified(self, fieldname=None):\n         if fieldname is not None:\n             field = getattr(context, fieldname, None)\n             modified = getattr(field, "modified", None)\n-            date = DateTime(modified or context._p_mtime)\n+            mtime = modified or context._p_mtime\n         else:\n-            date = DateTime(context._p_mtime)\n-        return date.millis()\n+            mtime = context._p_mtime\n+        # _p_mtime is None for unsaved objects (common in tests).\n+        # Fall back to 0 so DateTime returns a stable epoch value\n+        # instead of "now", which would break scale caching.\n+        if mtime is None:\n+            mtime = 0\n+        return DateTime(mtime).millis()\n \n     def scale(\n         self,\ndiff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex d00cf48a..1617184b 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -671,6 +671,22 @@ def testFallBackToDatabaseModifiedTimeStamp(self):\n         scale_b = self.scaling.scale("image", width=100, height=80)\n         self.assertNotEqual(scale_a.data, scale_b.data)\n \n+    def testScaleCachingWithNonePMtime(self):\n+        # _p_mtime is None for unsaved objects (common in tests).\n+        # Scales should still be cached rather than regenerated each time.\n+        # See https://github.com/plone/plone.namedfile/issues/58\n+        delattr(self.item.image, "_modified")\n+        # _p_mtime is read-only on Persistent, so patch it on DummyContent\n+        from unittest.mock import patch\n+        from unittest.mock import PropertyMock\n+\n+        with patch.object(\n+            DummyContent, "_p_mtime", new_callable=PropertyMock, return_value=None\n+        ):\n+            scale1 = self.scaling.scale("image", width=100, height=80)\n+            scale2 = self.scaling.scale("image", width=100, height=80)\n+            self.assertEqual(scale1.data, scale2.data)\n+\n     def testCustomSizeChange(self):\n         # set custom image sizes & view a scale\n         self.scaling.available_sizes = {"foo": (23, 23)}\n'
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/main
+Date: 2026-04-08T09:38:56+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/b60bb03e5da838a1fe0890671cb9d0c50b83bafe
+
+Update src/plone/namedfile/tests/test_scaling.py
+
+Co-authored-by: Mauro Amico &lt;mauro.amico@gmail.com&gt;
+
+Files changed:
+M src/plone/namedfile/tests/test_scaling.py
+
+b'diff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex 1617184..e9132fd 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -680,9 +680,13 @@ def testScaleCachingWithNonePMtime(self):\n         from unittest.mock import patch\n         from unittest.mock import PropertyMock\n \n-        with patch.object(\n-            DummyContent, "_p_mtime", new_callable=PropertyMock, return_value=None\n-        ):\n+        with (\n+            patch.object(\n+                DummyContent, "_p_mtime", new_callable=PropertyMock, return_value=None\n+            ),\n+            patch.object(\n+                MockNamedImage, "_p_mtime", new_callable=PropertyMock, return_value=None\n+            ),\n             scale1 = self.scaling.scale("image", width=100, height=80)\n             scale2 = self.scaling.scale("image", width=100, height=80)\n             self.assertEqual(scale1.data, scale2.data)\n'
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/main
+Date: 2026-04-08T09:38:56+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.namedfile/commit/3980ab26d770c627040dd379c430506b09ba55ab
+
+typo
+
+Files changed:
+M src/plone/namedfile/tests/test_scaling.py
+
+b'diff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex e9132fd..67836ad 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -687,6 +687,7 @@ def testScaleCachingWithNonePMtime(self):\n             patch.object(\n                 MockNamedImage, "_p_mtime", new_callable=PropertyMock, return_value=None\n             ),\n+        ):\n             scale1 = self.scaling.scale("image", width=100, height=80)\n             scale2 = self.scaling.scale("image", width=100, height=80)\n             self.assertEqual(scale1.data, scale2.data)\n'
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/main
+Date: 2026-04-08T09:40:33+02:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.namedfile/commit/ad1e38397d93c61c8a481490c7b194ec94a35a5c
+
+fix(tests): ensure modification
+
+Otherwise between the two calls there is no time difference and the
+generated scales override each other.
+
+Co-authored-by: Mauro Amico &lt;mauro.amico@gmail.com&gt;
+
+Files changed:
+M src/plone/namedfile/tests/test_scaling.py
+
+b'diff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex 67836ad..c87507b 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -689,6 +689,7 @@ def testScaleCachingWithNonePMtime(self):\n             ),\n         ):\n             scale1 = self.scaling.scale("image", width=100, height=80)\n+            wait_to_ensure_modified()\n             scale2 = self.scaling.scale("image", width=100, height=80)\n             self.assertEqual(scale1.data, scale2.data)\n \n'
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/main
+Date: 2026-04-11T08:27:45+02:00
+Author: Gil Forcada Codinachs (gforcada) <gil.gnome@gmail.com>
+Commit: https://github.com/plone/plone.namedfile/commit/2d97de0068ecaae75fe6ba9c9c5784ff29dccfa3
+
+Merge pull request #207 from plone/fix/58-scale-cache-none-mtime
+
+Fix scale caching when _p_mtime is None
+
+Files changed:
+A news/58.bugfix
+M src/plone/namedfile/scaling.py
+M src/plone/namedfile/tests/test_scaling.py
+
+b'diff --git a/news/58.bugfix b/news/58.bugfix\nnew file mode 100644\nindex 00000000..117d99df\n--- /dev/null\n+++ b/news/58.bugfix\n@@ -0,0 +1,4 @@\n+Fix image scale caching when ``_p_mtime`` is ``None`` (unsaved objects).\n+``DateTime(None)`` returns "now", so every cache check saw a different timestamp and scales were regenerated on every access.\n+Fall back to epoch (0) for a stable value.\n+@jensens\ndiff --git a/src/plone/namedfile/scaling.py b/src/plone/namedfile/scaling.py\nindex 4ec8da71..047bdbeb 100644\n--- a/src/plone/namedfile/scaling.py\n+++ b/src/plone/namedfile/scaling.py\n@@ -606,10 +606,15 @@ def modified(self, fieldname=None):\n         if fieldname is not None:\n             field = getattr(context, fieldname, None)\n             modified = getattr(field, "modified", None)\n-            date = DateTime(modified or context._p_mtime)\n+            mtime = modified or context._p_mtime\n         else:\n-            date = DateTime(context._p_mtime)\n-        return date.millis()\n+            mtime = context._p_mtime\n+        # _p_mtime is None for unsaved objects (common in tests).\n+        # Fall back to 0 so DateTime returns a stable epoch value\n+        # instead of "now", which would break scale caching.\n+        if mtime is None:\n+            mtime = 0\n+        return DateTime(mtime).millis()\n \n     def scale(\n         self,\ndiff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex d00cf48a..c87507b1 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -671,6 +671,28 @@ def testFallBackToDatabaseModifiedTimeStamp(self):\n         scale_b = self.scaling.scale("image", width=100, height=80)\n         self.assertNotEqual(scale_a.data, scale_b.data)\n \n+    def testScaleCachingWithNonePMtime(self):\n+        # _p_mtime is None for unsaved objects (common in tests).\n+        # Scales should still be cached rather than regenerated each time.\n+        # See https://github.com/plone/plone.namedfile/issues/58\n+        delattr(self.item.image, "_modified")\n+        # _p_mtime is read-only on Persistent, so patch it on DummyContent\n+        from unittest.mock import patch\n+        from unittest.mock import PropertyMock\n+\n+        with (\n+            patch.object(\n+                DummyContent, "_p_mtime", new_callable=PropertyMock, return_value=None\n+            ),\n+            patch.object(\n+                MockNamedImage, "_p_mtime", new_callable=PropertyMock, return_value=None\n+            ),\n+        ):\n+            scale1 = self.scaling.scale("image", width=100, height=80)\n+            wait_to_ensure_modified()\n+            scale2 = self.scaling.scale("image", width=100, height=80)\n+            self.assertEqual(scale1.data, scale2.data)\n+\n     def testCustomSizeChange(self):\n         # set custom image sizes & view a scale\n         self.scaling.available_sizes = {"foo": (23, 23)}\n'
 
