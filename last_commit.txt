@@ -1,50 +1,45 @@
-Repository: plone.app.upgrade
+Repository: plone.scale
 
 
 Branch: refs/heads/master
-Date: 2026-04-15T09:16:30+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/572a6e1ae0d61d00ab6796fb30624712960258ca
+Date: 2026-03-27T22:38:59+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.scale/commit/8af3d9f85d8511c893da8747f468449556c2bbb2
 
-Update `plone.plugins` registry to add new TinyMCE plugin.
+Fix IndexError scaling images with non-RGB color modes
+
+The greyscale optimisation assumed getcolors() returns 3-element RGB
+tuples, but modes like PA (palette+alpha) and LA (greyscale+alpha)
+return 2-element tuples, causing IndexError on rgb[2].
+
+Restrict the greyscale check to RGB/RGBA modes where the tuple
+structure is guaranteed.
+
+Fixes #34
 
 Files changed:
-M src/plone/app/upgrade/v62/alpha.py
-M src/plone/app/upgrade/v62/configure.zcml
+A news/34.bugfix
+M src/plone/scale/scale.py
+M src/plone/scale/tests/test_scale.py
 
-b'diff --git a/src/plone/app/upgrade/v62/alpha.py b/src/plone/app/upgrade/v62/alpha.py\nindex 6e05cacf..566aa151 100644\n--- a/src/plone/app/upgrade/v62/alpha.py\n+++ b/src/plone/app/upgrade/v62/alpha.py\n@@ -1,3 +1,4 @@\n+from plone.base.interfaces import ITinyMCEPluginSchema\n from plone.base.interfaces import ITinyMCESchema\n from plone.base.utils import get_installer\n from plone.registry.interfaces import IRegistry\n@@ -88,3 +89,21 @@ def add_s_to_valid_tags(context):\n         return\n     if "s" not in record.value:\n         record.value = sorted([*record.value, "s"])\n+\n+\n+def add_missing_tinymce_plugin(context):\n+    registry = getUtility(IRegistry)\n+\n+    # save the old values temporarily\n+    plugins_record = registry.records.get("plone.plugins")\n+    plugins_value_old = plugins_record.value\n+\n+    # delete the old registry record, it holds the wrong vocabulary of the old schema\n+    del registry.records["plone.plugins"]\n+\n+    # re-register the schema in the registry\n+    registry.registerInterface(ITinyMCEPluginSchema, prefix="plone")\n+\n+    # re-set the old value for plugins. Should be safe, since we\'ve added only a new plugin\n+    plugins_record = registry.records.get("plone.plugins")\n+    plugins_record.value = plugins_value_old\ndiff --git a/src/plone/app/upgrade/v62/configure.zcml b/src/plone/app/upgrade/v62/configure.zcml\nindex 850c77e6..1fa50cd8 100644\n--- a/src/plone/app/upgrade/v62/configure.zcml\n+++ b/src/plone/app/upgrade/v62/configure.zcml\n@@ -58,8 +58,8 @@\n       >\n     <!-- Plone 6.2.0rc2 -->\n     <gs:upgradeStep\n-        title="Miscellaneous"\n-        handler="..utils.null_upgrade_step"\n+        title="Add missing TinyMCE plugins to the registry record plone.plugins."\n+        handler=".alpha.add_missing_tinymce_plugin"\n         />\n   </gs:upgradeSteps>\n \n'
+b'diff --git a/news/34.bugfix b/news/34.bugfix\nnew file mode 100644\nindex 0000000..48afdbe\n--- /dev/null\n+++ b/news/34.bugfix\n@@ -0,0 +1,2 @@\n+Fix ``IndexError`` when scaling images with non-RGB color modes (e.g. BMP with palette+alpha).\n+@jensens\ndiff --git a/src/plone/scale/scale.py b/src/plone/scale/scale.py\nindex afa3a6c..aeffb38 100644\n--- a/src/plone/scale/scale.py\n+++ b/src/plone/scale/scale.py\n@@ -185,12 +185,12 @@ def scaleSingleFrame(\n \n     # convert to simpler mode if possible\n     colors = image.getcolors(maxcolors=256)\n-    if image.mode not in ("P", "L", "LA") and colors:\n-        if format_ == "JPEG":\n+    if colors:\n+        if image.mode in ("RGB", "RGBA") and format_ == "JPEG":\n             # check if it\'s all grey\n             if all(rgb[0] == rgb[1] == rgb[2] for c, rgb in colors):\n                 image = image.convert("L")\n-        elif format_ in ("PNG", "GIF"):\n+        elif image.mode not in ("P", "L", "LA") and format_ in ("PNG", "GIF"):\n             image = image.convert("P")\n \n     if image.mode == "RGBA" and format_ == "JPEG":\ndiff --git a/src/plone/scale/tests/test_scale.py b/src/plone/scale/tests/test_scale.py\nindex 15ee2b2..168ec6a 100644\n--- a/src/plone/scale/tests/test_scale.py\n+++ b/src/plone/scale/tests/test_scale.py\n@@ -146,6 +146,17 @@ def testMaintainLAModeForPalettePNG(self):\n         # Check format maintained\n         self.assertEqual(scaled_image.format, "PNG")\n \n+    def testScaleNonRGBColorTuples(self):\n+        # Images in modes like LA (greyscale+alpha) return 2-element color\n+        # tuples from getcolors(), not 3-element RGB tuples.  The greyscale\n+        # optimisation must not crash with IndexError on these.\n+        # See https://github.com/plone/plone.scale/issues/34\n+        src = PIL.Image.new("LA", (100, 100), (128, 255))\n+        buf = StringIO()\n+        src.save(buf, "PNG")\n+        imagedata, format_, size = scaleImage(buf.getvalue(), 50, 50, "scale")\n+        self.assertIsNotNone(imagedata)\n+\n     def testAutomaticPalette(self):\n         # get a JPEG with more than 256 colors\n         jpeg = PIL.Image.open(StringIO(PROFILE))\n'
 
-Repository: plone.app.upgrade
+Repository: plone.scale
 
 
 Branch: refs/heads/master
-Date: 2026-04-15T09:16:34+02:00
-Author: Peter Mathis (petschki) <peter.mathis@kombinat.at>
-Commit: https://github.com/plone/plone.app.upgrade/commit/7d306e40cf079a01985fba00897f4b4b6eb71fde
+Date: 2026-04-17T17:54:30+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.scale/commit/f9d7540d50c6ac61094485cc9cf0589643cf7bd2
 
-changenote
+Merge pull request #138 from plone/fix/34-bmp-scaling-error
 
-Files changed:
-A news/+tinymce_plugin.bugfix.md
-
-b'diff --git a/news/+tinymce_plugin.bugfix.md b/news/+tinymce_plugin.bugfix.md\nnew file mode 100644\nindex 00000000..65544b27\n--- /dev/null\n+++ b/news/+tinymce_plugin.bugfix.md\n@@ -0,0 +1,2 @@\n+Add new TinyMCE plugin `codesample`.\n+@petschki\n'
-
-Repository: plone.app.upgrade
-
-
-Branch: refs/heads/master
-Date: 2026-04-16T08:11:02+02:00
-Author: Peter Mathis (petschki) <petschki@users.noreply.github.com>
-Commit: https://github.com/plone/plone.app.upgrade/commit/a2d2e173d75e8fdf4b5175a79c65b4d5363a9164
-
-Merge pull request #370 from plone/tinymce-plugin-codesample
-
-Tinymce plugin codesample
+Fix IndexError scaling images with non-RGB color modes
 
 Files changed:
-A news/+tinymce_plugin.bugfix.md
-M src/plone/app/upgrade/v62/alpha.py
-M src/plone/app/upgrade/v62/configure.zcml
+A news/34.bugfix
+M src/plone/scale/scale.py
+M src/plone/scale/tests/test_scale.py
 
-b'diff --git a/news/+tinymce_plugin.bugfix.md b/news/+tinymce_plugin.bugfix.md\nnew file mode 100644\nindex 00000000..65544b27\n--- /dev/null\n+++ b/news/+tinymce_plugin.bugfix.md\n@@ -0,0 +1,2 @@\n+Add new TinyMCE plugin `codesample`.\n+@petschki\ndiff --git a/src/plone/app/upgrade/v62/alpha.py b/src/plone/app/upgrade/v62/alpha.py\nindex 6e05cacf..566aa151 100644\n--- a/src/plone/app/upgrade/v62/alpha.py\n+++ b/src/plone/app/upgrade/v62/alpha.py\n@@ -1,3 +1,4 @@\n+from plone.base.interfaces import ITinyMCEPluginSchema\n from plone.base.interfaces import ITinyMCESchema\n from plone.base.utils import get_installer\n from plone.registry.interfaces import IRegistry\n@@ -88,3 +89,21 @@ def add_s_to_valid_tags(context):\n         return\n     if "s" not in record.value:\n         record.value = sorted([*record.value, "s"])\n+\n+\n+def add_missing_tinymce_plugin(context):\n+    registry = getUtility(IRegistry)\n+\n+    # save the old values temporarily\n+    plugins_record = registry.records.get("plone.plugins")\n+    plugins_value_old = plugins_record.value\n+\n+    # delete the old registry record, it holds the wrong vocabulary of the old schema\n+    del registry.records["plone.plugins"]\n+\n+    # re-register the schema in the registry\n+    registry.registerInterface(ITinyMCEPluginSchema, prefix="plone")\n+\n+    # re-set the old value for plugins. Should be safe, since we\'ve added only a new plugin\n+    plugins_record = registry.records.get("plone.plugins")\n+    plugins_record.value = plugins_value_old\ndiff --git a/src/plone/app/upgrade/v62/configure.zcml b/src/plone/app/upgrade/v62/configure.zcml\nindex 850c77e6..1fa50cd8 100644\n--- a/src/plone/app/upgrade/v62/configure.zcml\n+++ b/src/plone/app/upgrade/v62/configure.zcml\n@@ -58,8 +58,8 @@\n       >\n     <!-- Plone 6.2.0rc2 -->\n     <gs:upgradeStep\n-        title="Miscellaneous"\n-        handler="..utils.null_upgrade_step"\n+        title="Add missing TinyMCE plugins to the registry record plone.plugins."\n+        handler=".alpha.add_missing_tinymce_plugin"\n         />\n   </gs:upgradeSteps>\n \n'
+b'diff --git a/news/34.bugfix b/news/34.bugfix\nnew file mode 100644\nindex 0000000..48afdbe\n--- /dev/null\n+++ b/news/34.bugfix\n@@ -0,0 +1,2 @@\n+Fix ``IndexError`` when scaling images with non-RGB color modes (e.g. BMP with palette+alpha).\n+@jensens\ndiff --git a/src/plone/scale/scale.py b/src/plone/scale/scale.py\nindex afa3a6c..aeffb38 100644\n--- a/src/plone/scale/scale.py\n+++ b/src/plone/scale/scale.py\n@@ -185,12 +185,12 @@ def scaleSingleFrame(\n \n     # convert to simpler mode if possible\n     colors = image.getcolors(maxcolors=256)\n-    if image.mode not in ("P", "L", "LA") and colors:\n-        if format_ == "JPEG":\n+    if colors:\n+        if image.mode in ("RGB", "RGBA") and format_ == "JPEG":\n             # check if it\'s all grey\n             if all(rgb[0] == rgb[1] == rgb[2] for c, rgb in colors):\n                 image = image.convert("L")\n-        elif format_ in ("PNG", "GIF"):\n+        elif image.mode not in ("P", "L", "LA") and format_ in ("PNG", "GIF"):\n             image = image.convert("P")\n \n     if image.mode == "RGBA" and format_ == "JPEG":\ndiff --git a/src/plone/scale/tests/test_scale.py b/src/plone/scale/tests/test_scale.py\nindex 15ee2b2..168ec6a 100644\n--- a/src/plone/scale/tests/test_scale.py\n+++ b/src/plone/scale/tests/test_scale.py\n@@ -146,6 +146,17 @@ def testMaintainLAModeForPalettePNG(self):\n         # Check format maintained\n         self.assertEqual(scaled_image.format, "PNG")\n \n+    def testScaleNonRGBColorTuples(self):\n+        # Images in modes like LA (greyscale+alpha) return 2-element color\n+        # tuples from getcolors(), not 3-element RGB tuples.  The greyscale\n+        # optimisation must not crash with IndexError on these.\n+        # See https://github.com/plone/plone.scale/issues/34\n+        src = PIL.Image.new("LA", (100, 100), (128, 255))\n+        buf = StringIO()\n+        src.save(buf, "PNG")\n+        imagedata, format_, size = scaleImage(buf.getvalue(), 50, 50, "scale")\n+        self.assertIsNotNone(imagedata)\n+\n     def testAutomaticPalette(self):\n         # get a JPEG with more than 256 colors\n         jpeg = PIL.Image.open(StringIO(PROFILE))\n'
 
