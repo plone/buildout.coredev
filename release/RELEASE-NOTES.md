@@ -1,30 +1,25 @@
-# Release notes for Plone 6.1.4 (2026-01-15)
+# Release notes for Plone 6.1.5 (unreleased)
 
-* Last updated: January 15, 2026
+* Last updated: April 21, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.4/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.4/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.4/constraints.txt](https://dist.plone.org/release/6.1.4/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.4/versions.cfg](https://dist.plone.org/release/6.1.4/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.4/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.4/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
 ## Highlights
 
-These are the main changes since 6.1.3:
+These are the main changes since 6.1.4:
 
-* `plone.app.upgrade`: Fix upgrading TinyMCE plugins with invalid/outdated plugins.
-* `plone.exportimport`: Implement regular commits to reduce memory usage in larger import processes.
-* Updated robotframework related versions, used in acceptance testing.
-* `plone.app.multilingual`: Adds the `volto.blocks` behavior to LRF if `plone.volto` is installed.
-* `plone.namedfile`: Add default width and height attributes if none provided when using the srcset method.
-* `plone.scale`: Handle animated WebP images.
-* `plone.staticresources`: Update mockup=5.4.6. See https://github.com/plone/mockup/releases/tag/5.4.6.
-* `plone.volto`: Support collective.html2blocks to convert HTML to Volto blocks as a replacement for blocks-conversion-tool.
-* `plonetheme.barceloneta`: Add a bit more separation between the menu and the search field in the mobile menu.
+* `plone.app.content`: Alphabetically sort the list of portal types in the constraints configuration form.
+* `plone.namedfile`: Add original image size url in the srcset generated in the srcset method.
+* `Products.isurlinportal`: Prevent URLs that start with more than two slashes to be considered as URLs in portal.
+  See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
 
 
 ## Volto frontend
@@ -33,7 +28,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.32.0](https://www.npmjs.com/package/@plone/volto/v/18.32.0).  See the [changelog](https://github.com/plone/volto/blob/18.32.0/packages/volto/CHANGELOG.md).
+Latest release is [18.33.1](https://www.npmjs.com/package/@plone/volto/v/18.33.1).  See the [changelog](https://github.com/plone/volto/blob/18.33.1/packages/volto/CHANGELOG.md).
 You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
@@ -52,11 +47,11 @@ This release supports Python 3.10, 3.11, 3.12, and 3.13.
 In Plone core we use these versions to install Plone:
 
 ```
-packaging==25.0
-pip==25.3
-setuptools==80.9.0
-wheel==0.45.1
-zc.buildout==4.1.12
+packaging==26.0
+pip==26.0.1
+setuptools==81.0.0
+wheel==0.46.3
+zc.buildout==4.2.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
