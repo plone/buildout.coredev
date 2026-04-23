@@ -2,35 +2,54 @@ Repository: plone.namedfile
 
 
 Branch: refs/heads/main
-Date: 2026-03-27T22:12:33+01:00
+Date: 2026-03-27T22:19:59+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/081d9fc6262eb1b8f9495686a08e45760c61b7d2
+Commit: https://github.com/plone/plone.namedfile/commit/6353c6dd850ecd23a16d06be304a1342048b7b21
 
-Handle empty image fields in srcset() and picture()
+Add Content-Disposition: inline with filename to @@display-file
 
-srcset() crashed with AttributeError when the image field was empty
-because self.scale() returned None and .url was accessed on it.
-Same issue in picture(). Now both return None for empty fields,
-consistent with tag().
+When @@display-file serves files with allowed inline mimetypes
+(images, PDFs, text/plain), browsers had no filename hint, so
+"Save As" would use generic names like "document.pdf".
 
-Fixes #202
+Now sets Content-Disposition: inline; filename*=UTF-8''&lt;name&gt; which
+preserves inline display while providing the correct filename.
+
+Fixes #205
+
+Co-Authored-By: Karel Calitz &lt;karel@juizi.com&gt;
 
 Files changed:
-A news/202.bugfix
-M src/plone/namedfile/scaling.py
-M src/plone/namedfile/tests/test_scaling.py
+A news/205.bugfix
+M src/plone/namedfile/browser.py
+M src/plone/namedfile/tests/test_display_file.py
 
-b'diff --git a/news/202.bugfix b/news/202.bugfix\nnew file mode 100644\nindex 00000000..16d029ee\n--- /dev/null\n+++ b/news/202.bugfix\n@@ -0,0 +1,2 @@\n+Return ``None`` from ``srcset()`` and ``picture()`` when the image field is empty, consistent with ``tag()``.\n+@jensens\ndiff --git a/src/plone/namedfile/scaling.py b/src/plone/namedfile/scaling.py\nindex 11aa2c44..1005f796 100644\n--- a/src/plone/namedfile/scaling.py\n+++ b/src/plone/namedfile/scaling.py\n@@ -751,6 +751,8 @@ def picture(\n \n         sourceset = picture_variant_config.get("sourceset")\n         scale = self.scale(fieldname, sourceset[-1].get("scale"), pre=True)\n+        if scale is None:\n+            return None\n         attributes = {}\n         attributes["class"] = css_class and [css_class] or []\n         if not attributes["class"]:\n@@ -792,6 +794,8 @@ def srcset(\n             fieldname = primary.fieldname\n \n         original_width, original_height = self.getImageSize(fieldname)\n+        if not original_width or not original_height:\n+            return None\n \n         storage = getMultiAdapter(\n             (self.context, functools.partial(self.modified, fieldname)),\n@@ -851,6 +855,8 @@ def srcset(\n                     break\n \n         scale = self.scale(fieldname=fieldname, scale=scale_in_src)\n+        if scale is None:\n+            return None\n         attributes["src"] = scale.url\n         if "width" not in attributes:\n             attributes["width"] = scale.width\ndiff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex d00cf48a..92bb9737 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -627,6 +627,13 @@ def testGetUnknownScale(self):\n         foo = self.scaling.scale("image", scale="foo?")\n         self.assertEqual(foo, None)\n \n+    def testSrcsetEmptyField(self):\n+        # srcset should return None for an empty image field\n+        # See https://github.com/plone/plone.namedfile/issues/202\n+        self.item.image = None\n+        result = self.scaling.srcset("image", sizes="100vw")\n+        self.assertIsNone(result)\n+\n     def testScaleInvalidation(self):\n         dt = self.item.modified()\n \n'
+b'diff --git a/news/205.bugfix b/news/205.bugfix\nnew file mode 100644\nindex 00000000..5e92b130\n--- /dev/null\n+++ b/news/205.bugfix\n@@ -0,0 +1,2 @@\n+Add ``Content-Disposition: inline`` with filename to ``@@display-file`` for allowed mimetypes, so browsers use the correct filename when saving files viewed inline.\n+@jensens\ndiff --git a/src/plone/namedfile/browser.py b/src/plone/namedfile/browser.py\nindex 85dc3c37..db38f2e8 100644\n--- a/src/plone/namedfile/browser.py\n+++ b/src/plone/namedfile/browser.py\n@@ -1,9 +1,11 @@\n from AccessControl.ZopeGuards import guarded_getattr\n from plone.namedfile.utils import extract_media_type\n+from plone.namedfile.utils import safe_basename\n from plone.namedfile.utils import set_headers\n from plone.namedfile.utils import stream_data\n from plone.rfc822.interfaces import IPrimaryFieldInfo\n from Products.Five.browser import BrowserView\n+from urllib.parse import quote\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n from zope.publisher.interfaces import NotFound\n@@ -198,3 +200,12 @@ def set_headers(self, file):\n                     return super().set_headers(file)\n         canonical = self.get_canonical(file)\n         set_headers(file, self.request.response, canonical=canonical)\n+        # Add Content-Disposition: inline with filename so browsers use the\n+        # correct name when saving files displayed inline (e.g. PDFs).\n+        filename = safe_basename(getattr(file, "filename", None))\n+        if filename:\n+            filename = quote(filename.encode("utf-8"))\n+            self.request.response.setHeader(\n+                "Content-Disposition",\n+                f"inline; filename*=UTF-8\'\'{filename}",\n+            )\ndiff --git a/src/plone/namedfile/tests/test_display_file.py b/src/plone/namedfile/tests/test_display_file.py\nindex 03c5ae52..37bf191c 100644\n--- a/src/plone/namedfile/tests/test_display_file.py\n+++ b/src/plone/namedfile/tests/test_display_file.py\n@@ -101,7 +101,10 @@ def assert_display_inline_works(self, base_url):\n         # Test that displaying this file inline works.\n         browser = self.get_anon_browser()\n         browser.open(base_url + f"/@@display-file/{self.field_name}")\n-        self.assertIsNone(get_disposition_header(browser))\n+        header = get_disposition_header(browser)\n+        self.assertIsNotNone(header)\n+        self.assertIn("inline", header)\n+        self.assertIn("filename", header)\n \n     def assert_display_inline_is_download(self, base_url):\n         # Test that displaying this file inline turns into a download.\n'
 
 Repository: plone.namedfile
 
 
 Branch: refs/heads/main
-Date: 2026-03-27T22:13:24+01:00
+Date: 2026-03-27T22:23:20+01:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/a5356c07fc01fb710a9d25b2799c076ecf582f41
+Commit: https://github.com/plone/plone.namedfile/commit/4b97c27ad35c922c8af305267a0de68790f881f9
 
-Merge branch 'main' into fix/202-srcset-empty-field
+Update doctest expectations for Content-Disposition: inline
+
+Files changed:
+M src/plone/namedfile/usage.rst
+
+b'diff --git a/src/plone/namedfile/usage.rst b/src/plone/namedfile/usage.rst\nindex 8dbb027..a4937d5 100644\n--- a/src/plone/namedfile/usage.rst\n+++ b/src/plone/namedfile/usage.rst\n@@ -328,6 +328,7 @@ We will test this with a dummy request, faking traversal::\n     >>> request.response.getHeader(\'Content-Type\')\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n+    "inline; filename*=UTF-8\'\'test.txt"\n \n     >>> request = TestRequest()\n     >>> display_file = DisplayFile(container, request).publishTraverse(request, \'blob\')\n@@ -339,6 +340,7 @@ We will test this with a dummy request, faking traversal::\n     >>> request.response.getHeader(\'Content-Type\')\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n+    "inline; filename*=UTF-8\'\'test.txt"\n \n     >>> request = TestRequest()\n     >>> display_file = DisplayFile(container, request).publishTraverse(request, \'image\')\n'
+
+Repository: plone.namedfile
+
+
+Branch: refs/heads/main
+Date: 2026-03-27T22:23:43+01:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.namedfile/commit/189bf55b9d6d0d3ea9d94cd7329f5e37925ab74d
+
+Merge branch 'main' into fix/205-display-file-inline-filename
 
 Files changed:
 A news/125.bugfix
@@ -42,18 +61,19 @@ Repository: plone.namedfile
 
 
 Branch: refs/heads/main
-Date: 2026-04-23T09:12:17+02:00
+Date: 2026-04-23T09:13:17+02:00
 Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.namedfile/commit/562aa1ca230807ebe1fd513cdcba9cdecee26095
+Commit: https://github.com/plone/plone.namedfile/commit/e9e40827dcaa2955b67705fc5cba5b0282a16399
 
-Merge pull request #212 from plone/fix/202-srcset-empty-field
+Merge pull request #213 from plone/fix/205-display-file-inline-filename
 
-Handle empty image fields in srcset() and picture()
+Add Content-Disposition: inline with filename to @@display-file
 
 Files changed:
-A news/202.bugfix
-M src/plone/namedfile/scaling.py
-M src/plone/namedfile/tests/test_scaling.py
+A news/205.bugfix
+M src/plone/namedfile/browser.py
+M src/plone/namedfile/tests/test_display_file.py
+M src/plone/namedfile/usage.rst
 
-b'diff --git a/news/202.bugfix b/news/202.bugfix\nnew file mode 100644\nindex 00000000..16d029ee\n--- /dev/null\n+++ b/news/202.bugfix\n@@ -0,0 +1,2 @@\n+Return ``None`` from ``srcset()`` and ``picture()`` when the image field is empty, consistent with ``tag()``.\n+@jensens\ndiff --git a/src/plone/namedfile/scaling.py b/src/plone/namedfile/scaling.py\nindex 047bdbeb..5359e297 100644\n--- a/src/plone/namedfile/scaling.py\n+++ b/src/plone/namedfile/scaling.py\n@@ -766,6 +766,8 @@ def picture(\n \n         sourceset = picture_variant_config.get("sourceset")\n         scale = self.scale(fieldname, sourceset[-1].get("scale"), pre=True)\n+        if scale is None:\n+            return None\n         attributes = {}\n         attributes["class"] = css_class and [css_class] or []\n         if not attributes["class"]:\n@@ -807,6 +809,8 @@ def srcset(\n             fieldname = primary.fieldname\n \n         original_width, original_height = self.getImageSize(fieldname)\n+        if not original_width or not original_height:\n+            return None\n \n         storage = getMultiAdapter(\n             (self.context, functools.partial(self.modified, fieldname)),\n@@ -866,6 +870,8 @@ def srcset(\n                     break\n \n         scale = self.scale(fieldname=fieldname, scale=scale_in_src)\n+        if scale is None:\n+            return None\n         attributes["src"] = scale.url\n         if "width" not in attributes:\n             attributes["width"] = scale.width\ndiff --git a/src/plone/namedfile/tests/test_scaling.py b/src/plone/namedfile/tests/test_scaling.py\nindex c87507b1..f41ba951 100644\n--- a/src/plone/namedfile/tests/test_scaling.py\n+++ b/src/plone/namedfile/tests/test_scaling.py\n@@ -627,6 +627,13 @@ def testGetUnknownScale(self):\n         foo = self.scaling.scale("image", scale="foo?")\n         self.assertEqual(foo, None)\n \n+    def testSrcsetEmptyField(self):\n+        # srcset should return None for an empty image field\n+        # See https://github.com/plone/plone.namedfile/issues/202\n+        self.item.image = None\n+        result = self.scaling.srcset("image", sizes="100vw")\n+        self.assertIsNone(result)\n+\n     def testScaleInvalidation(self):\n         dt = self.item.modified()\n \n'
+b'diff --git a/news/205.bugfix b/news/205.bugfix\nnew file mode 100644\nindex 0000000..5e92b13\n--- /dev/null\n+++ b/news/205.bugfix\n@@ -0,0 +1,2 @@\n+Add ``Content-Disposition: inline`` with filename to ``@@display-file`` for allowed mimetypes, so browsers use the correct filename when saving files viewed inline.\n+@jensens\ndiff --git a/src/plone/namedfile/browser.py b/src/plone/namedfile/browser.py\nindex 85dc3c3..db38f2e 100644\n--- a/src/plone/namedfile/browser.py\n+++ b/src/plone/namedfile/browser.py\n@@ -1,9 +1,11 @@\n from AccessControl.ZopeGuards import guarded_getattr\n from plone.namedfile.utils import extract_media_type\n+from plone.namedfile.utils import safe_basename\n from plone.namedfile.utils import set_headers\n from plone.namedfile.utils import stream_data\n from plone.rfc822.interfaces import IPrimaryFieldInfo\n from Products.Five.browser import BrowserView\n+from urllib.parse import quote\n from zope.interface import implementer\n from zope.publisher.interfaces import IPublishTraverse\n from zope.publisher.interfaces import NotFound\n@@ -198,3 +200,12 @@ def set_headers(self, file):\n                     return super().set_headers(file)\n         canonical = self.get_canonical(file)\n         set_headers(file, self.request.response, canonical=canonical)\n+        # Add Content-Disposition: inline with filename so browsers use the\n+        # correct name when saving files displayed inline (e.g. PDFs).\n+        filename = safe_basename(getattr(file, "filename", None))\n+        if filename:\n+            filename = quote(filename.encode("utf-8"))\n+            self.request.response.setHeader(\n+                "Content-Disposition",\n+                f"inline; filename*=UTF-8\'\'{filename}",\n+            )\ndiff --git a/src/plone/namedfile/tests/test_display_file.py b/src/plone/namedfile/tests/test_display_file.py\nindex 03c5ae5..37bf191 100644\n--- a/src/plone/namedfile/tests/test_display_file.py\n+++ b/src/plone/namedfile/tests/test_display_file.py\n@@ -101,7 +101,10 @@ def assert_display_inline_works(self, base_url):\n         # Test that displaying this file inline works.\n         browser = self.get_anon_browser()\n         browser.open(base_url + f"/@@display-file/{self.field_name}")\n-        self.assertIsNone(get_disposition_header(browser))\n+        header = get_disposition_header(browser)\n+        self.assertIsNotNone(header)\n+        self.assertIn("inline", header)\n+        self.assertIn("filename", header)\n \n     def assert_display_inline_is_download(self, base_url):\n         # Test that displaying this file inline turns into a download.\ndiff --git a/src/plone/namedfile/usage.rst b/src/plone/namedfile/usage.rst\nindex 8dbb027..a4937d5 100644\n--- a/src/plone/namedfile/usage.rst\n+++ b/src/plone/namedfile/usage.rst\n@@ -328,6 +328,7 @@ We will test this with a dummy request, faking traversal::\n     >>> request.response.getHeader(\'Content-Type\')\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n+    "inline; filename*=UTF-8\'\'test.txt"\n \n     >>> request = TestRequest()\n     >>> display_file = DisplayFile(container, request).publishTraverse(request, \'blob\')\n@@ -339,6 +340,7 @@ We will test this with a dummy request, faking traversal::\n     >>> request.response.getHeader(\'Content-Type\')\n     \'text/plain\'\n     >>> request.response.getHeader(\'Content-Disposition\')\n+    "inline; filename*=UTF-8\'\'test.txt"\n \n     >>> request = TestRequest()\n     >>> display_file = DisplayFile(container, request).publishTraverse(request, \'image\')\n'
 
