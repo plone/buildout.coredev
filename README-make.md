@@ -106,7 +106,7 @@ These large Makefiles are tricky.
 
 Run `make zope-start` to start the Zope instance.
 
-### Manage checkouts and versions
+### The `manage` command
 
 The `manage` command from `plone.releaser` can be used in various ways.
 It knows how to query or update files from both buildout and pip:
@@ -117,17 +117,37 @@ See the help text:
 make manage ARGS="--help"
 ```
 
+### Manage checkouts
+
 Add a package to the checkouts:
 
 ```shell
 make manage ARGS="add-checkout plone.restapi"
 ```
 
+This does not yet checkout the package: it only updates the `checkouts.cfg` and `mxcheckouts.ini` files.
+To *use* the new checkout, you still need to run `make install`.
+If the new checkout is still not used, you can more agressively get a new environment:
+`make mxenv-clean` and `make install`.
+
+Remove a package from the checkouts:
+
+```shell
+make manage ARGS="remove-checkout plone.restapi"
+```
+
+Similarly, you still need to call `make install` after this.
+
+### Manage versions
+
 Update a package version:
 
 ```shell
 make manage ARGS="set-package-version plone.restapi 10.0.0"
 ```
+
+Again, you still need to call `make install` to actually install the new version.
+
 
 ### Run tests
 
@@ -157,6 +177,18 @@ make test
 Note that this tests the *installed* version of the package.
 This can be a final version in `site-packages` or a source checkout.
 See the section "Manage checkouts and versions" on how to influence what is installed.
+
+Note: Simply having a package directory under `src/` is not enough for `make test` to pick it up.
+This may be an old checkout that is not currently active.
+You need to explicitly add it as a checkout and reinstall:
+
+```
+make manage ARGS="add-checkout plone.restapi"
+make mxenv-clean
+make install
+```
+
+Only after this will `make test TEST_PACKAGE=plone.restapi` use the source from src/.
 
 Under the hood, the `test` target calls `zope-testrunner`.
 To find out which arguments this supports, ask for help:
