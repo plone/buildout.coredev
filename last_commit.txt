@@ -1,72 +1,77 @@
-Repository: plone.namedfile
+Repository: plone.scale
 
 
-Branch: refs/heads/main
-Date: 2026-03-27T21:52:46+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/c0896a5ac6d7473eb36e2bbfa5416059da68a7ec
+Branch: refs/heads/master
+Date: 2026-04-11T23:45:30+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.scale/commit/66265d8be48d1e33759e448487a0d9d1fa913b1a
 
-Include exception in PIL image warning
+Fix incorrect scale calculation if zero-width.
 
-The generic "Image is probably broken" message gave no clue about the
-actual problem. Now logs the exception so the real cause is visible.
+When width or height are set to ``0`` and the other dimension is set, the
+zero-dimension should be calculated by keeping the aspect ratio. This works
+fine when height is set t o ``0`` but breaks and generates a ``1x1`` dimension
+if width is ``0``.
 
-Fixes #184
-
-Files changed:
-A news/184.bugfix
-M src/plone/namedfile/utils/__init__.py
-
-b'diff --git a/news/184.bugfix b/news/184.bugfix\nnew file mode 100644\nindex 00000000..99affcc3\n--- /dev/null\n+++ b/news/184.bugfix\n@@ -0,0 +1,2 @@\n+Include actual exception in PIL image identification warning instead of generic message.\n+@jensens\ndiff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex b0d415eb..3d16d221 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -240,14 +240,8 @@ def getImageInfo(data):\n             img = PIL.Image.open(BytesIO(data))\n             width, height = img.size\n             content_type = PIL.Image.MIME[img.format]\n-        except Exception:\n-            # TODO: determ which error really happens\n-            # Should happen if data is to short --> first_bytes\n-            # happens also if data is an svg or another special format.\n-            log.warning(\n-                "PIL can not recognize the image. "\n-                "Image is probably broken or of a non-supported format."\n-            )\n+        except Exception as e:\n+            log.warning("Could not identify image with PIL: %s", e)\n \n     log.debug(\n         "Image Info (Type: %s, Width: %s, Height: %s)", content_type, width, height\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-03-27T21:58:42+01:00
-Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/81092a93e573f06824504f2921582c88faa76dda
-
-Merge branch 'main' into fix/184-pil-warning
+This PR fixes that.
 
 Files changed:
-A news/125.bugfix
-M src/plone/namedfile/test.pt
+A news/140.bugfix.rst
+M src/plone/scale/scale.py
+M src/plone/scale/tests/test_scale.py
 
-b'diff --git a/news/125.bugfix b/news/125.bugfix\nnew file mode 100644\nindex 0000000..920cb64\n--- /dev/null\n+++ b/news/125.bugfix\n@@ -0,0 +1,2 @@\n+Fix broken fullscreen image links in ``@@images-test`` view for non-Image content types.\n+@jensens\ndiff --git a/src/plone/namedfile/test.pt b/src/plone/namedfile/test.pt\nindex 51c4b8c..0fea35b 100644\n--- a/src/plone/namedfile/test.pt\n+++ b/src/plone/namedfile/test.pt\n@@ -59,7 +59,7 @@\n           <h3 i18n:translate="">Thumb with info</h3>\n           <p i18n:translate="">Standard display of Image content type, but using thumb scale</p>\n           <figure class="figure">\n-            <a href="${context_url}/image_view_fullscreen"\n+            <a href="${context_url}/@@display-file/image"\n                tal:define="\n                  img_tag python:images.tag(\'image\', scale=\'thumb\', css_class=\'figure-img img-fluid\');\n                "\n@@ -111,7 +111,7 @@\n              i18n:translate=""\n           >Download</a>\n           <a class="btn btn-primary fullscreen"\n-             href="${context_url}/image_view_fullscreen"\n+             href="${context_url}/@@display-file/image"\n           ><span i18n:translate="label_click_to_view_full_image">View full-size image</span></a>\n         </section>\n         <hr />\n'
+b'diff --git a/news/140.bugfix.rst b/news/140.bugfix.rst\nnew file mode 100644\nindex 0000000..168edbe\n--- /dev/null\n+++ b/news/140.bugfix.rst\n@@ -0,0 +1,10 @@\n+Fix incorrect scale calculation if zero-width.\n+\n+When width or height are set to ``0`` and the other dimension is set, the\n+zero-dimension should be calculated by keeping the aspect ratio. This works\n+fine when height is set t o ``0`` but breaks and generates a ``1x1`` dimension\n+if width is ``0``.\n+\n+This PR fixes that.\n+\n+@thet\ndiff --git a/src/plone/scale/scale.py b/src/plone/scale/scale.py\nindex afa3a6c..2fcdebb 100644\n--- a/src/plone/scale/scale.py\n+++ b/src/plone/scale/scale.py\n@@ -267,6 +267,9 @@ def _calculate_all_dimensions(\n     if height is not None and (height >= MAX_HEIGHT or height <= 0):\n         height = None\n \n+    if width is not None and width <= 0:\n+        width = None\n+\n     if mode not in ("contain", "cover", "scale"):\n         raise ValueError("Unknown scale mode \'%s\'" % mode)\n \ndiff --git a/src/plone/scale/tests/test_scale.py b/src/plone/scale/tests/test_scale.py\nindex 15ee2b2..b78ba74 100644\n--- a/src/plone/scale/tests/test_scale.py\n+++ b/src/plone/scale/tests/test_scale.py\n@@ -452,16 +452,24 @@ def test_calculate_scaled_dimensions_scale(self):\n         """\n         # calc = functools.partial(calculate_scaled_dimensions, mode="scale")\n         calc = calculate_scaled_dimensions\n+\n         self.assertEqual(calc(1, 1, 1, 1), (1, 1))\n         self.assertEqual(calc(10, 10, 1, 1), (1, 1))\n+\n         # Mode "scale" only scales down, not up:\n         self.assertEqual(calc(1, 1, 10, 10), (1, 1))\n         self.assertEqual(calc(10, 20, 10, 10), (5, 10))\n+\n         # Try the new preview scale:\n         self.assertEqual(calc(10, 20, 400, 65536), (10, 20))\n         self.assertEqual(calc(600, 300, 400, 65536), (400, 200))\n         self.assertEqual(calc(600, 1200, 400, 65536), (400, 800))\n \n+        # Scale with width `0`\n+        self.assertEqual(calc(100, 100, 0, 50), (50, 50))\n+        # Scale with height `0`\n+        self.assertEqual(calc(100, 100, 50, 0), (50, 50))\n+\n     def testAnimatedGifContainsAllFrames(self):\n         image = scaleImage(ANIGIF, 84, 103, "contain")[0]\n         with PIL.Image.open(StringIO(image)) as img:\n'
 
-Repository: plone.namedfile
+Repository: plone.scale
 
 
-Branch: refs/heads/main
-Date: 2026-04-28T23:09:22+02:00
+Branch: refs/heads/master
+Date: 2026-04-13T18:57:01+02:00
 Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
-Commit: https://github.com/plone/plone.namedfile/commit/68c39e477a3cf4009a982051a0b8154a1bc9ad66
+Commit: https://github.com/plone/plone.scale/commit/1c6b3c05a129a0a1c4f32aa2365c34215747c20c
 
-Update src/plone/namedfile/utils/__init__.py
+Apply suggestion from @Copilot
 
-Co-authored-by: Maurits van Rees &lt;maurits@py76.be&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;
 
 Files changed:
-M src/plone/namedfile/utils/__init__.py
+M news/140.bugfix.rst
 
-b'diff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex 3d16d22..2878dd8 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -241,7 +241,11 @@ def getImageInfo(data):\n             width, height = img.size\n             content_type = PIL.Image.MIME[img.format]\n         except Exception as e:\n-            log.warning("Could not identify image with PIL: %s", e)\n+            log.warning(\n+                "PIL can not recognize the image. "\n+                "Image is probably broken or of a non-supported format: %s",\n+                e,\n+            )\n \n     log.debug(\n         "Image Info (Type: %s, Width: %s, Height: %s)", content_type, width, height\n'
+b'diff --git a/news/140.bugfix.rst b/news/140.bugfix.rst\nindex 168edbe..e554bd5 100644\n--- a/news/140.bugfix.rst\n+++ b/news/140.bugfix.rst\n@@ -2,7 +2,7 @@ Fix incorrect scale calculation if zero-width.\n \n When width or height are set to ``0`` and the other dimension is set, the\n zero-dimension should be calculated by keeping the aspect ratio. This works\n-fine when height is set t o ``0`` but breaks and generates a ``1x1`` dimension\n+fine when height is set to ``0`` but breaks and generates a ``1x1`` dimension\n if width is ``0``.\n \n This PR fixes that.\n'
 
-Repository: plone.namedfile
+Repository: plone.scale
 
 
-Branch: refs/heads/main
-Date: 2026-04-29T09:48:31+02:00
+Branch: refs/heads/master
+Date: 2026-04-20T12:14:31+02:00
+Author: Jens W. Klein (jensens) <jk@kleinundpartner.at>
+Commit: https://github.com/plone/plone.scale/commit/afa2dce27caf0ca6fba9d47d71aae34a525f6089
+
+Fix ZeroDivisionError in scale_svg_image for zero target dimensions
+
+Files changed:
+M news/140.bugfix.rst
+M src/plone/scale/scale.py
+M src/plone/scale/tests/test_scale.py
+
+b'diff --git a/news/140.bugfix.rst b/news/140.bugfix.rst\nindex e554bd5..5b17691 100644\n--- a/news/140.bugfix.rst\n+++ b/news/140.bugfix.rst\n@@ -5,6 +5,10 @@ zero-dimension should be calculated by keeping the aspect ratio. This works\n fine when height is set to ``0`` but breaks and generates a ``1x1`` dimension\n if width is ``0``.\n \n+Additionally, ``scale_svg_image`` raised ``ZeroDivisionError`` when either\n+target dimension was ``0`` or ``None``. The SVG scaling path now applies the\n+same "zero means auto, keep aspect ratio" semantics as the raster path.\n+\n This PR fixes that.\n \n @thet\ndiff --git a/src/plone/scale/scale.py b/src/plone/scale/scale.py\nindex 2fcdebb..9d79d5c 100644\n--- a/src/plone/scale/scale.py\n+++ b/src/plone/scale/scale.py\n@@ -634,11 +634,32 @@ def scale_svg_image(\n             f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'"\n         )\n         return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (\n-            int(target_width),\n-            int(target_height),\n+            int(target_width or 0),\n+            int(target_height or 0),\n         )\n \n-    source_aspectratio = source_width / source_height\n+    # Normalize target dimensions: 0 or None means "auto \xe2\x80\x94 derive from source\n+    # aspect ratio". Same semantics as ``_calculate_all_dimensions`` uses for\n+    # raster images.\n+    if target_width is not None and target_width <= 0:\n+        target_width = None\n+    if target_height is not None and target_height <= 0:\n+        target_height = None\n+\n+    if not source_width or not source_height:\n+        # Cannot compute source aspect ratio; fall back to requested dims.\n+        source_aspectratio = 1.0\n+        target_width = target_width or int(source_width) or 1\n+        target_height = target_height or int(source_height) or 1\n+    else:\n+        source_aspectratio = source_width / source_height\n+        if target_width is None and target_height is None:\n+            target_width, target_height = source_width, source_height\n+        elif target_width is None:\n+            target_width = target_height * source_aspectratio\n+        elif target_height is None:\n+            target_height = target_width / source_aspectratio\n+\n     target_aspectratio = target_width / target_height\n     if mode in ["scale", "cover"]:\n         # check if new width is larger than the one we get with aspect ratio\ndiff --git a/src/plone/scale/tests/test_scale.py b/src/plone/scale/tests/test_scale.py\nindex b78ba74..c51086c 100644\n--- a/src/plone/scale/tests/test_scale.py\n+++ b/src/plone/scale/tests/test_scale.py\n@@ -539,6 +539,27 @@ def testScaleSVGImage(self):\n         self.assertNotIn(b\'width="100"\', scaled_svg[0])\n         self.assertNotIn(b\'height="100"\', scaled_svg[0])\n \n+    def testScaleSVGImageZeroDimensions(self):\n+        # logo.svg has aspect ratio 158.253 / 40.686 ~= 3.889\n+        # Zero height -> derive from source aspect ratio (keeps aspect).\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, 0, mode="scale")\n+        self.assertEqual(w, 200)\n+        self.assertEqual(h, int(200 / (158.253 / 40.686)))\n+\n+        # Zero width -> derive from source aspect ratio.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 0, 100, mode="scale")\n+        self.assertEqual(h, 100)\n+        self.assertEqual(w, int(100 * (158.253 / 40.686)))\n+\n+        # None height -> same as zero.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, None, mode="scale")\n+        self.assertEqual(w, 200)\n+\n+        # contain mode with zero height must not raise.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, 0, mode="contain")\n+        self.assertEqual(w, 200)\n+        self.assertGreater(h, 0)\n+\n \n def test_suite():\n     from unittest import defaultTestLoader\n'
+
+Repository: plone.scale
+
+
+Branch: refs/heads/master
+Date: 2026-04-29T23:01:43+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@py76.be>
-Commit: https://github.com/plone/plone.namedfile/commit/4998ec276c2de253151623eb26ef366eff33a148
+Commit: https://github.com/plone/plone.scale/commit/323a978d1f983235f8e4848a4029c397e0c29203
 
-Merge pull request #210 from plone/fix/184-pil-warning
+Merge pull request #141 from plone/thet/fix-scale-calculation
 
-Include exception in PIL image identification warning
+Fix incorrect scale calculation if zero-width.
 
 Files changed:
-A news/184.bugfix
-M src/plone/namedfile/utils/__init__.py
+A news/140.bugfix.rst
+M src/plone/scale/scale.py
+M src/plone/scale/tests/test_scale.py
 
-b'diff --git a/news/184.bugfix b/news/184.bugfix\nnew file mode 100644\nindex 0000000..99affcc\n--- /dev/null\n+++ b/news/184.bugfix\n@@ -0,0 +1,2 @@\n+Include actual exception in PIL image identification warning instead of generic message.\n+@jensens\ndiff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex caa2071..c1c2f9c 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -240,13 +240,11 @@ def getImageInfo(data):\n             img = PIL.Image.open(BytesIO(data))\n             width, height = img.size\n             content_type = PIL.Image.MIME[img.format]\n-        except Exception:\n-            # TODO: determ which error really happens\n-            # Should happen if data is to short --> first_bytes\n-            # happens also if data is an svg or another special format.\n+        except Exception as e:\n             log.warning(\n                 "PIL can not recognize the image. "\n-                "Image is probably broken or of a non-supported format."\n+                "Image is probably broken or of a non-supported format: %s",\n+                e,\n             )\n \n     log.debug(\n'
+b'diff --git a/news/140.bugfix.rst b/news/140.bugfix.rst\nnew file mode 100644\nindex 0000000..5b17691\n--- /dev/null\n+++ b/news/140.bugfix.rst\n@@ -0,0 +1,14 @@\n+Fix incorrect scale calculation if zero-width.\n+\n+When width or height are set to ``0`` and the other dimension is set, the\n+zero-dimension should be calculated by keeping the aspect ratio. This works\n+fine when height is set to ``0`` but breaks and generates a ``1x1`` dimension\n+if width is ``0``.\n+\n+Additionally, ``scale_svg_image`` raised ``ZeroDivisionError`` when either\n+target dimension was ``0`` or ``None``. The SVG scaling path now applies the\n+same "zero means auto, keep aspect ratio" semantics as the raster path.\n+\n+This PR fixes that.\n+\n+@thet\ndiff --git a/src/plone/scale/scale.py b/src/plone/scale/scale.py\nindex aeffb38..abf488e 100644\n--- a/src/plone/scale/scale.py\n+++ b/src/plone/scale/scale.py\n@@ -267,6 +267,9 @@ def _calculate_all_dimensions(\n     if height is not None and (height >= MAX_HEIGHT or height <= 0):\n         height = None\n \n+    if width is not None and width <= 0:\n+        width = None\n+\n     if mode not in ("contain", "cover", "scale"):\n         raise ValueError("Unknown scale mode \'%s\'" % mode)\n \n@@ -631,11 +634,32 @@ def scale_svg_image(\n             f"Can not convert source dimensions: \'{source_width}\':\'{source_height}\'"\n         )\n         return etree.tostring(tree, encoding="utf-8", xml_declaration=True), (\n-            int(target_width),\n-            int(target_height),\n+            int(target_width or 0),\n+            int(target_height or 0),\n         )\n \n-    source_aspectratio = source_width / source_height\n+    # Normalize target dimensions: 0 or None means "auto \xe2\x80\x94 derive from source\n+    # aspect ratio". Same semantics as ``_calculate_all_dimensions`` uses for\n+    # raster images.\n+    if target_width is not None and target_width <= 0:\n+        target_width = None\n+    if target_height is not None and target_height <= 0:\n+        target_height = None\n+\n+    if not source_width or not source_height:\n+        # Cannot compute source aspect ratio; fall back to requested dims.\n+        source_aspectratio = 1.0\n+        target_width = target_width or int(source_width) or 1\n+        target_height = target_height or int(source_height) or 1\n+    else:\n+        source_aspectratio = source_width / source_height\n+        if target_width is None and target_height is None:\n+            target_width, target_height = source_width, source_height\n+        elif target_width is None:\n+            target_width = target_height * source_aspectratio\n+        elif target_height is None:\n+            target_height = target_width / source_aspectratio\n+\n     target_aspectratio = target_width / target_height\n     if mode in ["scale", "cover"]:\n         # check if new width is larger than the one we get with aspect ratio\ndiff --git a/src/plone/scale/tests/test_scale.py b/src/plone/scale/tests/test_scale.py\nindex 168ec6a..f0da760 100644\n--- a/src/plone/scale/tests/test_scale.py\n+++ b/src/plone/scale/tests/test_scale.py\n@@ -463,16 +463,24 @@ def test_calculate_scaled_dimensions_scale(self):\n         """\n         # calc = functools.partial(calculate_scaled_dimensions, mode="scale")\n         calc = calculate_scaled_dimensions\n+\n         self.assertEqual(calc(1, 1, 1, 1), (1, 1))\n         self.assertEqual(calc(10, 10, 1, 1), (1, 1))\n+\n         # Mode "scale" only scales down, not up:\n         self.assertEqual(calc(1, 1, 10, 10), (1, 1))\n         self.assertEqual(calc(10, 20, 10, 10), (5, 10))\n+\n         # Try the new preview scale:\n         self.assertEqual(calc(10, 20, 400, 65536), (10, 20))\n         self.assertEqual(calc(600, 300, 400, 65536), (400, 200))\n         self.assertEqual(calc(600, 1200, 400, 65536), (400, 800))\n \n+        # Scale with width `0`\n+        self.assertEqual(calc(100, 100, 0, 50), (50, 50))\n+        # Scale with height `0`\n+        self.assertEqual(calc(100, 100, 50, 0), (50, 50))\n+\n     def testAnimatedGifContainsAllFrames(self):\n         image = scaleImage(ANIGIF, 84, 103, "contain")[0]\n         with PIL.Image.open(StringIO(image)) as img:\n@@ -542,6 +550,27 @@ def testScaleSVGImage(self):\n         self.assertNotIn(b\'width="100"\', scaled_svg[0])\n         self.assertNotIn(b\'height="100"\', scaled_svg[0])\n \n+    def testScaleSVGImageZeroDimensions(self):\n+        # logo.svg has aspect ratio 158.253 / 40.686 ~= 3.889\n+        # Zero height -> derive from source aspect ratio (keeps aspect).\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, 0, mode="scale")\n+        self.assertEqual(w, 200)\n+        self.assertEqual(h, int(200 / (158.253 / 40.686)))\n+\n+        # Zero width -> derive from source aspect ratio.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 0, 100, mode="scale")\n+        self.assertEqual(h, 100)\n+        self.assertEqual(w, int(100 * (158.253 / 40.686)))\n+\n+        # None height -> same as zero.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, None, mode="scale")\n+        self.assertEqual(w, 200)\n+\n+        # contain mode with zero height must not raise.\n+        _, (w, h) = scale_svg_image(StringIO(SVG), 200, 0, mode="contain")\n+        self.assertEqual(w, 200)\n+        self.assertGreater(h, 0)\n+\n \n def test_suite():\n     from unittest import defaultTestLoader\n'
 
