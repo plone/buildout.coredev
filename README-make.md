@@ -99,9 +99,6 @@ Main results:
 * In `.venv` there is a virtual environment with Plone and all test requirements installed.
 * In `instance` a Zope instance is created.
 
-Important: you may need to run `make install` twice, especially after you change something.
-These large Makefiles are tricky.
-
 ### Start
 
 Run `make zope-start` to start the Zope instance.
@@ -127,8 +124,6 @@ make manage ARGS="add-checkout plone.restapi"
 
 This does not yet checkout the package: it only updates the `checkouts.cfg` and `mxcheckouts.ini` files.
 To *use* the new checkout, you still need to run `make install`.
-If the new checkout is still not used, you can more agressively get a new environment:
-`make mxenv-clean` and `make install`.
 
 Remove a package from the checkouts:
 
@@ -184,7 +179,6 @@ You need to explicitly add it as a checkout and reinstall:
 
 ```
 make manage ARGS="add-checkout plone.restapi"
-make mxenv-clean
 make install
 ```
 

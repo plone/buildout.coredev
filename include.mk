@@ -51,6 +51,10 @@ run-presources: $(PRE_SOURCES_TARGET)
 
 INSTALL_TARGETS+=run-presources
 
+# Add extra files to SOURCES_TARGET.
+# `make` merges all prerequisites into a single list.
+$(SOURCES_TARGET): mxcheckouts.ini mxsources.ini mxtests.ini
+
 ## robotframework browser support
 
 .PHONY: rfbrowser
