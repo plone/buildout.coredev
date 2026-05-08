@@ -16,6 +16,10 @@ plonereleaser-dirty:
 plonereleaser-clean: plonereleaser-dirty
 	@test -e $(MXENV_PYTHON) && $(MXENV_PYTHON) -m pip uninstall -y plone.releaser || :
 
+.PHONY: manage
+manage: $(PLONERELEASER_TARGET)
+	@manage ${ARGS}
+
 INSTALL_TARGETS+=$(PLONERELEASER_TARGET)
 DIRTY_TARGETS+=plonereleaser-dirty
 CLEAN_TARGETS+=plonereleaser-clean
@@ -46,6 +50,10 @@ run-presources: $(PRE_SOURCES_TARGET)
 	@touch $(PRE_SOURCES_TARGET)
 
 INSTALL_TARGETS+=run-presources
+
+# Add extra files to SOURCES_TARGET.
+# `make` merges all prerequisites into a single list.
+$(SOURCES_TARGET): mxcheckouts.ini mxsources.ini mxtests.ini
 
 ## robotframework browser support
 
