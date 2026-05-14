@@ -1,14 +1,14 @@
-# Release notes for Plone 6.2.0rc2
+# Release notes for Plone 6.2.0 (unreleased)
 
-* Released: May 8th, 2026
+* Last changed: May 14th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2.0rc2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.0rc2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.0rc2/constraints.txt](https://dist.plone.org/release/6.2.0rc2/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.0rc2/versions.cfg](https://dist.plone.org/release/6.2.0rc2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.0rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.0rc2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2-dev/constraints.txt](https://dist.plone.org/release/6.2-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2-dev/versions.cfg](https://dist.plone.org/release/6.2-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2-dev/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -21,20 +21,9 @@ Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we
 
 ## Highlights
 
-These are the main changes compared to 6.2.0rc1:
+These are the main changes compared to 6.2.0rc2:
 
-* `plone.app.querystring`:
-  * Fix merging multiple date operations.
-  * Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
-* `plone.app.upgrade`: Fix possible out-of-memory problem in `utils.update_catalog_metadata` by releasing memory early.
-* `plone.base`: Add `munge_search_term`, `BAD_CHARS`, and `MULTISPACE` as canonical location in `plone.base.utils`.
-  Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
-* `plone.namedfile`: lots of small improvements.
-* `plone.restapi`: Add support for plate block from `@kitconcept/volto-plate` (text indexer, resolveuid transforms, link integrity).
-* `plone.scale`:
-  * Add missing `fieldname` key to the scale information produced by `pre_scale` method.
-  * Fix `IndexError` when scaling images with non-RGB color modes (e.g. BMP with palette+alpha).
-  * Fix incorrect scale calculation if zero-width.
+* Mostly just making final releases of packages.
 
 These are the main changes compared to 6.1:
 
@@ -50,6 +39,8 @@ These are the main changes compared to 6.1:
 * `plone.base`:
   * Add boolean utils: `is_truthy` (improved), `is_falsy` and `boolean_value`.
   * Add `plone.base.interfaces.IAddonList`.
+  * Add `munge_search_term`, `BAD_CHARS`, and `MULTISPACE` as canonical location in `plone.base.utils`.
+    Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
 * `plone.exportimport`: Add `@export` and `@import` REST API services.
 * `plone.registry`: Add per-request cache for registry value and forInterface proxy lookups, avoiding repeated OOBTree traversals within a single request.
 * `plone.restapi`:
@@ -58,6 +49,7 @@ These are the main changes compared to 6.1:
   * The `@controlpanel` service now includes `searchable_text` for each control panel.
   * Added support for sorting vocabularies by title before batching for the `@vocabularies` endpoint.
   * Add CSV import and export support to the `@users` endpoint.
+  * Add support for plate block from `@kitconcept/volto-plate` (text indexer, resolveuid transforms, link integrity).
 * `Products.CMFPlone`:
   * `MigrationTool`: Prepare support for custom base profiles without subclassing.
     Make `AddonList` a named utility and register ours under the name `Products.CMFPlone`.
@@ -139,13 +131,7 @@ Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade
 
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
 
-### Classic UI related changes since 6.2.0rc1:
-
-* `plone.staticresources`:
-  * Fix vertical scrolling in `pat-toolbar`.
-  * Update mockup=5.6.2. See https://github.com/plone/mockup/releases/tag/5.6.2.
-* `plone.app.upgrade`: Make `plone.app.layout` installation safer in upgrades.
-* `plone.base`: Add missing `codesample` TinyMCE plugin.
+### Classic UI related changes since 6.2.0rc2:
 
 
 ### Classic UI related changes since 6.1:
