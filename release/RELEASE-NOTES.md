@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.0 (unreleased)
 
-* Last changed: May 14th, 2026
+* Last changed: May 18th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -23,7 +23,10 @@ Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we
 
 These are the main changes compared to 6.2.0rc2:
 
-* Mostly just making final releases of packages.
+* `Products.DateRecurringIndex`:
+  * Replace ``pkg_resources`` namespace with PEP 420 native namespace.  This was done earlier, but never made it into a release.
+  * Implements IDateRangeIndex to exclude DateRecurringIndex by indexes with value in the keys of the catalog plan
+* Mostly just making final releases of individual packages, with no changes compared to their earlier alpha/beta/rc releases.  Or only internal changes.
 
 These are the main changes compared to 6.1:
 
@@ -73,7 +76,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.0.0-alpha.34](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.34).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.34/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
+Latest release is [19.0.0-alpha.36](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.36).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.36/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
 
@@ -156,7 +159,15 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
   * Remove EmailWidget template and use generic attributes instead.
   * Implement URI widget for `type="url"` inputs.
 * `plone.classicui`: Install the `plone.app.layout` default profile when creating a site using the classic distribution.
-* `plone.staticresources`: Update `mockup` from 5.4 to 5.6.0 with TinyMCE 8.  See also [`mockup` 5.6.0 changelog](https://github.com/plone/mockup/releases/tag/5.6.0).
+* `plone.staticresources`: Update `mockup` from 5.4 to 5.6.4 with TinyMCE 8.  See also [`mockup` 5.6.4 changelog](https://github.com/plone/mockup/releases/tag/5.6.4) and earlier.
+  This is a substantial Classic UI modernization release with focused follow-up stabilization:
+  * TinyMCE was upgraded to version 8, including support for reading ``license_key`` from the Plone control panel.
+  * ``pat-contentbrowser`` was modernized internally (Svelte 5 migration), with follow-up fixes for batching, level filtering, selected items behavior, and upload interactions.
+  * ``pat-structure`` and related table handling were aligned with newer DataTables behavior, including fixes for initial sorting, column width handling, and ordering logic.
+  * Navigation and toolbar behavior were improved, including enhanced ``pat-navigationmarker`` capabilities and better toolbar scrolling behavior for constrained viewport heights.
+  * Accessibility and keyboard handling were improved in modal and recurrence interactions, including better focus trapping and semantically correct button-based controls.
+  * Several legacy jQuery-dependent paths were removed or reduced in favor of modernized pattern implementations.
+  After the larger feature jump in 5.6.0, the 5.6.1-5.6.4 updates primarily deliver bug fixes, UX polishing, and dependency maintenance for production readiness in Plone 6.2.
 
 
 ## Python compatibility
