@@ -62,6 +62,13 @@ These are the main changes compared to 6.1:
   See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
 * `Products.PluggableAuthService`: Add property to clear session data at login boundary to the session auth helper.  This property defaults to `False` to preserve the current behavior.  Clearing session data during login helps mitigate session fixation attacks: https://owasp.org/www-community/attacks/Session_fixation
 
+## Thanks!
+
+A big thank you to everyone who worked on Plone 6.2.  Looking through all the changelogs, I found at least these excellent people who have graciously put in their time, effort, and skills:
+
+@1letter, @ale-rt, @aryan7081, @cekk, @cihanandac, @davisagli, @ericof, @erral, @gforcada, @gyst, @jackahl, @jensens, @jimbiscuit, @jmevissen, @jnptk, @Mack, @mamico, @mauritsvanrees, @MrTango, @niccokunzmann, @pbauer, @perrinjerome, @petschki, @rohnsha0, @sneridagh, @stevepiercy, @TamilNeram, @Thanush-03, @thet, @tisto, @valipod, @wesleybl
+
+Thank you very much!
 
 ## Volto frontend
 
