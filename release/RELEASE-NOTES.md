@@ -1,40 +1,25 @@
-# Release notes for Plone 6.2.0rc2
+# Release notes for Plone 6.2.0
 
-* Released: May 8th, 2026
+* Released: May 19th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2.0rc2/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.0rc2/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2.0/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.0/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.0rc2/constraints.txt](https://dist.plone.org/release/6.2.0rc2/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.0rc2/versions.cfg](https://dist.plone.org/release/6.2.0rc2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.0rc2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.0rc2/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.0/constraints.txt](https://dist.plone.org/release/6.2.0/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.0/versions.cfg](https://dist.plone.org/release/6.2.0/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.0/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.0/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
-
-
-## Please test
-
-This is the second release candidate of Plone 6.2.  We don't recommend this for production use, but please try it out in your projects.  You can report issues in the [`Products.CMFPlone` tracker](https://github.com/plone/Products.CMFPlone/issues/).  We expect to make the final release within two weeks, with hardly any changes.
-
-Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we recommend that you switch to native namespaces.  This includes all packages in the `collective` namespace.  See the section "Move to native namespaces" in the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html).  This should be considered a breaking change, so you should do this in a new major version of your add-on.  Still, as explained in the upgrade guide and below, it should work fine to use such a new major version in Plone 6.0 and 6.1.  But you may need to use `zc.buildout` 5 and/or install `horse-with-no-namespace` in your virtualenv.
 
 
 ## Highlights
 
-These are the main changes compared to 6.2.0rc1:
+These are the main changes compared to 6.2.0rc2:
 
-* `plone.app.querystring`:
-  * Fix merging multiple date operations.
-  * Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
-* `plone.app.upgrade`: Fix possible out-of-memory problem in `utils.update_catalog_metadata` by releasing memory early.
-* `plone.base`: Add `munge_search_term`, `BAD_CHARS`, and `MULTISPACE` as canonical location in `plone.base.utils`.
-  Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
-* `plone.namedfile`: lots of small improvements.
-* `plone.restapi`: Add support for plate block from `@kitconcept/volto-plate` (text indexer, resolveuid transforms, link integrity).
-* `plone.scale`:
-  * Add missing `fieldname` key to the scale information produced by `pre_scale` method.
-  * Fix `IndexError` when scaling images with non-RGB color modes (e.g. BMP with palette+alpha).
-  * Fix incorrect scale calculation if zero-width.
+* `Products.DateRecurringIndex`:
+  * Replace `pkg_resources` namespace with PEP 420 native namespace.  This was done earlier, but never made it into a release.
+  * Implement `IDateRangeIndex` to exclude `DateRecurringIndex` by indexes with value in the keys of the catalog plan.
+* Mostly just making final releases of individual packages, with no changes compared to their earlier alpha/beta/rc releases.  Or only internal changes.
 
 These are the main changes compared to 6.1:
 
@@ -50,6 +35,8 @@ These are the main changes compared to 6.1:
 * `plone.base`:
   * Add boolean utils: `is_truthy` (improved), `is_falsy` and `boolean_value`.
   * Add `plone.base.interfaces.IAddonList`.
+  * Add `munge_search_term`, `BAD_CHARS`, and `MULTISPACE` as canonical location in `plone.base.utils`.
+    Fix multi-word search so all word parts get wildcard prefix matching, not just the last one.
 * `plone.exportimport`: Add `@export` and `@import` REST API services.
 * `plone.registry`: Add per-request cache for registry value and forInterface proxy lookups, avoiding repeated OOBTree traversals within a single request.
 * `plone.restapi`:
@@ -58,6 +45,7 @@ These are the main changes compared to 6.1:
   * The `@controlpanel` service now includes `searchable_text` for each control panel.
   * Added support for sorting vocabularies by title before batching for the `@vocabularies` endpoint.
   * Add CSV import and export support to the `@users` endpoint.
+  * Add support for plate block from `@kitconcept/volto-plate` (text indexer, resolveuid transforms, link integrity).
 * `Products.CMFPlone`:
   * `MigrationTool`: Prepare support for custom base profiles without subclassing.
     Make `AddonList` a named utility and register ours under the name `Products.CMFPlone`.
@@ -74,6 +62,11 @@ These are the main changes compared to 6.1:
   See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
 * `Products.PluggableAuthService`: Add property to clear session data at login boundary to the session auth helper.  This property defaults to `False` to preserve the current behavior.  Clearing session data during login helps mitigate session fixation attacks: https://owasp.org/www-community/attacks/Session_fixation
 
+## Thanks!
+
+A big thank you to everyone who worked on Plone 6.2.  Looking through all the changelogs, I found dozens of excellent people who have graciously put in their time, effort, and skills.  We could mention you by name, but then we would miss the people who contributed outside of the pure code that we ship, for example people who work on documentation, marketing, system administration, etc.
+
+Thank you all very much!
 
 ## Volto frontend
 
@@ -81,7 +74,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.0.0-alpha.34](https://www.npmjs.com/package/@plone/volto/v/19.0.0-alpha.34).  See the [changelog](https://github.com/plone/volto/blob/19.0.0-alpha.34/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
+Latest release is [19.0.0](https://www.npmjs.com/package/@plone/volto/v/19.0.0).  See the [changelog](https://github.com/plone/volto/blob/19.0.0/packages/volto/CHANGELOG.md).  This is an alpha release, but it is ready to be made final.  Volto is just waiting for the Plone 6.2 final release.
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
 
@@ -139,15 +132,6 @@ Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade
 
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
 
-### Classic UI related changes since 6.2.0rc1:
-
-* `plone.staticresources`:
-  * Fix vertical scrolling in `pat-toolbar`.
-  * Update mockup=5.6.2. See https://github.com/plone/mockup/releases/tag/5.6.2.
-* `plone.app.upgrade`: Make `plone.app.layout` installation safer in upgrades.
-* `plone.base`: Add missing `codesample` TinyMCE plugin.
-
-
 ### Classic UI related changes since 6.1:
 
 * Some templates are being moved to `plone.app.layout`, this is ongoing.  Progress so far:
@@ -170,7 +154,15 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
   * Remove EmailWidget template and use generic attributes instead.
   * Implement URI widget for `type="url"` inputs.
 * `plone.classicui`: Install the `plone.app.layout` default profile when creating a site using the classic distribution.
-* `plone.staticresources`: Update `mockup` from 5.4 to 5.6.0 with TinyMCE 8.  See also [`mockup` 5.6.0 changelog](https://github.com/plone/mockup/releases/tag/5.6.0).
+* `plone.staticresources`: Update `mockup` from 5.4 to 5.6.4 with TinyMCE 8.  See also [`mockup` 5.6.4 changelog](https://github.com/plone/mockup/releases/tag/5.6.4) and earlier.
+  This is a substantial Classic UI modernization release with focused follow-up stabilization:
+  * TinyMCE was upgraded to version 8, including support for reading ``license_key`` from the Plone control panel.
+  * ``pat-contentbrowser`` was modernized internally (Svelte 5 migration), with follow-up fixes for batching, level filtering, selected items behavior, and upload interactions.
+  * ``pat-structure`` and related table handling were aligned with newer DataTables behavior, including fixes for initial sorting, column width handling, and ordering logic.
+  * Navigation and toolbar behavior were improved, including enhanced ``pat-navigationmarker`` capabilities and better toolbar scrolling behavior for constrained viewport heights.
+  * Accessibility and keyboard handling were improved in modal and recurrence interactions, including better focus trapping and semantically correct button-based controls.
+  * Several legacy jQuery-dependent paths were removed or reduced in favor of modernized pattern implementations.
+  After the larger feature jump in 5.6.0, the 5.6.1-5.6.4 updates primarily deliver bug fixes, UX polishing, and dependency maintenance for production readiness in Plone 6.2.
 
 
 ## Python compatibility
@@ -226,6 +218,15 @@ For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/
 ## Installation
 
 For installation instructions, see the [documentation](https://6.docs.plone.org/install/index.html).
+
+
+## Plone 6.1
+
+With the release of Plone 6.2, Plone 6.1 is out of maintenance support.  You are encouraged to upgrade.
+We will still do a last Plone 6.1.5 release to wrap things up.  This is expected this month (May 2026).
+
+All Plone 6 minor versions (6.0, 6.1, 6.2) get security support until 2027-12-31, 5 years after Plone 6.0.0 was released.
+If Plone 7 is not out by that time, security support will be extended.
 
 
 ## Issues
