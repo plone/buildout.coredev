@@ -1,22 +1,15 @@
-# Release notes for Plone 6.2.0 (unreleased)
+# Release notes for Plone 6.2.0
 
-* Last changed: May 18th, 2026
+* Released: May 19th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2.0/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.0/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2-dev/constraints.txt](https://dist.plone.org/release/6.2-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2-dev/versions.cfg](https://dist.plone.org/release/6.2-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.0/constraints.txt](https://dist.plone.org/release/6.2.0/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.0/versions.cfg](https://dist.plone.org/release/6.2.0/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.0/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.0/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
-
-
-## Please test
-
-This is the second release candidate of Plone 6.2.  We don't recommend this for production use, but please try it out in your projects.  You can report issues in the [`Products.CMFPlone` tracker](https://github.com/plone/Products.CMFPlone/issues/).  We expect to make the final release within two weeks, with hardly any changes.
-
-Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we recommend that you switch to native namespaces.  This includes all packages in the `collective` namespace.  See the section "Move to native namespaces" in the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html).  This should be considered a breaking change, so you should do this in a new major version of your add-on.  Still, as explained in the upgrade guide and below, it should work fine to use such a new major version in Plone 6.0 and 6.1.  But you may need to use `zc.buildout` 5 and/or install `horse-with-no-namespace` in your virtualenv.
 
 
 ## Highlights
@@ -24,8 +17,8 @@ Please also test your add-ons on Plone 6.2.  If your package uses namespaces, we
 These are the main changes compared to 6.2.0rc2:
 
 * `Products.DateRecurringIndex`:
-  * Replace ``pkg_resources`` namespace with PEP 420 native namespace.  This was done earlier, but never made it into a release.
-  * Implements IDateRangeIndex to exclude DateRecurringIndex by indexes with value in the keys of the catalog plan
+  * Replace `pkg_resources` namespace with PEP 420 native namespace.  This was done earlier, but never made it into a release.
+  * Implement `IDateRangeIndex` to exclude `DateRecurringIndex` by indexes with value in the keys of the catalog plan.
 * Mostly just making final releases of individual packages, with no changes compared to their earlier alpha/beta/rc releases.  Or only internal changes.
 
 These are the main changes compared to 6.1:
@@ -134,9 +127,6 @@ Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade
 
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
 
-### Classic UI related changes since 6.2.0rc2:
-
-
 ### Classic UI related changes since 6.1:
 
 * Some templates are being moved to `plone.app.layout`, this is ongoing.  Progress so far:
@@ -223,6 +213,15 @@ For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/
 ## Installation
 
 For installation instructions, see the [documentation](https://6.docs.plone.org/install/index.html).
+
+
+## Plone 6.1
+
+With the release of Plone 6.2, Plone 6.1 is out of maintenance support.  You are encouraged to upgrade.
+We will still do a last Plone 6.1.5 release to wrap things up.  This is expected this month (May 2026).
+
+All Plone 6 minor versions (6.0, 6.1, 6.2) get security support until 2027-12-31, 5 years after Plone 6.0.0 was released.
+If Plone 7 is not out by that time, security support will be extended.
 
 
 ## Issues
