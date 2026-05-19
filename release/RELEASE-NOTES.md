@@ -64,11 +64,9 @@ These are the main changes compared to 6.1:
 
 ## Thanks!
 
-A big thank you to everyone who worked on Plone 6.2.  Looking through all the changelogs, I found at least these excellent people who have graciously put in their time, effort, and skills:
+A big thank you to everyone who worked on Plone 6.2.  Looking through all the changelogs, I found dozens of excellent people who have graciously put in their time, effort, and skills.  We could mention you by name, but then we would miss the people who contributed outside of the pure code that we ship, for example people who work on documentation, marketing, system administration, etc.
 
-@1letter, @ale-rt, @aryan7081, @cekk, @cihanandac, @davisagli, @ericof, @erral, @gforcada, @gyst, @jackahl, @jensens, @jimbiscuit, @jmevissen, @jnptk, @Mack, @mamico, @mauritsvanrees, @MrTango, @niccokunzmann, @pbauer, @perrinjerome, @petschki, @rohnsha0, @sneridagh, @stevepiercy, @TamilNeram, @Thanush-03, @thet, @tisto, @valipod, @wesleybl
-
-Thank you very much!
+Thank you all very much!
 
 ## Volto frontend
 
