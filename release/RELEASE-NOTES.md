@@ -18,7 +18,8 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes compared to 6.2:
 
-* nothing yet
+* Removed `horse-with-no-namespace` from `requirements.txt`.
+  You can use it if you want, but it should not be needed.
 
 
 ## Volto frontend
@@ -55,7 +56,6 @@ TODO We probably want to drop 3.10, as it will be out of security support in Oct
 In Plone core we use these versions to install Plone:
 
 ```
-horse-with-no-namespace==20260202.0
 pip==26.1.1
 setuptools==81.0.0
 wheel==0.47.0
