@@ -2,7 +2,7 @@
 
 Create an issue in CMFPlone and copy the below text in it.
 Edit where needed.
-https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Plone+6.2.x
+https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Plone+6.3.x
 
 ## Release packages, update versions
 
@@ -11,7 +11,7 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 - [ ] Optionally use `bin/versioncheck` to see if any new PyPI releases are worth adding, or check the artifact of the [versioncheck GitHub Action](https://github.com/plone/buildout.coredev/actions/workflows/versioncheck.yml).
 - [ ] Check that the overrides in `versions.cfg` and `mx.ini` are in sync.
 - [ ] Release individual packages from `checkouts.cfg`.
-- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/master/src/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/src/plone/app/upgrade/v62/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
+- [ ] Check that the version numbers of [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/master/src/Products/CMFPlone/profiles/default/metadata.xml) and latest [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/src/plone/app/upgrade/v63/configure.zcml) are in sync, and that they are higher than in the previous Plone release.
 - [ ] Handle special packages, often handled by special people.  :-) You can can ping people in the release-team channel on Discord, in the current issue, or individually:
   - [ ] [`plonetheme.barceloneta`](https://github.com/plone/plonetheme.barceloneta) and [`plone.staticresources`](https://github.com/plone/plone.staticresources) need a release on PyPI and npmjs.  Maybe [`plone.classicui`](https://github.com/plone/plone.classicui).  Ask Peter Mathis (petschki), Johannes (thet) or Maik (MrTango).
   - [ ] [`plone.restapi`](https://github.com/plone/plone.restapi) and maybe [`plone.volto`](https://github.com/plone/plone.volto).  Ask David (davisagli) or Timo (tisto).
@@ -21,20 +21,20 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 
 ## Release notes, constraints, dist.plone.org
 
-- [ ] Adjust coredev branch [`release/6.2-dev`](https://github.com/plone/buildout.coredev/tree/release/6.2-dev).  Most importantly, the `auto-checkout` list in `checkouts.cfg` should be empty, and the `versions.cfg` and `requirements.txt` should be the same.  One way that works for me: `git switch release/6.2-dev; git reset --hard 6.2; git reset origin/release/6.2-dev; git checkout .package_ignores checkouts.cfg last_commit.txt mxcheckouts.ini`.  Then check which remaining changes you want to commit.
-- [ ] Update the `6.2-dev` directory on dist.plone.org, and gather files to put there:
-  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=6.2.0a1 > release/changelog.txt`.  Remove the uninteresting top lines.  You may want to link to the [Zope changelog](https://github.com/zopefoundation/Zope/blob/master/CHANGES.rst) with a specific tag.
+- [ ] Adjust coredev branch [`release/6.3-dev`](https://github.com/plone/buildout.coredev/tree/release/6.3-dev).  Most importantly, the `auto-checkout` list in `checkouts.cfg` should be empty, and the `versions.cfg` and `requirements.txt` should be the same.  One way that works for me: `git switch release/6.3-dev; git reset --hard 6.3; git reset origin/release/6.3-dev; git checkout .package_ignores checkouts.cfg last_commit.txt mxcheckouts.ini`.  Then check which remaining changes you want to commit.
+- [ ] Update the `6.3-dev` directory on dist.plone.org, and gather files to put there:
+  - [ ] Create a unified changelog based on the previous release: `bin/manage changelog --start=6.3.0a1 > release/changelog.txt`.  Remove the uninteresting top lines.  You may want to link to the [Zope changelog](https://github.com/zopefoundation/Zope/blob/master/CHANGES.rst) with a specific tag.
   - [ ] Create a file `release/RELEASE-NOTES.md`.  It may be enough to look through the changelog and copy interesting changes.
   - [ ] Get the `versions*.cfg` file and any other versions files from coredev.
   - [ ] NEW.  Run `make install`.  This uses `mxdev` to install packages and generate some files.  Most importantly this generates `constraints-mxdev.txt`.  This contains *all* constraints, *and* makes sure no constraints are in there twice (provided that `mx.ini` is correct).  This is really the only constraints file that is needed and that is correct.  So for now I will only ship this one and call it `constraints.txt` on dist.plone.org.  This may need some more thought and updates in next releases.
   - [ ] Use `tox -c release/tox.ini` to copy these files to `release/dist`.
-  - [ ] Copy (`rsync`) these files to the pending release directory: `scp release/dist/* dist.plone.org:release/6.2-dev/`
+  - [ ] Copy (`rsync`) these files to the pending release directory: `scp release/dist/* dist.plone.org:release/6.3-dev/`
 
 ## Final release, Docker
 
-- [ ] Create tag of the `release/6.2-dev` branch, e.g.  6.2.0a1, and push to GitHub.
+- [ ] Create tag of the `release/6.3-dev` branch, e.g.  6.3.0a1, and push to GitHub.
 - [ ] Make final release directory on dist.plone.org, with versions, requirements, constraints, changelog, release notes.
-- [ ] Update the "-latest" links on dist.plone.org, e.g.  `ln -sfT 6.2.0a1 6.2-latest`
+- [ ] Update the "-latest" links on dist.plone.org, e.g.  `ln -sfT 6.3.0a1 6.3-latest`
 - [ ] Create a pull request for the [`plone-backend`](https://github.com/plone/plone-backend) Docker image with the new version number.  Get this reviewed, merged, tagged, released.
 
 ## Announcements
@@ -53,7 +53,18 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Update the [release schedule](https://plone.org/download/release-schedule): note the new release, and say when the next release in this series is expected.
 - [ ] Edit the link on https://plone.org/download.
 - [ ] Announce on community.plone.org.
-- [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py#L324), update `SUPPORTED_PYTHON_VERSIONS_PLONE62` as needed. Ask Steve Piercy or do it yourself.
+- [ ] In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py), update `SUPPORTED_PYTHON_VERSIONS_PLONE63` as needed. Ask Steve Piercy or do it yourself.
 - [ ] Check if the [version policy in Volto](https://github.com/plone/volto/blob/main/docs/source/contributing/version-policy.md) is still up to date.
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).  Mostly just a search and replace, except when you want to update Volto as well.
+
+## Minor release
+
+For the first alpha version of a minor release, ask Steve Piercy or do it yourself, where `##` represents the major and minor version of Plone:
+
+* Create a new include file `docs/_inc/_install-python-plone##.md`, and update its content.
+* Create a new version upgrade guide at `docs/backend/upgrading/version-specific-migration/upgrade-to-##.md`.
+
+After the final release:
+
+* In [plone/documentation's conf.py](https://github.com/plone/documentation/blob/6.0/docs/conf.py) update `PLONE_BACKEND_MINOR_VERSION`.
