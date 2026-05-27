@@ -1,8 +1,6 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-TODO: not all if these links exist yet.  There is no hurry.
-
-* Last updated: May 22nd, 2026
+* Last updated: May 27th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
@@ -20,6 +18,9 @@ These are the main changes compared to 6.2:
 
 * Removed `horse-with-no-namespace` from `requirements.txt`.
   You can use it if you want, but it should not be needed.
+* `plone.app.layout`:
+  * Moved `plone.app.i18n.browser.languageselector` template to `plone.app.layout.viewlets`
+
 
 
 ## Volto frontend
