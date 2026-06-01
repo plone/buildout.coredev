@@ -1,64 +1,37 @@
-Repository: plone.app.textfield
+Repository: plone.app.portlets
 
 
 Branch: refs/heads/master
-Date: 2026-05-30T16:20:24+02:00
-Author: Guido A.J. Stevens (gyst) <guido.stevens@cosent.nl>
-Commit: https://github.com/plone/plone.app.textfield/commit/0da1aeec2406cf640977eb857a03e792d2c7cac2
+Date: 2026-06-01T15:51:18+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/1d9507829f997b16e2c6562bf689a2e7d548bab7
 
-[security] Always sanitize RichText output for safe-HTML output type
+Document the @@render-portlet view.
 
-Stored XSS: RichTextValue.output returned the raw, unsanitized stored
-value whenever mimeType == outputMimeType, skipping the safe_html
-transform. Because the safe-HTML output type (text/x-html-safe) is the
-type that signifies "already sanitized", any value whose stored mimeType
-equals it bypassed sanitization entirely on render. The safe_html
-transform itself is sound (it strips on* event-handler attributes and
-javascript:/data: URIs); the defect is that the transform was never
-invoked for these values.
-
-Two reproduction entrypoints reach this skip with attacker-controlled
-input:
-
-  A. Lazy constructor. RichTextValue("&lt;img src=x onerror=alert(1)&gt;")
-     defaults both mimeType and outputMimeType to None. None == None
-     satisfies the shortcut, so .output returns the raw payload. A
-     developer doing the obvious thing to set a RichText field
-     programmatically silently disables sanitization.
-
-  B. REST deserialization. A client POSTs a RichText field as
-     {"data": "&lt;img src=x onerror=alert(1)&gt;",
-      "content-type": "text/x-html-safe"}. The deserializer trusts the
-     client-supplied content-type and constructs a RichTextValue whose
-     mimeType equals outputMimeType, again hitting the skip. No
-     developer code is involved; the framework builds the unsanitized
-     value from the request.
-
-The stored value is later rendered with tal:content="structure ...",
-which performs no escaping or sanitization, so the payload executes in
-the victim's browser. Any user who can set a RichText field (or reach
-the REST endpoint) can store a payload that fires for every viewer of
-the rendered content.
-
-Fix: in RichTextValue.output_relative_to, when the (effective) output
-type is the safe-HTML type, do not honor the mimeType == outputMimeType
-shortcut. Instead treat the input as text/html and run the safe_html
-transform. The transform is idempotent for genuinely-safe markup, so
-legitimate already-sanitized content is unaffected, while
-attacker-controlled input that merely claims to be text/x-html-safe is
-sanitized. The no-op shortcut is preserved for equal non-safe mimetypes
-(e.g. text/plain -&gt; text/plain). None raw values short-circuit to None.
-
-Adds regression tests for both entrypoints: the lazy constructor
-(defaulted None mimetypes) and a value whose input mimeType spoofs the
-safe-HTML output type. Both assert the onerror payload is absent from
-the rendered output. The REST-deserializer entrypoint is covered by a
-companion test in plone.restapi, which avoids a test-time dependency on
-plone.
+Documentation about the @@render-portlet view, which can be used to reload a
+portlet via AJAX.
 
 Files changed:
-M src/plone/app/textfield/tests.py
-M src/plone/app/textfield/value.py
+A news/+document-portlet-renderer.documentation.rst
+M README.rst
 
-b'diff --git a/src/plone/app/textfield/tests.py b/src/plone/app/textfield/tests.py\nindex 0a14128..871c28f 100644\n--- a/src/plone/app/textfield/tests.py\n+++ b/src/plone/app/textfield/tests.py\n@@ -47,6 +47,39 @@ def testTransformNone(self):\n         self.assertEqual(None, value.raw)\n         self.assertEqual(None, value.output)\n \n+    def assertXSSPayloadIsSanitized(self, value):\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        output = value.output_relative_to(self.portal)\n+\n+        self.assertNotIn(payload, output)\n+        self.assertNotIn("onerror", output.lower())\n+\n+    def testOutputSanitizesLazyRichTextValueConstructor(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(payload)\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n+    def testOutputSanitizesSpoofedSafeHtmlMimeType(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        # A value whose input mimeType claims to already be the safe-HTML\n+        # output type must NOT be trusted as pre-sanitized: output must still\n+        # run safe_html. This is the same bypass an untrusted REST client\n+        # reaches by sending content-type: text/x-html-safe (covered by a\n+        # deserializer test in plone.restapi); here we exercise the value\n+        # layer directly to avoid a test-time dependency on plone.restapi.\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(\n+            payload,\n+            mimeType="text/x-html-safe",\n+            outputMimeType="text/x-html-safe",\n+        )\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n     def testTransformStructured(self):\n         from plone.app.textfield import RichText\n         from zope.interface import Interface\ndiff --git a/src/plone/app/textfield/value.py b/src/plone/app/textfield/value.py\nindex bc21f76..886c8bd 100644\n--- a/src/plone/app/textfield/value.py\n+++ b/src/plone/app/textfield/value.py\n@@ -9,6 +9,9 @@\n \n LOG = logging.getLogger("plone.app.textfield")\n \n+HTML_MIME_TYPE = "text/html"\n+SAFE_HTML_MIME_TYPE = "text/x-html-safe"\n+\n \n class RawValueHolder(Persistent):\n     """Place the raw value in a separate persistent object so that it does not\n@@ -84,6 +87,14 @@ def mimeType(self):\n     def outputMimeType(self):\n         return self._outputMimeType\n \n+    def _clone_for_transform(self, mimeType, outputMimeType):\n+        clone = self.__class__.__new__(self.__class__)\n+        clone._raw_holder = self._raw_holder\n+        clone._mimeType = mimeType\n+        clone._outputMimeType = outputMimeType\n+        clone._encoding = self.encoding\n+        return clone\n+\n     @property\n     def output(self):\n         site = getSite()\n@@ -93,7 +104,7 @@ def output_relative_to(self, context):\n         """Transforms the raw value to the output mimetype, within a specified context.\n \n         If the value\'s mimetype is already the same as the output mimetype,\n-        no transformation is performed.\n+        no transformation is performed unless safe HTML output is requested.\n \n         The context parameter is relevant when the transformation is\n         context-dependent. For example, Plone\'s resolveuid-and-caption\n@@ -103,9 +114,22 @@ def output_relative_to(self, context):\n         If a transformer cannot be found for the specified context, a\n         transformer with the site as a context is used instead.\n         """\n-        if self.mimeType == self.outputMimeType:\n+        if self.raw is None:\n+            return None\n+\n+        mimeType = self.mimeType or HTML_MIME_TYPE\n+        outputMimeType = self.outputMimeType or SAFE_HTML_MIME_TYPE\n+\n+        if mimeType == outputMimeType and outputMimeType != SAFE_HTML_MIME_TYPE:\n             return self.raw\n \n+        if mimeType == SAFE_HTML_MIME_TYPE and outputMimeType == SAFE_HTML_MIME_TYPE:\n+            # Treat stored safe HTML as HTML when rendering to the safe HTML\n+            # output type.  The safe_html transform is idempotent for already\n+            # safe markup, and this avoids trusting attacker-controlled input\n+            # that merely claims to be text/x-html-safe.\n+            mimeType = HTML_MIME_TYPE\n+\n         transformer = ITransformer(context, None)\n         if transformer is None:\n             site = getSite()\n@@ -113,7 +137,11 @@ def output_relative_to(self, context):\n             if transformer is None:\n                 return None\n \n-        return transformer(self, self.outputMimeType)\n+        value = self\n+        if mimeType != self.mimeType or outputMimeType != self.outputMimeType:\n+            value = self._clone_for_transform(mimeType, outputMimeType)\n+\n+        return transformer(value, outputMimeType)\n \n     def __repr__(self):\n         return (\n'
+b'diff --git a/README.rst b/README.rst\nindex 09e6915a..82a10d61 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -5,6 +5,34 @@ plone.app.portlets provides a Plone-specific user interface for\n plone.portlets, as well as a standard set of portlets that ship with Plone.\n \n \n+Call one portlet by URL\n+=======================\n+\n+To call a portlet by its URL, for example, to update it via an AJAX call, use\n+the `@@render-portlet` view in your portlet renderer with `portlethash` as a\n+query parameter.\n+\n+The following example shows how to construct a reload URL for a portlet::\n+\n+    from plone.app.portlets.portlets.base import Renderer\n+    from Products.CMFPlone.utils import safe_unicode\n+\n+\n+    class BasePortletRenderer(Renderer):\n+        @property\n+        def hash(self):\n+            portlethash = self.request.form.get(\n+                "portlethash", getattr(self, "__portlet_metadata__", {}).get("hash", "")\n+            )\n+            return portlethash\n+\n+        @property\n+        def reload_url(self):\n+            base_url = self.context.absolute_url()\n+            hash = safe_unicode(self.hash)\n+            return f"{base_url}/@@render-portlet?portlethash={hash}"\n+\n+\n Compatibility\n =============\n \ndiff --git a/news/+document-portlet-renderer.documentation.rst b/news/+document-portlet-renderer.documentation.rst\nnew file mode 100644\nindex 00000000..bc87746a\n--- /dev/null\n+++ b/news/+document-portlet-renderer.documentation.rst\n@@ -0,0 +1,4 @@\n+Document the @@render-portlet view.\n+Documentation about the @@render-portlet view, which can be used to reload a\n+portlet via AJAX.\n+@thet\n'
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2026-06-01T15:51:52+02:00
+Author: Johannes Raggam (thet) <thetetet@gmail.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/5c039ba17e90ded7b7a380cf29ddbe1673d4f66f
+
+Merge pull request #221 from plone/thet/document-portlet-renderer
+
+Document the @@render-portlet view.
+
+Files changed:
+A news/+document-portlet-renderer.documentation.rst
+M README.rst
+
+b'diff --git a/README.rst b/README.rst\nindex 09e6915a..82a10d61 100644\n--- a/README.rst\n+++ b/README.rst\n@@ -5,6 +5,34 @@ plone.app.portlets provides a Plone-specific user interface for\n plone.portlets, as well as a standard set of portlets that ship with Plone.\n \n \n+Call one portlet by URL\n+=======================\n+\n+To call a portlet by its URL, for example, to update it via an AJAX call, use\n+the `@@render-portlet` view in your portlet renderer with `portlethash` as a\n+query parameter.\n+\n+The following example shows how to construct a reload URL for a portlet::\n+\n+    from plone.app.portlets.portlets.base import Renderer\n+    from Products.CMFPlone.utils import safe_unicode\n+\n+\n+    class BasePortletRenderer(Renderer):\n+        @property\n+        def hash(self):\n+            portlethash = self.request.form.get(\n+                "portlethash", getattr(self, "__portlet_metadata__", {}).get("hash", "")\n+            )\n+            return portlethash\n+\n+        @property\n+        def reload_url(self):\n+            base_url = self.context.absolute_url()\n+            hash = safe_unicode(self.hash)\n+            return f"{base_url}/@@render-portlet?portlethash={hash}"\n+\n+\n Compatibility\n =============\n \ndiff --git a/news/+document-portlet-renderer.documentation.rst b/news/+document-portlet-renderer.documentation.rst\nnew file mode 100644\nindex 00000000..bc87746a\n--- /dev/null\n+++ b/news/+document-portlet-renderer.documentation.rst\n@@ -0,0 +1,4 @@\n+Document the @@render-portlet view.\n+Documentation about the @@render-portlet view, which can be used to reload a\n+portlet via AJAX.\n+@thet\n'
 
