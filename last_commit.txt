@@ -1,84 +1,20 @@
-Repository: plone.app.textfield
+Repository: plone.restapi
 
 
-Branch: refs/heads/2.x
-Date: 2026-06-05T13:12:50+02:00
-Author: Guido A.J. Stevens (gyst) <guido.stevens@cosent.nl>
-Commit: https://github.com/plone/plone.app.textfield/commit/781d517a38524087fe57525a94806684908f852f
-
-[security] Always sanitize RichText output for safe-HTML output type
-
-Stored XSS: RichTextValue.output returned the raw, unsanitized stored
-value whenever mimeType == outputMimeType, skipping the safe_html
-transform. Because the safe-HTML output type (text/x-html-safe) is the
-type that signifies "already sanitized", any value whose stored mimeType
-equals it bypassed sanitization entirely on render. The safe_html
-transform itself is sound (it strips on* event-handler attributes and
-javascript:/data: URIs); the defect is that the transform was never
-invoked for these values.
-
-Two reproduction entrypoints reach this skip with attacker-controlled
-input:
-
-  A. Lazy constructor. RichTextValue("&lt;img src=x onerror=alert(1)&gt;")
-     defaults both mimeType and outputMimeType to None. None == None
-     satisfies the shortcut, so .output returns the raw payload. A
-     developer doing the obvious thing to set a RichText field
-     programmatically silently disables sanitization.
-
-  B. REST deserialization. A client POSTs a RichText field as
-     {"data": "&lt;img src=x onerror=alert(1)&gt;",
-      "content-type": "text/x-html-safe"}. The deserializer trusts the
-     client-supplied content-type and constructs a RichTextValue whose
-     mimeType equals outputMimeType, again hitting the skip. No
-     developer code is involved; the framework builds the unsanitized
-     value from the request.
-
-The stored value is later rendered with tal:content="structure ...",
-which performs no escaping or sanitization, so the payload executes in
-the victim's browser. Any user who can set a RichText field (or reach
-the REST endpoint) can store a payload that fires for every viewer of
-the rendered content.
-
-Fix: in RichTextValue.output_relative_to, when the (effective) output
-type is the safe-HTML type, do not honor the mimeType == outputMimeType
-shortcut. Instead treat the input as text/html and run the safe_html
-transform. The transform is idempotent for genuinely-safe markup, so
-legitimate already-sanitized content is unaffected, while
-attacker-controlled input that merely claims to be text/x-html-safe is
-sanitized. The no-op shortcut is preserved for equal non-safe mimetypes
-(e.g. text/plain -&gt; text/plain). None raw values short-circuit to None.
-
-Adds regression tests for both entrypoints: the lazy constructor
-(defaulted None mimetypes) and a value whose input mimeType spoofs the
-safe-HTML output type. Both assert the onerror payload is absent from
-the rendered output. The REST-deserializer entrypoint is covered by a
-companion test in plone.restapi, which avoids a test-time dependency on
-plone.
-
-Files changed:
-A news/+b4bb1c80.bugfix.rst
-M plone/app/textfield/tests.py
-M plone/app/textfield/value.py
-
-b'diff --git a/news/+b4bb1c80.bugfix.rst b/news/+b4bb1c80.bugfix.rst\nnew file mode 100644\nindex 0000000..4b005a3\n--- /dev/null\n+++ b/news/+b4bb1c80.bugfix.rst\n@@ -0,0 +1,3 @@\n+Security: Always sanitize RichText output for safe-HTML output type.\n+See https://github.com/plone/plone.app.textfield/security/advisories/GHSA-4r4f-gg25-rmg5\n+@gyst\ndiff --git a/plone/app/textfield/tests.py b/plone/app/textfield/tests.py\nindex 8fdbe53..cbf57f6 100644\n--- a/plone/app/textfield/tests.py\n+++ b/plone/app/textfield/tests.py\n@@ -47,6 +47,39 @@ def testTransformNone(self):\n         self.assertEqual(None, value.raw)\n         self.assertEqual(None, value.output)\n \n+    def assertXSSPayloadIsSanitized(self, value):\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        output = value.output_relative_to(self.portal)\n+\n+        self.assertNotIn(payload, output)\n+        self.assertNotIn("onerror", output.lower())\n+\n+    def testOutputSanitizesLazyRichTextValueConstructor(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(payload)\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n+    def testOutputSanitizesSpoofedSafeHtmlMimeType(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        # A value whose input mimeType claims to already be the safe-HTML\n+        # output type must NOT be trusted as pre-sanitized: output must still\n+        # run safe_html. This is the same bypass an untrusted REST client\n+        # reaches by sending content-type: text/x-html-safe (covered by a\n+        # deserializer test in plone.restapi); here we exercise the value\n+        # layer directly to avoid a test-time dependency on plone.restapi.\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(\n+            payload,\n+            mimeType="text/x-html-safe",\n+            outputMimeType="text/x-html-safe",\n+        )\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n     def testTransformStructured(self):\n         from plone.app.textfield import RichText\n         from zope.interface import Interface\ndiff --git a/plone/app/textfield/value.py b/plone/app/textfield/value.py\nindex bc21f76..886c8bd 100644\n--- a/plone/app/textfield/value.py\n+++ b/plone/app/textfield/value.py\n@@ -9,6 +9,9 @@\n \n LOG = logging.getLogger("plone.app.textfield")\n \n+HTML_MIME_TYPE = "text/html"\n+SAFE_HTML_MIME_TYPE = "text/x-html-safe"\n+\n \n class RawValueHolder(Persistent):\n     """Place the raw value in a separate persistent object so that it does not\n@@ -84,6 +87,14 @@ def mimeType(self):\n     def outputMimeType(self):\n         return self._outputMimeType\n \n+    def _clone_for_transform(self, mimeType, outputMimeType):\n+        clone = self.__class__.__new__(self.__class__)\n+        clone._raw_holder = self._raw_holder\n+        clone._mimeType = mimeType\n+        clone._outputMimeType = outputMimeType\n+        clone._encoding = self.encoding\n+        return clone\n+\n     @property\n     def output(self):\n         site = getSite()\n@@ -93,7 +104,7 @@ def output_relative_to(self, context):\n         """Transforms the raw value to the output mimetype, within a specified context.\n \n         If the value\'s mimetype is already the same as the output mimetype,\n-        no transformation is performed.\n+        no transformation is performed unless safe HTML output is requested.\n \n         The context parameter is relevant when the transformation is\n         context-dependent. For example, Plone\'s resolveuid-and-caption\n@@ -103,9 +114,22 @@ def output_relative_to(self, context):\n         If a transformer cannot be found for the specified context, a\n         transformer with the site as a context is used instead.\n         """\n-        if self.mimeType == self.outputMimeType:\n+        if self.raw is None:\n+            return None\n+\n+        mimeType = self.mimeType or HTML_MIME_TYPE\n+        outputMimeType = self.outputMimeType or SAFE_HTML_MIME_TYPE\n+\n+        if mimeType == outputMimeType and outputMimeType != SAFE_HTML_MIME_TYPE:\n             return self.raw\n \n+        if mimeType == SAFE_HTML_MIME_TYPE and outputMimeType == SAFE_HTML_MIME_TYPE:\n+            # Treat stored safe HTML as HTML when rendering to the safe HTML\n+            # output type.  The safe_html transform is idempotent for already\n+            # safe markup, and this avoids trusting attacker-controlled input\n+            # that merely claims to be text/x-html-safe.\n+            mimeType = HTML_MIME_TYPE\n+\n         transformer = ITransformer(context, None)\n         if transformer is None:\n             site = getSite()\n@@ -113,7 +137,11 @@ def output_relative_to(self, context):\n             if transformer is None:\n                 return None\n \n-        return transformer(self, self.outputMimeType)\n+        value = self\n+        if mimeType != self.mimeType or outputMimeType != self.outputMimeType:\n+            value = self._clone_for_transform(mimeType, outputMimeType)\n+\n+        return transformer(value, outputMimeType)\n \n     def __repr__(self):\n         return (\n'
-
-Repository: plone.app.textfield
-
-
-Branch: refs/heads/2.x
-Date: 2026-06-05T20:40:24+02:00
+Branch: refs/heads/9.x.x
+Date: 2026-06-05T20:40:49+02:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.textfield/commit/6f5cc7bcc56a04eb5c8682fdee0e392c7452e1d7
+Commit: https://github.com/plone/plone.restapi/commit/e0b392fd4792aa0e16decd086b1afbe5168a362a
 
 Merge commit from fork
 
-[security] Always sanitize RichText output for safe-HTML output type
+See https://github.com/plone/plone.restapi/security/advisories/GHSA-8rqh-vxpr-x77p
+Patch by @gyst and @mauritsvanrees.
 
 Files changed:
-A news/+b4bb1c80.bugfix.rst
-M plone/app/textfield/tests.py
-M plone/app/textfield/value.py
+A news/+a52fa1a8.bugfix.md
+M src/plone/restapi/deserializer/dxfields.py
+M src/plone/restapi/tests/test_dxfield_deserializer.py
 
-b'diff --git a/news/+b4bb1c80.bugfix.rst b/news/+b4bb1c80.bugfix.rst\nnew file mode 100644\nindex 0000000..4b005a3\n--- /dev/null\n+++ b/news/+b4bb1c80.bugfix.rst\n@@ -0,0 +1,3 @@\n+Security: Always sanitize RichText output for safe-HTML output type.\n+See https://github.com/plone/plone.app.textfield/security/advisories/GHSA-4r4f-gg25-rmg5\n+@gyst\ndiff --git a/plone/app/textfield/tests.py b/plone/app/textfield/tests.py\nindex 8fdbe53..cbf57f6 100644\n--- a/plone/app/textfield/tests.py\n+++ b/plone/app/textfield/tests.py\n@@ -47,6 +47,39 @@ def testTransformNone(self):\n         self.assertEqual(None, value.raw)\n         self.assertEqual(None, value.output)\n \n+    def assertXSSPayloadIsSanitized(self, value):\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        output = value.output_relative_to(self.portal)\n+\n+        self.assertNotIn(payload, output)\n+        self.assertNotIn("onerror", output.lower())\n+\n+    def testOutputSanitizesLazyRichTextValueConstructor(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(payload)\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n+    def testOutputSanitizesSpoofedSafeHtmlMimeType(self):\n+        from plone.app.textfield.value import RichTextValue\n+\n+        # A value whose input mimeType claims to already be the safe-HTML\n+        # output type must NOT be trusted as pre-sanitized: output must still\n+        # run safe_html. This is the same bypass an untrusted REST client\n+        # reaches by sending content-type: text/x-html-safe (covered by a\n+        # deserializer test in plone.restapi); here we exercise the value\n+        # layer directly to avoid a test-time dependency on plone.restapi.\n+        payload = \'<img src=x onerror="alert(1)">\'\n+        value = RichTextValue(\n+            payload,\n+            mimeType="text/x-html-safe",\n+            outputMimeType="text/x-html-safe",\n+        )\n+\n+        self.assertXSSPayloadIsSanitized(value)\n+\n     def testTransformStructured(self):\n         from plone.app.textfield import RichText\n         from zope.interface import Interface\ndiff --git a/plone/app/textfield/value.py b/plone/app/textfield/value.py\nindex bc21f76..886c8bd 100644\n--- a/plone/app/textfield/value.py\n+++ b/plone/app/textfield/value.py\n@@ -9,6 +9,9 @@\n \n LOG = logging.getLogger("plone.app.textfield")\n \n+HTML_MIME_TYPE = "text/html"\n+SAFE_HTML_MIME_TYPE = "text/x-html-safe"\n+\n \n class RawValueHolder(Persistent):\n     """Place the raw value in a separate persistent object so that it does not\n@@ -84,6 +87,14 @@ def mimeType(self):\n     def outputMimeType(self):\n         return self._outputMimeType\n \n+    def _clone_for_transform(self, mimeType, outputMimeType):\n+        clone = self.__class__.__new__(self.__class__)\n+        clone._raw_holder = self._raw_holder\n+        clone._mimeType = mimeType\n+        clone._outputMimeType = outputMimeType\n+        clone._encoding = self.encoding\n+        return clone\n+\n     @property\n     def output(self):\n         site = getSite()\n@@ -93,7 +104,7 @@ def output_relative_to(self, context):\n         """Transforms the raw value to the output mimetype, within a specified context.\n \n         If the value\'s mimetype is already the same as the output mimetype,\n-        no transformation is performed.\n+        no transformation is performed unless safe HTML output is requested.\n \n         The context parameter is relevant when the transformation is\n         context-dependent. For example, Plone\'s resolveuid-and-caption\n@@ -103,9 +114,22 @@ def output_relative_to(self, context):\n         If a transformer cannot be found for the specified context, a\n         transformer with the site as a context is used instead.\n         """\n-        if self.mimeType == self.outputMimeType:\n+        if self.raw is None:\n+            return None\n+\n+        mimeType = self.mimeType or HTML_MIME_TYPE\n+        outputMimeType = self.outputMimeType or SAFE_HTML_MIME_TYPE\n+\n+        if mimeType == outputMimeType and outputMimeType != SAFE_HTML_MIME_TYPE:\n             return self.raw\n \n+        if mimeType == SAFE_HTML_MIME_TYPE and outputMimeType == SAFE_HTML_MIME_TYPE:\n+            # Treat stored safe HTML as HTML when rendering to the safe HTML\n+            # output type.  The safe_html transform is idempotent for already\n+            # safe markup, and this avoids trusting attacker-controlled input\n+            # that merely claims to be text/x-html-safe.\n+            mimeType = HTML_MIME_TYPE\n+\n         transformer = ITransformer(context, None)\n         if transformer is None:\n             site = getSite()\n@@ -113,7 +137,11 @@ def output_relative_to(self, context):\n             if transformer is None:\n                 return None\n \n-        return transformer(self, self.outputMimeType)\n+        value = self\n+        if mimeType != self.mimeType or outputMimeType != self.outputMimeType:\n+            value = self._clone_for_transform(mimeType, outputMimeType)\n+\n+        return transformer(value, outputMimeType)\n \n     def __repr__(self):\n         return (\n'
+b'diff --git a/news/+a52fa1a8.bugfix.md b/news/+a52fa1a8.bugfix.md\nnew file mode 100644\nindex 000000000..43eb26822\n--- /dev/null\n+++ b/news/+a52fa1a8.bugfix.md\n@@ -0,0 +1,5 @@\n+Security: in rich text fields, do not accept input that claims it is already sanitized.\n+Specifically, raise a ValueError when deserializing a text field with input mimetype `text/x-html-safe`.\n+See https://github.com/plone/plone.restapi/security/advisories/GHSA-8rqh-vxpr-x77p\n+@gyst, @mauritsvanrees\n+\ndiff --git a/src/plone/restapi/deserializer/dxfields.py b/src/plone/restapi/deserializer/dxfields.py\nindex 47ae4dfba..03b5bb4ac 100644\n--- a/src/plone/restapi/deserializer/dxfields.py\n+++ b/src/plone/restapi/deserializer/dxfields.py\n@@ -286,7 +286,7 @@ def __call__(self, value):\n @adapter(IRichText, IDexterityContent, IBrowserRequest)\n class RichTextFieldDeserializer(DefaultFieldDeserializer):\n     def __call__(self, value):\n-        content_type = self.field.default_mime_type\n+        content_type = orig_content_type = self.field.default_mime_type\n         encoding = "utf8"\n         if isinstance(value, dict):\n             content_type = value.get("content-type", content_type)\n@@ -298,6 +298,10 @@ def __call__(self, value):\n                 data = f.read().decode("utf8")\n         else:\n             data = value\n+        # Defense-in-depth: a client must not be able to claim its payload\n+        # is already sanitized by setting the content-type to safe html.\n+        if content_type == "text/x-html-safe" and content_type != orig_content_type:\n+            raise ValueError("Not allowed to set content-type text/x-html-safe")\n         value = RichTextValue(\n             raw=html_parser.unescape(data),\n             mimeType=content_type,\ndiff --git a/src/plone/restapi/tests/test_dxfield_deserializer.py b/src/plone/restapi/tests/test_dxfield_deserializer.py\nindex 5a4670c78..373c2ecf3 100644\n--- a/src/plone/restapi/tests/test_dxfield_deserializer.py\n+++ b/src/plone/restapi/tests/test_dxfield_deserializer.py\n@@ -316,6 +316,23 @@ def test_richtext_deserialization_sets_encoding(self):\n         )\n         self.assertEqual("latin1", value.encoding)\n \n+    def test_richtext_deserialization_rejects_spoofed_safe_mime_type(self):\n+        # Defense-in-depth: a client must not be able to claim its payload\n+        # is already sanitized by setting the content-type to safe html.\n+        from plone.app.textfield import RichText\n+\n+        field = RichText()\n+        deserializer = getMultiAdapter(\n+            (field, self.portal.doc1, self.request), IFieldDeserializer\n+        )\n+        with self.assertRaises(ValueError):\n+            deserializer(\n+                {\n+                    "data": "<img src=x onerror=alert(1)>",\n+                    "content-type": "text/x-html-safe",\n+                }\n+            )\n+\n     def test_richtext_deserialization_fix_apostrophe(self):\n         value = self.deserialize("test_richtext_field", "<p>char with &#x27;</p>")\n         self.assertEqual("<p>char with \'</p>", value.raw)\n'
 
