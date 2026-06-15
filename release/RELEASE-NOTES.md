@@ -1,6 +1,6 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-* Last updated: May 28th, 2026
+* Last updated: June 15th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
@@ -20,7 +20,9 @@ These are the main changes compared to 6.2:
   You can use it if you want, but it should not be needed.
 * `plone.app.layout`:
   * Moved `plone.app.i18n.browser.languageselector` template to `plone.app.layout.viewlets`
-
+  * Move `plone.app.registry` Classic-UI browser templates and control panel views to `plone.app.layout.controlpanels.registry`.
+  * Move `plone.app.linkintegrity` template/views to `plone.app.layout.views.linkintegrity`
+  * Move UI related code and template of sharing view from `plone.app.workflow` to `plone.app.layout`.
 
 
 ## Volto frontend
@@ -57,7 +59,7 @@ TODO We probably want to drop 3.10, as it will be out of security support in Oct
 In Plone core we use these versions to install Plone:
 
 ```
-pip==26.1.1
+pip==26.1.2
 setuptools==81.0.0
 wheel==0.47.0
 zc.buildout==5.2.0
