@@ -1,98 +1,38 @@
-Repository: plone.app.dexterity
+Repository: plone.registry
 
 
 Branch: refs/heads/master
-Date: 2026-06-07T08:55:08+02:00
-Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
-Commit: https://github.com/plone/plone.app.dexterity/commit/411689047f9a3521899ae6992a9b0efbd0592a8f
+Date: 2026-06-11T21:14:14+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.registry/commit/181f8665c79964ec04cb0ee62f5e16f6937069eb
 
-fix max_length for title and description
+Invalidate request cache before firing RecordModifiedEvent
 
 Files changed:
-M src/plone/app/dexterity/behaviors/metadata.py
-M src/plone/app/dexterity/behaviors/tests/test_metadata.py
+A news/cache_invalidation.bugfix
+M src/plone/registry/record.py
+M src/plone/registry/registry.py
+M src/plone/registry/tests.py
 
-b'diff --git a/src/plone/app/dexterity/behaviors/metadata.py b/src/plone/app/dexterity/behaviors/metadata.py\nindex 3ae00f36..3b36c1c1 100644\n--- a/src/plone/app/dexterity/behaviors/metadata.py\n+++ b/src/plone/app/dexterity/behaviors/metadata.py\n@@ -65,7 +65,19 @@ def default_language(context):\n @provider(IFormFieldProvider)\n class IBasic(model.Schema):\n     # default fieldset\n-    title = schema.TextLine(title=_("label_title", default="Title"), required=True)\n+\n+    # max_length keeps the site responsive: title and description are rendered\n+    # in listings, navigation, and the ZMI, so very large values slow down\n+    # many pages at once.  To raise or remove the limit in a downstream package:\n+    #\n+    #   from plone.app.dexterity.behaviors.metadata import IBasic\n+    #   IBasic["title"].max_length = 5000        # or None to remove\n+    #   IBasic["description"].max_length = 50000  # same pattern for description\n+    #\n+    # Place this in your package\'s __init__.py or any other Python module loaded at startup.\n+    title = schema.TextLine(\n+        title=_("label_title", default="Title"), required=True, max_length=1024\n+    )\n \n     description = schema.Text(\n         title=_("label_description", default="Summary"),\n@@ -74,6 +86,7 @@ class IBasic(model.Schema):\n         ),\n         required=False,\n         missing_value="",\n+        max_length=10000,\n     )\n \n     directives.order_before(description="*")\ndiff --git a/src/plone/app/dexterity/behaviors/tests/test_metadata.py b/src/plone/app/dexterity/behaviors/tests/test_metadata.py\nindex 0df44892..891f291c 100644\n--- a/src/plone/app/dexterity/behaviors/tests/test_metadata.py\n+++ b/src/plone/app/dexterity/behaviors/tests/test_metadata.py\n@@ -47,6 +47,52 @@ def test_description_remains_newlines(self):\n         self.assertEqual("foo\\r\\nbar\\nbaz\\r", b.context.description)\n \n \n+class TestIBasicMaxLength(unittest.TestCase):\n+    def test_title_max_length(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        self.assertEqual(IBasic["title"].max_length, 1024)\n+\n+    def test_description_max_length(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        self.assertEqual(IBasic["description"].max_length, 10000)\n+\n+    def test_title_too_long_fails_validation(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+        from zope.schema import ValidationError\n+\n+        with self.assertRaises(ValidationError):\n+            IBasic["title"].validate("x" * 1025)\n+\n+    def test_description_too_long_fails_validation(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+        from zope.schema import ValidationError\n+\n+        with self.assertRaises(ValidationError):\n+            IBasic["description"].validate("x" * 10001)\n+\n+    def test_title_at_max_length_passes(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        IBasic["title"].validate("x" * 1024)  # must not raise\n+\n+    def test_description_at_max_length_passes(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        IBasic["description"].validate("x" * 10000)  # must not raise\n+\n+    def test_title_max_length_can_be_overridden(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        original = IBasic["title"].max_length\n+        try:\n+            IBasic["title"].max_length = 5000\n+            IBasic["title"].validate("x" * 5000)  # must not raise\n+        finally:\n+            IBasic["title"].max_length = original\n+\n+\n class TestCategorization(unittest.TestCase):\n     def _makeOne(self):\n         class Dummy:\n'
+b'diff --git a/news/cache_invalidation.bugfix b/news/cache_invalidation.bugfix\nnew file mode 100644\nindex 0000000..fcca023\n--- /dev/null\n+++ b/news/cache_invalidation.bugfix\n@@ -0,0 +1,2 @@\n+Invalidate the request cache for a record before firing the IRecordModifiedEvent to ensure subscribers see the new value.\n+[erral]\ndiff --git a/src/plone/registry/record.py b/src/plone/registry/record.py\nindex 27d9930..d6d1f97 100644\n--- a/src/plone/registry/record.py\n+++ b/src/plone/registry/record.py\n@@ -81,6 +81,8 @@ def _set_value(self, value):\n         self._value = value\n \n         if self.__parent__ is not None:\n+            if hasattr(self.__parent__.records, "_invalidate_key_cache"):\n+                self.__parent__.records._invalidate_key_cache(self.__name__)\n             self.__parent__.records._values[self.__name__] = value\n \n         notify(RecordModifiedEvent(self, oldValue, value))\ndiff --git a/src/plone/registry/registry.py b/src/plone/registry/registry.py\nindex 50ef086..638c13b 100644\n--- a/src/plone/registry/registry.py\n+++ b/src/plone/registry/registry.py\n@@ -224,6 +224,11 @@ def _invalidate_cache(self):\n         if cache is not None:\n             cache.clear()\n \n+    def _invalidate_key_cache(self, name):\n+        cache = _get_request_cache(self.__parent__)\n+        if cache is not None and name in cache:\n+            del cache[name]\n+\n     def __setitem__(self, name, record):\n         if not self._validkey(name):\n             raise InvalidRegistryKey(record)\ndiff --git a/src/plone/registry/tests.py b/src/plone/registry/tests.py\nindex 0d298ea..e4d7ec0 100644\n--- a/src/plone/registry/tests.py\n+++ b/src/plone/registry/tests.py\n@@ -207,6 +207,33 @@ def _setCache(self, data):\n         """Inject values into the per-registry cache on the request."""\n         self.request.other["_plone_registry_cache"] = {id(self.registry): data}\n \n+    def test_subscriber_sees_new_value(self):\n+        """A subscriber should see the new value even if the request cache exists."""\n+        from plone.registry.interfaces import IRecordModifiedEvent\n+        from zope.component import provideHandler\n+\n+        self._setRequest()\n+\n+        # Populate cache\n+        self.assertEqual(self.registry["test.key1"], "value1")\n+\n+        seen_values = []\n+\n+        def subscriber(event):\n+            # Try to read the value from the registry\n+            seen_values.append(self.registry["test.key1"])\n+\n+        provideHandler(subscriber, (IRecordModifiedEvent,))\n+\n+        # Update value\n+        self.registry["test.key1"] = "new_value"\n+\n+        self.assertEqual(\n+            seen_values,\n+            ["new_value"],\n+            "Subscriber saw the old cached value instead of the new one",\n+        )\n+\n     # --- __getitem__ tests ---\n \n     def test_getitem_no_request(self):\n'
 
-Repository: plone.app.dexterity
+Repository: plone.registry
 
 
 Branch: refs/heads/master
-Date: 2026-06-07T08:58:32+02:00
-Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
-Commit: https://github.com/plone/plone.app.dexterity/commit/1c6e89305a8b39e74bcb976c8761a09d5b43ecc2
+Date: 2026-06-16T10:44:02+02:00
+Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
+Commit: https://github.com/plone/plone.registry/commit/565c47b1cf3b4ce35c23da99b12c5e0b3ecd8d92
 
-changelog
+Merge pull request #70 from plone/fix-stale-cache-in-subscribers
 
-Files changed:
-A news/433.bugfix
-
-b'diff --git a/news/433.bugfix b/news/433.bugfix\nnew file mode 100644\nindex 00000000..b695f06a\n--- /dev/null\n+++ b/news/433.bugfix\n@@ -0,0 +1,12 @@\n+Added ``max_length`` constraints to the ``title`` (1024 characters) and\n+``description`` (10000 characters) fields of the ``IBasic`` behavior.\n+Very long values slow down the site because these fields are rendered in\n+listings, navigation, and the management interface.\n+Developers who need higher limits can override the fields in a downstream\n+package::\n+\n+    from plone.app.dexterity.behaviors.metadata import IBasic\n+    IBasic["title"].max_length = 5000        # or None to remove the limit\n+    IBasic["description"].max_length = 50000  # same pattern for description\n+\n+Place this in your package\'s ``__init__.py`` or any other Python module loaded at startup.\n'
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/master
-Date: 2026-06-08T14:37:59+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/cbcef731c0882146b9bf30688cdc639d879878fb
-
-Define MAX_DESCRIPTION_LENGTH and MAX_TITLE_LENGTH in new config.py.
+Invalidate request cache before firing RecordModifiedEvent
 
 Files changed:
-A src/plone/app/dexterity/config.py
-M src/plone/app/dexterity/behaviors/metadata.py
+A news/cache_invalidation.bugfix
+M src/plone/registry/record.py
+M src/plone/registry/registry.py
+M src/plone/registry/tests.py
 
-b'diff --git a/src/plone/app/dexterity/behaviors/metadata.py b/src/plone/app/dexterity/behaviors/metadata.py\nindex 3b36c1c1..17b916db 100644\n--- a/src/plone/app/dexterity/behaviors/metadata.py\n+++ b/src/plone/app/dexterity/behaviors/metadata.py\n@@ -2,6 +2,8 @@\n from datetime import datetime\n from DateTime import DateTime\n from plone.app.dexterity import _\n+from plone.app.dexterity.config import MAX_DESCRIPTION_LENGTH\n+from plone.app.dexterity.config import MAX_TITLE_LENGTH\n from plone.app.z3cform.widgets.select import AjaxSelectFieldWidget\n from plone.app.z3cform.widgets.select import Select2FieldWidget\n from plone.autoform import directives\n@@ -76,7 +78,7 @@ class IBasic(model.Schema):\n     #\n     # Place this in your package\'s __init__.py or any other Python module loaded at startup.\n     title = schema.TextLine(\n-        title=_("label_title", default="Title"), required=True, max_length=1024\n+        title=_("label_title", default="Title"), required=True, max_length=MAX_TITLE_LENGTH\n     )\n \n     description = schema.Text(\n@@ -86,7 +88,7 @@ class IBasic(model.Schema):\n         ),\n         required=False,\n         missing_value="",\n-        max_length=10000,\n+        max_length=MAX_DESCRIPTION_LENGTH,\n     )\n \n     directives.order_before(description="*")\ndiff --git a/src/plone/app/dexterity/config.py b/src/plone/app/dexterity/config.py\nnew file mode 100644\nindex 00000000..7a9a020a\n--- /dev/null\n+++ b/src/plone/app/dexterity/config.py\n@@ -0,0 +1,2 @@\n+MAX_DESCRIPTION_LENGTH = 10000\n+MAX_TITLE_LENGTH = 1024\n'
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/master
-Date: 2026-06-08T15:38:33+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/f3596538cf7670bb8bc27b0dfa0b1da41c8b8a3a
-
-Don's set a too long context title in 'name from filename'.
-
-Files changed:
-M src/plone/app/dexterity/behaviors/filename.py
-
-b'diff --git a/src/plone/app/dexterity/behaviors/filename.py b/src/plone/app/dexterity/behaviors/filename.py\nindex fc3987c3..64280377 100644\n--- a/src/plone/app/dexterity/behaviors/filename.py\n+++ b/src/plone/app/dexterity/behaviors/filename.py\n@@ -1,4 +1,5 @@\n from plone.app.content.interfaces import INameFromTitle\n+from plone.app.dexterity.config import MAX_TITLE_LENGTH\n from plone.base.utils import safe_hasattr\n from plone.rfc822.interfaces import IPrimaryFieldInfo\n from zope.component import adapter\n@@ -23,7 +24,7 @@ def __new__(cls, context):\n         instance = super().__new__(cls)\n         instance.title = filename\n         if safe_hasattr(context, "title") and not context.title:\n-            context.title = filename\n+            context.title = filename[:MAX_TITLE_LENGTH]\n         return instance\n \n     def __init__(self, context):\n'
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/master
-Date: 2026-06-08T16:50:22+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/3d1fe372ce282a4c4912a76e979633cf16da2db9
-
-black
-
-Files changed:
-M src/plone/app/dexterity/behaviors/metadata.py
-
-b'diff --git a/src/plone/app/dexterity/behaviors/metadata.py b/src/plone/app/dexterity/behaviors/metadata.py\nindex 17b916db..a9653bb5 100644\n--- a/src/plone/app/dexterity/behaviors/metadata.py\n+++ b/src/plone/app/dexterity/behaviors/metadata.py\n@@ -78,7 +78,9 @@ class IBasic(model.Schema):\n     #\n     # Place this in your package\'s __init__.py or any other Python module loaded at startup.\n     title = schema.TextLine(\n-        title=_("label_title", default="Title"), required=True, max_length=MAX_TITLE_LENGTH\n+        title=_("label_title", default="Title"),\n+        required=True,\n+        max_length=MAX_TITLE_LENGTH,\n     )\n \n     description = schema.Text(\n'
-
-Repository: plone.app.dexterity
-
-
-Branch: refs/heads/master
-Date: 2026-06-15T21:26:57+02:00
-Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.app.dexterity/commit/2fdceb120ca86682a408f3a14753cfcf5126d9d9
-
-Merge pull request #433 from plone/title_max_length
-
-Add max_length to IBasic title and description fields
-
-Files changed:
-A news/433.bugfix
-A src/plone/app/dexterity/config.py
-M src/plone/app/dexterity/behaviors/filename.py
-M src/plone/app/dexterity/behaviors/metadata.py
-M src/plone/app/dexterity/behaviors/tests/test_metadata.py
-
-b'diff --git a/news/433.bugfix b/news/433.bugfix\nnew file mode 100644\nindex 00000000..b695f06a\n--- /dev/null\n+++ b/news/433.bugfix\n@@ -0,0 +1,12 @@\n+Added ``max_length`` constraints to the ``title`` (1024 characters) and\n+``description`` (10000 characters) fields of the ``IBasic`` behavior.\n+Very long values slow down the site because these fields are rendered in\n+listings, navigation, and the management interface.\n+Developers who need higher limits can override the fields in a downstream\n+package::\n+\n+    from plone.app.dexterity.behaviors.metadata import IBasic\n+    IBasic["title"].max_length = 5000        # or None to remove the limit\n+    IBasic["description"].max_length = 50000  # same pattern for description\n+\n+Place this in your package\'s ``__init__.py`` or any other Python module loaded at startup.\ndiff --git a/src/plone/app/dexterity/behaviors/filename.py b/src/plone/app/dexterity/behaviors/filename.py\nindex fc3987c3..64280377 100644\n--- a/src/plone/app/dexterity/behaviors/filename.py\n+++ b/src/plone/app/dexterity/behaviors/filename.py\n@@ -1,4 +1,5 @@\n from plone.app.content.interfaces import INameFromTitle\n+from plone.app.dexterity.config import MAX_TITLE_LENGTH\n from plone.base.utils import safe_hasattr\n from plone.rfc822.interfaces import IPrimaryFieldInfo\n from zope.component import adapter\n@@ -23,7 +24,7 @@ def __new__(cls, context):\n         instance = super().__new__(cls)\n         instance.title = filename\n         if safe_hasattr(context, "title") and not context.title:\n-            context.title = filename\n+            context.title = filename[:MAX_TITLE_LENGTH]\n         return instance\n \n     def __init__(self, context):\ndiff --git a/src/plone/app/dexterity/behaviors/metadata.py b/src/plone/app/dexterity/behaviors/metadata.py\nindex 3ae00f36..a9653bb5 100644\n--- a/src/plone/app/dexterity/behaviors/metadata.py\n+++ b/src/plone/app/dexterity/behaviors/metadata.py\n@@ -2,6 +2,8 @@\n from datetime import datetime\n from DateTime import DateTime\n from plone.app.dexterity import _\n+from plone.app.dexterity.config import MAX_DESCRIPTION_LENGTH\n+from plone.app.dexterity.config import MAX_TITLE_LENGTH\n from plone.app.z3cform.widgets.select import AjaxSelectFieldWidget\n from plone.app.z3cform.widgets.select import Select2FieldWidget\n from plone.autoform import directives\n@@ -65,7 +67,21 @@ def default_language(context):\n @provider(IFormFieldProvider)\n class IBasic(model.Schema):\n     # default fieldset\n-    title = schema.TextLine(title=_("label_title", default="Title"), required=True)\n+\n+    # max_length keeps the site responsive: title and description are rendered\n+    # in listings, navigation, and the ZMI, so very large values slow down\n+    # many pages at once.  To raise or remove the limit in a downstream package:\n+    #\n+    #   from plone.app.dexterity.behaviors.metadata import IBasic\n+    #   IBasic["title"].max_length = 5000        # or None to remove\n+    #   IBasic["description"].max_length = 50000  # same pattern for description\n+    #\n+    # Place this in your package\'s __init__.py or any other Python module loaded at startup.\n+    title = schema.TextLine(\n+        title=_("label_title", default="Title"),\n+        required=True,\n+        max_length=MAX_TITLE_LENGTH,\n+    )\n \n     description = schema.Text(\n         title=_("label_description", default="Summary"),\n@@ -74,6 +90,7 @@ class IBasic(model.Schema):\n         ),\n         required=False,\n         missing_value="",\n+        max_length=MAX_DESCRIPTION_LENGTH,\n     )\n \n     directives.order_before(description="*")\ndiff --git a/src/plone/app/dexterity/behaviors/tests/test_metadata.py b/src/plone/app/dexterity/behaviors/tests/test_metadata.py\nindex 0df44892..891f291c 100644\n--- a/src/plone/app/dexterity/behaviors/tests/test_metadata.py\n+++ b/src/plone/app/dexterity/behaviors/tests/test_metadata.py\n@@ -47,6 +47,52 @@ def test_description_remains_newlines(self):\n         self.assertEqual("foo\\r\\nbar\\nbaz\\r", b.context.description)\n \n \n+class TestIBasicMaxLength(unittest.TestCase):\n+    def test_title_max_length(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        self.assertEqual(IBasic["title"].max_length, 1024)\n+\n+    def test_description_max_length(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        self.assertEqual(IBasic["description"].max_length, 10000)\n+\n+    def test_title_too_long_fails_validation(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+        from zope.schema import ValidationError\n+\n+        with self.assertRaises(ValidationError):\n+            IBasic["title"].validate("x" * 1025)\n+\n+    def test_description_too_long_fails_validation(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+        from zope.schema import ValidationError\n+\n+        with self.assertRaises(ValidationError):\n+            IBasic["description"].validate("x" * 10001)\n+\n+    def test_title_at_max_length_passes(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        IBasic["title"].validate("x" * 1024)  # must not raise\n+\n+    def test_description_at_max_length_passes(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        IBasic["description"].validate("x" * 10000)  # must not raise\n+\n+    def test_title_max_length_can_be_overridden(self):\n+        from plone.app.dexterity.behaviors.metadata import IBasic\n+\n+        original = IBasic["title"].max_length\n+        try:\n+            IBasic["title"].max_length = 5000\n+            IBasic["title"].validate("x" * 5000)  # must not raise\n+        finally:\n+            IBasic["title"].max_length = original\n+\n+\n class TestCategorization(unittest.TestCase):\n     def _makeOne(self):\n         class Dummy:\ndiff --git a/src/plone/app/dexterity/config.py b/src/plone/app/dexterity/config.py\nnew file mode 100644\nindex 00000000..7a9a020a\n--- /dev/null\n+++ b/src/plone/app/dexterity/config.py\n@@ -0,0 +1,2 @@\n+MAX_DESCRIPTION_LENGTH = 10000\n+MAX_TITLE_LENGTH = 1024\n'
+b'diff --git a/news/cache_invalidation.bugfix b/news/cache_invalidation.bugfix\nnew file mode 100644\nindex 0000000..fcca023\n--- /dev/null\n+++ b/news/cache_invalidation.bugfix\n@@ -0,0 +1,2 @@\n+Invalidate the request cache for a record before firing the IRecordModifiedEvent to ensure subscribers see the new value.\n+[erral]\ndiff --git a/src/plone/registry/record.py b/src/plone/registry/record.py\nindex 27d9930..d6d1f97 100644\n--- a/src/plone/registry/record.py\n+++ b/src/plone/registry/record.py\n@@ -81,6 +81,8 @@ def _set_value(self, value):\n         self._value = value\n \n         if self.__parent__ is not None:\n+            if hasattr(self.__parent__.records, "_invalidate_key_cache"):\n+                self.__parent__.records._invalidate_key_cache(self.__name__)\n             self.__parent__.records._values[self.__name__] = value\n \n         notify(RecordModifiedEvent(self, oldValue, value))\ndiff --git a/src/plone/registry/registry.py b/src/plone/registry/registry.py\nindex 50ef086..638c13b 100644\n--- a/src/plone/registry/registry.py\n+++ b/src/plone/registry/registry.py\n@@ -224,6 +224,11 @@ def _invalidate_cache(self):\n         if cache is not None:\n             cache.clear()\n \n+    def _invalidate_key_cache(self, name):\n+        cache = _get_request_cache(self.__parent__)\n+        if cache is not None and name in cache:\n+            del cache[name]\n+\n     def __setitem__(self, name, record):\n         if not self._validkey(name):\n             raise InvalidRegistryKey(record)\ndiff --git a/src/plone/registry/tests.py b/src/plone/registry/tests.py\nindex 0d298ea..e4d7ec0 100644\n--- a/src/plone/registry/tests.py\n+++ b/src/plone/registry/tests.py\n@@ -207,6 +207,33 @@ def _setCache(self, data):\n         """Inject values into the per-registry cache on the request."""\n         self.request.other["_plone_registry_cache"] = {id(self.registry): data}\n \n+    def test_subscriber_sees_new_value(self):\n+        """A subscriber should see the new value even if the request cache exists."""\n+        from plone.registry.interfaces import IRecordModifiedEvent\n+        from zope.component import provideHandler\n+\n+        self._setRequest()\n+\n+        # Populate cache\n+        self.assertEqual(self.registry["test.key1"], "value1")\n+\n+        seen_values = []\n+\n+        def subscriber(event):\n+            # Try to read the value from the registry\n+            seen_values.append(self.registry["test.key1"])\n+\n+        provideHandler(subscriber, (IRecordModifiedEvent,))\n+\n+        # Update value\n+        self.registry["test.key1"] = "new_value"\n+\n+        self.assertEqual(\n+            seen_values,\n+            ["new_value"],\n+            "Subscriber saw the old cached value instead of the new one",\n+        )\n+\n     # --- __getitem__ tests ---\n \n     def test_getitem_no_request(self):\n'
 
