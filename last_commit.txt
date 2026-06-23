@@ -1,22 +1,66 @@
-Repository: plone.restapi
+Repository: plone.app.portlets
 
 
-Branch: refs/heads/main
-Date: 2026-06-23T09:15:39+02:00
-Author: Steve Piercy (stevepiercy) <web@stevepiercy.com>
-Commit: https://github.com/plone/plone.restapi/commit/0583d5ff7396bc8cfb5a2b747b5c63ca9b03a16b
+Branch: refs/heads/master
+Date: 2026-06-17T04:57:51+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/1d9cacacfad9ed08b890dadc6e75741e295dc151
 
-Remove rtd pr preview workflow (#2026)
-
-* Remove RTD PR preview build workflow
-
-We now use the [RTD GitHub app](https://docs.readthedocs.com/platform/stable/reference/git-integration.html#github-app), making the removed file redundant to pull request preview builds. Additionally, the call to the old GitHub Action was deprecated on 2025-07-01, per https://github.com/readthedocs/actions/blob/main/README.md.
-
-* change log
+tal_validation
 
 Files changed:
-A news/+remove-rtd-pr-preview.internal
-D .github/workflows/rtd-pr-preview.yml
+M src/plone/app/portlets/portlets/classic.py
+M src/plone/app/portlets/tests/test_classic_portlet.py
 
-b'diff --git a/.github/workflows/rtd-pr-preview.yml b/.github/workflows/rtd-pr-preview.yml\ndeleted file mode 100644\nindex 28e329ecf6..0000000000\n--- a/.github/workflows/rtd-pr-preview.yml\n+++ /dev/null\n@@ -1,22 +0,0 @@\n-# .github/workflows/rtd-pr-preview.yml\n-name: readthedocs/actions\n-on:\n-  pull_request_target:\n-    types:\n-      - opened\n-    # Execute this action only on PRs that touch\n-    # documentation files.\n-    # paths:\n-    #   - "docs/**"\n-\n-permissions:\n-  pull-requests: write\n-\n-jobs:\n-  documentation-links:\n-    runs-on: ubuntu-latest\n-    steps:\n-      - uses: readthedocs/actions/preview@v1\n-        with:\n-          project-slug: "plonerestapi"\n-          single-version: "true"\ndiff --git a/news/+remove-rtd-pr-preview.internal b/news/+remove-rtd-pr-preview.internal\nnew file mode 100644\nindex 0000000000..c9eec6bdf6\n--- /dev/null\n+++ b/news/+remove-rtd-pr-preview.internal\n@@ -0,0 +1 @@\n+Remove redundant and deprecated pull request preview build workflow. @stevepiercy\n'
+b'diff --git a/src/plone/app/portlets/portlets/classic.py b/src/plone/app/portlets/portlets/classic.py\nindex 9a1b1ea2..cd1299d6 100644\n--- a/src/plone/app/portlets/portlets/classic.py\n+++ b/src/plone/app/portlets/portlets/classic.py\n@@ -5,6 +5,23 @@\n from zope import schema\n from zope.interface import implementer\n \n+import re\n+\n+\n+# Legitimate Classic-portlet template/macro names are plain traversal steps\n+# (e.g. "portlet_recent", "@@view", "content-core"). They must never contain\n+# TALES metacharacters such as "|", ":" (python:/string:), whitespace or\n+# parentheses, which would otherwise allow a TALES expression injection.\n+_SAFE_NAME = re.compile(r"^[A-Za-z0-9_@.\\-/]*$")\n+\n+\n+def _valid_name(value):\n+    if value and not _SAFE_NAME.match(value):\n+        raise schema.ValidationError(\n+            "Only letters, digits and the characters _ @ . - / are allowed."\n+        )\n+    return True\n+\n \n class IClassicPortlet(IPortletDataProvider):\n     """A portlet which can render a classic Plone portlet macro"""\n@@ -13,6 +30,7 @@ class IClassicPortlet(IPortletDataProvider):\n         title=_("Template"),\n         description=_("The template containing the portlet."),\n         required=True,\n+        constraint=_valid_name,\n     )\n \n     macro = schema.ASCIILine(\n@@ -22,6 +40,7 @@ class IClassicPortlet(IPortletDataProvider):\n         ),\n         default="portlet",\n         required=False,\n+        constraint=_valid_name,\n     )\n \n \n@@ -48,6 +67,20 @@ def use_macro(self):\n         return bool(self.data.macro)\n \n     def path_expression(self):\n+        """Build the TALES *path* expression used to render the portlet.\n+\n+        The ``template`` and ``macro`` fields are validated against a strict\n+        whitelist (see ``_valid_name``) which forbids ``:`` and ``|``. This\n+        guarantees the resulting string can only ever be a plain path\n+        traversal: it cannot introduce a TALES expression type\n+        (``python:``/``string:``/...) nor the ``|`` fallback operator, closing\n+        the TALES injection that previously allowed arbitrary code execution.\n+        """\n+        # Defense in depth: validate again at render time so assignments\n+        # created programmatically (e.g. via GenericSetup import) that bypass\n+        # the form field constraint are still rejected. Raises on illegal names.\n+        _valid_name(self.data.template)\n+        _valid_name(self.data.macro)\n         expr = "context/%s" % self.data.template\n         if self.use_macro():\n             expr += "/macros/%s" % self.data.macro\ndiff --git a/src/plone/app/portlets/tests/test_classic_portlet.py b/src/plone/app/portlets/tests/test_classic_portlet.py\nindex 7e800fe4..319bd166 100644\n--- a/src/plone/app/portlets/tests/test_classic_portlet.py\n+++ b/src/plone/app/portlets/tests/test_classic_portlet.py\n@@ -119,6 +119,32 @@ def testRenderClassicPortlet(self):\n         )\n         r.render()\n \n+    def testRejectTalesInjection(self):\n+        # A TALES injection payload in the template field must not be turned\n+        # into a TALES expression. path_expression() rejects the illegal name\n+        # and render() raises rather than executing the payload.\n+        payload = "x | python:\'RCE-START\'+\'RCE-END\'"\n+        r = self.renderer(\n+            assignment=classic.Assignment(template=payload, macro=None)\n+        )\n+        from zope.schema import ValidationError\n+\n+        self.assertRaises(ValidationError, r.path_expression)\n+        try:\n+            output = r.render()\n+        except Exception:\n+            output = ""\n+        self.assertNotIn("RCE-START", output)\n+\n+    def testConstraintRejectsMetacharacters(self):\n+        from zope.schema import ValidationError\n+\n+        field = classic.IClassicPortlet["template"]\n+        self.assertRaises(ValidationError, field.validate, "x | python:\'pwn\'")\n+        # legitimate names validate fine\n+        field.validate("portlet_recent")\n+        field.validate("@@view")\n+\n \n def test_suite():\n     suite = unittest.TestSuite()\n'
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2026-06-17T05:04:52+02:00
+Author: Mauro Amico (mamico) <mauro.amico@gmail.com>
+Commit: https://github.com/plone/plone.app.portlets/commit/f4233dcbd28e30bef94882acdad1e6fe72e947ab
+
+changelog
+
+Files changed:
+A news/ghsa-rr49-f9g6-c9r5.bugfix
+
+b'diff --git a/news/ghsa-rr49-f9g6-c9r5.bugfix b/news/ghsa-rr49-f9g6-c9r5.bugfix\nnew file mode 100644\nindex 00000000..5092bbe8\n--- /dev/null\n+++ b/news/ghsa-rr49-f9g6-c9r5.bugfix\n@@ -0,0 +1,8 @@\n+Fix TALES expression injection (remote code execution) in the Classic portlet.\n+The user-supplied ``template`` and ``macro`` fields are now validated against a\n+strict whitelist that forbids TALES metacharacters (notably ``:`` and ``|``),\n+so they can no longer be turned into a TALES expression with a ``python:`` type\n+or a ``|`` fallback chain when passed to the TAL ``path()`` helper. Validation\n+is enforced both on the add/edit form fields and again at render time (for\n+assignments created programmatically). Reported by Giuseppe Caruso (giuseppe.caruso@betrusted.it)\n+(GHSA-rr49-f9g6-c9r5).\n'
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2026-06-17T11:16:43+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.portlets/commit/aea41ce4aba5dae799118e3fdaa1f506d4eb6bc7
+
+isort/black
+
+Files changed:
+M src/plone/app/portlets/portlets/classic.py
+M src/plone/app/portlets/tests/test_classic_portlet.py
+
+b'diff --git a/src/plone/app/portlets/portlets/classic.py b/src/plone/app/portlets/portlets/classic.py\nindex cd1299d6..7d316c59 100644\n--- a/src/plone/app/portlets/portlets/classic.py\n+++ b/src/plone/app/portlets/portlets/classic.py\n@@ -7,7 +7,6 @@\n \n import re\n \n-\n # Legitimate Classic-portlet template/macro names are plain traversal steps\n # (e.g. "portlet_recent", "@@view", "content-core"). They must never contain\n # TALES metacharacters such as "|", ":" (python:/string:), whitespace or\ndiff --git a/src/plone/app/portlets/tests/test_classic_portlet.py b/src/plone/app/portlets/tests/test_classic_portlet.py\nindex 319bd166..fc104fa0 100644\n--- a/src/plone/app/portlets/tests/test_classic_portlet.py\n+++ b/src/plone/app/portlets/tests/test_classic_portlet.py\n@@ -124,9 +124,7 @@ def testRejectTalesInjection(self):\n         # into a TALES expression. path_expression() rejects the illegal name\n         # and render() raises rather than executing the payload.\n         payload = "x | python:\'RCE-START\'+\'RCE-END\'"\n-        r = self.renderer(\n-            assignment=classic.Assignment(template=payload, macro=None)\n-        )\n+        r = self.renderer(assignment=classic.Assignment(template=payload, macro=None))\n         from zope.schema import ValidationError\n \n         self.assertRaises(ValidationError, r.path_expression)\n'
+
+Repository: plone.app.portlets
+
+
+Branch: refs/heads/master
+Date: 2026-06-23T14:15:27+02:00
+Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
+Commit: https://github.com/plone/plone.app.portlets/commit/5932d287cb1d47db1b003417069960562851b893
+
+Merge commit from fork
+
+Privilege Escalation via TALES Injection [master]
+
+Files changed:
+A news/ghsa-rr49-f9g6-c9r5.bugfix
+M src/plone/app/portlets/portlets/classic.py
+M src/plone/app/portlets/tests/test_classic_portlet.py
+
+b'diff --git a/news/ghsa-rr49-f9g6-c9r5.bugfix b/news/ghsa-rr49-f9g6-c9r5.bugfix\nnew file mode 100644\nindex 00000000..5092bbe8\n--- /dev/null\n+++ b/news/ghsa-rr49-f9g6-c9r5.bugfix\n@@ -0,0 +1,8 @@\n+Fix TALES expression injection (remote code execution) in the Classic portlet.\n+The user-supplied ``template`` and ``macro`` fields are now validated against a\n+strict whitelist that forbids TALES metacharacters (notably ``:`` and ``|``),\n+so they can no longer be turned into a TALES expression with a ``python:`` type\n+or a ``|`` fallback chain when passed to the TAL ``path()`` helper. Validation\n+is enforced both on the add/edit form fields and again at render time (for\n+assignments created programmatically). Reported by Giuseppe Caruso (giuseppe.caruso@betrusted.it)\n+(GHSA-rr49-f9g6-c9r5).\ndiff --git a/src/plone/app/portlets/portlets/classic.py b/src/plone/app/portlets/portlets/classic.py\nindex 9a1b1ea2..7d316c59 100644\n--- a/src/plone/app/portlets/portlets/classic.py\n+++ b/src/plone/app/portlets/portlets/classic.py\n@@ -5,6 +5,22 @@\n from zope import schema\n from zope.interface import implementer\n \n+import re\n+\n+# Legitimate Classic-portlet template/macro names are plain traversal steps\n+# (e.g. "portlet_recent", "@@view", "content-core"). They must never contain\n+# TALES metacharacters such as "|", ":" (python:/string:), whitespace or\n+# parentheses, which would otherwise allow a TALES expression injection.\n+_SAFE_NAME = re.compile(r"^[A-Za-z0-9_@.\\-/]*$")\n+\n+\n+def _valid_name(value):\n+    if value and not _SAFE_NAME.match(value):\n+        raise schema.ValidationError(\n+            "Only letters, digits and the characters _ @ . - / are allowed."\n+        )\n+    return True\n+\n \n class IClassicPortlet(IPortletDataProvider):\n     """A portlet which can render a classic Plone portlet macro"""\n@@ -13,6 +29,7 @@ class IClassicPortlet(IPortletDataProvider):\n         title=_("Template"),\n         description=_("The template containing the portlet."),\n         required=True,\n+        constraint=_valid_name,\n     )\n \n     macro = schema.ASCIILine(\n@@ -22,6 +39,7 @@ class IClassicPortlet(IPortletDataProvider):\n         ),\n         default="portlet",\n         required=False,\n+        constraint=_valid_name,\n     )\n \n \n@@ -48,6 +66,20 @@ def use_macro(self):\n         return bool(self.data.macro)\n \n     def path_expression(self):\n+        """Build the TALES *path* expression used to render the portlet.\n+\n+        The ``template`` and ``macro`` fields are validated against a strict\n+        whitelist (see ``_valid_name``) which forbids ``:`` and ``|``. This\n+        guarantees the resulting string can only ever be a plain path\n+        traversal: it cannot introduce a TALES expression type\n+        (``python:``/``string:``/...) nor the ``|`` fallback operator, closing\n+        the TALES injection that previously allowed arbitrary code execution.\n+        """\n+        # Defense in depth: validate again at render time so assignments\n+        # created programmatically (e.g. via GenericSetup import) that bypass\n+        # the form field constraint are still rejected. Raises on illegal names.\n+        _valid_name(self.data.template)\n+        _valid_name(self.data.macro)\n         expr = "context/%s" % self.data.template\n         if self.use_macro():\n             expr += "/macros/%s" % self.data.macro\ndiff --git a/src/plone/app/portlets/tests/test_classic_portlet.py b/src/plone/app/portlets/tests/test_classic_portlet.py\nindex 7e800fe4..fc104fa0 100644\n--- a/src/plone/app/portlets/tests/test_classic_portlet.py\n+++ b/src/plone/app/portlets/tests/test_classic_portlet.py\n@@ -119,6 +119,30 @@ def testRenderClassicPortlet(self):\n         )\n         r.render()\n \n+    def testRejectTalesInjection(self):\n+        # A TALES injection payload in the template field must not be turned\n+        # into a TALES expression. path_expression() rejects the illegal name\n+        # and render() raises rather than executing the payload.\n+        payload = "x | python:\'RCE-START\'+\'RCE-END\'"\n+        r = self.renderer(assignment=classic.Assignment(template=payload, macro=None))\n+        from zope.schema import ValidationError\n+\n+        self.assertRaises(ValidationError, r.path_expression)\n+        try:\n+            output = r.render()\n+        except Exception:\n+            output = ""\n+        self.assertNotIn("RCE-START", output)\n+\n+    def testConstraintRejectsMetacharacters(self):\n+        from zope.schema import ValidationError\n+\n+        field = classic.IClassicPortlet["template"]\n+        self.assertRaises(ValidationError, field.validate, "x | python:\'pwn\'")\n+        # legitimate names validate fine\n+        field.validate("portlet_recent")\n+        field.validate("@@view")\n+\n \n def test_suite():\n     suite = unittest.TestSuite()\n'
 
