@@ -1,30 +1,33 @@
-# Release notes for Plone 6.1.4 (2026-01-15)
+# Release notes for Plone 6.1.5
 
-* Last updated: January 15, 2026
+* Released: June 25, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1.4/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.4/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.5/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.5/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.4/constraints.txt](https://dist.plone.org/release/6.1.4/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.4/versions.cfg](https://dist.plone.org/release/6.1.4/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.4/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.4/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.5/constraints.txt](https://dist.plone.org/release/6.1.5/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.5/versions.cfg](https://dist.plone.org/release/6.1.5/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.5/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.5/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
 ## Highlights
 
-These are the main changes since 6.1.3:
+This is the last maintenance release of the Plone 6.1 series.
+With the release of Plone 6.2, Plone 6.1 is out of maintenance support.  You are encouraged to upgrade.
+All Plone 6 minor versions (6.0, 6.1, 6.2) get security support until 2027-12-31, 5 years after Plone 6.0.0 was released.
+If Plone 7 is not out by that time, security support will be extended.
 
-* `plone.app.upgrade`: Fix upgrading TinyMCE plugins with invalid/outdated plugins.
-* `plone.exportimport`: Implement regular commits to reduce memory usage in larger import processes.
-* Updated robotframework related versions, used in acceptance testing.
-* `plone.app.multilingual`: Adds the `volto.blocks` behavior to LRF if `plone.volto` is installed.
-* `plone.namedfile`: Add default width and height attributes if none provided when using the srcset method.
-* `plone.scale`: Handle animated WebP images.
-* `plone.staticresources`: Update mockup=5.4.6. See https://github.com/plone/mockup/releases/tag/5.4.6.
-* `plone.volto`: Support collective.html2blocks to convert HTML to Volto blocks as a replacement for blocks-conversion-tool.
-* `plonetheme.barceloneta`: Add a bit more separation between the menu and the search field in the mobile menu.
+These are the main changes since 6.1.4:
+
+* Add security fixes from June 5 and 23.  See:
+  * https://community.plone.org/t/security-vulnerability-announcement-plone-app-textfield-and-plone-restapi/23050
+  * https://community.plone.org/t/plone-security-fixes-20260623/23085
+* `Products.isurlinportal`: Prevent URLs that start with more than two slashes to be considered as URLs in portal.
+  See [security advisory](https://github.com/plone/Products.isurlinportal/security/advisories/GHSA-43gx-6gv6-3jcp).
+* `plone.app.content`: Alphabetically sort the list of portal types in the constraints configuration form.
+* `plone.namedfile`: Add original image size url in the srcset generated in the srcset method.
 
 
 ## Volto frontend
@@ -33,8 +36,8 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.32.0](https://www.npmjs.com/package/@plone/volto/v/18.32.0).  See the [changelog](https://github.com/plone/volto/blob/18.32.0/packages/volto/CHANGELOG.md).
-You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
+Latest release is [18.35.1](https://www.npmjs.com/package/@plone/volto/v/18.35.1).  See the [changelog](https://github.com/plone/volto/blob/18.35.1/packages/volto/CHANGELOG.md).
+You can also use [Volto 19](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
 ## Classic UI
@@ -52,11 +55,11 @@ This release supports Python 3.10, 3.11, 3.12, and 3.13.
 In Plone core we use these versions to install Plone:
 
 ```
-packaging==25.0
-pip==25.3
-setuptools==80.9.0
-wheel==0.45.1
-zc.buildout==4.1.12
+packaging==26.2
+pip==26.1.2
+setuptools==81.0.0
+wheel==0.47.0
+zc.buildout==4.2.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
@@ -65,32 +68,8 @@ Note that if you use Buildout and are on `setuptools` 80+, you need the latest `
 If you use `zc.buildout`, you can also choose to upgrade to version 5.x.
 That helps avoid problems when not all packages in a namespace are using the same namespace style.
 When using either `zc.buildout` or `pip` (or `uv`) you can also choose to install the `horse-with-no-namespace` package.
-Plone 6.2 (under development) already uses both.
 
-Let's explain why you may want to do this.
-Problems start when you have multiple packages in the same namespace, that use different namespace implementations.
-Then on startup of Plone you may get an error saying "Package not found".
-This depends on what you use to install the packages.
-In the following examples, we have two packages in the same namespace, say `ns.native` (using native namespaces) and `ns.deprecated` (using pkg_resources style).
-
-* Make editable installs of both packages (`pip install -e` or in buildout, `develop =`):
-
-  - This works neither in pip nor in buildout.
-  - You can install the [`horse-with-no-namespace`](https://pypi.org/project/horse-with-no-namespace/) package to get this working.
-
-* Make a normal install of both packages:
-
-  - This works fine in pip.
-  - This fails in buildout 4.x.
-  - This works fine in buildout 5.x.
-
-* Make a normal install of one package and an editable install of the other:
-
-  - This works fine in pip.
-  - This fails in buildout 4.x.
-  - This fails in buildout 5.x as well.  But again, you can use `horse-with-no-namespace` to get this working.
-
-For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0a3/), the part about
+For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0/), the part about
 "native namespaces and breaking changes in 5.x".  This is also good to read if you use pip instead of Buildout.
 
 
