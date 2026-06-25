@@ -1,14 +1,14 @@
-# Release notes for Plone 6.1.5 (unreleased)
+# Release notes for Plone 6.1.5
 
-* Last updated: June 23, 2026
+* Released: June 25, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.1.5/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1.5/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.1-dev/constraints.txt](https://dist.plone.org/release/6.1-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1-dev/versions.cfg](https://dist.plone.org/release/6.1-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.1.5/constraints.txt](https://dist.plone.org/release/6.1.5/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.1.5/versions.cfg](https://dist.plone.org/release/6.1.5/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.1.5/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.1.5/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -36,8 +36,8 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.1 is meant to be used with Volto 18.
-Latest release is [18.35.0](https://www.npmjs.com/package/@plone/volto/v/18.35.0).  See the [changelog](https://github.com/plone/volto/blob/18.35.0/packages/volto/CHANGELOG.md).
-You can already test with the [latest Volto 19 alpha version](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
+Latest release is [18.35.1](https://www.npmjs.com/package/@plone/volto/v/18.35.1).  See the [changelog](https://github.com/plone/volto/blob/18.35.1/packages/volto/CHANGELOG.md).
+You can also use [Volto 19](https://github.com/plone/volto/blob/main/packages/volto/CHANGELOG.md).
 
 
 ## Classic UI
