@@ -1,14 +1,14 @@
-# Release notes for Plone 6.2.1 (unreleased)
+# Release notes for Plone 6.2.1
 
-* Last updated: June 23rd, 2026
+* Released: June 26th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.1/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2-dev/constraints.txt](https://dist.plone.org/release/6.2-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2-dev/versions.cfg](https://dist.plone.org/release/6.2-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.1/constraints.txt](https://dist.plone.org/release/6.2.1/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.1/versions.cfg](https://dist.plone.org/release/6.2.1/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.1/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.1/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -43,7 +43,7 @@ It is being [renamed to Blicca](https://community.plone.org/t/say-hello-to-blicc
 
 ### Classic UI related changes since 6.2.0:
 
-* `plone.staticresources`: Update `mockup` from 5.6.4 to 5.6.6.  See also [`mockup` 5.6.6 changelog](https://github.com/plone/mockup/releases/tag/5.6.6) and earlier.
+* `plone.staticresources`: Update `mockup` from 5.6.4 to 5.6.7.  See also [`mockup` 5.6.7 changelog](https://github.com/plone/mockup/releases/tag/5.6.7) and earlier.
 
 
 ## Python compatibility
@@ -64,6 +64,7 @@ zc.buildout==5.2.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
+If you don't use buildout, it should be fine to use `setuptools` 82+.
 
 
 ## Installation
