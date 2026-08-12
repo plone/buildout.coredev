@@ -146,7 +146,7 @@ if [[ "$TEST_ARGS" == *"--all"* ]]; then
 You are responsible for initializing the robotframework browser first.
 If you want to run *only* robot test of a package, do something like this:
 
-.venv/bin/rfbrowser init
+make rfbrowser  # or: .venv/bin/rfbrowser init chromium
 export ROBOTSUITE_PREFIX=ONLYROBOT
 make test TEST_ARGS=\"-t ONLYROBOT --all\" TEST_PACKAGE=plone.app.discussion
 """
