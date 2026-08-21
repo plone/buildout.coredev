@@ -1,8 +1,8 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-* Last updated: June 15th, 2026
+* Last updated: August 26th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
-* Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.1.
+* Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
 
 If you want to jump straight in, here are some important links:
@@ -31,9 +31,10 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.3 is meant to be used with Volto 19.
-Latest release is [19.0.0](https://www.npmjs.com/package/@plone/volto/v/19.0.0).  See the [changelog](https://github.com/plone/volto/blob/19.0.0/packages/volto/CHANGELOG.md).
+Latest release is [19.3.0](https://www.npmjs.com/package/@plone/volto/v/19.3.0).  See the [changelog](https://github.com/plone/volto/blob/19.3.0/packages/volto/CHANGELOG.md).
 
-### Volto related changes in the Python backend since 6.1:
+
+### Volto related changes in the Python backend since 6.2:
 
 * nothing yet
 
@@ -42,7 +43,7 @@ Latest release is [19.0.0](https://www.npmjs.com/package/@plone/volto/v/19.0.0).
 
 The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
 
-### Classic UI related changes since 6.1:
+### Classic UI related changes since 6.2:
 
 * nothing yet
 
@@ -59,13 +60,17 @@ TODO We probably want to drop 3.10, as it will be out of security support in Oct
 In Plone core we use these versions to install Plone:
 
 ```
-pip==26.1.2
-setuptools==81.0.0
+pip==26.2.1
+setuptools==84.0.0
 wheel==0.47.0
-zc.buildout==5.2.0
+zc.buildout==6.0.0a1
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
+
+`zc.buildout` 6.0.0a1 includes its own copy of the deprecated `pkg_resources` module, so it works with the latest `setuptools` version.
+And it fixes support for PEP 660 develop packages, so `pyproject.toml` only, made with `setuptools` or with newer build systems like `hatchling`, `flit`, `pdm`.
+See the [major changes](https://pypi.org/project/zc.buildout/6.0.0a1/#user-content-major-changes-in-6-x) for details information.
 
 
 ## Installation
