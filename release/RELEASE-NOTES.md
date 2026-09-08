@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2.2 (unreleased)
 
-* Last updated: August 22th, 2026
+* Last updated: September 8th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -16,6 +16,12 @@ If you want to jump straight in, here are some important links:
 
 These are the main changes compared to 6.2.1:
 
+* [Plone security advisory 20260831](https://plone.org/security/announcements/plone-security-advisory-20260831):
+  * `plone.restapi`:
+    * Security: in summary serializer only allow access to metadata that is available in the catalog.
+    * Fix the security check when a wrong permission is specified.
+    * Add support for the `RESTAPI_ADDITIONAL_NON_METADATA_ATTRIBUTES` environment variable, a comma-separated list of extra attribute names appended to the summary serializer's `non_metadata_attributes`.
+  * `plone.autoform`: Secure a field when a wrong permission is specified.  Not really a vulnerability, just hardening.
 * Zope 6.2: Disable XML-RPC request support by default. The protocol is rarely used and disabling it reduces the potential for abuse. Set `enable-xmlrpc` to on in the Zope configuration if you really need XML-RPC support.
   In older Plone and Zope versions, when using Buildout and `plone.recipe.zope2instance`, you can set `zope-conf-additional = enable-xmlrpc off` to disable XML-RPC.
 * `plone.testing`: Explicitly enable XML-RPC in the ``WSGIServer`` layer.
@@ -23,6 +29,9 @@ These are the main changes compared to 6.2.1:
 * `plone.base`: Add `area` to default `valid_tags` so HTML image maps work out of the box.
 * `plone.batching` and others: Move package metadata from `setup.py` to `pyproject.toml`.
   This will happen to most Plone packages in the near future.  You should not notice any difference in practice.
+* `plone.scale`:
+  Add scale name and scale mode to the scale info data structure.
+  This can be used in the scaling adapter to handle handle scales differently.
 
 
 ## Volto frontend
@@ -31,7 +40,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.2 is meant to be used with Volto 19.
-Latest release is [19.3.0](https://www.npmjs.com/package/@plone/volto/v/19.3.0).  See the [changelog](https://github.com/plone/volto/blob/19.3.0/packages/volto/CHANGELOG.md).
+Latest release is [19.4.0](https://www.npmjs.com/package/@plone/volto/v/19.4.0).  See the [changelog](https://github.com/plone/volto/blob/19.4.0/packages/volto/CHANGELOG.md).
 
 Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade-guide/index.html#upgrading-to-volto-19-x-x) for migration from Volto 18 to 19.
 
@@ -46,7 +55,7 @@ It is being [renamed to Blicca](https://community.plone.org/t/say-hello-to-blicc
 
 ### Classic UI related changes since 6.2.1:
 
-* `plone.staticresources`: Update `mockup` from 5.6.7 to 5.6.8.  See also [`mockup` 5.6.8 changelog](https://github.com/plone/mockup/releases/tag/5.6.8).
+* `plone.staticresources`: Update `mockup` from 5.6.7 to 5.6.9.  See also [`mockup` 5.6.8 changelog](https://github.com/plone/mockup/releases/tag/5.6.8) and [`mockup` 5.6.9 changelog](https://github.com/plone/mockup/releases/tag/5.6.9).
 * `plonetheme.barceloneta`: `barceloneta-toolbar.css`: Scope CSS declarations.
   Scope the CSS for the `barceloneta-toolbar.css` file, so that its styles do not pollute the rest of the site.
   This way you can use `barceloneta-toolbar.css` in a site without Bootstrap or with a Bootstrap version other than 5 without breaking your site's design.
@@ -65,7 +74,7 @@ In Plone core we use these versions to install Plone:
 horse-with-no-namespace==20260202.0
 pip==26.2.1
 setuptools==81.0.0
-wheel==0.47.0
+wheel==0.48.0
 zc.buildout==5.2.0
 ```
 
