@@ -1,14 +1,14 @@
-# Release notes for Plone 6.2.2 (unreleased)
+# Release notes for Plone 6.2.2
 
-* Last updated: September 8th, 2026
+* Released: September 10th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
-* Canonical place for these [release notes](https://dist.plone.org/release/6.2.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
+* Canonical place for these [release notes](https://dist.plone.org/release/6.2.1/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2.2/changelog.txt).
 
 If you want to jump straight in, here are some important links:
 
-* With pip you can use the constraints file at [https://dist.plone.org/release/6.2-dev/constraints.txt](https://dist.plone.org/release/6.2-dev/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
-* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2-dev/versions.cfg](https://dist.plone.org/release/6.2-dev/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2-dev/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2-dev/versions-ecosystem.cfg).
+* With pip you can use the constraints file at [https://dist.plone.org/release/6.2.2/constraints.txt](https://dist.plone.org/release/6.2.2/constraints.txt).  This includes the extra and ecosystem constraints, which are separate in the Buildout configs.
+* With Buildout you can use the versions file at [https://dist.plone.org/release/6.2.2/versions.cfg](https://dist.plone.org/release/6.2.2/versions.cfg), plus optionally [`versions-extra.cfg`](https://dist.plone.org/release/6.2.2/versions-extra.cfg) and [`versions-ecosystem.cfg`](https://dist.plone.org/release/6.2.2/versions-ecosystem.cfg).
 * Use Docker image `plone-backend`.
 
 
@@ -32,6 +32,7 @@ These are the main changes compared to 6.2.1:
 * `plone.scale`:
   Add scale name and scale mode to the scale info data structure.
   This can be used in the scaling adapter to handle handle scales differently.
+* `plone.exportimport`: Make it easy to customize which content gets exported.
 
 
 ## Volto frontend
@@ -55,7 +56,7 @@ It is being [renamed to Blicca](https://community.plone.org/t/say-hello-to-blicc
 
 ### Classic UI related changes since 6.2.1:
 
-* `plone.staticresources`: Update `mockup` from 5.6.7 to 5.6.9.  See also [`mockup` 5.6.8 changelog](https://github.com/plone/mockup/releases/tag/5.6.8) and [`mockup` 5.6.9 changelog](https://github.com/plone/mockup/releases/tag/5.6.9).
+* `plone.staticresources`: Update `mockup` from 5.6.7 to 5.6.10.  See also [`mockup` 5.6.8 changelog](https://github.com/plone/mockup/releases/tag/5.6.8), [`mockup` 5.6.9 changelog](https://github.com/plone/mockup/releases/tag/5.6.9),  and [`mockup` 5.6.10 changelog](https://github.com/plone/mockup/releases/tag/5.6.10).
 * `plonetheme.barceloneta`: `barceloneta-toolbar.css`: Scope CSS declarations.
   Scope the CSS for the `barceloneta-toolbar.css` file, so that its styles do not pollute the rest of the site.
   This way you can use `barceloneta-toolbar.css` in a site without Bootstrap or with a Bootstrap version other than 5 without breaking your site's design.
