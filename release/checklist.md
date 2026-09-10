@@ -57,3 +57,7 @@ You probably want to wait until the Docker images are there, but don't wait long
 - [ ] Check if the [version policy in Volto](https://github.com/plone/volto/blob/main/docs/source/contributing/version-policy.md) is still up to date.
 - [ ] Send mail to Marketing Team so they can prepare announcements.
 - [ ] Ask Philip Bauer and/or Fred van Dijk to update the demo sites.  Here is a [sample PR](https://github.com/plone/demo.plone.org/pull/15).  Mostly just a search and replace, except when you want to update Volto as well.
+
+## Prepare new development cycle
+
+- [ ] Upgrade the version number in [`CMFPlone metadata.xml`](https://github.com/plone/Products.CMFPlone/blob/6.2.x/src/Products/CMFPlone/profiles/default/metadata.xml) and add a dummy/null [`upgrade step`](https://github.com/plone/plone.app.upgrade/blob/master/src/plone/app/upgrade/v62/configure.zcml) in `plone.app.upgrade`.
