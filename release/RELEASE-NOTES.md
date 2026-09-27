@@ -23,6 +23,7 @@ These are the main changes compared to 6.2:
   * Move `plone.app.registry` Classic-UI browser templates and control panel views to `plone.app.layout.controlpanels.registry`.
   * Move `plone.app.linkintegrity` template/views to `plone.app.layout.views.linkintegrity`
   * Move UI related code and template of sharing view from `plone.app.workflow` to `plone.app.layout`.
+  * Move ``plone.app.users`` template/views to ``plone.app.layout.views.users``
 
 
 ## Volto frontend
