@@ -1,6 +1,6 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-* Last updated: September 27th, 2026
+* Last updated: September 28th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
@@ -25,6 +25,7 @@ These are the main changes compared to 6.2:
   * Move UI related code and template of sharing view from `plone.app.workflow` to `plone.app.layout`.
   * Move `plone.app.users` template/views to `plone.app.layout.views.users`.
   * Move `plone.app.contenttypes` views to `plone.app.layout`.
+  * Move `plone.app.dexterity` views to `plone.app.layout`.
 
 
 ## Volto frontend
