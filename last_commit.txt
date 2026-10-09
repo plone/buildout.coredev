@@ -1,15 +1,34 @@
-Repository: plone.app.multilingual
+Repository: plone.restapi
 
 
-Branch: refs/heads/master
-Date: 2026-10-09T10:35:06+02:00
-Author: Mikel Larreategi (erral) <mlarreategi@codesyntax.com>
-Commit: https://github.com/plone/plone.app.multilingual/commit/d1e980ade2f3ec290f8eed281e324c6a3bae48f5
+Branch: refs/heads/main
+Date: 2026-10-09T08:46:13-03:00
+Author: Érico Andrei (ericof) <ericof@plone.org>
+Commit: https://github.com/plone/plone.restapi/commit/f266030e666e0d413a184a185a996edb74ac6ff0
 
-bump version
+Allow anonymous access to @types for the context's own type (#2055)
+
+* Allow anonymous access to @types for the context's own type
+
+The @types service is protected by zope2.View, but check_security
+rejected every anonymous request. That breaks Volto's default view
+for anonymous visitors, which fetches the schema of the content it
+is rendering.
+
+Anonymous users may now read the schema of the context's own
+portal_type. Other types, the types list, and field lookups still
+require authentication.
+
+Closes #2054
+
+* Trigger RTD build
+
+* Test that field lookups on the context's own type stay closed to anonymous users
 
 Files changed:
-M setup.cfg
+A news/2054.bugfix
+M src/plone/restapi/services/types/get.py
+M src/plone/restapi/tests/test_services_types.py
 
-b'diff --git a/setup.cfg b/setup.cfg\nindex 4f7f42c3..103e431f 100644\n--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1,5 +1,5 @@\n [metadata]\n-version = 9.0.3.dev0\n+version = 10.0.0.dev0\n name = plone.app.multilingual\n description = Multilingual Plone Content package\n long_description = file: README.rst, CREDITS.rst, CHANGES.rst\n'
+b'diff --git a/news/2054.bugfix b/news/2054.bugfix\nnew file mode 100644\nindex 000000000..7b1827af5\n--- /dev/null\n+++ b/news/2054.bugfix\n@@ -0,0 +1 @@\n+Allow anonymous users to read the `@types` schema of the context\'s own content type, so Volto\'s default view works for them. Other types and the types list still require authentication. @ericof\ndiff --git a/src/plone/restapi/services/types/get.py b/src/plone/restapi/services/types/get.py\nindex 777e9379e..cf2ee0606 100644\n--- a/src/plone/restapi/services/types/get.py\n+++ b/src/plone/restapi/services/types/get.py\n@@ -22,7 +22,13 @@\n from zope.schema.interfaces import IVocabularyFactory\n \n \n-def check_security(context):\n+def check_security(context, portal_type: str = ""):\n+    # Issue 2054: Only expose type information to Anonymous users\n+    # if they are trying to access information about the current context portal type\n+    context_portal_type = getattr(context, "portal_type", None)\n+    if portal_type and (context_portal_type == portal_type):\n+        return\n+\n     # Only expose type information to authenticated users\n     portal_membership = getToolByName(context, "portal_membership")\n     if portal_membership.isAnonymousUser():\n@@ -126,8 +132,8 @@ def reply(self):\n             return self.reply_for_field()\n \n     def reply_for_type(self):\n-        check_security(self.context)\n         portal_type = self.params.pop()\n+        check_security(self.context, portal_type)\n \n         # Make sure we get the right dexterity-types adapter\n         if IPloneRestapiLayer.providedBy(self.request):\ndiff --git a/src/plone/restapi/tests/test_services_types.py b/src/plone/restapi/tests/test_services_types.py\nindex 4c84fa4c3..b1abbed25 100644\n--- a/src/plone/restapi/tests/test_services_types.py\n+++ b/src/plone/restapi/tests/test_services_types.py\n@@ -487,6 +487,41 @@ def test_types_endpoint_only_accessible_for_authenticated_users(self):\n         response = self.api_session.get(f"{self.portal.absolute_url()}/@types")  # noqa\n         self.assertEqual(response.status_code, 401)\n \n+    def _create_published_document(self):\n+        document = api.content.create(\n+            container=self.portal, id="doc", type="Document", title="Doc"\n+        )\n+        api.content.transition(obj=document, transition="publish")\n+        transaction.commit()\n+        return document\n+\n+    def test_types_context_portal_type_accessible_for_anonymous(self):\n+        document = self._create_published_document()\n+        self.api_session.auth = ()\n+        response = self.api_session.get(f"{document.absolute_url()}/@types/Document")\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["title"], "Page")\n+\n+    def test_types_other_portal_type_not_accessible_for_anonymous(self):\n+        document = self._create_published_document()\n+        self.api_session.auth = ()\n+        response = self.api_session.get(f"{document.absolute_url()}/@types/Folder")\n+        self.assertEqual(response.status_code, 401)\n+\n+    def test_types_list_not_accessible_for_anonymous_on_content(self):\n+        document = self._create_published_document()\n+        self.api_session.auth = ()\n+        response = self.api_session.get(f"{document.absolute_url()}/@types")\n+        self.assertEqual(response.status_code, 401)\n+\n+    def test_types_context_portal_type_field_not_accessible_for_anonymous(self):\n+        document = self._create_published_document()\n+        self.api_session.auth = ()\n+        response = self.api_session.get(\n+            f"{document.absolute_url()}/@types/Document/title"\n+        )\n+        self.assertEqual(response.status_code, 401)\n+\n     def test_contextaware_addable(self):\n         response = self.api_session.get(f"{self.portal.absolute_url()}/@types")  # noqa\n \n'
 
