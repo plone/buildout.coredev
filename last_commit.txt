@@ -2,40 +2,15 @@ Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2026-10-11T20:35:48-07:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.restapi/commit/3848283ba4890104a65742abf748a689721f79a8
+Date: 2026-10-11T20:49:04-07:00
+Author: David Glick (davisagli) <david@glicksoftware.com>
+Commit: https://github.com/plone/plone.restapi/commit/cc7fedb8c4facaf3e891517c95f7ae0195d10e7b
 
-Fix TypeErrors (HTTP 500) from request parameters in search/summary serialization (#2060)
-
-Two code paths in the REST API search and summary serialization could raise a
-TypeError (returned as HTTP 500) based on request input:
-
-1. DefaultJSONSummarySerializer stored the merged serializer metadata on the
-   request with request.set() (which writes to request.other), but read it back
-   with request.form.get(). The cached value was therefore never found, so the
-   metadata was recomputed for every serialized item, for example once per
-   search result. In addition, a client-supplied form or query string parameter
-   named summary_serializer_metadata made metadata a string and raised a
-   TypeError when it was indexed as a dict. Read the cache back with
-   request.get() so it is reused, and guard it with isinstance(metadata, dict).
-
-2. SearchHandler.filter_query() checked "query" in types to detect a
-   {"query": ...} portal_type dict. For a string portal_type this is a substring
-   check, so a value containing "query" (for example "Subquery") was indexed as
-   a dict and raised a TypeError. Guard the check with isinstance(types, dict).
-
-Add regression tests for all three cases; each fails without the fix.
-
-Co-authored-by: David Glick &lt;david@glicksoftware.com&gt;
+Fix workflow triggers for external PRs
 
 Files changed:
-A news/2060.bugfix
-M CONTRIBUTORS.md
-M src/plone/restapi/search/handler.py
-M src/plone/restapi/serializer/summary.py
-M src/plone/restapi/tests/test_search.py
-M src/plone/restapi/tests/test_serializer_summary.py
+M .github/workflows/meta.yml
+M .github/workflows/test-matrix.yml
 
-b'diff --git a/CONTRIBUTORS.md b/CONTRIBUTORS.md\nindex 3ce85efff..75c35c113 100644\n--- a/CONTRIBUTORS.md\n+++ b/CONTRIBUTORS.md\n@@ -44,3 +44,4 @@ this file, one to a line, like so:\n - Jon Pentland\n - Leonardo J. Caballero G.\n - Steve Piercy\n+- Marcel Liebischer\ndiff --git a/news/2060.bugfix b/news/2060.bugfix\nnew file mode 100644\nindex 000000000..0765e80b0\n--- /dev/null\n+++ b/news/2060.bugfix\n@@ -0,0 +1 @@\n+Fix two cases where REST API search and summary serialization could return HTTP 500 (`TypeError`) based on request parameters: a form or query string parameter named `summary_serializer_metadata`, and a `portal_type` value containing the substring "query" when `use_site_search_settings` is used. Also make the summary serializer\'s per-request metadata cache effective; it was recomputed for every item. @mliebischer\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 7469277ea..9af223f66 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -116,7 +116,7 @@ def filter_query(self, query):\n         search_settings = registry.forInterface(ISearchSchema, prefix="plone")\n \n         types = query.get("portal_type", [])\n-        if "query" in types:\n+        if isinstance(types, dict) and "query" in types:\n             types = types["query"]\n         query["portal_type"] = self.filter_types(types)\n \ndiff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex 4ae106a47..3721bb375 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -84,9 +84,10 @@ class DefaultJSONSummarySerializer:\n     def __init__(self, context, request):\n         self.context = context\n         self.request = request\n-        # Cache summary_serializer_metadata on request\n-        metadata = self.request.form.get("summary_serializer_metadata", None)\n-        if not metadata:\n+        # Cache on the request: read via request.get() so the value stored by\n+        # request.set() is reused; isinstance() ignores a same-named parameter.\n+        metadata = self.request.get("summary_serializer_metadata", None)\n+        if not isinstance(metadata, dict):\n             metadata = merge_serializer_metadata_utilities_data()\n             self.request.set("summary_serializer_metadata", metadata)\n \ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex f409b85fe..a61c438da 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -789,6 +789,17 @@ def test_respect_access_inactive_permission(self):\n         ).json()\n         self.assertEqual(response["items_total"], 1)\n \n+    def test_search_use_site_search_settings_with_portal_type_containing_query(self):\n+        # A portal_type string that happens to contain the substring "query"\n+        # must not be mistaken for a {"query": ...} dict, which raised a\n+        # TypeError (HTTP 500) in filter_query.\n+        response = self.api_session.get(\n+            "/@search",\n+            params={"use_site_search_settings": 1, "portal_type": "Subquery"},\n+        )\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["items_total"], 0)\n+\n     def test_search_use_site_search_settings_for_types(self):\n         response = self.api_session.get(\n             "/@search", params={"use_site_search_settings": 1}\ndiff --git a/src/plone/restapi/tests/test_serializer_summary.py b/src/plone/restapi/tests/test_serializer_summary.py\nindex 19aca779f..33ba2d295 100644\n--- a/src/plone/restapi/tests/test_serializer_summary.py\n+++ b/src/plone/restapi/tests/test_serializer_summary.py\n@@ -216,6 +216,39 @@ def test_extra_non_metadata_attributes_env_var(self):\n         self.assertIn("getPath", non_metadata_attributes)\n         self.assertIn("getURL", non_metadata_attributes)\n \n+    def test_request_metadata_cache_is_reused(self):\n+        # The per-request metadata cache must take effect, so the metadata is\n+        # only computed once even when many items are serialized in the same\n+        # request (e.g. a search result or folder listing with many items).\n+        from plone.restapi.serializer import summary as summary_module\n+\n+        self.request.other.pop("summary_serializer_metadata", None)\n+\n+        with mock.patch.object(\n+            summary_module,\n+            "merge_serializer_metadata_utilities_data",\n+            wraps=summary_module.merge_serializer_metadata_utilities_data,\n+        ) as merge_mock:\n+            getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n+            getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n+\n+        self.assertEqual(merge_mock.call_count, 1)\n+\n+    def test_request_parameter_does_not_break_serialization(self):\n+        # A client-supplied form or query string parameter that happens to use\n+        # the same name as the internal per-request cache must not break\n+        # serialization with a TypeError.\n+        self.request.other.pop("summary_serializer_metadata", None)\n+        self.request.form["summary_serializer_metadata"] = "injected"\n+        try:\n+            summary = getMultiAdapter(\n+                (self.doc1, self.request), ISerializeToJsonSummary\n+            )()\n+        finally:\n+            del self.request.form["summary_serializer_metadata"]\n+\n+        self.assertEqual(summary["@type"], "DXTestDocument")\n+\n     def test_dx_type_summary(self):\n         summary = getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n \n'
+b'diff --git a/.github/workflows/meta.yml b/.github/workflows/meta.yml\nindex 982ce671d..52965ff33 100644\n--- a/.github/workflows/meta.yml\n+++ b/.github/workflows/meta.yml\n@@ -5,6 +5,13 @@ name: Meta\n \n on:\n   push:\n+    branches:\n+      - master\n+      - main\n+  pull_request:\n+    branches:\n+      - master\n+      - main\n   workflow_dispatch:\n \n ##\ndiff --git a/.github/workflows/test-matrix.yml b/.github/workflows/test-matrix.yml\nindex 610db0ea2..b039d3a31 100644\n--- a/.github/workflows/test-matrix.yml\n+++ b/.github/workflows/test-matrix.yml\n@@ -5,6 +5,13 @@ name: Tests\n \n on:\n   push:\n+    branches:\n+      - master\n+      - main\n+  pull_request:\n+    branches:\n+      - master\n+      - main\n   workflow_dispatch:\n \n jobs:\n'
 
