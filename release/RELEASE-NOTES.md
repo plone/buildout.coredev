@@ -1,6 +1,6 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-* Last updated: September 28th, 2026
+* Last updated: October 19th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
@@ -26,6 +26,12 @@ These are the main changes compared to 6.2:
   * Move `plone.app.users` template/views to `plone.app.layout.views.users`.
   * Move `plone.app.contenttypes` views to `plone.app.layout`.
   * Move `plone.app.dexterity` views to `plone.app.layout`.
+* `plone.portlets`:
+  Merge ``plone.app.portlets``, ``plone.portlet.collection`` and ``plone.portlet.static`` into this distribution, with their complete git history.
+  Import paths do not change.
+  The three former distributions are continued as empty packages that depend on ``plone.portlets``.
+  See [PLIP 4137](https://github.com/plone/Products.CMFPlone/issues/4137).
+* `plone.exportimport`: Add `--path` and `--paths` options to `plone-exporter` to export only parts of a site. Relations, translations, discussions, portlets and redirects are limited to the exported content.
 
 
 ## Volto frontend
@@ -34,7 +40,7 @@ The default frontend for new Plone 6 sites is Volto.
 Note that this is a JavaScript frontend that you need to run in a separate process with NodeJS.
 
 Plone 6.3 is meant to be used with Volto 19.
-Latest release is [19.3.0](https://www.npmjs.com/package/@plone/volto/v/19.3.0).  See the [changelog](https://github.com/plone/volto/blob/19.3.0/packages/volto/CHANGELOG.md).
+Latest release is [19.5.0](https://www.npmjs.com/package/@plone/volto/v/19.5.0).  See the [changelog](https://github.com/plone/volto/blob/19.5.0/packages/volto/CHANGELOG.md).
 
 
 ### Volto related changes in the Python backend since 6.2:
@@ -70,14 +76,14 @@ In Plone core we use these versions to install Plone:
 pip==26.2.1
 setuptools==84.0.0
 wheel==0.48.0
-zc.buildout==6.0.0a1
+zc.buildout==6.0.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
 
-`zc.buildout` 6.0.0a1 includes its own copy of the deprecated `pkg_resources` module, so it works with the latest `setuptools` version.
+`zc.buildout` 6.0.0 includes its own copy of the deprecated `pkg_resources` module, so it works with the latest `setuptools` version.
 And it fixes support for PEP 660 develop packages, so `pyproject.toml` only, made with `setuptools` or with newer build systems like `hatchling`, `flit`, `pdm`.
-See the [major changes](https://pypi.org/project/zc.buildout/6.0.0a1/#user-content-major-changes-in-6-x) for details information.
+See the [major changes](https://pypi.org/project/zc.buildout/6.0.0/#user-content-major-changes-in-6-x) for details information.
 
 
 ## Installation
