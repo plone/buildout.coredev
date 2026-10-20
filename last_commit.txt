@@ -1,115 +1,17 @@
-Repository: plone.namedfile
+Repository: plone.restapi
 
 
 Branch: refs/heads/main
-Date: 2026-09-16T17:43:14+02:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.namedfile/commit/9ae696b3d993035910f9396fbd874daa74c6924f
-
-Stop filestream_range_iterator.read at the end of the range
-
-WSGI servers like waitress wrap the response body in wsgi.file_wrapper
-and read it with read(size) instead of iterating it. read() ignored the
-end of the requested range, so a range request (e.g. bytes=0-0 on a large
-video) read the file from the start of the range to its end. The server
-cut the output at Content-Length, but the disk reads and the CPU time were
-spent anyway.
-
-Files changed:
-A news/+range-read.bugfix
-M src/plone/namedfile/tests/test_utils.py
-M src/plone/namedfile/utils/__init__.py
-
-b'diff --git a/news/+range-read.bugfix b/news/+range-read.bugfix\nnew file mode 100644\nindex 00000000..83c82e5a\n--- /dev/null\n+++ b/news/+range-read.bugfix\n@@ -0,0 +1,3 @@\n+Stop ``filestream_range_iterator.read`` at the end of the requested range.\n+WSGI servers like waitress read the ``wsgi.file_wrapper`` instead of iterating it, so a range request read the file from the start of the range to its end.\n+[mliebischer]\ndiff --git a/src/plone/namedfile/tests/test_utils.py b/src/plone/namedfile/tests/test_utils.py\nindex 4587e299..ac7c852d 100644\n--- a/src/plone/namedfile/tests/test_utils.py\n+++ b/src/plone/namedfile/tests/test_utils.py\n@@ -1,9 +1,12 @@\n from plone.namedfile.file import NamedImage\n from plone.namedfile.tests import getFile\n+from plone.namedfile.utils import filestream_range_iterator\n from plone.namedfile.utils import get_contenttype\n from plone.namedfile.utils import getImageInfo\n from plone.namedfile.utils import safe_basename\n \n+import os\n+import tempfile\n import unittest\n \n \n@@ -105,3 +108,40 @@ def test_safe_basename_windows(self):\n \n     def test_safe_basename_plain(self):\n         self.assertEqual(safe_basename("file.txt"), "file.txt")\n+\n+\n+class TestFilestreamRangeIterator(unittest.TestCase):\n+\n+    def setUp(self):\n+        self.data = bytes(range(256)) * 4\n+        fd, self.path = tempfile.mkstemp()\n+        with os.fdopen(fd, "wb") as f:\n+            f.write(self.data)\n+\n+    def tearDown(self):\n+        os.remove(self.path)\n+\n+    def test_iterate_range(self):\n+        iterator = filestream_range_iterator(self.path, start=10, end=20, streamsize=4)\n+        self.assertEqual(b"".join(iterator), self.data[10:20])\n+        iterator.close()\n+\n+    def test_read_stops_at_end_of_range(self):\n+        # WSGI servers read through wsgi.file_wrapper (e.g. waitress), not by iterating\n+        iterator = filestream_range_iterator(self.path, start=10, end=20)\n+        self.assertEqual(iterator.read(), self.data[10:20])\n+        self.assertEqual(iterator.read(), b"")\n+        iterator.close()\n+\n+    def test_read_in_blocks_stops_at_end_of_range(self):\n+        iterator = filestream_range_iterator(self.path, start=10, end=20)\n+        self.assertEqual(iterator.read(4), self.data[10:14])\n+        self.assertEqual(iterator.read(4), self.data[14:18])\n+        self.assertEqual(iterator.read(4), self.data[18:20])\n+        self.assertEqual(iterator.read(4), b"")\n+        iterator.close()\n+\n+    def test_read_without_end(self):\n+        iterator = filestream_range_iterator(self.path, start=1000)\n+        self.assertEqual(iterator.read(), self.data[1000:])\n+        iterator.close()\ndiff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex 04d7481a..616b0826 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -91,6 +91,11 @@ def close(self):\n     # def __len__(self)\n \n     def read(self, size=-1):\n+        # WSGI servers read wsgi.file_wrapper objects instead of iterating them,\n+        # so stop at the end of the range here as well.\n+        if self.end is not None:\n+            remaining = max(self.end - self._io.tell(), 0)\n+            size = remaining if size is None or size < 0 else min(size, remaining)\n         return self._io.read(size)\n \n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-09-16T18:06:47+02:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.namedfile/commit/565f113641f174aed8045647d2e103c9afb189df
-
-Rename news entry to the pull request number
-
-Files changed:
-A news/226.bugfix
-D news/+range-read.bugfix
-
-b'diff --git a/news/+range-read.bugfix b/news/226.bugfix\nsimilarity index 100%\nrename from news/+range-read.bugfix\nrename to news/226.bugfix\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-10-15T16:45:10+02:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.namedfile/commit/1309731eb1c73b8a3913021b8ac386d82a9bfd3f
-
-Apply review suggestions
-
-Use addCleanup instead of tearDown and contextlib.closing in the tests,
-and write the size check in read as a plain if.
-
-Files changed:
-M src/plone/namedfile/tests/test_utils.py
-M src/plone/namedfile/utils/__init__.py
-
-b'diff --git a/src/plone/namedfile/tests/test_utils.py b/src/plone/namedfile/tests/test_utils.py\nindex ac7c852..068ca7c 100644\n--- a/src/plone/namedfile/tests/test_utils.py\n+++ b/src/plone/namedfile/tests/test_utils.py\n@@ -5,6 +5,7 @@\n from plone.namedfile.utils import getImageInfo\n from plone.namedfile.utils import safe_basename\n \n+import contextlib\n import os\n import tempfile\n import unittest\n@@ -115,33 +116,31 @@ class TestFilestreamRangeIterator(unittest.TestCase):\n     def setUp(self):\n         self.data = bytes(range(256)) * 4\n         fd, self.path = tempfile.mkstemp()\n+        self.addCleanup(os.remove, self.path)\n         with os.fdopen(fd, "wb") as f:\n             f.write(self.data)\n \n-    def tearDown(self):\n-        os.remove(self.path)\n-\n     def test_iterate_range(self):\n         iterator = filestream_range_iterator(self.path, start=10, end=20, streamsize=4)\n-        self.assertEqual(b"".join(iterator), self.data[10:20])\n-        iterator.close()\n+        with contextlib.closing(iterator):\n+            self.assertEqual(b"".join(iterator), self.data[10:20])\n \n     def test_read_stops_at_end_of_range(self):\n         # WSGI servers read through wsgi.file_wrapper (e.g. waitress), not by iterating\n         iterator = filestream_range_iterator(self.path, start=10, end=20)\n-        self.assertEqual(iterator.read(), self.data[10:20])\n-        self.assertEqual(iterator.read(), b"")\n-        iterator.close()\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(), self.data[10:20])\n+            self.assertEqual(iterator.read(), b"")\n \n     def test_read_in_blocks_stops_at_end_of_range(self):\n         iterator = filestream_range_iterator(self.path, start=10, end=20)\n-        self.assertEqual(iterator.read(4), self.data[10:14])\n-        self.assertEqual(iterator.read(4), self.data[14:18])\n-        self.assertEqual(iterator.read(4), self.data[18:20])\n-        self.assertEqual(iterator.read(4), b"")\n-        iterator.close()\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(4), self.data[10:14])\n+            self.assertEqual(iterator.read(4), self.data[14:18])\n+            self.assertEqual(iterator.read(4), self.data[18:20])\n+            self.assertEqual(iterator.read(4), b"")\n \n     def test_read_without_end(self):\n         iterator = filestream_range_iterator(self.path, start=1000)\n-        self.assertEqual(iterator.read(), self.data[1000:])\n-        iterator.close()\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(), self.data[1000:])\ndiff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex 616b082..d7bd0f7 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -95,7 +95,8 @@ def read(self, size=-1):\n         # so stop at the end of the range here as well.\n         if self.end is not None:\n             remaining = max(self.end - self._io.tell(), 0)\n-            size = remaining if size is None or size < 0 else min(size, remaining)\n+            if size is None or size < 0 or size > remaining:\n+                size = remaining\n         return self._io.read(size)\n \n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-10-15T16:45:10+02:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.namedfile/commit/59eadeb4349406968a17e0333f17cb5cb9064ccb
-
-Add an integration test for range requests through wsgi.file_wrapper
-
-Publish a range request on @@download with waitress' file wrapper and
-check that the wrapper reads only the requested range.
-
-Files changed:
-A src/plone/namedfile/tests/test_download_range.py
-
-b'diff --git a/src/plone/namedfile/tests/test_download_range.py b/src/plone/namedfile/tests/test_download_range.py\nnew file mode 100644\nindex 0000000..cf7627a\n--- /dev/null\n+++ b/src/plone/namedfile/tests/test_download_range.py\n@@ -0,0 +1,81 @@\n+"""Range requests on @@download, published the way waitress does it.\n+\n+Zope hands the range iterator to ``wsgi.file_wrapper`` because it has a ``read``\n+method. waitress then reads the wrapper in blocks instead of iterating it. The\n+server cuts the response at Content-Length, so the client gets the right bytes\n+either way, but the iterator must stop at the end of the range by itself.\n+"""\n+\n+from OFS.SimpleItem import SimpleItem\n+from plone.namedfile.file import NamedBlobFile\n+from plone.namedfile.testing import PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n+from waitress.buffers import ReadOnlyFileBasedBuffer\n+from ZPublisher.WSGIPublisher import publish_module\n+\n+import io\n+import sys\n+import transaction\n+import unittest\n+\n+\n+class DummyContent(SimpleItem):\n+    id = __name__ = "item"\n+    file = None\n+\n+\n+class TestDownloadRange(unittest.TestCase):\n+    layer = PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n+\n+    def setUp(self):\n+        app = self.layer["app"]\n+        app._setOb("item", DummyContent())\n+        # 256 KiB, more than the 32 KiB blocks waitress reads\n+        self.data = bytes(range(256)) * 1024\n+        app.item.file = NamedBlobFile(self.data, filename="data.bin")\n+        # the iterator is only used for committed blobs\n+        transaction.commit()\n+\n+    def publish(self, **headers):\n+        environ = {\n+            "REQUEST_METHOD": "GET",\n+            "PATH_INFO": "/item/@@download/file",\n+            "SERVER_NAME": "nohost",\n+            "SERVER_PORT": "80",\n+            "SERVER_PROTOCOL": "HTTP/1.1",\n+            "wsgi.url_scheme": "http",\n+            "wsgi.input": io.BytesIO(),\n+            "wsgi.errors": sys.stderr,\n+            "wsgi.file_wrapper": ReadOnlyFileBasedBuffer,\n+        }\n+        environ.update(headers)\n+        response = {}\n+\n+        def start_response(status, response_headers, exc_info=None):\n+            response["status"] = status\n+            response["headers"] = {\n+                key.lower(): value for key, value in response_headers\n+            }\n+\n+        result = publish_module(environ, start_response)\n+        try:\n+            # everything the file wrapper reads, not cut at Content-Length\n+            body = b"".join(result)\n+        finally:\n+            result.close()\n+        return response["status"], response["headers"], body\n+\n+    def test_range_request_reads_only_the_range(self):\n+        start, end = 65536, 131072\n+        status, headers, body = self.publish(HTTP_RANGE=f"bytes={start}-{end - 1}")\n+        self.assertEqual(status, "206 Partial Content")\n+        self.assertEqual(headers["content-length"], str(end - start))\n+        self.assertEqual(\n+            headers["content-range"], f"bytes {start}-{end - 1}/{len(self.data)}"\n+        )\n+        self.assertEqual(body, self.data[start:end])\n+\n+    def test_request_without_range_reads_the_whole_file(self):\n+        status, headers, body = self.publish()\n+        self.assertEqual(status, "200 OK")\n+        self.assertEqual(headers["content-length"], str(len(self.data)))\n+        self.assertEqual(body, self.data)\n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-10-15T17:03:29+02:00
-Author: Marcel Liebischer (mliebischer) <liebischer@interaktiv.de>
-Commit: https://github.com/plone/plone.namedfile/commit/6fd9c5d3fb4b3bf089ed4e4e2458f52cb6b4b5d2
-
-Write the size check in read as if and else
-
-Spell out the two cases: read everything up to the end of the range,
-or read at most the requested number of bytes.
-
-Files changed:
-M src/plone/namedfile/utils/__init__.py
-
-b'diff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex d7bd0f7..8f9e271 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -95,8 +95,10 @@ def read(self, size=-1):\n         # so stop at the end of the range here as well.\n         if self.end is not None:\n             remaining = max(self.end - self._io.tell(), 0)\n-            if size is None or size < 0 or size > remaining:\n+            if size is None or size < 0:\n                 size = remaining\n+            else:\n+                size = min(size, remaining)\n         return self._io.read(size)\n \n \n'
-
-Repository: plone.namedfile
-
-
-Branch: refs/heads/main
-Date: 2026-10-17T18:25:13-07:00
+Date: 2026-10-19T21:20:50-07:00
 Author: David Glick (davisagli) <david@glicksoftware.com>
-Commit: https://github.com/plone/plone.namedfile/commit/e404b539d9e7413871f178a22e225d7b5703d49f
+Commit: https://github.com/plone/plone.restapi/commit/4f809a35f9f684063c62e4397bfcb11783cde2b4
 
-Merge pull request #226 from plone/mliebischer-range-iterator-read-end
-
-Stop filestream_range_iterator.read at the end of the range
+Run CI on PRs that don't target main
 
 Files changed:
-A news/226.bugfix
-A src/plone/namedfile/tests/test_download_range.py
-M src/plone/namedfile/tests/test_utils.py
-M src/plone/namedfile/utils/__init__.py
+M .github/workflows/meta.yml
+M .github/workflows/test-matrix.yml
+M .github/workflows/tests.yml
 
-b'diff --git a/news/226.bugfix b/news/226.bugfix\nnew file mode 100644\nindex 0000000..83c82e5\n--- /dev/null\n+++ b/news/226.bugfix\n@@ -0,0 +1,3 @@\n+Stop ``filestream_range_iterator.read`` at the end of the requested range.\n+WSGI servers like waitress read the ``wsgi.file_wrapper`` instead of iterating it, so a range request read the file from the start of the range to its end.\n+[mliebischer]\ndiff --git a/src/plone/namedfile/tests/test_download_range.py b/src/plone/namedfile/tests/test_download_range.py\nnew file mode 100644\nindex 0000000..cf7627a\n--- /dev/null\n+++ b/src/plone/namedfile/tests/test_download_range.py\n@@ -0,0 +1,81 @@\n+"""Range requests on @@download, published the way waitress does it.\n+\n+Zope hands the range iterator to ``wsgi.file_wrapper`` because it has a ``read``\n+method. waitress then reads the wrapper in blocks instead of iterating it. The\n+server cuts the response at Content-Length, so the client gets the right bytes\n+either way, but the iterator must stop at the end of the range by itself.\n+"""\n+\n+from OFS.SimpleItem import SimpleItem\n+from plone.namedfile.file import NamedBlobFile\n+from plone.namedfile.testing import PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n+from waitress.buffers import ReadOnlyFileBasedBuffer\n+from ZPublisher.WSGIPublisher import publish_module\n+\n+import io\n+import sys\n+import transaction\n+import unittest\n+\n+\n+class DummyContent(SimpleItem):\n+    id = __name__ = "item"\n+    file = None\n+\n+\n+class TestDownloadRange(unittest.TestCase):\n+    layer = PLONE_NAMEDFILE_FUNCTIONAL_TESTING\n+\n+    def setUp(self):\n+        app = self.layer["app"]\n+        app._setOb("item", DummyContent())\n+        # 256 KiB, more than the 32 KiB blocks waitress reads\n+        self.data = bytes(range(256)) * 1024\n+        app.item.file = NamedBlobFile(self.data, filename="data.bin")\n+        # the iterator is only used for committed blobs\n+        transaction.commit()\n+\n+    def publish(self, **headers):\n+        environ = {\n+            "REQUEST_METHOD": "GET",\n+            "PATH_INFO": "/item/@@download/file",\n+            "SERVER_NAME": "nohost",\n+            "SERVER_PORT": "80",\n+            "SERVER_PROTOCOL": "HTTP/1.1",\n+            "wsgi.url_scheme": "http",\n+            "wsgi.input": io.BytesIO(),\n+            "wsgi.errors": sys.stderr,\n+            "wsgi.file_wrapper": ReadOnlyFileBasedBuffer,\n+        }\n+        environ.update(headers)\n+        response = {}\n+\n+        def start_response(status, response_headers, exc_info=None):\n+            response["status"] = status\n+            response["headers"] = {\n+                key.lower(): value for key, value in response_headers\n+            }\n+\n+        result = publish_module(environ, start_response)\n+        try:\n+            # everything the file wrapper reads, not cut at Content-Length\n+            body = b"".join(result)\n+        finally:\n+            result.close()\n+        return response["status"], response["headers"], body\n+\n+    def test_range_request_reads_only_the_range(self):\n+        start, end = 65536, 131072\n+        status, headers, body = self.publish(HTTP_RANGE=f"bytes={start}-{end - 1}")\n+        self.assertEqual(status, "206 Partial Content")\n+        self.assertEqual(headers["content-length"], str(end - start))\n+        self.assertEqual(\n+            headers["content-range"], f"bytes {start}-{end - 1}/{len(self.data)}"\n+        )\n+        self.assertEqual(body, self.data[start:end])\n+\n+    def test_request_without_range_reads_the_whole_file(self):\n+        status, headers, body = self.publish()\n+        self.assertEqual(status, "200 OK")\n+        self.assertEqual(headers["content-length"], str(len(self.data)))\n+        self.assertEqual(body, self.data)\ndiff --git a/src/plone/namedfile/tests/test_utils.py b/src/plone/namedfile/tests/test_utils.py\nindex 4587e29..068ca7c 100644\n--- a/src/plone/namedfile/tests/test_utils.py\n+++ b/src/plone/namedfile/tests/test_utils.py\n@@ -1,9 +1,13 @@\n from plone.namedfile.file import NamedImage\n from plone.namedfile.tests import getFile\n+from plone.namedfile.utils import filestream_range_iterator\n from plone.namedfile.utils import get_contenttype\n from plone.namedfile.utils import getImageInfo\n from plone.namedfile.utils import safe_basename\n \n+import contextlib\n+import os\n+import tempfile\n import unittest\n \n \n@@ -105,3 +109,38 @@ def test_safe_basename_windows(self):\n \n     def test_safe_basename_plain(self):\n         self.assertEqual(safe_basename("file.txt"), "file.txt")\n+\n+\n+class TestFilestreamRangeIterator(unittest.TestCase):\n+\n+    def setUp(self):\n+        self.data = bytes(range(256)) * 4\n+        fd, self.path = tempfile.mkstemp()\n+        self.addCleanup(os.remove, self.path)\n+        with os.fdopen(fd, "wb") as f:\n+            f.write(self.data)\n+\n+    def test_iterate_range(self):\n+        iterator = filestream_range_iterator(self.path, start=10, end=20, streamsize=4)\n+        with contextlib.closing(iterator):\n+            self.assertEqual(b"".join(iterator), self.data[10:20])\n+\n+    def test_read_stops_at_end_of_range(self):\n+        # WSGI servers read through wsgi.file_wrapper (e.g. waitress), not by iterating\n+        iterator = filestream_range_iterator(self.path, start=10, end=20)\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(), self.data[10:20])\n+            self.assertEqual(iterator.read(), b"")\n+\n+    def test_read_in_blocks_stops_at_end_of_range(self):\n+        iterator = filestream_range_iterator(self.path, start=10, end=20)\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(4), self.data[10:14])\n+            self.assertEqual(iterator.read(4), self.data[14:18])\n+            self.assertEqual(iterator.read(4), self.data[18:20])\n+            self.assertEqual(iterator.read(4), b"")\n+\n+    def test_read_without_end(self):\n+        iterator = filestream_range_iterator(self.path, start=1000)\n+        with contextlib.closing(iterator):\n+            self.assertEqual(iterator.read(), self.data[1000:])\ndiff --git a/src/plone/namedfile/utils/__init__.py b/src/plone/namedfile/utils/__init__.py\nindex 04d7481..8f9e271 100644\n--- a/src/plone/namedfile/utils/__init__.py\n+++ b/src/plone/namedfile/utils/__init__.py\n@@ -91,6 +91,14 @@ def close(self):\n     # def __len__(self)\n \n     def read(self, size=-1):\n+        # WSGI servers read wsgi.file_wrapper objects instead of iterating them,\n+        # so stop at the end of the range here as well.\n+        if self.end is not None:\n+            remaining = max(self.end - self._io.tell(), 0)\n+            if size is None or size < 0:\n+                size = remaining\n+            else:\n+                size = min(size, remaining)\n         return self._io.read(size)\n \n \n'
+b'diff --git a/.github/workflows/meta.yml b/.github/workflows/meta.yml\nindex 52965ff33..af61e6c1e 100644\n--- a/.github/workflows/meta.yml\n+++ b/.github/workflows/meta.yml\n@@ -9,9 +9,6 @@ on:\n       - master\n       - main\n   pull_request:\n-    branches:\n-      - master\n-      - main\n   workflow_dispatch:\n \n ##\n@@ -55,7 +52,6 @@ jobs:\n # os_dependencies = "git libxml2 libxslt"\n ##\n \n-\n ##\n # Specify additional jobs in .meta.toml:\n #  [github]\ndiff --git a/.github/workflows/test-matrix.yml b/.github/workflows/test-matrix.yml\nindex 81d62ed73..2c5a9ea22 100644\n--- a/.github/workflows/test-matrix.yml\n+++ b/.github/workflows/test-matrix.yml\n@@ -9,9 +9,6 @@ on:\n       - master\n       - main\n   pull_request:\n-    branches:\n-      - master\n-      - main\n   workflow_dispatch:\n \n jobs:\ndiff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml\nindex af8135767..1a77f028a 100644\n--- a/.github/workflows/tests.yml\n+++ b/.github/workflows/tests.yml\n@@ -5,9 +5,6 @@ on:\n       - master\n       - main\n   pull_request:\n-    branches:\n-      - master\n-      - main\n   workflow_dispatch:\n \n jobs:\n'
 
