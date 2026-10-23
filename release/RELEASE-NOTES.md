@@ -1,6 +1,6 @@
 # Release notes for Plone 6.2-dev
 
-* Released: October 21st, 2026
+* Last updated: October 23rd, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-62.html), explaining the biggest changes compared to 6.1.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.2-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.2-dev/changelog.txt).
@@ -14,7 +14,7 @@ If you want to jump straight in, here are some important links:
 
 ## Highlights
 
-These are the main changes compared to 6.2.2:
+These are the main changes compared to 6.2.2.1:
 
 * `plone.exportimport`: Add `--path` and `--paths` options to `plone-exporter` to export only parts of a site. Relations, translations, discussions, portlets and redirects are limited to the exported content.
 
@@ -49,6 +49,8 @@ It is being [renamed to Blicca](https://community.plone.org/t/say-hello-to-blicc
 ## Python compatibility
 
 This release supports Python 3.10, 3.11, 3.12, 3.13, and 3.14.
+
+Note: we will soon drop support for Python 3.10, as this is out of security support.
 
 
 ## pip, buildout, setuptools
