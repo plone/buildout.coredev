@@ -1,6 +1,6 @@
 # Release notes for Plone 6.3.0a1 (unreleased)
 
-* Last updated: October 19th, 2026
+* Last updated: October 23th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-63.html), explaining the biggest changes compared to 6.2.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.3-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.3-dev/changelog.txt).
@@ -73,7 +73,7 @@ TODO We probably want to drop 3.10, as it will be out of security support in Oct
 In Plone core we use these versions to install Plone:
 
 ```
-pip==26.2.1
+pip==26.2.2
 setuptools==84.0.0
 wheel==0.48.0
 zc.buildout==6.0.0
