@@ -77,7 +77,6 @@ for package, versions in pins.items():
     # Check if Python 3.9 differs from the rest.
     if py39_version is not None:
         combi.append(f'{package}=={py39_version}; python_version == "3.9"')
-        combi.append(f'{package}=={py39_version}; python_version == "3.9"')
 
     # Check if Python 3.10 differs from the rest.
     if py310_version == py311_version == py312_version == py313_version and py310_version is not None:
