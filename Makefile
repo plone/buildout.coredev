@@ -52,8 +52,8 @@ EXTRA_PATH?=
 PRIMARY_PYTHON?=python3
 
 # Minimum required Python version.
-# Default: 3.10
-PYTHON_MIN_VERSION?=3.10
+# Default: 3.11
+PYTHON_MIN_VERSION?=3.11
 
 # Install packages using the given package installer method.
 # Supported are `pip` and `uv`. When `uv` is selected, a global installation
