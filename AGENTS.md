@@ -113,13 +113,18 @@ consider pinning it in `versions.cfg` or `versions-extra.cfg`.
    Python 3.9, 3.10 and 3.13.
 3. Check that every pinned version can be installed on each supported
    Python. For `release/constraints.txt` and `requirements.txt`:
-   `uv pip compile --quiet --no-deps --python-version 3.9 --python-platform linux <file> -o $TMP/out.txt`
+   `uv pip compile --quiet --no-deps --python-version 3.9.25 --python-platform linux <file> -o $TMP/out.txt`
    (and again for 3.10 up to 3.13). This fails on any pin whose
    `requires_python` excludes that Python. Leave out Windows-only lines
-   (`pywin32`), they don't resolve on Linux. Known failure on Python 3.9,
-   which you can leave out of the check: legacy-cgi 2.6.2 needs Python
-   3.10+. It is only installed on Python 3.13, where the `cgi` module was
-   removed from the standard library.
+   (`pywin32`), they don't resolve on Linux. Use `--python-version 3.9.25`
+   instead of `3.9`: cryptography excludes Python 3.9.0 and 3.9.1.
+   Known failures on Python 3.9, which you can leave out of the check,
+   because these packages are never installed on Python 3.9:
+   - legacy-cgi 2.6.2 needs Python 3.10+. It is only installed on Python
+     3.13, where the `cgi` module was removed from the standard library.
+   - feedparser-sgmllib 2.1.0 needs Python 3.10+. It is only a dependency of
+     feedparser 6.0.13+. On Python 3.9 we pin feedparser 6.0.12, which uses
+     sgmllib3k instead.
    This check also applies to `versions-ecosystem.cfg`, which has its own
    `[versions:python39]` section (e.g. collective.z3cform.datagridfield).
    Those pins are only tested on Python 3.10 in CI
