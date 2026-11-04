@@ -73,7 +73,9 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 - Check `requires_python` on PyPI against the oldest supported Python (see the
   `python_version == "3.10"` section). If the fix needs a newer Python, pin the
   fixed version only for the newer Pythons and keep the old pin explicitly for
-  the old one (see the filelock pins).
+  the old one (see the filelock pins). This also goes for **new** pins, e.g.
+  a new dependency: platformdirs 4.14.4 was added for zc.buildout 6, but
+  needs Python 3.11+, and broke buildout on Python 3.10 in CI.
 - "Dependency not found on PyPI" from pip-audit usually means the pinned
   version doesn't exist (a typo). Check the release list on PyPI.
 - For a new major version (e.g. zc.buildout), read the changelog and check
@@ -86,13 +88,22 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 1. Run `bin/manage versions2constraints` and check that the `constraints.txt`
    diff only contains the intended changes.
 2. Re-run the audit on the new `constraints.txt` and `requirements.txt`.
-3. Check the mxdev result without touching the real environment: copy
+   Run it for Python 3.10 too, for the pins that only apply there.
+3. Check that every pinned version can be installed on the oldest and the
+   newest supported Python. For each of `constraints.txt` (without the `-c`
+   line), `constraints-extra.txt`, `constraints-ecosystem.txt` and
+   `requirements.txt`:
+   `uv pip compile --quiet --no-deps --python-version 3.10 --python-platform linux <file> -o $TMP/out.txt`
+   (and again with e.g. `--python-version 3.14`). This fails on any pin whose
+   `requires_python` excludes that Python. Leave out Windows-only lines
+   (`pywin32`), they don't resolve on Linux.
+4. Check the mxdev result without touching the real environment: copy
    `mx.ini`, `requirements-test.txt` and all `constraints*.txt` files to a scratch
    directory, remove the `mx*.ini` includes from the copied `mx.ini`, and run
    `.venv/bin/mxdev -n -c mx.ini` there. In `constraints-mxdev.txt`, the
    overridden Zope pins must show up as `# ... -> mxdev disabled (override)`,
    with exactly one active line per package/marker.
-4. For marker-specific pins, run a pip dry run per Python version against that
+5. For marker-specific pins, run a pip dry run per Python version against that
    `constraints-mxdev.txt`:
    `pip install --dry-run --report - <pkg> -c constraints-mxdev.txt`
    in a throwaway `uv venv --python 3.10 --seed` (and a newer Python).
