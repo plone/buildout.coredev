@@ -116,13 +116,14 @@ consider pinning it in `versions.cfg` or `versions-extra.cfg`.
    `uv pip compile --quiet --no-deps --python-version 3.9 --python-platform linux <file> -o $TMP/out.txt`
    (and again for 3.10 up to 3.13). This fails on any pin whose
    `requires_python` excludes that Python. Leave out Windows-only lines
-   (`pywin32`), they don't resolve on Linux. Known failures on Python 3.9,
-   which you can leave out of the check:
-   - collective.z3cform.datagridfield 3.0.5 needs Python 3.10+. It is an
-     ecosystem pin, and those are only tested on 3.10
-     (`.github/workflows/ecosystem.yml`).
-   - legacy-cgi 2.6.2 needs Python 3.10+. It is only installed on Python
-     3.13, where the `cgi` module was removed from the standard library.
+   (`pywin32`), they don't resolve on Linux. Known failure on Python 3.9,
+   which you can leave out of the check: legacy-cgi 2.6.2 needs Python
+   3.10+. It is only installed on Python 3.13, where the `cgi` module was
+   removed from the standard library.
+   This check also applies to `versions-ecosystem.cfg`, which has its own
+   `[versions:python39]` section (e.g. collective.z3cform.datagridfield).
+   Those pins are only tested on Python 3.10 in CI
+   (`.github/workflows/ecosystem.yml`), so this check is the only one for 3.9.
 4. Only when the user asks: run `bin/buildout` (with Python 3.9 and a newer
    Python) and check for "Versions had to be automatically picked" at the
    end. Otherwise leave this to CI (`.github/workflows/run-buildout.yml`
