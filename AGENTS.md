@@ -2,6 +2,10 @@
 
 ## General
 
+- This is the Plone 6.1 branch. It is based on Zope 5.14.x and supports
+  Python 3.10 up to 3.13. So the oldest supported Python is 3.10 and the
+  newest is 3.13.
+
 - Don't install anything into `.venv` or commit unless asked. When asked to
   commit, do it on a new branch.
 - Put temporary files and helper scripts in a scratch directory, not in the
@@ -21,8 +25,10 @@ vulnerabilities, and to update the pins.
 - `constraints.txt` (and `constraints-extra.txt`, `constraints-ecosystem.txt`)
   are **generated**: edit `versions.cfg`, then run `bin/manage versions2constraints`.
   Never edit `constraints.txt` by hand.
-- The `# Basics` section of `versions.cfg` (pip, setuptools, wheel,
-  zc.buildout, horse-with-no-namespace) must match `requirements.txt`.
+- The `# Basics` section of `versions.cfg` (packaging, pip, setuptools,
+  wheel, zc.buildout) must match `requirements.txt`. If one of these differs
+  from the Zope pin, it must also be in `version-overrides` in `mx.ini`
+  (currently `packaging`).
 - To override a Zope pin, add it to the `# OVERRIDES` section of
   `versions.cfg` **and** to `version-overrides` in `mx.ini`. Without the
   `mx.ini` entry, mxdev keeps both pins and pip fails on the conflict.
@@ -44,14 +50,14 @@ scratch directory, not in the repo.
 ```bash
 # 1. Our own pins (strip the remote -c Zope line):
 grep -v '^-c' constraints.txt > $TMP/own.txt
-uvx --python 3.14 pip-audit -r $TMP/own.txt --no-deps --disable-pip
-uvx --python 3.14 pip-audit -r constraints-extra.txt --no-deps --disable-pip
-uvx --python 3.14 pip-audit -r constraints-ecosystem.txt --no-deps --disable-pip
-uvx --python 3.14 pip-audit -r requirements.txt --no-deps --disable-pip
+uvx --python 3.13 pip-audit -r $TMP/own.txt --no-deps --disable-pip
+uvx --python 3.13 pip-audit -r constraints-extra.txt --no-deps --disable-pip
+uvx --python 3.13 pip-audit -r constraints-ecosystem.txt --no-deps --disable-pip
+uvx --python 3.13 pip-audit -r requirements.txt --no-deps --disable-pip
 
 # 2. The Zope constraints (URL is on the first line of constraints.txt):
-curl -s https://zopefoundation.github.io/Zope/releases/6.2/constraints.txt > $TMP/zope.txt
-uvx --python 3.14 pip-audit -r $TMP/zope.txt --no-deps --disable-pip
+curl -s https://zopefoundation.github.io/Zope/releases/5.14.2/constraints.txt > $TMP/zope.txt
+uvx --python 3.13 pip-audit -r $TMP/zope.txt --no-deps --disable-pip
 
 # 3. Installed packages (skip the source checkouts in src/):
 PIPAPI_PYTHON_LOCATION=.venv/bin/python uvx pip-audit --skip-editable
@@ -73,9 +79,10 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 - Check `requires_python` on PyPI against the oldest supported Python (see the
   `python_version == "3.10"` section). If the fix needs a newer Python, pin the
   fixed version only for the newer Pythons and keep the old pin explicitly for
-  the old one (see the filelock pins). This also goes for **new** pins, e.g.
-  a new dependency: platformdirs 4.14.4 was added for zc.buildout 6, but
-  needs Python 3.11+, and broke buildout on Python 3.10 in CI.
+  the old one (see the pillow pins). This also goes for **new** pins, e.g.
+  a new dependency: on Plone 6.2, platformdirs 4.14.4 was added for
+  zc.buildout 6, but needs Python 3.11+, and broke buildout on Python 3.10
+  in CI.
 - "Dependency not found on PyPI" from pip-audit usually means the pinned
   version doesn't exist (a typo). Check the release list on PyPI.
 - For a new major version (e.g. zc.buildout), read the changelog and check
@@ -94,7 +101,7 @@ When it finds such a package, consider pinning it in `versions.cfg`.
    line), `constraints-extra.txt`, `constraints-ecosystem.txt` and
    `requirements.txt`:
    `uv pip compile --quiet --no-deps --python-version 3.10 --python-platform linux <file> -o $TMP/out.txt`
-   (and again with e.g. `--python-version 3.14`). This fails on any pin whose
+   (and again with e.g. `--python-version 3.13`). This fails on any pin whose
    `requires_python` excludes that Python. Leave out Windows-only lines
    (`pywin32`), they don't resolve on Linux.
 4. Check the mxdev result without touching the real environment: copy
@@ -117,11 +124,13 @@ Report minor and major updates to the user, but don't bump them unless asked.
 
 For CalVer packages (first version component is a year, e.g. certifi
 `2026.10.19`, tzdata `2026.3`, trove-classifiers `2026.6.1.19`, rpds-py
-`2026.6.3`, horse-with-no-namespace `20260202.0`), "bugfix" means nothing:
-look for the latest final release instead. (plone.versioncheck reports these
-as `Major`, `Minor` or `Bugfix` updates: take the newest.) Leave out releases whose first
-component is not a year (e.g. rpds-py `0.30.0`, from before it switched to
-CalVer). Pins in `mx.ini` overrides (e.g. certifi) must be bumped there too.
+`2026.6.3`), "bugfix" means nothing: look for the latest final release
+instead. (plone.versioncheck reports these as `Major`, `Minor` or `Bugfix`
+updates: take the newest.) Leave out releases whose first component is not a
+year (e.g. rpds-py `0.30.0`, from before it switched to CalVer). On this
+branch rpds-py is still pinned to `0.30.0`: report the CalVer releases to the
+user, but don't switch to them unless asked. Pins in `mx.ini` overrides
+(e.g. certifi) must be bumped there too.
 For CalVer packages it is fine to override Zope pins (e.g. certifi, pytz):
 mostly these are data packages (certificates, time zones, classifiers) where
 newer is simply better.
@@ -163,7 +172,7 @@ Check these by hand, with a few requests to
 
 - **Python-specific sections.** It only reads `[versions]`, not
   `[versions:python_version > "3.10"]` etc. Pins that only exist there
-  (exceptiongroup, pillow, rpds-py, filelock, tomli in `versions-extra.cfg`)
+  (currently pillow and tomli in `versions.cfg`)
   are missing, reported as unpinned, or compared against the Zope pin
   instead of ours.
 - **Fourth version component.** It only compares major.minor.bugfix, so it
@@ -192,8 +201,8 @@ Check these by hand, with a few requests to
   Overriding Zope pins is only for security fixes, and for CalVer packages
   (see above).
 - This includes Zope pins that apply to only one Python version. Example:
-  Zope pins exceptiongroup 1.3.0 on Python 3.10, so bump only our
-  `python_version > "3.10"` pin and keep 1.3.0 for 3.10. Don't replace both
+  Zope pins tomli 2.2.1 on Python 3.10, so bump only our
+  `python_version > "3.10"` pin and keep 2.2.1 for 3.10. Don't replace both
   with one unconditional pin: that would override the Zope pin. Report the
   newer Zope bugfix releases to the user instead; they're for Zope to make.
 - If the pin of a package isn't pinned by Zope and is the same for all
