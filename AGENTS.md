@@ -5,16 +5,19 @@
 - This is the Plone 6.0 branch. It is based on Zope 5.13 and supports
   Python 3.9 up to 3.13. So the oldest supported Python is 3.9 and the
   newest is 3.13.
-- This branch only uses buildout. There is no mxdev, no `mx.ini` and no
-  `constraints*.txt`. The virtualenv is the repository root itself
-  (`bin/python`, `bin/buildout`), and the eggs are in the buildout
-  `eggs-directory`, not in the virtualenv.
+- This branch uses buildout for development. There is no mxdev and no
+  `mx.ini`. The virtualenv is the repository root itself (`bin/python`,
+  `bin/buildout`), and the eggs are in the buildout `eggs-directory`, not in
+  the virtualenv.
+- For pip users there is `release/constraints.txt`, generated from the
+  buildout version files (see below).
 
 - Don't install anything into the virtualenv, don't run `bin/buildout` and
   don't commit unless asked. When asked to commit, do it on a new branch.
 - Put temporary files and helper scripts in a scratch directory, not in the
   repo.
-- After changing pins, do the verification steps under "Verifying" below.
+- After changing pins, regenerate `release/constraints.txt` and do the
+  verification steps under "Verifying" below.
 
 ## Checking pins for security vulnerabilities
 
@@ -42,45 +45,41 @@ to update the pins.
   etc. in `versions.cfg`. Each of these sections applies to exactly **one**
   Python version, and overrides `[versions]` in the same file. So a pin that
   should apply to 3.9 and 3.10 needs to be in both sections.
+- `release/constraints.txt` is **generated**: one flat list of all effective
+  pins (ours and Zope's, from `ecosystem.cfg`), with `python_version`
+  markers where the pins differ per Python. Never edit it by hand. It is
+  not always in sync with the buildout files: the release manager syncs it
+  when preparing a Plone release. Regenerate it with:
+
+  ```bash
+  uvx tox -q -p auto -c release/tox.ini \
+      -e constraints39,constraints310,constraints311,constraints312,constraints313,constraints
+  ```
+
+  This needs `python3.9` up to `python3.13` on the `PATH`, and takes a few
+  seconds. It runs buildout's own config parsing for each Python
+  (`release/create-constraints.py`) and combines the results
+  (`release/combine-constraints.py`). Plain `tox -c release/tox.ini` also
+  runs the `gather` env, which copies files to `release/dist/` for the
+  release; that is not needed here (but harmless: it is ignored by git).
 
 ### Running the audit
 
 Use `uvx pip-audit`. Don't install it into the virtualenv. Put temporary
 files in a scratch directory, not in the repo.
 
-There are no flat constraints files, so first make a list of all effective
-pins (ours and Zope's) with plone.versioncheck (see also "Finding updates with
-plone.versioncheck" below). Leave out `-n`, so all pins are included:
+First regenerate `release/constraints.txt` (see above), so it matches the
+buildout files. If that gives a diff before you changed anything, tell the
+user: the file was out of sync. Then:
 
 ```bash
-PYTHONWARNINGS=ignore uvx --from plone.versioncheck versioncheck \
-    -m -o $TMP/versioncheck-all.json ecosystem.cfg
-python3 - $TMP <<'EOF'
-import json, sys
-tmp = sys.argv[1]
-data = json.load(open(f"{tmp}/versioncheck-all.json"))
-pins = []
-for name, info in data.items():
-    for v in info["versions"]:
-        if v["state"] in ("A", "O"):
-            pins.append(f"{name}=={v['version']}")
-            break
-open(f"{tmp}/pins.txt", "w").write("\n".join(pins) + "\n")
-EOF
-# Leave out Windows-only packages:
-grep -v -i -E '^(pywin32|nt-svcutils)==' $TMP/pins.txt > $TMP/pins-audit.txt
-
-uvx --python 3.13 pip-audit -r $TMP/pins-audit.txt --no-deps --disable-pip
+uvx --python 3.13 pip-audit -r release/constraints.txt --no-deps --disable-pip
 uvx --python 3.13 pip-audit -r requirements.txt --no-deps --disable-pip
 ```
 
-This list only has the `[versions]` pins (see "What plone.versioncheck
-misses"). Check the pins in the Python-specific sections of `versions.cfg`
-(currently backports.tarfile, docutils, pip, Pillow, RestrictedPython) and of
-the Zope `versions.cfg` separately, for example by putting them in a small
-requirements file and running pip-audit on that. Environment markers in
-`requirements.txt` are evaluated for the Python that runs pip-audit, so also
-use `uvx --python 3.9 ...` for that file.
+Environment markers are evaluated for the Python that runs pip-audit, so
+run both again with `uvx --python 3.9 ...` and `uvx --python 3.10 ...` for
+the pins that only apply there.
 
 Some installed packages aren't pinned anywhere. Buildout reports them as
 "Versions had to be automatically picked" at the end of `bin/buildout`, and
@@ -107,19 +106,23 @@ consider pinning it in `versions.cfg` or `versions-extra.cfg`.
 
 ### Verifying
 
-1. Run plone.versioncheck again and check that the new pins are active
-   (state `A`) and come from the file you expect.
-2. Re-run the audit on the new pins and on `requirements.txt`.
-   Run it for Python 3.9 too, for the pins that only apply there.
-3. Check that every pinned version can be installed on the oldest and the
-   newest supported Python. For the pins list from the audit and for
-   `requirements.txt`:
+1. Regenerate `release/constraints.txt` (see above) and check that its diff
+   only contains the intended changes, with the right `python_version`
+   markers. Commit the regenerated file together with the pin changes.
+2. Re-run the audit on `release/constraints.txt` and `requirements.txt`, for
+   Python 3.9, 3.10 and 3.13.
+3. Check that every pinned version can be installed on each supported
+   Python. For `release/constraints.txt` and `requirements.txt`:
    `uv pip compile --quiet --no-deps --python-version 3.9 --python-platform linux <file> -o $TMP/out.txt`
-   (and again with e.g. `--python-version 3.13`). This fails on any pin whose
+   (and again for 3.10 up to 3.13). This fails on any pin whose
    `requires_python` excludes that Python. Leave out Windows-only lines
-   (`pywin32`, `nt-svcutils`), they don't resolve on Linux. For 3.9 and the
-   other older Pythons, first replace the pins with those from the matching
-   `[versions:pythonXY]` sections.
+   (`pywin32`), they don't resolve on Linux. Known failures on Python 3.9,
+   which you can leave out of the check:
+   - collective.z3cform.datagridfield 3.0.5 needs Python 3.10+. It is an
+     ecosystem pin, and those are only tested on 3.10
+     (`.github/workflows/ecosystem.yml`).
+   - legacy-cgi 2.6.2 needs Python 3.10+. It is only installed on Python
+     3.13, where the `cgi` module was removed from the standard library.
 4. Only when the user asks: run `bin/buildout` (with Python 3.9 and a newer
    Python) and check for "Versions had to be automatically picked" at the
    end. Otherwise leave this to CI (`.github/workflows/run-buildout.yml`
@@ -183,6 +186,7 @@ Check these by hand, with a few requests to
   (currently backports.tarfile, docutils, pip, Pillow and RestrictedPython in
   `versions.cfg`, and docutils in the Zope `versions.cfg`), are missing,
   reported as unpinned, or compared against the `[versions]` pin instead.
+  `release/constraints.txt` (regenerated) shows all of them, with markers.
 - **Fourth version component.** It only compares major.minor.bugfix, so it
   doesn't report e.g. types-PyYAML `6.0.12.10` → `6.0.12.20261103`. Check
   pins with four components by hand.
