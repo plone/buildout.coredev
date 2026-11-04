@@ -190,6 +190,11 @@ Check these by hand, with a few requests to
 
 - Pins with a marker for Python 3.10: check that the new version still
   supports 3.10.
+- Check `requires_dist` of the new version for new dependencies that need a
+  pin, even for bugfix releases. Example: feedparser 6.0.13 replaced
+  `sgmllib3k` with `feedparser-sgmllib`, and buildout then warned that it had
+  to pick a version for it. Unpinned dependencies also show up as "Versions
+  had to be automatically picked" at the end of `bin/buildout`.
 - Read the comments and `[versionannotations]` next to a pin. They may give a
   reason to hold it back. Check that the reason still holds (e.g. with
   `requires_dist` of the package mentioned). Remove comments that no longer
