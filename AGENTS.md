@@ -114,6 +114,17 @@ When it finds such a package, consider pinning it in `versions.cfg`.
    `constraints-mxdev.txt`:
    `pip install --dry-run --report - <pkg> -c constraints-mxdev.txt`
    in a throwaway `uv venv --python 3.10 --seed` (and a newer Python).
+6. Check that all pins fit together, **with** their dependencies. Steps 2 and
+   3 use `--no-deps`, and CI doesn't install every pinned package, so they
+   miss a pin whose dependency range excludes another pin. Example: bumping
+   cryptography to 50.0.2 while pyOpenSSL 26.2.0 (needs `cryptography<49`)
+   stayed pinned. In the scratch directory from step 4, put the pins of
+   `constraints.txt`, `constraints-extra.txt` and `constraints-ecosystem.txt`
+   in one file (without `-c` lines, comments and `pywin32`) and run:
+   `uv pip compile --quiet --python-version 3.10 --python-platform linux pins.txt -c constraints-mxdev.txt -c constraints-extra.txt -c constraints-ecosystem.txt -o $TMP/out.txt`
+   (and again with `--python-version 3.13`). On a conflict, bump the other
+   package to a release that accepts the new pin, even if that is a minor
+   or major update.
 
 ## Checking pins for bugfix releases
 
