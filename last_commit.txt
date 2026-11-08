@@ -1,20 +1,32 @@
-Repository: plone.restapi
+Repository: plone.staticresources
 
 
-Branch: refs/heads/9.x.x
-Date: 2026-10-25T11:51:30-07:00
-Author: David Ichim (ichim-david) <ichim.david@gmail.com>
-Commit: https://github.com/plone/plone.restapi/commit/370ba5e4effb891107fad1b0eb0852b15faa987c
+Branch: refs/heads/2.x
+Date: 2026-11-09T00:07:57+01:00
+Author: Peter Mathis (petschki) <petschki@users.noreply.github.com>
+Commit: https://github.com/plone/plone.staticresources/commit/26d2d9ce732000d24ff4e3a59c42b1eb08942630
 
-Backport pr 2060 to 9.x.x branch (#2073)
+Preparing release 2.3.9
 
 Files changed:
-A news/2060.bugfix
-M CONTRIBUTORS.md
-M src/plone/restapi/search/handler.py
-M src/plone/restapi/serializer/summary.py
-M src/plone/restapi/tests/test_search.py
-M src/plone/restapi/tests/test_serializer_summary.py
+M CHANGES.rst
+M setup.py
+D news/+maintenance.bugfix.md
 
-b'diff --git a/CONTRIBUTORS.md b/CONTRIBUTORS.md\nindex 3ce85efff..75c35c113 100644\n--- a/CONTRIBUTORS.md\n+++ b/CONTRIBUTORS.md\n@@ -44,3 +44,4 @@ this file, one to a line, like so:\n - Jon Pentland\n - Leonardo J. Caballero G.\n - Steve Piercy\n+- Marcel Liebischer\ndiff --git a/news/2060.bugfix b/news/2060.bugfix\nnew file mode 100644\nindex 000000000..0765e80b0\n--- /dev/null\n+++ b/news/2060.bugfix\n@@ -0,0 +1 @@\n+Fix two cases where REST API search and summary serialization could return HTTP 500 (`TypeError`) based on request parameters: a form or query string parameter named `summary_serializer_metadata`, and a `portal_type` value containing the substring "query" when `use_site_search_settings` is used. Also make the summary serializer\'s per-request metadata cache effective; it was recomputed for every item. @mliebischer\ndiff --git a/src/plone/restapi/search/handler.py b/src/plone/restapi/search/handler.py\nindex 7469277ea..9af223f66 100644\n--- a/src/plone/restapi/search/handler.py\n+++ b/src/plone/restapi/search/handler.py\n@@ -116,7 +116,7 @@ def filter_query(self, query):\n         search_settings = registry.forInterface(ISearchSchema, prefix="plone")\n \n         types = query.get("portal_type", [])\n-        if "query" in types:\n+        if isinstance(types, dict) and "query" in types:\n             types = types["query"]\n         query["portal_type"] = self.filter_types(types)\n \ndiff --git a/src/plone/restapi/serializer/summary.py b/src/plone/restapi/serializer/summary.py\nindex 3fe86b7a4..ccf8edc43 100644\n--- a/src/plone/restapi/serializer/summary.py\n+++ b/src/plone/restapi/serializer/summary.py\n@@ -85,9 +85,10 @@ class DefaultJSONSummarySerializer:\n     def __init__(self, context, request):\n         self.context = context\n         self.request = request\n-        # Cache summary_serializer_metadata on request\n-        metadata = self.request.form.get("summary_serializer_metadata", None)\n-        if not metadata:\n+        # Cache on the request: read via request.get() so the value stored by\n+        # request.set() is reused; isinstance() ignores a same-named parameter.\n+        metadata = self.request.get("summary_serializer_metadata", None)\n+        if not isinstance(metadata, dict):\n             metadata = merge_serializer_metadata_utilities_data()\n             self.request.set("summary_serializer_metadata", metadata)\n \ndiff --git a/src/plone/restapi/tests/test_search.py b/src/plone/restapi/tests/test_search.py\nindex 88820f6c6..44f940beb 100644\n--- a/src/plone/restapi/tests/test_search.py\n+++ b/src/plone/restapi/tests/test_search.py\n@@ -718,6 +718,17 @@ def test_respect_access_inactive_permission(self):\n         ).json()\n         self.assertEqual(response["items_total"], 1)\n \n+    def test_search_use_site_search_settings_with_portal_type_containing_query(self):\n+        # A portal_type string that happens to contain the substring "query"\n+        # must not be mistaken for a {"query": ...} dict, which raised a\n+        # TypeError (HTTP 500) in filter_query.\n+        response = self.api_session.get(\n+            "/@search",\n+            params={"use_site_search_settings": 1, "portal_type": "Subquery"},\n+        )\n+        self.assertEqual(response.status_code, 200)\n+        self.assertEqual(response.json()["items_total"], 0)\n+\n     def test_search_use_site_search_settings_for_types(self):\n         response = self.api_session.get(\n             "/@search", params={"use_site_search_settings": 1}\ndiff --git a/src/plone/restapi/tests/test_serializer_summary.py b/src/plone/restapi/tests/test_serializer_summary.py\nindex 07e449a8a..a8f92eccd 100644\n--- a/src/plone/restapi/tests/test_serializer_summary.py\n+++ b/src/plone/restapi/tests/test_serializer_summary.py\n@@ -19,6 +19,7 @@\n import Missing\n import pytz\n import unittest\n+from unittest import mock\n \n \n try:\n@@ -202,6 +203,36 @@ def test_brain_summary_includes_all_metadata_fields(self):\n             summary.items(),\n         )\n \n+    def test_request_metadata_cache_is_reused(self):\n+        # The per-request metadata cache must take effect, so the metadata is\n+        # only computed once even when many items are serialized in the same\n+        # request (e.g. a search result or folder listing with many items).\n+        from plone.restapi.serializer import summary as summary_module\n+\n+        self.request.other.pop("summary_serializer_metadata", None)\n+\n+        with mock.patch.object(\n+            summary_module,\n+            "merge_serializer_metadata_utilities_data",\n+            wraps=summary_module.merge_serializer_metadata_utilities_data,\n+        ) as merge_mock:\n+            getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n+            getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n+\n+        self.assertEqual(merge_mock.call_count, 1)\n+\n+    def test_request_parameter_does_not_break_serialization(self):\n+        self.request.other.pop("summary_serializer_metadata", None)\n+        self.request.form["summary_serializer_metadata"] = "injected"\n+        try:\n+            summary = getMultiAdapter(\n+                (self.doc1, self.request), ISerializeToJsonSummary\n+            )()\n+        finally:\n+            del self.request.form["summary_serializer_metadata"]\n+\n+        self.assertEqual(summary["@type"], "DXTestDocument")\n+\n     def test_dx_type_summary(self):\n         summary = getMultiAdapter((self.doc1, self.request), ISerializeToJsonSummary)()\n \n'
+b'diff --git a/CHANGES.rst b/CHANGES.rst\nindex 842b9d661..48d63158a 100644\n--- a/CHANGES.rst\n+++ b/CHANGES.rst\n@@ -8,6 +8,16 @@ Changelog\n \n .. towncrier release notes start\n \n+2.3.9 (2026-11-09)\n+------------------\n+\n+Bug fixes:\n+\n+\n+- Update mockup=5.4.11. See https://github.com/plone/mockup/releases/tag/5.4.11.\n+  Update bootstrap-icons=1.13.2. @petschki\n+\n+\n 2.3.8 (2026-06-09)\n ------------------\n \ndiff --git a/news/+maintenance.bugfix.md b/news/+maintenance.bugfix.md\ndeleted file mode 100644\nindex 62f82f01d..000000000\n--- a/news/+maintenance.bugfix.md\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-Update mockup=5.4.11. See https://github.com/plone/mockup/releases/tag/5.4.11.\n-Update bootstrap-icons=1.13.2. @petschki\ndiff --git a/setup.py b/setup.py\nindex ba7d3b0eb..8cf53951d 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -11,7 +11,7 @@\n \n setup(\n     name="plone.staticresources",\n-    version="2.3.9.dev0",\n+    version="2.3.9",\n     description="Static resources for Plone",\n     long_description=long_description,\n     long_description_content_type="text/x-rst",\n'
+
+Repository: plone.staticresources
+
+
+Branch: refs/heads/2.x
+Date: 2026-11-09T00:08:41+01:00
+Author: Peter Mathis (petschki) <petschki@users.noreply.github.com>
+Commit: https://github.com/plone/plone.staticresources/commit/b1640afce556407f552b41ea3939669df066e26a
+
+Back to development: 2.3.10
+
+Files changed:
+M setup.py
+
+b'diff --git a/setup.py b/setup.py\nindex 8cf53951d..d880385ef 100644\n--- a/setup.py\n+++ b/setup.py\n@@ -11,7 +11,7 @@\n \n setup(\n     name="plone.staticresources",\n-    version="2.3.9",\n+    version="2.3.10.dev0",\n     description="Static resources for Plone",\n     long_description=long_description,\n     long_description_content_type="text/x-rst",\n'
 
