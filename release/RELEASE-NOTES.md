@@ -1,6 +1,6 @@
-# Release notes for Plone 6.1-dev (unreleased)
+# Release notes for Plone 6.1.6
 
-* Last updated: October 23rd, 2026
+* Released: November 10th, 2026
 * Check the [release schedule](https://plone.org/download/release-schedule).
 * Read the [upgrade guide](https://6.docs.plone.org/backend/upgrading/version-specific-migration/upgrade-to-61.html), explaining the biggest changes compared to 6.0.
 * Canonical place for these [release notes](https://dist.plone.org/release/6.1-dev/RELEASE-NOTES.md) and the full [packages changelog](https://dist.plone.org/release/6.1-dev/changelog.txt).
@@ -15,12 +15,17 @@ If you want to jump straight in, here are some important links:
 ## Highlights
 
 6.1.5 was the last maintenance release of the Plone 6.1 series, so further changes may not make it into an official new release.
+The new 6.1.6 release is an exception for security reasons.
+
 With the release of Plone 6.2, Plone 6.1 is out of maintenance support.  You are encouraged to upgrade.
 All Plone 6 minor versions (6.0, 6.1, 6.2) get security support until 2027-12-31, 5 years after Plone 6.0.0 was released.
 If Plone 7 is not out by that time, security support will be extended.
 
 These are the main changes since 6.1.5:
 
+* All fixes from Plone security fix 20261110: remote code execution.
+  See [plone.org](https://plone.org/security/announcements/plone-security-advisory-20261110)
+  or [community.plone.org](https://community.plone.org/t/plone-security-hotfix-20261110/23313).
 * `plone.app.content`: Fix information disclosure vulnarability.  See [advisory](https://github.com/plone/plone.app.content/security/advisories/GHSA-vhwp-qc29-j4xp)
 * `pip`, `certifi`: Upgrade to versions that fix a [certificate security incident](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)
   Note: if you use `uv`, you should upgrade that package yourself to 0.13.4.
@@ -31,6 +36,9 @@ These are the main changes since 6.1.5:
   * Security: in summary serializer only allow access to metadata that is available in the catalog.
   * Add support for the `RESTAPI_ADDITIONAL_NON_METADATA_ATTRIBUTES` environment variable, a comma-separated list of extra attribute names appended to the summary serializer's `non_metadata_attributes`.
   * Fix the security check when a wrong permission is specified.
+* `plone.staticresources`:
+  * Update mockup=5.4.11. See https://github.com/plone/mockup/releases/tag/5.4.11.
+  * Update bootstrap-icons=1.13.2.
 
 
 ## Volto frontend
@@ -52,6 +60,8 @@ The HTML based and server side rendered UI that was present in Plone 5.2 and ear
 
 This release supports Python 3.10, 3.11, 3.12, and 3.13.
 
+Note that Python 3.10 itself is already out of security support.
+
 
 ## pip, buildout, setuptools
 
@@ -66,13 +76,13 @@ zc.buildout==4.2.0
 ```
 
 In general you are free to use whatever versions work for you, but these worked for us.
-Note that if you use Buildout and are on `setuptools` 80+, you need the latest `zc.buildout` 4.1.12.
+Note that if you use Buildout and are on `setuptools` 80+, you need latest `zc.buildout` 4.1.12+.
 
 If you use `zc.buildout`, you can also choose to upgrade to version 5.x.
 That helps avoid problems when not all packages in a namespace are using the same namespace style.
 When using either `zc.buildout` or `pip` (or `uv`) you can also choose to install the `horse-with-no-namespace` package.
 
-For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.0.0/), the part about
+For more explanation, see the [`zc.buildout` 5 readme](https://pypi.org/project/zc.buildout/5.2.0/), the part about
 "native namespaces and breaking changes in 5.x".  This is also good to read if you use pip instead of Buildout.
 
 
