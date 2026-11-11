@@ -94,7 +94,7 @@ for package, versions in pins.items():
 
     # Check if Python 3.12 differs from the rest.
     if py312_version == py313_version and py312_version is not None:
-        combi.append(f'{package}=={py312_version}; python_version >= "3.12"')
+        combi.append(f'{package}=={py312_version}; python_version >= "3.11"')
         continue
     if py312_version is not None:
         combi.append(f'{package}=={py312_version}; python_version == "3.12"')
