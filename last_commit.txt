@@ -1,24 +1,16 @@
-Repository: plone.restapi
+Repository: plone.app.upgrade
 
 
-Branch: refs/heads/main
-Date: 2026-11-10T14:07:06+01:00
+Branch: refs/heads/master
+Date: 2026-11-11T03:29:13+01:00
 Author: Maurits van Rees (mauritsvanrees) <maurits@vanrees.org>
-Commit: https://github.com/plone/plone.restapi/commit/18b5540e55fb6eedd6ebaf3a606b087a975ef624
+Commit: https://github.com/plone/plone.app.upgrade/commit/1f2027d4eebdcbbcc84b0b546c63f84510178604
 
-Merge commit from fork
-
-`allow_module("json")` made the whole json module available to restricted code.
-Some functions could be used to call protected methods on any object.
-Remove it, so nothing from the json module is importable in restricted
-Python.
-
-See GHSA-vgxm-pwch-89q6.
+Added upgrade to 6207, Plone 6.2.4.
 
 Files changed:
-A news/+restrictedjson.bugfix
-A src/plone/restapi/tests/test_restricted_json.py
-M src/plone/restapi/__init__.py
+A news/+fcfb146a.internal.rst
+M src/plone/app/upgrade/v62/configure.zcml
 
-b'diff --git a/news/+restrictedjson.bugfix b/news/+restrictedjson.bugfix\nnew file mode 100644\nindex 0000000000..23146ebbd8\n--- /dev/null\n+++ b/news/+restrictedjson.bugfix\n@@ -0,0 +1,4 @@\n+Security: no longer allow importing the `json` module in restricted code.\n+Some functions could be used to call protected methods on any object.\n+See https://github.com/plone/plone.restapi/security/advisories/GHSA-vgxm-pwch-89q6\n+@mauritsvanrees\ndiff --git a/src/plone/restapi/__init__.py b/src/plone/restapi/__init__.py\nindex db6862b9bf..3a687674d8 100644\n--- a/src/plone/restapi/__init__.py\n+++ b/src/plone/restapi/__init__.py\n@@ -1,5 +1,4 @@\n from . import patches  # noqa: ignore=F401\n-from AccessControl import allow_module\n from AccessControl.Permissions import add_user_folders\n from importlib import import_module\n from importlib.metadata import distribution\n@@ -18,8 +17,6 @@\n PROJECT_NAME = "plone.restapi"\n \n \n-allow_module("json")\n-\n HAS_PLONE_6 = getattr(\n     import_module("Products.CMFPlone.factory"), "PLONE60MARKER", False\n )\ndiff --git a/src/plone/restapi/tests/test_restricted_json.py b/src/plone/restapi/tests/test_restricted_json.py\nnew file mode 100644\nindex 0000000000..42aeb36e7f\n--- /dev/null\n+++ b/src/plone/restapi/tests/test_restricted_json.py\n@@ -0,0 +1,63 @@\n+from AccessControl import ClassSecurityInfo\n+from AccessControl.class_init import InitializeClass\n+from AccessControl.SecurityManagement import newSecurityManager\n+from AccessControl.SecurityManagement import noSecurityManager\n+from AccessControl.SpecialUsers import nobody\n+from AccessControl.ZopeGuards import get_safe_globals\n+from AccessControl.ZopeGuards import guarded_getattr\n+from RestrictedPython import compile_restricted\n+from zExceptions import Unauthorized\n+\n+import plone.restapi  # noqa: F401 -- make sure json is not made public\n+import unittest\n+\n+\n+class Protected:\n+    security = ClassSecurityInfo()\n+    text = \'"secret"\'\n+\n+    security.declareProtected("Manage portal", "write")\n+\n+    def write(self, text):\n+        self.text = text\n+\n+    security.declareProtected("Manage portal", "read")\n+\n+    def read(self):\n+        return self.text\n+\n+\n+InitializeClass(Protected)\n+\n+\n+class TestRestrictedJson(unittest.TestCase):\n+    def setUp(self):\n+        newSecurityManager(None, nobody)\n+        self.obj = Protected()\n+\n+    def tearDown(self):\n+        noSecurityManager()\n+\n+    def run_restricted(self, code):\n+        globs = get_safe_globals()\n+        globs["_getattr_"] = guarded_getattr\n+        globs["obj"] = self.obj\n+        exec(compile_restricted(code, "<test>", "exec"), globs)\n+        return globs.get("result")\n+\n+    def test_import_json_not_allowed(self):\n+        with self.assertRaises(Unauthorized):\n+            self.run_restricted("import json")\n+\n+    def test_dump_not_allowed(self):\n+        with self.assertRaises(Unauthorized):\n+            self.run_restricted("import json\\njson.dump(\'pwned\', obj)")\n+        self.assertEqual(self.obj.text, \'"secret"\')\n+\n+    def test_load_not_allowed(self):\n+        with self.assertRaises(Unauthorized):\n+            self.run_restricted("import json\\nresult = json.load(obj)")\n+\n+    def test_from_import_dump_not_allowed(self):\n+        with self.assertRaises(Unauthorized):\n+            self.run_restricted("from json import dump")\n'
+b'diff --git a/news/+fcfb146a.internal.rst b/news/+fcfb146a.internal.rst\nnew file mode 100644\nindex 00000000..499cb07e\n--- /dev/null\n+++ b/news/+fcfb146a.internal.rst\n@@ -0,0 +1 @@\n+Added upgrade to 6207, Plone 6.2.4.  [maurits]\ndiff --git a/src/plone/app/upgrade/v62/configure.zcml b/src/plone/app/upgrade/v62/configure.zcml\nindex efca9503..16bb27e0 100644\n--- a/src/plone/app/upgrade/v62/configure.zcml\n+++ b/src/plone/app/upgrade/v62/configure.zcml\n@@ -104,7 +104,19 @@\n       source="6205"\n       destination="6206"\n       >\n-    <!-- Plone 6.2.2 -->\n+    <!-- Plone 6.2.3 -->\n+    <gs:upgradeStep\n+        title="Miscellaneous"\n+        handler="..utils.null_upgrade_step"\n+        />\n+  </gs:upgradeSteps>\n+\n+  <gs:upgradeSteps\n+      profile="Products.CMFPlone:plone"\n+      source="6206"\n+      destination="6207"\n+      >\n+    <!-- Plone 6.2.4 -->\n     <gs:upgradeStep\n         title="Miscellaneous"\n         handler="..utils.null_upgrade_step"\n'
 
