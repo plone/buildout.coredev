@@ -41,7 +41,7 @@ https://github.com/plone/Products.CMFPlone/issues/new?title=Release+checklist+Pl
 
 You probably want to wait until the Docker images are there, but don't wait long.
 
-- [ ] Create release page on https://plone.org/download/releases.  This currently needs the Classic UI and some workarounds:
+- [ ] Create release page on https://plone.org/download/releases.  This currently needs Blicca and some workarounds:
   - Go to the https://plone.org/ClassicUI/failsafe_login_form and login.  Not with your GitHub username, but a special user.  Ask the A/I team if you don't know.
   - In https://plone.org/ClassicUI/download/releases/ add a new Plone Release.
   - In the text you need the html of release notes.  What I do: create a new post on community.plone.org, copy the release notes (MarkDown) in there, copy the html output, and save as a draft.  Then paste the html in the Release notes field.  Copy `changelog.txt` in the other field.
