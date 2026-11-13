@@ -46,12 +46,15 @@ Please have a look at the [upgrade guide](https://6.docs.plone.org/volto/upgrade
 * plone.volto: Add `personal_tools` actions (Profile, Preferences and Site Setup) for the Volto toolbar's Personal tools menu, with an upgrade step for existing sites.
 
 
-## Classic UI
+## Blicca
 
-The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
-It is being [renamed to Blicca](https://community.plone.org/t/say-hello-to-blicca-plone-classic-ui-has-a-new-name/23037).
+The classic, HTML based and server-rendered frontend is here to stay, and it deserves a name that says so.
+Formerly this was known as Classic UI, but we [renamed it to Blicca](https://community.plone.org/t/say-hello-to-blicca-plone-classic-ui-has-a-new-name/23037).
+In Plone 6 Blicca is always included in the Python backend.
+In Plone 7 we will make a clearer split for ease of maintenance and further development.
 
-### Classic UI related changes since 6.2.2:
+
+### Blicca related changes since 6.2.2:
 
 * `plone.staticresources`: Update `mockup` from 5.6.10 to 5.6.15 (TinyMCE 8.9.3 security fix, Patternslib 9.11.1, Svelte 5.57.3).
   See also [`mockup` 5.6.15 changelog](https://github.com/plone/mockup/releases/tag/5.6.15) and earlier.
