@@ -47,12 +47,15 @@ Latest release is [19.5.0](https://www.npmjs.com/package/@plone/volto/v/19.5.0).
 
 * nothing yet
 
+## Blicca
 
-## Classic UI
+The classic, HTML based and server-rendered frontend is here to stay, and it deserves a name that says so.
+Formerly this was known as Classic UI, but we [renamed it to Blicca](https://community.plone.org/t/say-hello-to-blicca-plone-classic-ui-has-a-new-name/23037).
+In Plone 6 Blicca is always included in the Python backend.
+In Plone 7 we will make a clearer split for ease of maintenance and further development.
 
-The HTML based and server side rendered UI that was present in Plone 5.2 and earlier major Plone releases is still available and has also been updated and improved upon in Plone 6.  Our documentation now refers to this frontend as 'Classic UI'.
 
-### Classic UI related changes since 6.2:
+### Blicca related changes since 6.2:
 
 * `plone.staticresources`: upgraded from 3.0.6 → 3.1.0a3
   * Add Svelte 5 folder-contents pattern `pat-filemanager`.
