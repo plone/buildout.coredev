@@ -2,9 +2,9 @@
 
 ## General
 
-- This is the Plone 6.2 branch. It is based on Zope 6.2.x and supports
-  Python 3.10 up to 3.14. So the oldest supported Python is 3.10 and the
-  newest is 3.14.
+- This is the Plone 6.2 branch. It is based on Zope 6.3.x and supports
+  Python 3.11 up to 3.15. So the oldest supported Python is 3.11 and the
+  newest is 3.15.
 
 - Don't install anything into `.venv` or commit unless asked. When asked to
   commit, do it on a new branch.
@@ -30,9 +30,10 @@ vulnerabilities, and to update the pins.
 - To override a Zope pin, add it to the `# OVERRIDES` section of
   `versions.cfg` **and** to `version-overrides` in `mx.ini`. Without the
   `mx.ini` entry, mxdev keeps both pins and pip fails on the conflict.
-- Python-specific pins go in `[versions:python_version > "3.10"]` /
-  `[versions:python_version == "3.10"]` in `versions.cfg`, and in `mx.ini` as
-  `name==x.y; python_version ...` lines.
+- Python-specific pins go in sections like
+  `[versions:python_version > "3.11"]` /
+  `[versions:python_version == "3.11"]` in `versions.cfg`, and in `mx.ini` as
+  `name==x.y; python_version ...` lines. Currently there are none.
 - mxdev quirk: `version-overrides` keeps **one line per package name**, and
   that name is case sensitive. If you need two marker-specific overrides for
   the same package, spell the second one differently
@@ -54,7 +55,7 @@ uvx --python 3.14 pip-audit -r constraints-ecosystem.txt --no-deps --disable-pip
 uvx --python 3.14 pip-audit -r requirements.txt --no-deps --disable-pip
 
 # 2. The Zope constraints (URL is on the first line of constraints.txt):
-curl -s https://zopefoundation.github.io/Zope/releases/6.2/constraints.txt > $TMP/zope.txt
+curl -s https://zopefoundation.github.io/Zope/releases/6.3/constraints.txt > $TMP/zope.txt
 uvx --python 3.14 pip-audit -r $TMP/zope.txt --no-deps --disable-pip
 
 # 3. Installed packages (skip the source checkouts in src/):
@@ -62,7 +63,7 @@ PIPAPI_PYTHON_LOCATION=.venv/bin/python uvx pip-audit --skip-editable
 ```
 
 Environment markers are evaluated for the Python that runs pip-audit, so use
-`uvx --python 3.10 ...` to check the 3.10 pins.
+`uvx --python 3.11 ...` to check pins that only apply to Python 3.11.
 
 Step 3 mostly repeats steps 1 and 2. It's there because some installed
 packages aren't pinned in any constraints file, and only this step checks
@@ -74,12 +75,12 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 
 - Prefer the latest release over the lowest fixed version, unless there's a
   reason not to.
-- Check `requires_python` on PyPI against the oldest supported Python (see the
-  `python_version == "3.10"` section). If the fix needs a newer Python, pin the
-  fixed version only for the newer Pythons and keep the old pin explicitly for
-  the old one (see the filelock pins). This also goes for **new** pins, e.g.
-  a new dependency: platformdirs 4.14.4 was added for zc.buildout 6, but
-  needs Python 3.11+, and broke buildout on Python 3.10 in CI.
+- Check `requires_python` on PyPI against the oldest supported Python (3.11).
+  If the fix needs a newer Python, pin the fixed version only for the newer
+  Pythons and keep the old pin explicitly for the old one. This also goes for
+  **new** pins, e.g. a new dependency: platformdirs 4.14.4 was added for
+  zc.buildout 6, but needs Python 3.11+, and broke buildout on Python 3.10 in
+  CI, back when we still supported 3.10.
 - "Dependency not found on PyPI" from pip-audit usually means the pinned
   version doesn't exist (a typo). Check the release list on PyPI.
 - For a new major version (e.g. zc.buildout), read the changelog and check
@@ -92,13 +93,15 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 1. Run `bin/manage versions2constraints` and check that the `constraints.txt`
    diff only contains the intended changes.
 2. Re-run the audit on the new `constraints.txt` and `requirements.txt`.
-   Run it for Python 3.10 too, for the pins that only apply there.
+   If there are pins that only apply to Python 3.11, run it for 3.11 too.
 3. Check that every pinned version can be installed on the oldest and the
    newest supported Python. For each of `constraints.txt` (without the `-c`
    line), `constraints-extra.txt`, `constraints-ecosystem.txt` and
    `requirements.txt`:
-   `uv pip compile --quiet --no-deps --python-version 3.10 --python-platform linux <file> -o $TMP/out.txt`
-   (and again with e.g. `--python-version 3.14`). This fails on any pin whose
+   `uv pip compile --quiet --no-deps --python-version 3.11.5 --python-platform linux <file> -o $TMP/out.txt`
+   (and again with `--python-version 3.15`). Use 3.11.5 rather than 3.11:
+   some packages (e.g. soupsieve 3) need Python 3.11.5 or higher, and
+   `--python-version 3.11` means 3.11.0. This fails on any pin whose
    `requires_python` excludes that Python. Leave out Windows-only lines
    (`pywin32`), they don't resolve on Linux.
 4. Check the mxdev result without touching the real environment: copy
@@ -110,7 +113,7 @@ When it finds such a package, consider pinning it in `versions.cfg`.
 5. For marker-specific pins, run a pip dry run per Python version against that
    `constraints-mxdev.txt`:
    `pip install --dry-run --report - <pkg> -c constraints-mxdev.txt`
-   in a throwaway `uv venv --python 3.10 --seed` (and a newer Python).
+   in a throwaway `uv venv --python 3.11 --seed` (and a newer Python).
 6. Check that all pins fit together, **with** their dependencies. Steps 2 and
    3 use `--no-deps`, and CI doesn't install every pinned package, so they
    miss a pin whose dependency range excludes another pin. Example (on Plone
@@ -119,8 +122,8 @@ When it finds such a package, consider pinning it in `versions.cfg`.
    put the pins of `constraints.txt`, `constraints-extra.txt` and
    `constraints-ecosystem.txt` in one file (without `-c` lines, comments and
    `pywin32`) and run:
-   `uv pip compile --quiet --python-version 3.10 --python-platform linux pins.txt -c constraints-mxdev.txt -c constraints-extra.txt -c constraints-ecosystem.txt -o $TMP/out.txt`
-   (and again with `--python-version 3.14`). On a conflict, bump the other
+   `uv pip compile --quiet --python-version 3.11.5 --python-platform linux pins.txt -c constraints-mxdev.txt -c constraints-extra.txt -c constraints-ecosystem.txt -o $TMP/out.txt`
+   (and again with `--python-version 3.15`). On a conflict, bump the other
    package to a release that accepts the new pin, even if that is a minor
    or major update.
 
@@ -178,17 +181,15 @@ Check these by hand, with a few requests to
 `https://pypi.org/pypi/<name>/json`:
 
 - **Python-specific sections.** It only reads `[versions]`, not
-  `[versions:python_version > "3.10"]` etc. Pins that only exist there
-  (AccessControl, exceptiongroup, filelock, pillow, platformdirs,
-  RestrictedPython, rpds-py, and tomli in `versions-extra.cfg`)
+  `[versions:python_version > "3.11"]` etc. Pins that only exist there
   are missing, reported as unpinned, or compared against the Zope pin
-  instead of ours.
+  instead of ours. (Currently we have no such sections.)
 - **Fourth version component.** It only compares major.minor.bugfix, so it
   doesn't report e.g. types-PyYAML `6.0.12.10` → `6.0.12.20261103`. Check
   pins with four components by hand.
 - **`requires_python`.** It doesn't check whether an update supports the
-  oldest Python we support (3.10). If the newest release needs a newer
-  Python, look for the newest release that still supports 3.10.
+  oldest Python we support (3.11). If the newest release needs a newer
+  Python, look for the newest release that still supports 3.11.
 - **Yanked releases.** It reports yanked releases as updates (e.g. smmap
   6.0.0). Check that a candidate has at least one file that isn't
   yanked.
@@ -196,8 +197,7 @@ Check these by hand, with a few requests to
 
 ### Before bumping
 
-- Pins with a marker for Python 3.10: check that the new version still
-  supports 3.10.
+- Check that the new version still supports Python 3.11.
 - Check `requires_dist` of the new version for new dependencies that need a
   pin, even for bugfix releases. Example (on Plone 6.1): feedparser 6.0.13
   replaced `sgmllib3k` with `feedparser-sgmllib`, and buildout then warned
@@ -213,11 +213,13 @@ Check these by hand, with a few requests to
 - Keep the Zope pins the same: don't override them for bugfix releases.
   Overriding Zope pins is only for security fixes, and for CalVer packages
   (see above).
-- This includes Zope pins that apply to only one Python version. Example:
-  Zope pins exceptiongroup 1.3.0 on Python 3.10, so bump only our
-  `python_version > "3.10"` pin and keep 1.3.0 for 3.10. Don't replace both
-  with one unconditional pin: that would override the Zope pin. Report the
-  newer Zope bugfix releases to the user instead; they're for Zope to make.
+- This includes Zope pins that apply to only one Python version. Example
+  (from when we supported Python 3.10): Zope pinned exceptiongroup 1.3.0 on
+  Python 3.10, so we bumped only our `python_version > "3.10"` pin and kept
+  1.3.0 for 3.10. Don't replace both with one unconditional pin: that would
+  override the Zope pin. Report the newer Zope bugfix releases to the user
+  instead; they're for Zope to make. Zope pins for Python versions we don't
+  support (e.g. 3.10) don't matter.
 - If the pin of a package isn't pinned by Zope and is the same for all
   Python versions after the bump, replace the per-Python pins with a single
   pin in `[versions]`.
